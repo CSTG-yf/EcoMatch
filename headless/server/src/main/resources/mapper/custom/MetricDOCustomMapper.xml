@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tencent.supersonic.headless.server.persistence.mapper.MetricDOCustomMapper">
+    <resultMap id="BaseResultMap"
+               type="com.tencent.supersonic.headless.server.persistence.dataobject.MetricDO">
+        <id column="id" jdbcType="BIGINT" property="id"/>
+        <result column="model_id" jdbcType="BIGINT" property="modelId"/>
+        <result column="name" jdbcType="VARCHAR" property="name"/>
+        <result column="biz_name" jdbcType="VARCHAR" property="bizName"/>
+        <result column="description" jdbcType="VARCHAR" property="description"/>
+        <result column="status" jdbcType="INTEGER" property="status"/>
+        <result column="sensitive_level" jdbcType="INTEGER" property="sensitiveLevel"/>
+        <result column="type" jdbcType="VARCHAR" property="type"/>
+        <result column="created_at" jdbcType="TIMESTAMP" property="createdAt"/>
+        <result column="created_by" jdbcType="VARCHAR" property="createdBy"/>
+        <result column="updated_at" jdbcType="TIMESTAMP" property="updatedAt"/>
+        <result column="updated_by" jdbcType="VARCHAR" property="updatedBy"/>
+        <result column="data_format_type" jdbcType="VARCHAR" property="dataFormatType"/>
+        <result column="data_format" jdbcType="VARCHAR" property="dataFormat"/>
+        <result column="alias" jdbcType="VARCHAR" property="alias"/>
+        <result column="classifications" jdbcType="VARCHAR" property="classifications"/>
+        <result column="define_type" jdbcType="VARCHAR" property="defineType"/>
+    </resultMap>
+    <resultMap extends="BaseResultMap" id="ResultMapWithBLOBs"
+               type="com.tencent.supersonic.headless.server.persistence.dataobject.MetricDO">
+        <result column="type_params" jdbcType="LONGVARCHAR" property="typeParams"/>
+    </resultMap>
+    <sql id="Example_Where_Clause">
+        <where>
+            <foreach collection="oredCriteria" item="criteria" separator="or">
+                <if test="criteria.valid">
+                    <trim prefix="(" prefixOverrides="and" suffix=")">
+                        <foreach collection="criteria.criteria" item="criterion">
+                            <choose>
+                                <when test="criterion.noValue">
+                                    and ${criterion.condition}
+                                </when>
+                                <when test="criterion.singleValue">
+                                    and ${criterion.condition} #{criterion.value}
+                                </when>
+                                <when test="criterion.betweenValue">
+                                    and ${criterion.condition} #{criterion.value} and
+                                    #{criterion.secondValue}
+                                </when>
+                                <when test="criterion.listValue">
+                                    and ${criterion.condition}
+                                    <foreach close=")" collection="criterion.value" item="listItem"
+                                             open="(" separator=",">
+                                        #{listItem}
+                                    </foreach>
+                                </when>
+                            </choose>
+                        </foreach>
+                    </trim>
+                </if>
+            </foreach>
+        </where>
+    </sql>
+    <sql id="Base_Column_List">
+        id
+        , model_id, name, biz_name, description, status, sensitive_level, type, created_at,
+    created_by, updated_at, updated_by, data_format_type, data_format, alias, classifications, define_type
+    </sql>
+    <sql id="Blob_Column_List">
+        type_params
+    </sql>
+
+    <insert id="batchInsert" parameterType="java.util.List" useGeneratedKeys="true"
+            keyProperty="id">
+        insert into s2_metric (model_id, name,
+        biz_name, description, type,status,sensitive_level,
+        created_at, created_by, updated_at,
+        updated_by, type_params, define_type,is_publish
+        )
+        values
+        <foreach collection="list" item="metric" separator=",">
+            ( #{metric.modelId,jdbcType=BIGINT}, #{metric.name,jdbcType=VARCHAR},
+            #{metric.bizName,jdbcType=VARCHAR}, #{metric.description,jdbcType=VARCHAR},
+            #{metric.type,jdbcType=VARCHAR},
+            #{metric.status,jdbcType=VARCHAR},#{metric.sensitiveLevel,jdbcType=VARCHAR},
+            #{metric.createdAt,jdbcType=TIMESTAMP}, #{metric.createdBy,jdbcType=VARCHAR},
+            #{metric.updatedAt,jdbcType=TIMESTAMP},
+            #{metric.updatedBy,jdbcType=VARCHAR}, #{metric.typeParams,jdbcType=LONGVARCHAR},
+            #{metric.defineType,jdbcType=VARCHAR},#{metric.isPublish,jdbcType=VARCHAR}
+            )
+        </foreach>
+    </insert>
+
+    <update id="batchUpdateStatus" parameterType="java.util.List">
+        <foreach collection="list" item="metric" separator=";">
+            update s2_metric
+            set status = #{metric.status,jdbcType=INTEGER},
+            updated_at = #{metric.updatedAt,jdbcType=TIMESTAMP},
+            updated_by = #{metric.updatedBy,jdbcType=VARCHAR}
+            where id = #{metric.id,jdbcType=BIGINT}
+        </foreach>
+    </update>
+
+    <update id="batchUpdate" parameterType="java.util.List">
+        <foreach collection="list" item="metric" separator=";">
+            update s2_metric
+            set
+            <if test="metric.name != null and metric.name !=''">name = #{metric.name,jdbcType=VARCHAR},</if>
+            <if test="metric.bizName != null and metric.bizName !=''">biz_name = #{metric.bizName,jdbcType=VARCHAR},
+            </if>
+            <if test="metric.description != null and metric.description !=''">description =
+                #{metric.description,jdbcType=VARCHAR},
+            </if>
+            <if test="metric.status != null">status = #{metric.status,jdbcType=INTEGER},</if>
+            <if test="metric.modelId != null">model_id = #{metric.modelId,jdbcType=BIGINT},</if>
+            <if test="metric.type != null and metric.type !=''">type = #{metric.type,jdbcType=VARCHAR},</if>
+            <if test="metric.typeParams != null and metric.typeParams !=''">type_params =
+                #{metric.typeParams,jdbcType=VARCHAR},
+            </if>
+            <if test="metric.createdAt != null">created_at = #{metric.createdAt,jdbcType=TIMESTAMP},</if>
+            <if test="metric.createdBy != null and dimension.createdBy !=''">created_by =
+                #{metric.createdBy,jdbcType=VARCHAR},
+            </if>
+            <if test="metric.sensitiveLevel != null">sensitive_level = #{metric.sensitiveLevel,jdbcType=INTEGER},</if>
+            <if test="metric.updatedBy != null and metric.updatedBy !=''">updated_by =
+                #{metric.updatedBy,jdbcType=VARCHAR},
+            </if>
+            <if test="metric.updatedAt != null">updated_at = #{metric.updatedAt,jdbcType=TIMESTAMP}</if>
+            where id = #{metric.id,jdbcType=BIGINT}
+        </foreach>
+    </update>
+
+    <update id="batchPublish" parameterType="java.util.List">
+        <foreach collection="list" item="metric" separator=";">
+            update s2_metric
+            set is_publish = 1,
+            updated_at = #{metric.updatedAt,jdbcType=TIMESTAMP},
+            updated_by = #{metric.updatedBy,jdbcType=VARCHAR}
+            where id = #{metric.id,jdbcType=BIGINT}
+        </foreach>
+    </update>
+
+    <update id="batchUnPublish" parameterType="java.util.List">
+        <foreach collection="list" item="metric" separator=";">
+            update s2_metric
+            set is_publish = 0,
+            updated_at = #{metric.updatedAt,jdbcType=TIMESTAMP},
+            updated_by = #{metric.updatedBy,jdbcType=VARCHAR}
+            where id = #{metric.id,jdbcType=BIGINT}
+        </foreach>
+    </update>
+
+    <update id="updateClassificationsBatch" parameterType="java.util.List">
+        <foreach collection="list" item="metric" separator=";">
+            update s2_metric
+            set classifications = #{metric.classifications,jdbcType=VARCHAR},
+            updated_at = #{metric.updatedAt,jdbcType=TIMESTAMP},
+            updated_by = #{metric.updatedBy,jdbcType=VARCHAR}
+            where id = #{metric.id,jdbcType=BIGINT}
+        </foreach>
+    </update>
+
+    <select id="queryMetrics" resultMap="ResultMapWithBLOBs">
+        select *
+        from s2_metric
+        where status != 3
+        <if test="modelIds != null and modelIds.size >0">
+            and model_id in
+            <foreach collection="modelIds" index="index" item="model" open="(" close=")"
+                     separator=",">
+                #{model}
+            </foreach>
+        </if>
+        <if test="metricIds != null  and metricIds.size >0">
+            and id in
+            <foreach collection="metricIds" index="index" item="metricId" open="(" close=")"
+                     separator=",">
+                #{metricId}
+            </foreach>
+        </if>
+        <if test="metricNames != null and metricNames.size > 0">
+            AND (
+            (name IN
+            <foreach collection="metricNames" index="index" item="metricName" open="(" close=")"
+                     separator=",">
+                #{metricName}
+            </foreach>)
+            OR
+            (biz_name IN
+            <foreach collection="metricNames" index="index" item="metricName" open="(" close=")"
+                     separator=",">
+                #{metricName}
+            </foreach>)
+            )
+        </if>
+    </select>
+
+
+</mapper>

@@ -1,0 +1,126 @@
+@import '../../../styles/index.less';
+
+@metric-card-prefix-cls: ~'@{supersonic-chat-prefix}-metric-card';
+
+.@{metric-card-prefix-cls} {
+  width: 100%;
+  row-gap: 4px;
+
+  &-dsl {
+    height: 90px;
+  }
+
+  &-top-bar {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    column-gap: 8px;
+  }
+
+  &-filter-section-wrapper {
+    display: flex;
+    align-items: center;
+    color: var(--text-color-third);
+  }
+
+  &-filter-section {
+    display: flex;
+    align-items: center;
+    font-size: 13px;
+    column-gap: 12px;
+    color: var(--text-color-third);
+  }
+
+  &-filter-item {
+    margin-right: 4px;
+    display: flex;
+    align-items: center;
+  }
+
+  &-filter-item-label {
+    color: var(--text-color-third);
+  }
+
+  &-filter-item-value {
+    color: var(--text-color);
+    font-weight: 500;
+  }
+
+  &-indicator-name {
+    font-size: 14px;
+    color: var(--text-color);
+    font-weight: 500;
+    margin-top: 2px;
+  }
+
+  &-query-tootip {
+    margin-left: 5px;
+  }
+  
+  &-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    margin: 12px 0;
+  }
+
+  &-date-range {
+    color: var(--text-color-fourth);
+    font-size: 12px;
+    margin-top: 8px;
+  }
+
+  &-indicator-value {
+    color: var(--text-color);
+    font-weight: 700;
+    font-size: 40px;
+    color: var(--chat-blue);
+  }
+
+  &-indicator-switch {
+    color: var(--text-color-fourth);
+    font-size: 18px;
+    margin-left: 6px;
+    margin-bottom: 3px;
+  }
+
+  &-period-compare {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    column-gap: 40px;
+    font-size: 13px;
+    overflow-x: auto;
+    margin-bottom: 12px;
+  }
+
+  &-period-compare-item {
+    display: flex;
+    align-items: center;
+    column-gap: 10px;
+  }
+
+  &-period-compare-item-title {
+    color: var(--text-color-fourth);
+  }
+
+  &-period-compare-item-value {
+    display: flex;
+    align-items: center;
+    column-gap: 4px;
+    font-weight: 500;
+  }
+
+  &-period-compare-item-value-up {
+    color: rgb(252, 103, 114);
+  }
+
+  &-period-compare-item-value-down {
+    color: rgb(45, 202, 147);
+  }
+
+  &-drill-down-dimensions {
+    margin-top: 2px;
+  }
+}

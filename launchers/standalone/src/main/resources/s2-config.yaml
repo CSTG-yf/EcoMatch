@@ -1,0 +1,45 @@
+s2:
+  schema:
+    cache:
+      enable: true
+
+  parser:
+    strategy: ONE_PASS_SELF_CONSISTENCY
+    exemplar-recall:
+      number: 10
+    few-shot:
+      number: 5
+    self-consistency:
+      number: 1
+    multi-turn:
+      enable: false
+
+  corrector:
+    additional:
+      information: true
+    date: true
+
+  demo:
+    names: S2VisitsDemo,S2SingerDemo,S2CompanyDemo,S2SmallTalkDemo
+    enableLLM: true
+
+  authentication:
+    enable: true
+    exclude:
+      path: /api/auth/user/register,/api/auth/user/login
+    token:
+      http:
+        header:
+          key: Authorization
+
+  mapper:
+    name:
+      threshold: 0.30
+      min:
+        threshold:value: 0.25
+    value:
+      threshold: 0.5
+      min:
+        threshold: 0.3
+    embedding:
+      use-llm-enhance: true

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.tencent.supersonic.chat.server.persistence.mapper.ChatContextMapper">
+
+    <resultMap id="ChatContextDO"
+               type="com.tencent.supersonic.chat.server.persistence.dataobject.ChatContextDO">
+        <id column="chat_id" property="chatId"/>
+        <result column="modified_at" property="modifiedAt"/>
+        <result column="query_user" property="queryUser"/>
+        <result column="query_text" property="queryText"/>
+        <result column="semantic_parse" property="semanticParse"/>
+        <!--<result column="ext_data" property="extData"/>-->
+    </resultMap>
+
+    <select id="getContextByChatId"  resultMap="ChatContextDO">
+        select *
+        from s2_chat_context where chat_id=#{chatId} limit 1
+    </select>
+
+</mapper>

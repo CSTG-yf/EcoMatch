@@ -1,0 +1,28 @@
+name: SuperSonic question request
+description: Ask a question about SuperSonic
+title: "[question] "
+labels: question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Ask a Question about SuperSonic
+        Please provide a detailed description of your question or the clarification you seek regarding the SuperSonic project.
+
+  - type: textarea
+    id: describe-question
+    attributes:
+      label: Describe your question
+      description: Please provide a clear and concise description of your question.
+      placeholder: "Type your question here..."
+    validations:
+      required: true
+
+  - type: input
+    id: organization
+    attributes:
+      label: Your organization
+      description: Please tell us your organization so that we can provide you better support and advice.
+      placeholder: "TME..."
+    validations:
+      required: true

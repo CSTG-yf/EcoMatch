@@ -1,0 +1,10 @@
+spring:
+  profiles:
+    active: local
+  application:
+    name: headless
+  main:
+    allow-circular-references: true
+  mvc:
+    pathmatch:
+      matching-strategy: ANT_PATH_MATCHER

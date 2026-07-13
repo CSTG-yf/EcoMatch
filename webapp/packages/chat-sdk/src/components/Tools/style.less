@@ -1,0 +1,67 @@
+@import '../../styles/index.less';
+
+@tools-cls: ~'@{supersonic-chat-prefix}-tools';
+
+.@{tools-cls} {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+  column-gap: 6px;
+
+  &-feedback {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0 10px 0 10px;
+    color: var(--text-color-third);
+    column-gap: 20px;
+  }
+
+
+  &-like {
+    margin-right: 4px;
+  }
+
+  &-feedback-active {
+    color: rgb(234, 197, 79);
+  }
+
+  &-mobile-tools {
+    display: flex;
+    flex-direction: column;
+    margin-top: 12px;
+    row-gap: 10px;
+  }
+
+  &-tools {
+    margin-top: 0;
+  }
+
+  &-feedback {
+    margin-left: 2px;
+  }
+
+  &-feedback-item {
+    display: flex;
+    align-items: flex-start;
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+
+  &-feedback-item-title {
+    width: 40px;
+    margin-right: 20px;
+    text-align: right;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-color);
+  }
+
+  &-font-style {
+    font-size: 12px;
+    color: grey;
+    font-style: italic;
+    text-align: center;
+  }
+}

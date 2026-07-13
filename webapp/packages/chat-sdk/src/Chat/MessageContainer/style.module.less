@@ -1,0 +1,53 @@
+.messageContainer {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+
+  .messageList {
+    display: flex;
+    flex-direction: column;
+    padding: 70px 20px 60px 14px;
+    row-gap: 16px;
+
+    .messageItem {
+      display: flex;
+      flex-direction: column;
+      row-gap: 20px;
+
+      :global {
+        .ant-table-small {
+          .ant-table-tbody {
+            .ant-table-cell {
+              padding: 6px 0 !important;
+            }
+          }
+          .ss-chat-table-formatted-value {
+            font-size: 15px !important;
+          }
+        }
+        .ant-table-row {
+          background-color: #fff;
+        }
+
+        .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+          transition: background 0.2s, border-color 0.2s;
+        }
+
+        .ss-chat-table-even-row {
+          background-color: #fbfbfb;
+        }
+      }
+    }
+  }
+
+  &.mobile {
+    .messageList {
+      padding: 20px 10px 30px;
+    }
+  }
+}

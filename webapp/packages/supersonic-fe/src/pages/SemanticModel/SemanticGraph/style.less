@@ -1,0 +1,49 @@
+.nodeInfoDrawerContent {
+  .title {
+    margin-bottom: 12px;
+    font-size: 16px;
+    color: #0e73ff;
+    font-weight: bold;
+    position: relative;
+    &::before {
+      display: block;
+      position: absolute;
+      content: "";
+      left: -10px;
+      top: 7px;
+      height: 14px;
+      width: 3px;
+      font-size: 0;
+      background: #0e73ff;
+      border-radius: 2px;
+      border: 1px solid #0e73ff;
+    }
+  }
+}
+
+.graphLegend {
+  padding: 15px;
+  background: #45be940d;
+  position: absolute;
+  top: 100px;
+  left: 20px;
+  z-index: 1;
+  border: 1px solid #78c16d;
+  min-width: 190px;
+  .title {
+    text-align: center;
+    margin-bottom: 10px;
+    font-size: 10px;
+    font-weight: 500;
+  }
+  :global {
+    .ant-form-item {
+      margin-bottom: 2px;
+    }
+  }
+}
+.graphLegendVisibleModeItem {
+  padding: 3px;
+  background: #fff;
+  min-width: 190px;
+}

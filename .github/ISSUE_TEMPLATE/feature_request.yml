@@ -1,0 +1,34 @@
+name: SuperSonic feature request
+description: Suggest an idea for SuperSonic
+title: "[Feature] "
+labels: feature
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you very much for your good ideas and suggestions for SuperSonic
+
+  - type: textarea
+    attributes:
+      label: Description
+      description: Describe your ideas and needs.
+
+  - type: input
+    id: organization
+    attributes:
+      label: Your organization
+      description: Please tell us your organization so that we can provide you better support and advice.
+      placeholder: "TME..."
+    validations:
+      required: true
+
+  - type: checkboxes
+    attributes:
+      label: Are you willing to submit PR?
+      description: >
+        We very much look forward to developers or users to help develop the SuperSonic together.
+        If you are willing to submit a PR to implement this feature, please tick it.
+      options:
+        - label: Yes I am willing to submit a PR!
+
+

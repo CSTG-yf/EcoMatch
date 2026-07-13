@@ -1,0 +1,138 @@
+package com.tencent.supersonic.chat.server.processor.execute;
+
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.agent.Agent;
+import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
+import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryRepository;
+import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
+import com.tencent.supersonic.common.pojo.ChatApp;
+import com.tencent.supersonic.common.pojo.enums.AppModule;
+import com.tencent.supersonic.common.util.ChatAppManager;
+import com.tencent.supersonic.common.util.ContextUtils;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.StreamingResponseHandler;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
+import dev.langchain4j.model.input.Prompt;
+import dev.langchain4j.model.input.PromptTemplate;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.provider.ModelProvider;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * DataInterpretProcessor interprets query result to make it more readable to the users.
+ */
+public class DataInterpretProcessor implements ExecuteResultProcessor {
+    public static String tip = "AI 回答中...\r\n";
+    private static final Logger keyPipelineLog = LoggerFactory.getLogger("keyPipeline");
+
+    private static Map<Long, StringBuffer> resultCache = new HashMap<>();
+
+    public static final String APP_KEY = "DATA_INTERPRETER";
+    private static final String INSTRUCTION = ""
+            + "#Role: You are a data expert who communicates with business users everyday."
+            + "\n#Task: Your will be provided with a question asked by a user and the relevant "
+            + "result data queried from the databases, please interpret the data and organize a brief answer."
+            + "\n#Rules: " + "\n1.ALWAYS respond in the use the same language as the `#Question`."
+            + "\n2.ALWAYS reference some key data in the `#Answer`."
+            + "\n#Question:{{question}} #Data:{{data}} #Answer:";
+
+    public DataInterpretProcessor() {
+        ChatAppManager.register(APP_KEY, ChatApp.builder().prompt(INSTRUCTION).name("结果数据解读")
+                .appModule(AppModule.CHAT).description("通过大模型对结果数据做提炼总结").enable(false).build());
+    }
+
+    public static String getTextSummary(Long queryId) {
+        if (resultCache.get(queryId) != null) {
+            return resultCache.get(queryId).toString();
+        }
+        return "";
+    }
+
+    public static Map<Long, StringBuffer> getResultCache() {
+        return resultCache;
+    }
+
+    @Override
+    public boolean accept(ExecuteContext executeContext) {
+        Agent agent = executeContext.getAgent();
+        ChatApp chatApp = agent.getChatAppConfig().get(APP_KEY);
+        return Objects.nonNull(chatApp) && chatApp.isEnable()
+                && StringUtils.isNotBlank(executeContext.getResponse().getTextResult()) // 如果都没结果，则无法处理
+                && StringUtils.isBlank(executeContext.getResponse().getTextSummary()); // 如果已经有汇总的结果了，无法再次处理
+    }
+
+    @Override
+    public void process(ExecuteContext executeContext) {
+        QueryResult queryResult = executeContext.getResponse();
+        Agent agent = executeContext.getAgent();
+        ChatApp chatApp = agent.getChatAppConfig().get(APP_KEY);
+
+        Map<String, Object> variable = new HashMap<>();
+        String question = executeContext.getResponse().getTextResult();// 结果解析应该用改写的问题，因为改写的内容信息量更大
+        if (executeContext.getParseInfo().getProperties() != null
+                && executeContext.getParseInfo().getProperties().containsKey("CONTEXT")) {
+            Map<String, Object> context = (Map<String, Object>) executeContext.getParseInfo()
+                    .getProperties().get("CONTEXT");
+            if (context.get("queryText") != null && "".equals(context.get("queryText"))) {
+                question = context.get("queryText").toString();
+            }
+        }
+        variable.put("question", question);
+        variable.put("data", queryResult.getTextResult());
+
+        Prompt prompt = PromptTemplate.from(chatApp.getPrompt()).apply(variable);
+        if (executeContext.getRequest().isStreamingResult()) {
+            StreamingChatLanguageModel chatLanguageModel =
+                    ModelProvider.getChatStreamingModel(chatApp.getChatModelConfig());
+            final Long queryId = executeContext.getRequest().getQueryId();
+            resultCache.put(queryId, new StringBuffer(tip));
+            chatLanguageModel.generate(prompt.toUserMessage(),
+                    new StreamingResponseHandler<AiMessage>() {
+                        @Override
+                        public void onNext(String token) {
+                            resultCache.get(queryId).append(token);
+                        }
+
+                        @Override
+                        public void onComplete(Response<AiMessage> response) {
+                            ChatQueryRepository chatQueryRepository =
+                                    ContextUtils.getBean(ChatQueryRepository.class);
+                            ChatQueryDO chatQueryDO = chatQueryRepository.getChatQueryDO(queryId);
+                            JSONObject queryResult = JSON.parseObject(chatQueryDO.getQueryResult());
+                            queryResult.put("textSummary",
+                                    resultCache.get(queryId).toString().substring(tip.length()));
+                            chatQueryDO.setQueryResult(queryResult.toJSONString());
+                            chatQueryRepository.updateChatQuery(chatQueryDO);
+                            resultCache.remove(queryId);
+                        }
+
+                        @Override
+                        public void onError(Throwable error) {
+                            error.printStackTrace();
+                            resultCache.remove(queryId);
+                        }
+                    });
+        } else {
+            ChatLanguageModel chatLanguageModel =
+                    ModelProvider.getChatModel(chatApp.getChatModelConfig());
+            Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
+            String anwser = response.content().text();
+            keyPipelineLog.info("DataInterpretProcessor modelReq:\n{} \nmodelResp:\n{}",
+                    prompt.text(), anwser);
+            if (StringUtils.isNotBlank(anwser)) {
+                queryResult.setTextSummary(anwser);
+            }
+        }
+
+
+    }
+}

@@ -1,0 +1,48 @@
+name: SuperSonic Bug report
+title: "[Bug] "
+description: Problems and issues with code of SuperSonic
+labels: bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you very much for submitting feedback to SuperSonic to help SuperSonic develop better.
+
+        If it is an idea or help wanted, please go to:
+        [Github Discussion](https://github.com/tencentmusic/supersonic/discussions)
+
+  - type: input
+    id: version
+    attributes:
+      label: SuperSonic version
+      description: Please tell us which version you are using.
+      placeholder: "0.9.8"
+    validations:
+      required: true
+
+  - type: input
+    id: organization
+    attributes:
+      label: Your organization
+      description: Please tell us your organization so that we can provide you better support and advice.
+      placeholder: "TME..."
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Description
+      description: Describe the bug you met.
+
+  - type: checkboxes
+    attributes:
+      label: Are you willing to submit PR?
+      description: >
+        We very much look forward to developers or users to help solve the SuperSonic problem together.
+        If you are willing to submit a PR to fix this problem, please tick it.
+      options:
+        - label: Yes I am willing to submit a PR!
+
+  - type: markdown
+    attributes:
+      value: "Thanks for completing our form!"
