@@ -9,6 +9,7 @@ import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
 import com.tencent.supersonic.headless.api.pojo.enums.ChatWorkflowState;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
+import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import lombok.Data;
 
@@ -31,6 +32,7 @@ public class ChatQueryContext implements Serializable {
     @JsonIgnore
     private SemanticSchema semanticSchema;
     private ChatWorkflowState chatWorkflowState;
+    private BankIntentResult bankIntentResult;
 
     public ChatQueryContext() {
         this(new QueryNLReq());
