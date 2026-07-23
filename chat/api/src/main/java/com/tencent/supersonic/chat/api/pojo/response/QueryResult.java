@@ -8,8 +8,10 @@ import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import lombok.Data;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Data
 public class QueryResult {
@@ -28,6 +30,8 @@ public class QueryResult {
     private List<SchemaElement> recommendedDimensions;
     private AggregateInfo aggregateInfo;
     private String errorMsg;
+    private boolean dataMasked;
+    private Set<String> maskedColumns = new LinkedHashSet<>();
     private ChartRecommendation recommendedChart;
     private List<ChartRecommendation> candidateCharts;
     private BusinessExplanation businessExplanation;

@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlValidHelper;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -157,8 +158,9 @@ public class LLMPhysicalSqlCorrector extends BaseSemanticCorrector {
                 semanticParseInfo, chatApp.getPrompt());
         PhysicalSql physicalSql =
                 extractor.generatePhysicalSql(prompt.toUserMessage().singleText());
-        keyPipelineLog.info("LLMPhysicalSqlCorrector modelReq:\n{} \nmodelResp:\n{}", prompt.text(),
-                physicalSql);
+        keyPipelineLog.info("LLMPhysicalSqlCorrector modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()),
+                SensitiveLogUtils.summarize(physicalSql));
         if ("NEGATIVE".equalsIgnoreCase(physicalSql.getOpinion())
                 && StringUtils.isNotBlank(physicalSql.getSql())) {
             semanticParseInfo.getSqlInfo().setCorrectedQuerySQL(physicalSql.getSql());

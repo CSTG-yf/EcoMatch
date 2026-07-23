@@ -6,6 +6,7 @@ import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
@@ -106,8 +107,8 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
         prompt2Exemplar.keySet().parallelStream().forEach(prompt -> {
             SemanticSql s2Sql = extractor.generateSemanticSql(prompt.toUserMessage().singleText());
             output2Prompt.put(s2Sql.getSql(), prompt);
-            keyPipelineLog.info("OnePassSCSqlGenStrategy modelReq:\n{} \nmodelResp:\n{}",
-                    prompt.text(), s2Sql);
+            keyPipelineLog.info("OnePassSCSqlGenStrategy modelReq=[{}], modelResp=[{}]",
+                    SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(s2Sql));
         });
 
         // 4.format response.

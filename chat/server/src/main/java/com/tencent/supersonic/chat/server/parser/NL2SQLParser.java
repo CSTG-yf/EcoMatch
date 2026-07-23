@@ -15,6 +15,7 @@ import com.tencent.supersonic.common.pojo.enums.Text2SQLType;
 import com.tencent.supersonic.common.service.impl.ExemplarServiceImpl;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementMatch;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -214,7 +215,8 @@ public class NL2SQLParser implements ChatQueryParser {
                 ModelProvider.getChatModel(ModelConfigHelper.getChatModelConfig(chatApp));
         Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
         String rewrittenQuery = response.content().text();
-        keyPipelineLog.info("QueryRewrite modelReq:\n{} \nmodelResp:\n{}", prompt.text(), response);
+        keyPipelineLog.info("QueryRewrite modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(response));
         parseContext.getRequest().setQueryText(rewrittenQuery);
         queryNLReq.setQueryText(rewrittenQuery);
         context.setRewrittenQuery(rewrittenQuery);

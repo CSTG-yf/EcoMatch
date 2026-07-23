@@ -11,6 +11,7 @@ import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -26,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * DataInterpretProcessor interprets query result to make it more readable to the users.
@@ -34,7 +36,7 @@ public class DataInterpretProcessor implements ExecuteResultProcessor {
     public static String tip = "AI 回答中...\r\n";
     private static final Logger keyPipelineLog = LoggerFactory.getLogger("keyPipeline");
 
-    private static Map<Long, StringBuffer> resultCache = new HashMap<>();
+    private static final Map<Long, StringBuffer> resultCache = new ConcurrentHashMap<>();
 
     public static final String APP_KEY = "DATA_INTERPRETER";
     private static final String INSTRUCTION = ""
@@ -117,7 +119,10 @@ public class DataInterpretProcessor implements ExecuteResultProcessor {
 
                         @Override
                         public void onError(Throwable error) {
-                            error.printStackTrace();
+                            keyPipelineLog.warn(
+                                    "DataInterpretProcessor streaming failed: type={}, error=[{}]",
+                                    error.getClass().getSimpleName(),
+                                    SensitiveLogUtils.summarize(error));
                             resultCache.remove(queryId);
                         }
                     });
@@ -126,8 +131,9 @@ public class DataInterpretProcessor implements ExecuteResultProcessor {
                     ModelProvider.getChatModel(chatApp.getChatModelConfig());
             Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
             String anwser = response.content().text();
-            keyPipelineLog.info("DataInterpretProcessor modelReq:\n{} \nmodelResp:\n{}",
-                    prompt.text(), anwser);
+            keyPipelineLog.info("DataInterpretProcessor modelReq=[{}], modelResp=[{}]",
+                    SensitiveLogUtils.summarize(prompt.text()),
+                    SensitiveLogUtils.summarize(anwser));
             if (StringUtils.isNotBlank(anwser)) {
                 queryResult.setTextSummary(anwser);
             }

@@ -55,6 +55,9 @@ public class SqlUtils {
     @Value("${s2.source.explain-max-estimated-rows:1000000}")
     private long explainMaxEstimatedRows;
 
+    @Value("${s2.source.explain-require-estimate:false}")
+    private boolean explainRequireEstimate;
+
     @Getter
     private DataType dataTypeEnum;
 
@@ -76,7 +79,8 @@ public class SqlUtils {
                 .withJdbcDataSource(this.jdbcDataSource).withResultLimit(this.resultLimit)
                 .withIsQueryLogEnable(this.isQueryLogEnable)
                 .withQueryTimeoutSeconds(this.queryTimeoutSeconds)
-                .withExplainCostCheck(this.explainCostCheckEnabled, this.explainMaxEstimatedRows)
+                .withExplainCostCheck(this.explainCostCheckEnabled, this.explainMaxEstimatedRows,
+                        this.explainRequireEstimate)
                 .build();
     }
 
@@ -118,7 +122,7 @@ public class SqlUtils {
         JdbcTemplate jdbcTemplate = jdbcTemplate();
         if (explainCostCheckEnabled) {
             List<Map<String, Object>> plan = jdbcTemplate.queryForList("EXPLAIN " + sql);
-            new ExplainCostPolicy(explainMaxEstimatedRows).validate(plan);
+            new ExplainCostPolicy(explainMaxEstimatedRows, explainRequireEstimate).validate(plan);
         }
         getResult(sql, queryResultWithColumns, jdbcTemplate);
     }
@@ -196,6 +200,7 @@ public class SqlUtils {
         private int queryTimeoutSeconds = 30;
         private boolean explainCostCheckEnabled = true;
         private long explainMaxEstimatedRows = 1_000_000;
+        private boolean explainRequireEstimate;
         private String name;
         private String type;
         private String jdbcUrl;
@@ -228,9 +233,11 @@ public class SqlUtils {
             return this;
         }
 
-        SqlUtilsBuilder withExplainCostCheck(boolean enabled, long maxEstimatedRows) {
+        SqlUtilsBuilder withExplainCostCheck(boolean enabled, long maxEstimatedRows,
+                boolean requireEstimate) {
             this.explainCostCheckEnabled = enabled;
             this.explainMaxEstimatedRows = maxEstimatedRows;
+            this.explainRequireEstimate = requireEstimate;
             return this;
         }
 
@@ -271,6 +278,7 @@ public class SqlUtils {
             sqlUtils.queryTimeoutSeconds = this.queryTimeoutSeconds;
             sqlUtils.explainCostCheckEnabled = this.explainCostCheckEnabled;
             sqlUtils.explainMaxEstimatedRows = this.explainMaxEstimatedRows;
+            sqlUtils.explainRequireEstimate = this.explainRequireEstimate;
             sqlUtils.jdbcDataSourceUtils = new JdbcDataSourceUtils(this.jdbcDataSource);
 
             return sqlUtils;

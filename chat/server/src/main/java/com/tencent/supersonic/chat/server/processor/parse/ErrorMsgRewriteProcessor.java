@@ -4,6 +4,7 @@ import com.tencent.supersonic.chat.server.pojo.ParseContext;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.data.message.AiMessage;
@@ -77,8 +78,9 @@ public class ErrorMsgRewriteProcessor implements ParseResultProcessor {
         String rewrittenMsg = response.content().text();
         parseContext.getResponse().setErrorMsg(rewrittenMsg);
         parseContext.getResponse().setState(ParseResp.ParseState.FAILED);
-        keyPipelineLog.info("ErrorMessageProcessor modelReq:\n{} \nmodelResp:\n{}", prompt.text(),
-                rewrittenMsg);
+        keyPipelineLog.info("ErrorMessageProcessor modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()),
+                SensitiveLogUtils.summarize(rewrittenMsg));
     }
 
 }

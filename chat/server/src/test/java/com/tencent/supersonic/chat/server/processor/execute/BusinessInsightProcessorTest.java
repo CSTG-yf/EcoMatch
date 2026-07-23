@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -220,6 +221,30 @@ class BusinessInsightProcessorTest {
         assertTrue(result.getBusinessExplanation().getEvidence().isEmpty());
         assertTrue(result.getBusinessExplanation().getWarnings().stream()
                 .anyMatch(warning -> warning.contains("不可解析")));
+        assertEquals("TABLE", result.getRecommendedChart().getChartType());
+    }
+
+    @Test
+    void excludesMaskedFieldsFromChartsAndBusinessEvidence() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("branch", "A", "balance", "****"),
+                Map.of("branch", "B", "balance", "****"),
+                Map.of("branch", "C", "balance", "****")));
+        result.setDataMasked(true);
+        result.setMaskedColumns(Set.of("BALANCE"));
+        ExecuteContext context = new ExecuteContext(
+                ChatExecuteReq.builder().queryText("masked balance by branch").build());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("TABLE", result.getRecommendedChart().getChartType());
+        assertFalse(result.getRecommendedChart().getMetricFields().contains("balance"));
+        assertTrue(result.getBusinessExplanation().getEvidence().isEmpty());
+        assertTrue(result.getBusinessExplanation().getWarnings().stream()
+                .anyMatch(warning -> warning.contains("脱敏字段")));
     }
 
     @Test

@@ -128,6 +128,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
         for (QueryColumn column : result.getQueryColumns()) {
             String field = fieldName(column);
+            if (isMaskedField(result, field)) {
+                continue;
+            }
             if (SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
                     || result.getQueryResults().stream().map(row -> row.get(field))
                             .anyMatch(Number.class::isInstance)) {
@@ -146,8 +149,13 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         boolean hasNegativeValue = result.getQueryResults().stream()
                 .flatMap(row -> metrics.stream().map(row::get)).map(this::toDecimal)
                 .filter(Objects::nonNull).anyMatch(value -> value.signum() < 0);
+        boolean hasUsableMetricValue =
+                result.getQueryResults().stream().flatMap(row -> metrics.stream().map(row::get))
+                        .map(this::toDecimal).anyMatch(Objects::nonNull);
+        boolean hasMaskedColumns = result.isDataMasked()
+                || (result.getMaskedColumns() != null && !result.getMaskedColumns().isEmpty());
         return new FieldProfile(metrics, dates, categories, definitions, metricLabels,
-                hasNegativeValue);
+                hasNegativeValue, hasUsableMetricValue, hasMaskedColumns);
     }
 
     private List<ChartRecommendation> recommendCharts(FieldProfile profile, int rowCount,
@@ -155,6 +163,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         List<ChartRecommendation> charts = new ArrayList<>();
         if (rowCount == 0) {
             charts.add(chart("TABLE", rules.getLowConfidence(), "当前无数据，保留表格结构用于展示空结果",
+                    profile.categories, profile.metrics));
+        } else if (!profile.hasUsableMetricValue) {
+            charts.add(chart("TABLE", rules.getLowConfidence(), "数值字段已脱敏或不可解析，使用表格避免误导性图表",
                     profile.categories, profile.metrics));
         } else if (rowCount == 1 && !profile.metrics.isEmpty()) {
             charts.add(chart("KPI_CARD", 0.98, "单行数值结果适合使用指标卡", List.of(), profile.metrics));
@@ -177,6 +188,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             charts.add(chart("TABLE", 0.90, "当前字段结构适合保留明细表格", profile.categories, profile.metrics));
         }
 
+        if (!profile.hasUsableMetricValue) {
+            return charts;
+        }
         Set<String> types = new LinkedHashSet<>();
         types.add(charts.get(0).getChartType());
         if (isComposition(profile, rowCount, queryText, rules) && types.add("PIE")) {
@@ -258,6 +272,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             warnings.add("未识别到数值指标，不输出增减或贡献度结论");
         } else if (evidence.isEmpty()) {
             warnings.add("数值已脱敏或不可解析，不输出数值结论");
+        }
+        if (profile.hasMaskedColumns) {
+            warnings.add("查询结果包含脱敏字段，解释和图表均不使用这些字段的值");
         }
         if (isRiskProfile(profile)) {
             warnings.add("风险指标结论仅供分析，不替代监管报送、授信审批或风险处置");
@@ -460,6 +477,11 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         return normalized.matches(".*(date|time|day|month|year|日期|时间|月份|年度).*");
     }
 
+    private boolean isMaskedField(QueryResult result, String field) {
+        return result.getMaskedColumns() != null && result.getMaskedColumns().stream()
+                .filter(Objects::nonNull).anyMatch(masked -> masked.equalsIgnoreCase(field));
+    }
+
     private BigDecimal toDecimal(Object value) {
         return BusinessNumericUtils.parse(value);
     }
@@ -470,5 +492,5 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
     private record FieldProfile(List<String> metrics, List<String> dates, List<String> categories,
             Map<String, String> definitions, Map<String, String> metricLabels,
-            boolean hasNegativeValue) {}
+            boolean hasNegativeValue, boolean hasUsableMetricValue, boolean hasMaskedColumns) {}
 }
