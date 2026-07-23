@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -33,17 +34,49 @@ class DataMaskingServiceTest {
 
     @Test
     void keepsRawValuesForConfiguredAndAdminUsers() {
-        DataMaskingService service = new DataMaskingService("auditor", "");
+        DataMaskingService service = new DataMaskingService("auditor", "data_steward");
         SemanticSchemaResp schema = schema("mobile");
         SemanticQueryResp auditorResponse = response("mobile", "13812345678");
         SemanticQueryResp adminResponse = response("mobile", "13812345678");
+        SemanticQueryResp stewardResponse = response("mobile", "13812345678");
+        User steward = User.get(3L, "steward");
+        steward.setRoles(Set.of("data_steward"));
 
         service.mask(auditorResponse, schema, User.get(2L, "auditor"));
         service.mask(adminResponse, schema, User.getDefaultUser());
+        service.mask(stewardResponse, schema, steward);
 
         assertEquals("13812345678", auditorResponse.getResultList().get(0).get("mobile"));
         assertEquals("13812345678", adminResponse.getResultList().get(0).get("mobile"));
+        assertEquals("13812345678", stewardResponse.getResultList().get(0).get("mobile"));
         assertFalse(auditorResponse.isDataMasked());
+    }
+
+    @Test
+    void masksAllSupportedSensitiveValueTypes() {
+        DataMaskingService service = new DataMaskingService("", "");
+
+        assertEquals("a****e@bank.cn", service.maskValue("email", "alice@bank.cn"));
+        assertEquals("138****5678", service.maskValue("mobile", "13812345678"));
+        assertEquals("320101****1234", service.maskValue("id_card", "320101199001011234"));
+        assertEquals("6222****1234", service.maskValue("account_no", "622200001234"));
+        assertEquals("张***", service.maskValue("customer_name", "张三"));
+        assertEquals("****", service.maskValue("balance", 1000));
+    }
+
+    @Test
+    void toleratesMissingColumnsAndSchemaCollections() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("mobile", "13812345678");
+        response.setColumns(null);
+        SemanticSchemaResp schema = new SemanticSchemaResp();
+        schema.setDimensions(null);
+        schema.setMetrics(null);
+
+        service.mask(response, schema, User.get(2L, "analyst"));
+
+        assertEquals("13812345678", response.getResultList().get(0).get("mobile"));
+        assertFalse(response.isDataMasked());
     }
 
     private SemanticQueryResp response(String field, Object value) {

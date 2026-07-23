@@ -6,8 +6,10 @@ import com.tencent.supersonic.headless.core.gateway.SqlSafetyPolicy;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -18,6 +20,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QueryGatewayH2IntegrationTest {
@@ -90,6 +94,22 @@ class QueryGatewayH2IntegrationTest {
         assertTrue(average <= 3000, "average latency must not exceed 3 seconds");
         assertTrue(gateway.getRejectedQueries().get() == 0,
                 "queries should remain stable within configured concurrency");
+    }
+
+    @Test
+    void cancelsLongRunningJdbcQueryAndReleasesResources() {
+        jdbcTemplate.setQueryTimeout(1);
+        try {
+            assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> assertThrows(DataAccessException.class,
+                            () -> jdbcTemplate.queryForObject("SELECT SUM(MOD(a.X * b.X, 97)) "
+                                    + "FROM SYSTEM_RANGE(1, 100000) a "
+                                    + "CROSS JOIN SYSTEM_RANGE(1, 100000) b", Long.class)));
+        } finally {
+            jdbcTemplate.setQueryTimeout(0);
+        }
+
+        assertEquals(1, jdbcTemplate.queryForObject("SELECT 1", Integer.class));
     }
 
     private int execute(QueryExecutionGateway gateway) {

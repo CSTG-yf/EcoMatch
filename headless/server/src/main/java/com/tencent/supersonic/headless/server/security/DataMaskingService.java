@@ -39,7 +39,8 @@ public class DataMaskingService {
             return;
         }
         Set<String> sensitiveFields = getSensitiveFields(schema);
-        if (sensitiveFields.isEmpty() || response.getResultList() == null) {
+        if (sensitiveFields.isEmpty() || response.getResultList() == null
+                || response.getColumns() == null) {
             return;
         }
 
@@ -72,7 +73,9 @@ public class DataMaskingService {
 
     private Set<String> getSensitiveFields(SemanticSchemaResp schema) {
         Set<String> fields = new HashSet<>();
-        Stream.<SchemaItem>concat(schema.getDimensions().stream(), schema.getMetrics().stream())
+        Stream.<SchemaItem>concat(
+                Stream.ofNullable(schema.getDimensions()).flatMap(java.util.Collection::stream),
+                Stream.ofNullable(schema.getMetrics()).flatMap(java.util.Collection::stream))
                 .filter(item -> item.getSensitiveLevel() != null
                         && item.getSensitiveLevel() >= SensitiveLevelEnum.MID.getCode())
                 .forEach(item -> {

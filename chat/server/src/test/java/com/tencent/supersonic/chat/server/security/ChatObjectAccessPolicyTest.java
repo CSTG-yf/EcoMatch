@@ -14,8 +14,7 @@ class ChatObjectAccessPolicyTest {
     @Test
     void allowsOwnerAndSuperAdmin() {
         assertDoesNotThrow(() -> policy.checkQueryAccess(1L, "alice", User.get(2L, "alice")));
-        assertDoesNotThrow(
-                () -> policy.checkQueryAccess(1L, "alice", User.getDefaultUser()));
+        assertDoesNotThrow(() -> policy.checkQueryAccess(1L, "alice", User.getDefaultUser()));
     }
 
     @Test

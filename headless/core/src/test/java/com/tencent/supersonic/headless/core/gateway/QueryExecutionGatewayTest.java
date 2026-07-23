@@ -32,7 +32,30 @@ class QueryExecutionGatewayTest {
         assertEquals(1, first.get(1, TimeUnit.SECONDS));
         assertEquals(1, gateway.getAcceptedQueries().get());
         assertEquals(1, gateway.getRejectedQueries().get());
+        assertEquals(1, gateway.snapshot().completedQueries());
+        assertEquals(0, gateway.snapshot().activeQueries());
+        assertEquals(1, gateway.snapshot().availablePermits());
         executor.shutdownNow();
+    }
+
+    @Test
+    void recordsPolicyRejectionsAndExecutionFailures() {
+        QueryExecutionGateway gateway = new QueryExecutionGateway(2, 20, 1000);
+
+        assertThrows(SqlPolicyViolationException.class,
+                () -> gateway.execute("DELETE FROM account", () -> 1));
+        assertThrows(IllegalStateException.class,
+                () -> gateway.execute("SELECT id FROM account", () -> {
+                    throw new IllegalStateException("database unavailable");
+                }));
+
+        QueryExecutionGateway.QueryGatewayStats stats = gateway.snapshot();
+        assertEquals(1, stats.acceptedQueries());
+        assertEquals(1, stats.rejectedQueries());
+        assertEquals(0, stats.completedQueries());
+        assertEquals(1, stats.failedQueries());
+        assertEquals(0, stats.activeQueries());
+        assertEquals(2, stats.availablePermits());
     }
 
     private void await(CountDownLatch latch) {

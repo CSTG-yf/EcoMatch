@@ -78,7 +78,7 @@
 | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
 | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| BE-06 SQL 安全与性能网关 | 开发及本地性能基线完成，待 QA-03 目标环境验收 | 2026-07-23 | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| BE-06 SQL 安全与性能网关 | 开发、本地性能及超时取消验收完成，待 QA-03 目标环境验收 | 2026-07-23 | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
 | BE-08 金融级权限和动态脱敏 | 已完成 | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
 | BE-10 业务化解释与图表推荐服务 | 已完成 | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
 | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
@@ -172,7 +172,7 @@
 
 ### BE-06 SQL 安全与性能网关
 
-- 状态：开发及本地性能基线完成（2026-07-23），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
+- 状态：开发、本地性能及超时取消验收完成（2026-07-23），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-05；下游被 QA-03、OPS-01 和最终性能验收依赖。
 - 工作内容：

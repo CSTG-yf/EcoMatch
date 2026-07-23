@@ -75,8 +75,8 @@ public class ChatController {
     }
 
     @GetMapping("/getChatQuery/{queryId}")
-    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId,
-            HttpServletRequest request, HttpServletResponse response) {
+    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId, HttpServletRequest request,
+            HttpServletResponse response) {
         return chatService.getChatQuery(queryId, UserHolder.findUser(request, response));
     }
 

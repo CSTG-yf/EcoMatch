@@ -20,7 +20,8 @@
 ## 验证
 
 - `AuthGroupMatcherTest`：用户、组织、角色和属性条件。
-- `DataMaskingServiceTest`：普通用户脱敏、管理员及白名单原值访问。
+- `DataMaskingServiceTest`：邮箱、手机号、证件、账号、文本和数值脱敏，管理员、用户及角色白名单原值访问。
+- `DataMaskingServiceTest`：空列定义和空语义集合边界不会中断查询响应。
 - `ChatObjectAccessPolicyTest`：所有者、超级管理员和越权访问。
 
 安全注入、提示词绕过、分享链接和全接口越权扫描由 QA-02 继续覆盖。
