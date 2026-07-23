@@ -22,8 +22,11 @@ import java.util.stream.Collectors;
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
 
-    private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "load_file",
-            "pg_read_file", "pg_sleep", "sleep", "sys_eval", "sys_exec");
+    private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
+            "get_lock", "load_file", "lo_export", "lo_import", "nextval", "pg_advisory_lock",
+            "pg_advisory_unlock", "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
+            "pg_sleep", "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file",
+            "release_lock", "set_config", "setval", "sleep", "sys_eval", "sys_exec");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
 
@@ -81,6 +84,7 @@ public class SqlSafetyPolicy {
                 continue;
             }
             PlainSelect plainSelect = (PlainSelect) select;
+            validateReadOnlySelectFeatures(plainSelect);
             boolean selectsAll =
                     plainSelect.getSelectItems().stream().map(item -> item.getExpression())
                             .anyMatch(expression -> expression instanceof AllColumns
@@ -91,6 +95,16 @@ public class SqlSafetyPolicy {
                 throw new SqlPolicyViolationException(
                         "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
             }
+        }
+    }
+
+    private void validateReadOnlySelectFeatures(PlainSelect select) {
+        if ((select.getIntoTables() != null && !select.getIntoTables().isEmpty())
+                || select.getIntoTempTable() != null) {
+            throw new SqlPolicyViolationException("SELECT INTO is forbidden");
+        }
+        if (select.getForMode() != null || select.getForClause() != null) {
+            throw new SqlPolicyViolationException("Row-locking SELECT clauses are forbidden");
         }
     }
 

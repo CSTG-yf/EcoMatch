@@ -204,6 +204,25 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void ignoresNumericRepresentationsThatWouldExpandExcessively() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("branch", "A", "balance", "1e1000000"),
+                Map.of("branch", "B", "balance", "NaN"),
+                Map.of("branch", "C", "balance", "Infinity")));
+        ExecuteContext context =
+                new ExecuteContext(ChatExecuteReq.builder().queryText("各分支行贷款余额").build());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertTrue(result.getBusinessExplanation().getEvidence().isEmpty());
+        assertTrue(result.getBusinessExplanation().getWarnings().stream()
+                .anyMatch(warning -> warning.contains("不可解析")));
+    }
+
+    @Test
     void reachesRequiredAccuracyOnFrozenDataset() throws Exception {
         Path dataset = locateDataset();
         int total = 0;

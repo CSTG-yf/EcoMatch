@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -58,6 +59,8 @@ public class DataMaskingService {
         Set<String> maskedColumns =
                 Stream.ofNullable(response.getMaskedColumns()).flatMap(java.util.Collection::stream)
                         .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Map<String, Object>, Map<String, String>> resultKeyIndexes =
+                buildResultKeyIndexes(response);
         for (QueryColumn column : response.getColumns()) {
             if (!isSensitive(column, sensitiveFields)) {
                 continue;
@@ -66,10 +69,21 @@ public class DataMaskingService {
                     Stream.of(column.getBizName(), column.getNameEn(), column.getName())
                             .filter(StringUtils::isNotBlank)
                             .collect(Collectors.toCollection(LinkedHashSet::new));
+            String sensitiveField = resultKeys.stream()
+                    .filter(key -> sensitiveFields.contains(key.toLowerCase(Locale.ROOT)))
+                    .findFirst().orElse(column.getBizName());
             for (Map<String, Object> row : response.getResultList()) {
-                for (String key : resultKeys) {
-                    if (row.containsKey(key) && row.get(key) != null) {
-                        row.put(key, maskValue(key, row.get(key)));
+                if (row == null) {
+                    continue;
+                }
+                Map<String, String> keyIndex = resultKeyIndexes.get(row);
+                Set<String> matchingKeys =
+                        resultKeys.stream().map(key -> key.toLowerCase(Locale.ROOT))
+                                .map(keyIndex::get).filter(StringUtils::isNotBlank)
+                                .collect(Collectors.toCollection(LinkedHashSet::new));
+                for (String key : matchingKeys) {
+                    if (row.get(key) != null) {
+                        row.put(key, maskValue(key, sensitiveField, row.get(key)));
                         maskedColumns.add(key);
                     }
                 }
@@ -77,6 +91,29 @@ public class DataMaskingService {
         }
         response.setDataMasked(!maskedColumns.isEmpty());
         response.setMaskedColumns(maskedColumns);
+    }
+
+    private Map<Map<String, Object>, Map<String, String>> buildResultKeyIndexes(
+            SemanticQueryResp response) {
+        Map<Map<String, Object>, Map<String, String>> indexes = new IdentityHashMap<>();
+        for (Map<String, Object> row : response.getResultList()) {
+            if (row == null) {
+                continue;
+            }
+            Map<String, String> keyIndex = new LinkedHashMap<>();
+            row.keySet().stream().filter(StringUtils::isNotBlank)
+                    .forEach(key -> keyIndex.putIfAbsent(key.toLowerCase(Locale.ROOT), key));
+            indexes.put(row, keyIndex);
+        }
+        return indexes;
+    }
+
+    private Object maskValue(String resultField, String sensitiveField, Object value) {
+        MaskingStrategy aliasStrategy = fieldStrategies.get(resultField.toLowerCase(Locale.ROOT));
+        if (aliasStrategy != null) {
+            return applyStrategy(aliasStrategy, String.valueOf(value));
+        }
+        return maskValue(StringUtils.defaultIfBlank(sensitiveField, resultField), value);
     }
 
     private boolean canViewRawData(User user) {

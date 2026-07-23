@@ -2,7 +2,7 @@
 
 ## 已实现
 
-- 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、危险函数、锁语句和文件写入，避免注释分隔绕过。
+- 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、`SELECT INTO`、`FOR SHARE/UPDATE` 行锁、状态变更函数、危险函数和文件写入，避免注释分隔绕过。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 执行前运行 `EXPLAIN`，兼容结构化行数和 PostgreSQL 文本计划，超过阈值时拒绝查询。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
@@ -34,7 +34,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *` 绕过，以及受限派生查询的兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/ advisory lock 状态函数绕过，以及受限派生查询兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关。
 - `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果。
@@ -54,7 +54,7 @@
 - 状态：已完成（2026-07-23）。
 - 数据规模：H2 内存数据库，`bank_account` 表 10,000 行。
 - 测试规模：20 次预热、200 次串行采样、8 线程 200 次并发查询。
-- 最新实测结果：平均 `7.70 ms`、P95 `10 ms`、P99 `15 ms`，并发查询无拒绝。
+- 最新实测结果：平均 `7.35 ms`、P95 `10 ms`、P99 `13 ms`，并发查询无拒绝。
 - 验收结论：本地标准测试环境满足“单轮查询平均响应时间不高于 3 秒”的性能门槛。
 - 完整报告：`task/BE-06_PERFORMANCE_REPORT.md`。
 

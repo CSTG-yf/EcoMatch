@@ -106,6 +106,23 @@ class DataMaskingServiceTest {
         assertFalse(response.isDataMasked());
     }
 
+    @Test
+    void masksAliasedSensitiveColumnWithCaseDifferentResultKey() {
+        DataMaskingService service = new DataMaskingService("", "");
+        QueryColumn column = new QueryColumn("contact", "VARCHAR", "contact");
+        column.setNameEn("mobile");
+        SemanticQueryResp response = new SemanticQueryResp();
+        response.setColumns(List.of(column));
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("CONTACT", "13812345678");
+        response.setResultList(List.of(row));
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertEquals("138****5678", row.get("CONTACT"));
+        assertTrue(response.getMaskedColumns().contains("CONTACT"));
+    }
+
     private SemanticQueryResp response(String field, Object value) {
         SemanticQueryResp response = new SemanticQueryResp();
         response.setColumns(List.of(new QueryColumn(field, "VARCHAR", field)));

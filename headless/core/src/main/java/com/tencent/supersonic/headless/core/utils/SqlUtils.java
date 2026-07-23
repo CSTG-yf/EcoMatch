@@ -131,11 +131,7 @@ public class SqlUtils {
             }
 
             ResultSetMetaData metaData = rs.getMetaData();
-            List<QueryColumn> queryColumns = new ArrayList<>();
-            for (int i = 1; i <= metaData.getColumnCount(); i++) {
-                String key = metaData.getColumnLabel(i);
-                queryColumns.add(new QueryColumn(key, metaData.getColumnTypeName(i)));
-            }
+            List<QueryColumn> queryColumns = getQueryColumns(metaData);
             queryResultWithColumns.setColumns(queryColumns);
 
             List<Map<String, Object>> resultList = getAllData(rs, queryColumns);
@@ -143,6 +139,17 @@ public class SqlUtils {
             return queryResultWithColumns;
         });
         return queryResultWithColumns;
+    }
+
+    List<QueryColumn> getQueryColumns(ResultSetMetaData metaData) throws SQLException {
+        List<QueryColumn> queryColumns = new ArrayList<>();
+        for (int i = 1; i <= metaData.getColumnCount(); i++) {
+            String label = metaData.getColumnLabel(i);
+            QueryColumn column = new QueryColumn(label, metaData.getColumnTypeName(i), label);
+            column.setNameEn(metaData.getColumnName(i));
+            queryColumns.add(column);
+        }
+        return queryColumns;
     }
 
     List<Map<String, Object>> getAllData(ResultSet rs, List<QueryColumn> queryColumns)

@@ -461,11 +461,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     }
 
     private BigDecimal toDecimal(Object value) {
-        try {
-            return value == null ? null : new BigDecimal(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return BusinessNumericUtils.parse(value);
     }
 
     private String format(BigDecimal value) {

@@ -4,9 +4,11 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import org.junit.jupiter.api.Test;
 
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -20,5 +22,19 @@ class SqlUtilsResultReadTest {
 
         assertThrows(SQLException.class, () -> new SqlUtils().getAllData(resultSet,
                 List.of(new QueryColumn("account_no", "VARCHAR"))));
+    }
+
+    @Test
+    void preservesPhysicalColumnNameWhenSqlUsesAlias() throws Exception {
+        ResultSetMetaData metaData = mock(ResultSetMetaData.class);
+        when(metaData.getColumnCount()).thenReturn(1);
+        when(metaData.getColumnLabel(1)).thenReturn("contact");
+        when(metaData.getColumnName(1)).thenReturn("mobile");
+        when(metaData.getColumnTypeName(1)).thenReturn("VARCHAR");
+
+        QueryColumn column = new SqlUtils().getQueryColumns(metaData).get(0);
+
+        assertEquals("contact", column.getBizName());
+        assertEquals("mobile", column.getNameEn());
     }
 }

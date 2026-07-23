@@ -266,19 +266,15 @@ final class BusinessInsightConsistencyValidator {
     }
 
     private BigDecimal decimal(String value) {
-        try {
-            return new BigDecimal(value);
-        } catch (NumberFormatException e) {
+        BigDecimal decimal = BusinessNumericUtils.parse(value);
+        if (decimal == null) {
             throw inconsistent("evidence contains an invalid number");
         }
+        return decimal;
     }
 
     private BigDecimal decimalOrNull(Object value) {
-        try {
-            return value == null ? null : new BigDecimal(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return BusinessNumericUtils.parse(value);
     }
 
     private boolean containsNonFiniteNumber(String value) {

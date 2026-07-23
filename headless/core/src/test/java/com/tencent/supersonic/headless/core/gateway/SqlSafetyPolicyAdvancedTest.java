@@ -59,4 +59,22 @@ class SqlSafetyPolicyAdvancedTest {
                                 + "SELECT * FROM recent JOIN customer "
                                 + "ON recent.customer_id = customer.id"));
     }
+
+    @Test
+    void rejectsSelectIntoAndRowLockingVariants() {
+        assertThrows(SqlPolicyViolationException.class, () -> policy.validate(
+                "SELECT account_id INTO copied_account FROM account WHERE account_id = 1"));
+        assertThrows(SqlPolicyViolationException.class, () -> policy
+                .validate("SELECT account_id FROM account WHERE account_id = 1 FOR SHARE"));
+    }
+
+    @Test
+    void rejectsStateChangingFunctionsInsideSelect() {
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT nextval('account_seq')"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT setval('account_seq', 1)"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT pg_advisory_lock(1)"));
+    }
 }
