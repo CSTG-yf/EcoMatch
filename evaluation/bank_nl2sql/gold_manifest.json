@@ -1,0 +1,11 @@
+{
+  "databaseSha256": "f4c1e95ec5fc2f91f6a1eae757e2610f2d99f5cf674814fa4c96be78a9f06264",
+  "officialCount": 200,
+  "splitCounts": {
+    "dev": 36,
+    "test": 49,
+    "train": 115
+  },
+  "sqlExecution": "PASS",
+  "version": "0.1.0"
+}

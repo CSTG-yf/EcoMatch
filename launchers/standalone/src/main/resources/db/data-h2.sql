@@ -6,6 +6,10 @@ INSERT INTO s2_user (`name`, password, salt,  display_name, email) values ('tom'
 INSERT INTO s2_user (`name`, password, salt,  display_name, email) values ('lucy','c3VwZXJzb25pY0BiaWNvbc7Ychfu99lPL7rLmCkf/vgF4RASa4Z++Mxo1qlDCpci','3Jnpqob6uDoGLP9eCAg5Fw==','lucy','lucy@xx.com');
 INSERT INTO s2_user (`name`, password, salt,  display_name, email) values ('alice','c3VwZXJzb25pY0BiaWNvbe9Z4F2/DVIfAJoN1HwUTuH1KgVuiusvfh7KkWYQSNHk','K9gGyX8OAK8aH8Myj6djqQ==','alice','alice@xx.com');
 
+-- Local OpenAI-compatible model shared by all users in the H2 development profile.
+INSERT INTO s2_chat_model (`name`, `description`, `config`, `created_at`, `created_by`, `updated_at`, `updated_by`, `admin`, `viewer`, `is_open`)
+VALUES ('局域网 Qwen3.6-35B', '本地局域网算力服务器，OpenAI 兼容接口', '{"provider":"OPEN_AI","baseUrl":"http://192.168.20.115:8080/v1","apiKey":"local-no-key","modelName":"Qwen3.6-35B-A3B-UD-Q4_K_M.gguf","apiVersion":"2024-02-01","temperature":0.0,"timeOut":60,"maxRetries":3,"logRequests":false,"logResponses":false,"enableSearch":false,"jsonFormat":false,"jsonFormatType":"json_schema"}', CURRENT_TIMESTAMP, 'admin', CURRENT_TIMESTAMP, 'admin', 'admin', '[]', 1);
+
 MERGE INTO s2_available_date_info(`id`,`item_id` ,`type`    ,`date_format` ,`start_date`  ,`end_date` ,`unavailable_date` ,`created_at`  ,`created_by`  ,`updated_at`  ,`updated_by` )
 values (1 , 1, 'dimension', 'yyyy-MM-dd', DATEADD('DAY', -28, CURRENT_DATE()), DATEADD('DAY', -1, CURRENT_DATE()), '[]', '2023-06-01', 'admin', '2023-06-01', 'admin');
 MERGE INTO s2_available_date_info(`id`,`item_id` ,`type`    ,`date_format` ,`start_date`  ,`end_date` ,`unavailable_date` ,`created_at`  ,`created_by`  ,`updated_at`  ,`updated_by` )

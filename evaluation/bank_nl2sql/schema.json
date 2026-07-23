@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "expected": {
+      "required": [
+        "answerText",
+        "columns",
+        "rows",
+        "unit",
+        "numericTolerance",
+        "orderSensitive"
+      ],
+      "type": "object"
+    },
+    "expectedAction": {
+      "enum": [
+        "EXECUTE",
+        "CLARIFY",
+        "REFUSE"
+      ],
+      "type": "string"
+    },
+    "id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "s2sql": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sourceSplit": {
+      "enum": [
+        "train",
+        "dev",
+        "test",
+        null
+      ],
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "split": {
+      "enum": [
+        "train",
+        "dev",
+        "test"
+      ],
+      "type": "string"
+    },
+    "sql": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "source",
+    "sourceSplit",
+    "split",
+    "splitReason",
+    "difficulty",
+    "question",
+    "normalizedIntent",
+    "templateGroup",
+    "expectedAction",
+    "s2sql",
+    "sql",
+    "sqlFeatures",
+    "expected",
+    "errorCategory"
+  ],
+  "title": "EcoMatch bank NL2SQL annotated sample",
+  "type": "object"
+}

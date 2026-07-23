@@ -1,10 +1,16 @@
 import type { ActionType, ProColumns } from '@ant-design/pro-components';
 import { ProTable } from '@ant-design/pro-components';
-import { message, Button, Space, Popconfirm } from 'antd';
+import { message, Button, Space, Popconfirm, Modal, Select } from 'antd';
 import React, { useRef, useState, useEffect } from 'react';
 import { StatusEnum } from '../../enum';
 import { useModel } from '@umijs/max';
-import { deleteView, updateView, getDataSetList, getAllModelByDomainId } from '../../service';
+import {
+  deleteView,
+  updateView,
+  getDataSetList,
+  getAllModelByDomainId,
+  importBankSemanticResources,
+} from '../../service';
 import ViewCreateFormModal from './ViewCreateFormModal';
 import moment from 'moment';
 import styles from '../../components/style.less';
@@ -30,6 +36,10 @@ const DataSetTable: React.FC<Props> = ({ disabledEdit = false }) => {
   const [modelList, setModelList] = useState<ISemantic.IModelItem[]>([]);
   const actionRef = useRef<ActionType>();
   const [editFormStep, setEditFormStep] = useState<number>(0);
+  const [bankImportOpen, setBankImportOpen] = useState(false);
+  const [bankImportFile, setBankImportFile] = useState<File>();
+  const [bankImportModelId, setBankImportModelId] = useState<number>();
+  const [bankImportLoading, setBankImportLoading] = useState(false);
 
   const updateViewStatus = async (modelData: ISemantic.IDatasetItem) => {
     setSaveLoading(true);
@@ -71,6 +81,52 @@ const DataSetTable: React.FC<Props> = ({ disabledEdit = false }) => {
       setModelList(data);
     } else {
       message.error(msg);
+    }
+  };
+
+  const openBankImport = () => {
+    const preferredModel =
+      modelList.find((item) => item.bizName === 'bank_metric_daily') || modelList[0];
+    setBankImportModelId(preferredModel?.id);
+    setBankImportFile(undefined);
+    setBankImportOpen(true);
+  };
+
+  const handleBankImport = async () => {
+    if (!bankImportModelId) {
+      message.error('请选择目标模型');
+      return;
+    }
+    if (!bankImportFile) {
+      message.error('请选择银行指标工作簿');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', bankImportFile);
+    formData.append('modelId', String(bankImportModelId));
+    formData.append('dataSetName', '银行日指标数据集');
+    formData.append('dataSetBizName', 'bank_daily_metrics');
+    formData.append('dateField', 'data_date');
+    formData.append('organizationField', 'org_code');
+    formData.append('indicatorCodeField', 'metric_code');
+    formData.append('indicatorValueField', 'metric_value');
+
+    setBankImportLoading(true);
+    try {
+      const { code, data: report, msg } = await importBankSemanticResources(formData);
+      if (code === 200 && report?.success) {
+        const metricCount = report?.created?.metrics || report?.updated?.metrics || 0;
+        message.success(`银行语义资源导入成功，已处理 ${metricCount} 个指标`);
+        setBankImportOpen(false);
+        queryDataSetList();
+      } else {
+        message.error(report?.errors?.[0]?.message || msg || '银行语义资源导入失败');
+      }
+    } catch (error) {
+      message.error('银行语义资源导入请求失败');
+    } finally {
+      setBankImportLoading(false);
     }
   };
 
@@ -229,6 +285,9 @@ const DataSetTable: React.FC<Props> = ({ disabledEdit = false }) => {
           disabledEdit
             ? [<></>]
             : [
+                <Button key="bankImport" disabled={!modelList.length} onClick={openBankImport}>
+                  导入银行指标工作簿
+                </Button>,
                 <Button
                   key="create"
                   type="primary"
@@ -270,6 +329,43 @@ const DataSetTable: React.FC<Props> = ({ disabledEdit = false }) => {
             setSearchModalOpen(false);
           }}
         />
+      )}
+
+      {bankImportOpen && (
+        <Modal
+          destroyOnHidden
+          title="导入银行指标工作簿"
+          open={true}
+          confirmLoading={bankImportLoading}
+          okText="开始导入"
+          cancelText="取消"
+          onOk={handleBankImport}
+          onCancel={() => setBankImportOpen(false)}
+        >
+          <p>导入后会更新银行日指标数据集，并同步机构、指标、术语和指标字典。</p>
+          <div style={{ marginBottom: 16 }}>
+            <label htmlFor="bank-import-model">目标模型</label>
+            <Select
+              id="bank-import-model"
+              aria-label="目标模型"
+              style={{ display: 'block', marginTop: 8, width: '100%' }}
+              value={bankImportModelId}
+              options={modelList.map((item) => ({ label: item.name, value: item.id }))}
+              onChange={setBankImportModelId}
+            />
+          </div>
+          <div>
+            <label htmlFor="bank-import-workbook">银行指标工作簿（.xlsx）</label>
+            <input
+              id="bank-import-workbook"
+              aria-label="银行指标工作簿（.xlsx）"
+              style={{ display: 'block', marginTop: 8 }}
+              type="file"
+              accept=".xlsx"
+              onChange={(event) => setBankImportFile(event.target.files?.[0])}
+            />
+          </div>
+        </Modal>
       )}
     </>
   );

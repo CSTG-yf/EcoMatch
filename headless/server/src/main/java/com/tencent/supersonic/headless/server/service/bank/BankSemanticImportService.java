@@ -163,7 +163,8 @@ public class BankSemanticImportService {
             BankSemanticImportConfig config, User user, BankSemanticImportReport report)
             throws Exception {
         MetaFilter filter = new MetaFilter(Lists.newArrayList(config.getModelId()));
-        Map<String, DimensionResp> existing = dimensionService.getDimensions(filter).stream()
+        List<DimensionResp> existingDimensions = dimensionService.getDimensions(filter);
+        Map<String, DimensionResp> existing = existingDimensions.stream()
                 .collect(Collectors.toMap(DimensionResp::getBizName, Function.identity(),
                         (left, right) -> left, LinkedHashMap::new));
         List<DimensionReq> requests = Arrays.asList(dateDimension(config),
@@ -171,6 +172,14 @@ public class BankSemanticImportService {
         Map<String, DimensionResp> result = new LinkedHashMap<>();
         for (DimensionReq request : requests) {
             DimensionResp current = existing.get(request.getBizName());
+            // A model created through the UI can already contain a quick-created
+            // dimension for the same physical column. Reuse it instead of creating
+            // a second dimension with a colliding display name.
+            if (current == null) {
+                current = existingDimensions.stream()
+                        .filter(item -> Objects.equals(item.getExpr(), request.getExpr()))
+                        .findFirst().orElse(null);
+            }
             if (current == null) {
                 DimensionResp created = dimensionService.createDimension(request, user);
                 result.put(request.getBizName(), created);

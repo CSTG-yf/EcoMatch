@@ -1,0 +1,43 @@
+{
+  "accessPolicy": {
+    "excludedByDefault": [
+      "test.jsonl",
+      "augmentation.jsonl"
+    ],
+    "heldOutGold": [
+      "test.jsonl"
+    ],
+    "training": [
+      "train.jsonl",
+      "dev.jsonl"
+    ]
+  },
+  "augmentationCount": 12,
+  "contentSha256": {
+    "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
+    "dev.jsonl": "41f2b0c0afa3bcf1759b3804d6fc112f92a709c2b4419ca8cbf7820544b300fa",
+    "gold_manifest.json": "dcc650e261482a910f8fb352291342b8338777664c25fff075849b7fcce0919f",
+    "manifest.json": "1e50a583c41b77fe0f96640cdfda37e04cf4826676d0331390c6d436c767a9f4",
+    "schema.json": "56d0db738ad0748927fa7ef78eb92efe0c2b0fb8301869d9c427caf71ee9a334",
+    "test.jsonl": "f8102dce081eaf5c33021d8c7466df02adffb1c90e0e45d9bad1232bafb72989",
+    "train.jsonl": "c717419454c306ccf932ef27db8a2b1e469ac7ac11839a608c574771348ebf29"
+  },
+  "evaluationSplitCounts": {
+    "dev": 36,
+    "test": 49,
+    "train": 115
+  },
+  "goldValidation": {
+    "officialCount": 200,
+    "result": "PASS",
+    "sqlExecutionCount": 200
+  },
+  "officialCount": 200,
+  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "sourceSplitCounts": {
+    "dev": 40,
+    "test": 40,
+    "train": 120
+  },
+  "version": "0.1.0"
+}
