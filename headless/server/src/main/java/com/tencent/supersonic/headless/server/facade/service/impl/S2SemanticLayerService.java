@@ -32,6 +32,7 @@ import com.tencent.supersonic.headless.core.utils.ComponentFactory;
 import com.tencent.supersonic.headless.server.annotation.S2DataPermission;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import com.tencent.supersonic.headless.server.manager.SemanticSchemaManager;
+import com.tencent.supersonic.headless.server.security.DataMaskingService;
 import com.tencent.supersonic.headless.server.service.*;
 import com.tencent.supersonic.headless.server.utils.MetricDrillDownChecker;
 import com.tencent.supersonic.headless.server.utils.QueryUtils;
@@ -62,6 +63,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
     private final DomainService domainService;
     private final DimensionService dimensionService;
     private final TranslatorConfig translatorConfig;
+    private final DataMaskingService dataMaskingService;
     private final QueryCache queryCache = ComponentFactory.getQueryCache();
     private final List<QueryExecutor> queryExecutors = ComponentFactory.getQueryExecutors();
 
@@ -71,7 +73,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
             MetricDrillDownChecker metricDrillDownChecker,
             KnowledgeBaseService knowledgeBaseService, MetricService metricService,
             DimensionService dimensionService, DomainService domainService,
-            TranslatorConfig translatorConfig) {
+            TranslatorConfig translatorConfig, DataMaskingService dataMaskingService) {
         this.statUtils = statUtils;
         this.queryUtils = queryUtils;
         this.semanticSchemaManager = semanticSchemaManager;
@@ -84,6 +86,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
         this.dimensionService = dimensionService;
         this.domainService = domainService;
         this.translatorConfig = translatorConfig;
+        this.dataMaskingService = dataMaskingService;
     }
 
     public DataSetSchema getDataSetSchema(Long id) {
@@ -153,16 +156,18 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 }
             }
 
+            if (Objects.isNull(queryResp)) {
+                state = TaskStatusEnum.ERROR;
+            } else {
+                queryResp.appendErrorMsg(queryStatement.getErrMsg());
+                maskBeforeCache(queryReq, queryResp, user);
+            }
+
             // 5.reset cache and set stateInfo
             Boolean setCacheSuccess = queryCache.put(queryReq, cacheKey, queryResp);
             if (setCacheSuccess) {
                 // if result is not null, update cache data
                 statUtils.updateResultCacheKey(cacheKey);
-            }
-            if (Objects.isNull(queryResp)) {
-                state = TaskStatusEnum.ERROR;
-            } else {
-                queryResp.appendErrorMsg(queryStatement.getErrMsg());
             }
 
             return queryResp;
@@ -175,6 +180,14 @@ public class S2SemanticLayerService implements SemanticLayerService {
         } finally {
             statUtils.statInfo2DbAsync(state);
         }
+    }
+
+    private void maskBeforeCache(SemanticQueryReq queryReq, SemanticQueryResp queryResp,
+            User user) {
+        SchemaFilterReq filter = new SchemaFilterReq();
+        filter.setModelIds(queryReq.getModelIds());
+        filter.setDataSetId(queryReq.getDataSetId());
+        dataMaskingService.mask(queryResp, schemaService.fetchSemanticSchema(filter), user);
     }
 
     @Override

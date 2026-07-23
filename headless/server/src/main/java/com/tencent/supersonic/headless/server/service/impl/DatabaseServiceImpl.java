@@ -19,6 +19,8 @@ import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptor;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptorFactory;
 import com.tencent.supersonic.headless.core.gateway.QueryExecutionGateway;
+import com.tencent.supersonic.headless.core.gateway.QueryRejectedException;
+import com.tencent.supersonic.headless.core.gateway.SqlPolicyViolationException;
 import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import com.tencent.supersonic.headless.core.utils.SqlVariableParseUtils;
@@ -237,10 +239,18 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         SqlUtils sqlUtils = this.sqlUtils.init(database);
         log.info("query SQL [{}]", SensitiveLogUtils.summarize(StringUtils.normalizeSpace(sql)));
-        return queryExecutionGateway.execute(sql, () -> {
-            sqlUtils.queryInternal(sql, queryResultWithColumns);
-            return queryResultWithColumns;
-        });
+        try {
+            return queryExecutionGateway.execute(sql, () -> {
+                sqlUtils.queryInternal(sql, queryResultWithColumns);
+                return queryResultWithColumns;
+            });
+        } catch (QueryRejectedException | SqlPolicyViolationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.error("Direct query execution failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw new QueryRejectedException("Query execution failed", e);
+        }
     }
 
     private DatabaseDO getDatabaseDO(Long id) {
