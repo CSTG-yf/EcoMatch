@@ -154,7 +154,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
             }
 
             // 5.reset cache and set stateInfo
-            Boolean setCacheSuccess = queryCache.put(cacheKey, queryResp);
+            Boolean setCacheSuccess = queryCache.put(queryReq, cacheKey, queryResp);
             if (setCacheSuccess) {
                 // if result is not null, update cache data
                 statUtils.updateResultCacheKey(cacheKey);

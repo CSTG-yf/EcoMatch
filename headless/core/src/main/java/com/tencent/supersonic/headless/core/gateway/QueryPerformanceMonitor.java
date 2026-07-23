@@ -19,6 +19,8 @@ public final class QueryPerformanceMonitor {
     private static final Map<Stage, StageAccumulator> ACCUMULATORS = createAccumulators();
     private static final LongAdder CACHE_HITS = new LongAdder();
     private static final LongAdder CACHE_MISSES = new LongAdder();
+    private static final LongAdder HOT_METRIC_CACHE_HITS = new LongAdder();
+    private static final LongAdder HOT_METRIC_CACHE_MISSES = new LongAdder();
 
     private QueryPerformanceMonitor() {}
 
@@ -38,10 +40,20 @@ public final class QueryPerformanceMonitor {
     }
 
     public static void recordCacheLookup(boolean hit) {
+        recordCacheLookup(hit, false);
+    }
+
+    public static void recordCacheLookup(boolean hit, boolean hotMetric) {
         if (hit) {
             CACHE_HITS.increment();
+            if (hotMetric) {
+                HOT_METRIC_CACHE_HITS.increment();
+            }
         } else {
             CACHE_MISSES.increment();
+            if (hotMetric) {
+                HOT_METRIC_CACHE_MISSES.increment();
+            }
         }
     }
 
@@ -49,13 +61,19 @@ public final class QueryPerformanceMonitor {
         long hits = CACHE_HITS.sum();
         long misses = CACHE_MISSES.sum();
         long requests = hits + misses;
-        return new CacheStats(hits, misses, requests, requests == 0 ? 0 : (double) hits / requests);
+        long hotHits = HOT_METRIC_CACHE_HITS.sum();
+        long hotMisses = HOT_METRIC_CACHE_MISSES.sum();
+        long hotRequests = hotHits + hotMisses;
+        return new CacheStats(hits, misses, requests, rate(hits, requests), hotHits, hotMisses,
+                hotRequests, rate(hotHits, hotRequests));
     }
 
     static void reset() {
         ACCUMULATORS.values().forEach(StageAccumulator::reset);
         CACHE_HITS.reset();
         CACHE_MISSES.reset();
+        HOT_METRIC_CACHE_HITS.reset();
+        HOT_METRIC_CACHE_MISSES.reset();
     }
 
     private static Map<Stage, StageAccumulator> createAccumulators() {
@@ -69,7 +87,13 @@ public final class QueryPerformanceMonitor {
     public record StageStats(long count, double totalTimeMs, double averageTimeMs, double maxTimeMs,
             double p50TimeMs, double p95TimeMs, double p99TimeMs) {}
 
-    public record CacheStats(long hits, long misses, long requests, double hitRate) {}
+    public record CacheStats(long hits, long misses, long requests, double hitRate,
+            long hotMetricHits, long hotMetricMisses, long hotMetricRequests,
+            double hotMetricHitRate) {}
+
+    private static double rate(long hits, long requests) {
+        return requests == 0 ? 0 : (double) hits / requests;
+    }
 
     private static final class StageAccumulator {
 

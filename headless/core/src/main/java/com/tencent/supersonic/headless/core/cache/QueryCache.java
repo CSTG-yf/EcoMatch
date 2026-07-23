@@ -9,6 +9,10 @@ public interface QueryCache {
 
     Boolean put(String cacheKey, Object value);
 
+    default Boolean put(SemanticQueryReq semanticQueryReq, String cacheKey, Object value) {
+        return put(cacheKey, value);
+    }
+
     String getCacheKey(SemanticQueryReq semanticQueryReq);
 
     default String getCacheKey(SemanticQueryReq semanticQueryReq, User user) {

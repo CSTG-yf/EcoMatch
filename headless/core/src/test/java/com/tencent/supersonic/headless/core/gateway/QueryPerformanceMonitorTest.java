@@ -26,6 +26,7 @@ class QueryPerformanceMonitorTest {
                 TimeUnit.MILLISECONDS.toNanos(50));
         QueryPerformanceMonitor.recordCacheLookup(true);
         QueryPerformanceMonitor.recordCacheLookup(false);
+        QueryPerformanceMonitor.recordCacheLookup(true, true);
 
         Map<String, QueryPerformanceMonitor.StageStats> snapshot =
                 QueryPerformanceMonitor.snapshot();
@@ -37,9 +38,12 @@ class QueryPerformanceMonitorTest {
         assertEquals(10.0, snapshot.get("parse").p50TimeMs());
         assertEquals(30.0, snapshot.get("parse").p95TimeMs());
         assertEquals(30.0, snapshot.get("parse").p99TimeMs());
-        assertEquals(1, QueryPerformanceMonitor.cacheSnapshot().hits());
+        assertEquals(2, QueryPerformanceMonitor.cacheSnapshot().hits());
         assertEquals(1, QueryPerformanceMonitor.cacheSnapshot().misses());
-        assertEquals(0.5, QueryPerformanceMonitor.cacheSnapshot().hitRate());
+        assertEquals(2.0 / 3.0, QueryPerformanceMonitor.cacheSnapshot().hitRate());
+        assertEquals(1, QueryPerformanceMonitor.cacheSnapshot().hotMetricHits());
+        assertEquals(1, QueryPerformanceMonitor.cacheSnapshot().hotMetricRequests());
+        assertEquals(1.0, QueryPerformanceMonitor.cacheSnapshot().hotMetricHitRate());
         assertEquals(1, snapshot.get("model").count());
         assertTrue(snapshot.containsKey("translate"));
         assertTrue(snapshot.containsKey("execute"));

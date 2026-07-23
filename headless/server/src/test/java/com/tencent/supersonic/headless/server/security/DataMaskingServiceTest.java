@@ -65,6 +65,21 @@ class DataMaskingServiceTest {
     }
 
     @Test
+    void appliesConfiguredFieldStrategies() {
+        DataMaskingService service =
+                new DataMaskingService("", "", "customer_name=FULL,account_no=LAST4");
+
+        assertEquals("****", service.maskValue("customer_name", "张三"));
+        assertEquals("****1234", service.maskValue("account_no", "622200001234"));
+    }
+
+    @Test
+    void rejectsInvalidFieldStrategyConfiguration() {
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> new DataMaskingService("", "", "account_no=UNKNOWN"));
+    }
+
+    @Test
     void masksAllSupportedSensitiveValueTypes() {
         DataMaskingService service = new DataMaskingService("", "");
 

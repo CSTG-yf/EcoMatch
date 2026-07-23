@@ -243,7 +243,7 @@ public class S2DataPermissionAspect {
                 log.info("After doRowPermission, querySqlReq: {}", modifiedSql);
             }
         } catch (JSQLParserException e) {
-            log.error("Failed to apply row permission filter", e);
+            log.warn("Failed to apply row permission filter: {}", e.getMessage());
             throw new InvalidPermissionException(
                     "Row permission filter is invalid; query execution was denied");
         }
@@ -291,7 +291,7 @@ public class S2DataPermissionAspect {
             try {
                 CCJSqlParserUtil.parseCondExpression(expression);
             } catch (JSQLParserException e) {
-                log.error("Failed to parse row permission filter", e);
+                log.warn("Failed to parse row permission filter: {}", e.getMessage());
                 throw new InvalidPermissionException(
                         "Row permission filter is invalid; query execution was denied");
             }

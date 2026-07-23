@@ -109,6 +109,25 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void calculatesReproducibleMonthOverMonthAndYearOverYearEvidence() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("month", "2025-01", "balance", 100),
+                Map.of("month", "2025-12", "balance", 110),
+                Map.of("month", "2026-01", "balance", 120)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertTrue(result.getBusinessExplanation().getEvidence()
+                .contains("balance环比变化9.09%（2026-01较2025-12）"));
+        assertTrue(result.getBusinessExplanation().getEvidence()
+                .contains("balance同比变化20%（2026-01较2025-01）"));
+    }
+
+    @Test
     void coversDatasetChartProfiles() {
         assertEquals("KPI_CARD", recommend(List.of(column("metric_value", "NUMBER")),
                 List.of(Map.of("metric_value", 10))));

@@ -7,12 +7,14 @@ import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -26,13 +28,21 @@ public class DataMaskingService {
 
     private final Set<String> rawUsers;
     private final Set<String> rawRoles;
+    private final Map<String, MaskingStrategy> fieldStrategies;
 
+    @Autowired
     public DataMaskingService(@Value("${s2.security.masking.raw-users:}") String rawUsers,
-            @Value("${s2.security.masking.raw-roles:}") String rawRoles) {
+            @Value("${s2.security.masking.raw-roles:}") String rawRoles,
+            @Value("${s2.security.masking.field-strategies:}") String fieldStrategies) {
         this.rawUsers = Arrays.stream(StringUtils.defaultString(rawUsers).split(","))
                 .map(String::trim).filter(StringUtils::isNotBlank).collect(Collectors.toSet());
         this.rawRoles = Arrays.stream(StringUtils.defaultString(rawRoles).split(","))
                 .map(String::trim).filter(StringUtils::isNotBlank).collect(Collectors.toSet());
+        this.fieldStrategies = parseFieldStrategies(fieldStrategies);
+    }
+
+    public DataMaskingService(String rawUsers, String rawRoles) {
+        this(rawUsers, rawRoles, "");
     }
 
     public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user) {
@@ -100,6 +110,10 @@ public class DataMaskingService {
     }
 
     Object maskValue(String fieldName, Object value) {
+        MaskingStrategy strategy = fieldStrategies.get(fieldName.toLowerCase(Locale.ROOT));
+        if (strategy != null) {
+            return applyStrategy(strategy, String.valueOf(value));
+        }
         if (value instanceof Number) {
             return "****";
         }
@@ -124,9 +138,44 @@ public class DataMaskingService {
         return text.charAt(0) + "***";
     }
 
+    private Object applyStrategy(MaskingStrategy strategy, String value) {
+        switch (strategy) {
+            case FULL:
+                return "****";
+            case LAST4:
+                return value.length() <= 4 ? "****" : "****" + value.substring(value.length() - 4);
+            case FIRST_LAST:
+                return value.length() <= 2 ? "****"
+                        : value.charAt(0) + "***" + value.charAt(value.length() - 1);
+            default:
+                return value;
+        }
+    }
+
+    private Map<String, MaskingStrategy> parseFieldStrategies(String configuredStrategies) {
+        Map<String, MaskingStrategy> strategies = new LinkedHashMap<>();
+        for (String item : StringUtils.defaultString(configuredStrategies).split(",")) {
+            if (StringUtils.isBlank(item)) {
+                continue;
+            }
+            String[] pair = item.split("=", 2);
+            if (pair.length != 2 || StringUtils.isAnyBlank(pair[0], pair[1])) {
+                throw new IllegalArgumentException(
+                        "Invalid masking field strategy, expected field=STRATEGY: " + item);
+            }
+            strategies.put(pair[0].trim().toLowerCase(Locale.ROOT),
+                    MaskingStrategy.valueOf(pair[1].trim().toUpperCase(Locale.ROOT)));
+        }
+        return strategies;
+    }
+
     private String maskRange(String value, int prefixLength, int suffixStart) {
         int prefix = Math.min(prefixLength, value.length());
         int suffix = Math.max(prefix, Math.min(suffixStart, value.length()));
         return value.substring(0, prefix) + "****" + value.substring(suffix);
+    }
+
+    private enum MaskingStrategy {
+        FULL, LAST4, FIRST_LAST
     }
 }

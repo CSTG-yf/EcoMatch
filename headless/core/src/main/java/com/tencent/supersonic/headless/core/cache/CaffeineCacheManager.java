@@ -19,9 +19,13 @@ public class CaffeineCacheManager implements CacheManager {
     @Qualifier("caffeineCache")
     private Cache<String, Object> caffeineCache;
 
+    @Autowired
+    @Qualifier("hotMetricCaffeineCache")
+    private Cache<String, Object> hotMetricCaffeineCache;
+
     @Override
     public Boolean put(String key, Object value) {
-        log.debug("[put caffeineCache] key:{}, value:{}", key, value);
+        log.debug("[put caffeineCache] key:{}", key);
         caffeineCache.put(key, value);
         return true;
     }
@@ -29,7 +33,21 @@ public class CaffeineCacheManager implements CacheManager {
     @Override
     public Object get(String key) {
         Object value = caffeineCache.asMap().get(key);
-        log.debug("[get caffeineCache] key:{}, value:{}", key, value);
+        log.debug("[get caffeineCache] key:{}, hit:{}", key, value != null);
+        return value;
+    }
+
+    @Override
+    public Boolean putHotMetric(String key, Object value) {
+        log.debug("[put hotMetricCaffeineCache] key:{}", key);
+        hotMetricCaffeineCache.put(key, value);
+        return true;
+    }
+
+    @Override
+    public Object getHotMetric(String key) {
+        Object value = hotMetricCaffeineCache.asMap().get(key);
+        log.debug("[get hotMetricCaffeineCache] key:{}, hit:{}", key, value != null);
         return value;
     }
 
@@ -46,6 +64,12 @@ public class CaffeineCacheManager implements CacheManager {
     @Override
     public Boolean removeCache(String key) {
         caffeineCache.asMap().remove(key);
+        return true;
+    }
+
+    @Override
+    public Boolean removeHotMetricCache(String key) {
+        hotMetricCaffeineCache.invalidate(key);
         return true;
     }
 }

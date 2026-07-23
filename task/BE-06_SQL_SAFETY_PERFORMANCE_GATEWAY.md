@@ -8,6 +8,7 @@
 - 提供网关运行快照，包含最大并发、可用许可、活动查询、接收、拒绝、成功、失败和平均执行耗时。
 - 统一采集解析、模型、翻译、执行和解释五个阶段的调用次数、累计耗时、平均耗时、最大耗时及最近 2,048 次样本的 P50/P95/P99。
 - 采集语义结果缓存命中、未命中、请求总数和命中率。
+- 聚合指标查询进入独立热点指标缓存，默认保留 60 分钟，与普通 10 分钟结果缓存隔离，并单独统计命中率。
 - 提供仅超级管理员可访问的 `GET /api/semantic/query/gateway/stats` 监控接口，同时返回网关运行快照、五阶段耗时和缓存命中率。
 - JDBC 层统一设置查询超时、最大结果行数和 Fetch Size；超时由驱动取消执行。
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度，避免权限结果跨用户复用。
@@ -23,6 +24,8 @@
 | `s2.source.result-limit` | `1000000` | 最大返回行数 |
 | `s2.source.explain-cost-check-enabled` | `true` | 是否执行 EXPLAIN 成本检查 |
 | `s2.source.explain-max-estimated-rows` | `1000000` | 计划最大估算扫描行数 |
+| `s2.cache.hot-metric.expire.after.write` | `60` | 热点指标缓存写入后过期分钟数 |
+| `s2.cache.hot-metric.max.size` | `1000` | 热点指标缓存最大条目数 |
 
 ## 验证
 
@@ -31,6 +34,8 @@
 - `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，并校验接收和拒绝计数。
 - `QueryExecutionGatewayTest`：校验策略拒绝、执行失败、活动查询和平均耗时快照。
 - `QueryPerformanceMonitorTest`：校验五阶段耗时聚合、平均值、最大值、P50/P95/P99 和缓存命中率。
+- `DefaultQueryCacheTest`：校验结构化指标查询和聚合 SQL 的热点识别。
+- `CaffeineCacheManagerTest`：校验普通结果与热点指标使用独立缓存空间。
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
@@ -41,7 +46,7 @@
 - 状态：已完成（2026-07-23）。
 - 数据规模：H2 内存数据库，`bank_account` 表 10,000 行。
 - 测试规模：20 次预热、200 次串行采样、8 线程 200 次并发查询。
-- 最新实测结果：平均 `7.67 ms`、P95 `12 ms`、P99 `21 ms`，并发查询无拒绝。
+- 最新实测结果：平均 `7.45 ms`、P95 `11 ms`、P99 `15 ms`，并发查询无拒绝。
 - 验收结论：本地标准测试环境满足“单轮查询平均响应时间不高于 3 秒”的性能门槛。
 - 完整报告：`task/BE-06_PERFORMANCE_REPORT.md`。
 

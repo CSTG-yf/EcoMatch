@@ -14,6 +14,8 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.YearMonth;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -23,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -230,6 +233,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             }
         }
         appendContributionEvidence(result.getQueryResults(), profile, evidence);
+        if (!smallSample) {
+            appendTemporalComparisonEvidence(result.getQueryResults(), profile, evidence);
+        }
 
         String timeRange = resolveTimeRange(result.getQueryResults(), profile.dates);
         boolean hasQualityWarning = smallSample || profile.metrics.isEmpty() || evidence.isEmpty();
@@ -303,6 +309,64 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         BigDecimal contribution = top.getValue().divide(total, 4, RoundingMode.HALF_UP)
                 .multiply(BigDecimal.valueOf(100));
         evidence.add(String.format("%s的%s贡献度最高，为%s%%", top.getKey(), metric, format(contribution)));
+    }
+
+    private void appendTemporalComparisonEvidence(List<Map<String, Object>> rows,
+            FieldProfile profile, List<String> evidence) {
+        if (profile.dates.size() != 1 || !profile.categories.isEmpty()
+                || profile.metrics.isEmpty()) {
+            return;
+        }
+        String dateField = profile.dates.get(0);
+        for (String metric : profile.metrics) {
+            TreeMap<YearMonth, BigDecimal> monthlyValues = new TreeMap<>();
+            for (Map<String, Object> row : rows) {
+                YearMonth month = toYearMonth(row.get(dateField));
+                BigDecimal value = toDecimal(row.get(metric));
+                if (month == null || value == null || monthlyValues.put(month, value) != null) {
+                    monthlyValues.clear();
+                    break;
+                }
+            }
+            if (monthlyValues.size() < 2) {
+                continue;
+            }
+            YearMonth latestMonth = monthlyValues.lastKey();
+            BigDecimal latest = monthlyValues.get(latestMonth);
+            String label = profile.metricLabels.getOrDefault(metric, metric);
+            appendComparison(label, "环比", latestMonth, latest, latestMonth.minusMonths(1),
+                    monthlyValues, evidence);
+            appendComparison(label, "同比", latestMonth, latest, latestMonth.minusYears(1),
+                    monthlyValues, evidence);
+        }
+    }
+
+    private void appendComparison(String label, String comparisonType, YearMonth latestMonth,
+            BigDecimal latest, YearMonth baselineMonth, Map<YearMonth, BigDecimal> monthlyValues,
+            List<String> evidence) {
+        BigDecimal baseline = monthlyValues.get(baselineMonth);
+        if (baseline == null || baseline.signum() == 0) {
+            return;
+        }
+        BigDecimal change = latest.subtract(baseline)
+                .divide(baseline.abs(), 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+        evidence.add(String.format("%s%s变化%s%%（%s较%s）", label, comparisonType, format(change),
+                latestMonth, baselineMonth));
+    }
+
+    private YearMonth toYearMonth(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim().replace('/', '-');
+        if (text.length() < 7) {
+            return null;
+        }
+        try {
+            return YearMonth.parse(text.substring(0, 7));
+        } catch (DateTimeParseException e) {
+            return null;
+        }
     }
 
     private boolean isRiskMetric(String metric) {
