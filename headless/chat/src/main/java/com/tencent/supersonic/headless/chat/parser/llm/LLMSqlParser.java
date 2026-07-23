@@ -61,7 +61,8 @@ public class LLMSqlParser implements SemanticParser {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
                     // deduplicate the S2SQL result list and build parserInfo
-                    sqlRespMap = responseService.getDeduplicationSqlResp(currentRetry, llmResp);
+                    sqlRespMap =
+                            responseService.getDeduplicationSqlResp(currentRetry, llmResp, llmReq);
                     if (MapUtils.isNotEmpty(sqlRespMap)) {
                         parseResult = ParseResult.builder().dataSetId(dataSetId).llmReq(llmReq)
                                 .llmResp(llmResp).build();

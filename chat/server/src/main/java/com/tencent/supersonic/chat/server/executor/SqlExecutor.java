@@ -12,15 +12,20 @@ import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
+import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
+import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlErrorClassifier;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 public class SqlExecutor implements ChatQueryExecutor {
@@ -91,16 +96,57 @@ public class SqlExecutor implements ChatQueryExecutor {
         queryResult.setQueryMode(parseInfo.getQueryMode());
         SemanticQueryResp queryResp =
                 semanticLayer.queryByReq(sqlReq, executeContext.getRequest().getUser());
+        String originalError = queryResp == null ? null : queryResp.getErrorMsg();
+        boolean repairAttempted = false;
+        if (queryResp != null && StringUtils.isNotBlank(originalError)
+                && LLMSqlQuery.QUERY_MODE.equals(parseInfo.getQueryMode())
+                && executeContext.getAgent() != null) {
+            String repairedSql = LLMPhysicalSqlCorrector.repairExecutionError(
+                    executeContext.getAgent().getChatAppConfig()
+                            .get(LLMPhysicalSqlCorrector.EXECUTION_APP_KEY),
+                    executeContext.getRequest().getQueryText(), finalSql, originalError);
+            if (StringUtils.isNotBlank(repairedSql)) {
+                repairAttempted = true;
+                sqlReq.setSql(repairedSql);
+                queryResp = semanticLayer.queryByReq(sqlReq, executeContext.getRequest().getUser());
+                finalSql = repairedSql;
+                parseInfo.getSqlInfo().setCorrectedQuerySQL(repairedSql);
+                parseInfo.getSqlInfo().setQuerySQL(repairedSql);
+            }
+        }
         queryResult.setQueryTimeCost(System.currentTimeMillis() - startTime);
         if (queryResp != null) {
             queryResult.setQueryAuthorization(queryResp.getQueryAuthorization());
             queryResult.setQuerySql(finalSql);
             queryResult.setQueryResults(queryResp.getResultList());
             queryResult.setQueryColumns(queryResp.getColumns());
-            queryResult.setQueryState(QueryState.SUCCESS);
             queryResult.setErrorMsg(queryResp.getErrorMsg());
-            chatCtx.setParseInfo(parseInfo);
-            chatContextService.updateContext(chatCtx);
+            if (StringUtils.isBlank(queryResp.getErrorMsg())) {
+                queryResult.setQueryState(QueryState.SUCCESS);
+                if (repairAttempted) {
+                    Map<String, Object> feedback = new HashMap<>();
+                    feedback.put("errorType",
+                            ComplexSqlErrorClassifier.classifyExecutionError(originalError).name());
+                    feedback.put("retryable", false);
+                    feedback.put("repairAttempted", true);
+                    feedback.put("repaired", true);
+                    feedback.put("originalError", originalError);
+                    parseInfo.getProperties().put("sqlExecutionFeedback", feedback);
+                }
+                chatCtx.setParseInfo(parseInfo);
+                chatContextService.updateContext(chatCtx);
+            } else {
+                queryResult.setQueryState(QueryState.SEARCH_EXCEPTION);
+                SqlErrorType errorType =
+                        ComplexSqlErrorClassifier.classifyExecutionError(queryResp.getErrorMsg());
+                Map<String, Object> feedback = new HashMap<>();
+                feedback.put("errorType", errorType.name());
+                feedback.put("retryable", true);
+                feedback.put("repairAttempted", repairAttempted);
+                feedback.put("originalError", originalError);
+                feedback.put("finalError", queryResp.getErrorMsg());
+                parseInfo.getProperties().put("sqlExecutionFeedback", feedback);
+            }
         } else {
             queryResult.setQueryState(QueryState.INVALID);
         }

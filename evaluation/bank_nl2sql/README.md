@@ -10,6 +10,7 @@
 - `schema.json`：正样本的机器可读字段协议。
 - `manifest.json`：来源哈希、数量、覆盖率和执行统计。
 - `validation_report.json`：重新执行 SQL 后的验收结果。
+- `be05_evaluation_report.json`：BE-05 复杂 S2SQL 校验与物理 SQL 执行结果。
 
 ## 覆盖范围
 

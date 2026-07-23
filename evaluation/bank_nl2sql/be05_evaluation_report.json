@@ -1,0 +1,38 @@
+{
+  "task": "BE-05",
+  "evaluatedAt": "2026-07-23",
+  "datasetVersion": "1.0.0",
+  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "acceptanceThreshold": 0.9,
+  "s2sqlValidation": {
+    "total": 96,
+    "passed": 96,
+    "failed": 0,
+    "successRate": 1.0
+  },
+  "physicalSqlExecution": {
+    "total": 96,
+    "passed": 96,
+    "failed": 0,
+    "successRate": 1.0
+  },
+  "coveredFeatures": [
+    "SINGLE_TABLE",
+    "MULTI_TABLE",
+    "NESTED_QUERY",
+    "AGGREGATION",
+    "YOY",
+    "MOM",
+    "TOP_N",
+    "CROSS_ORGANIZATION"
+  ],
+  "errorTaxonomy": [
+    "MAPPING_ERROR",
+    "DEFINITION_ERROR",
+    "JOIN_ERROR",
+    "FILTER_ERROR",
+    "SYNTAX_ERROR",
+    "EXECUTION_ERROR"
+  ],
+  "status": "passed"
+}
