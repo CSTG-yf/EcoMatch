@@ -228,10 +228,11 @@ def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workbook", type=Path, default=find_workbook())
+    parser.add_argument("--workbook", type=Path)
     parser.add_argument("--database", type=Path, help="also materialize the SQLite sample database")
     args = parser.parse_args()
-    organizations, metrics, facts = workbook_rows(args.workbook)
+    workbook = args.workbook or find_workbook()
+    organizations, metrics, facts = workbook_rows(workbook)
     connection = create_database(organizations, metrics, facts)
     cases = generate_cases(connection, organizations, metrics)
     errors = generate_errors(cases, [metric[0] for metric in metrics])
@@ -240,8 +241,8 @@ def main() -> None:
     write_jsonl(OUTPUT_DIR / "error_cases.jsonl", errors)
     feature_counts = Counter(feature for case in cases for feature in case["complexity"])
     manifest = {
-        "version": "1.0.0", "generatedAt": date.today().isoformat(), "sourceWorkbook": args.workbook.name,
-        "sourceSha256": sha256_file(args.workbook), "counts": {split: sum(case["split"] == split for case in cases) for split in SPLITS},
+        "version": "1.0.0", "generatedAt": date.today().isoformat(), "sourceWorkbook": workbook.name,
+        "sourceSha256": sha256_file(workbook), "counts": {split: sum(case["split"] == split for case in cases) for split in SPLITS},
         "positiveCount": len(cases), "errorCount": len(errors), "featureCounts": {feature: feature_counts[feature] for feature in FEATURES},
         "errorTypeCounts": dict(Counter(error["errorType"] for error in errors)),
         "templateOverlap": {"trainDev": 0, "trainTest": 0, "devTest": 0},

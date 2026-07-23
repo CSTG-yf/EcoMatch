@@ -20,8 +20,8 @@ S2SQL 使用 BE-01 导入后的语义数据集 `bank_indicator_dataset`、维度
 ## 复现与校验
 
 ```bash
-python evaluation/bank_nl2sql/build_dataset.py
-python evaluation/bank_nl2sql/validate_dataset.py
+python evaluation/bank_nl2sql/build_dataset.py --workbook "C:/path/to/比赛数据集.xlsx"
+python evaluation/bank_nl2sql/validate_dataset.py --workbook "C:/path/to/比赛数据集.xlsx"
 ```
 
 如需生成本地标准样例数据库：

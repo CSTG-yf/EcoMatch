@@ -18,3 +18,5 @@ python evaluation/bank_nl2sql/validate_dataset.py
 ```
 
 生成物、数据协议和详细说明见 `evaluation/bank_nl2sql/README.md`。
+
+校验器支持通过 `--workbook` 显式传入仓库外的比赛 Excel；参数缺省时才查找 `task/*.xlsx`。这保证官方文件无需复制进 Git，也可以重复执行完整 SQL 验收。

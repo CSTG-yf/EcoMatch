@@ -38,9 +38,10 @@ def assert_negative_behavior(connection: sqlite3.Connection, error: dict, positi
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workbook", type=Path, default=find_workbook())
+    parser.add_argument("--workbook", type=Path)
     args = parser.parse_args()
-    organizations, metrics, facts = workbook_rows(args.workbook)
+    workbook = args.workbook or find_workbook()
+    organizations, metrics, facts = workbook_rows(workbook)
     connection = create_database(organizations, metrics, facts)
     cases = [case for split in SPLITS for case in read_jsonl(OUTPUT_DIR / f"{split}.jsonl")]
     errors = read_jsonl(OUTPUT_DIR / "error_cases.jsonl")
