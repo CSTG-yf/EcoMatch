@@ -1,12 +1,15 @@
 package com.tencent.supersonic.headless.core.cache;
 
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -48,6 +51,30 @@ public class DefaultQueryCache implements QueryCache {
         String commandMd5 = semanticQueryReq.generateCommandMd5();
         String keyByModelIds = getKeyByModelIds(semanticQueryReq.getModelIds());
         return cacheManager.generateCacheKey(keyByModelIds, commandMd5);
+    }
+
+    @Override
+    public String getCacheKey(SemanticQueryReq semanticQueryReq, User user) {
+        String baseKey = getCacheKey(semanticQueryReq);
+        String userScope = securityScope(user);
+        CacheManager cacheManager = ContextUtils.getBean(CacheManager.class);
+        return cacheManager.generateCacheKey(baseKey, userScope);
+    }
+
+    private String securityScope(User user) {
+        if (user == null || user.getName() == null) {
+            return "anonymous";
+        }
+        String roles = Objects.requireNonNullElse(user.getRoles(), Collections.<String>emptySet())
+                .stream().sorted().collect(Collectors.joining(","));
+        String attributes = Objects
+                .requireNonNullElse(user.getAttributes(), Collections.<String, String>emptyMap())
+                .entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining(","));
+        return String.join("|", user.getName(), String.valueOf(user.isSuperAdmin()), roles,
+                attributes);
     }
 
     private String getKeyByModelIds(List<Long> modelIds) {

@@ -11,6 +11,8 @@ import lombok.ToString;
 
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Data
@@ -21,6 +23,8 @@ public class SemanticQueryResp extends QueryResult<Map<String, Object>> {
     String sql;
     QueryAuthorization queryAuthorization;
     boolean useCache;
+    boolean dataMasked;
+    Set<String> maskedColumns = new LinkedHashSet<>();
     private String errorMsg;
 
     public List<QueryColumn> getMetricColumns() {

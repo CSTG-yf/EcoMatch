@@ -23,7 +23,7 @@ public interface ChatManageService {
 
     boolean updateChatName(Long chatId, String chatName, String userName);
 
-    boolean updateFeedback(Long id, Integer score, String feedback);
+    boolean updateFeedback(Long id, Integer score, String feedback, User user);
 
     boolean updateChatIsTop(Long chatId, int isTop);
 
@@ -33,7 +33,7 @@ public interface ChatManageService {
 
     Long createChatQuery(ChatParseReq chatParseReq);
 
-    QueryResp getChatQuery(Long queryId);
+    QueryResp getChatQuery(Long queryId, User user);
 
     ChatQueryDO getChatQueryDO(Long queryId);
 
@@ -45,7 +45,9 @@ public interface ChatManageService {
 
     int updateQuery(ChatQueryDO chatQueryDO);
 
-    void deleteQuery(Long queryId);
+    void deleteQuery(Long queryId, User user);
+
+    void checkQueryAccess(Long queryId, User user);
 
     void updateParseCostTime(ChatParseResp chatParseResp);
 

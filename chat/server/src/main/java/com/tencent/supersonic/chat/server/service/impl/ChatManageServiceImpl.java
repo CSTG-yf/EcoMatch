@@ -18,6 +18,7 @@ import com.tencent.supersonic.chat.server.persistence.repository.ChatRepository;
 import com.tencent.supersonic.chat.server.pojo.ChatMemory;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.chat.server.service.MemoryService;
+import com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicy;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -41,6 +42,7 @@ public class ChatManageServiceImpl implements ChatManageService {
     private ChatQueryRepository chatQueryRepository;
     @Autowired
     private MemoryService memoryService;
+    private final ChatObjectAccessPolicy objectAccessPolicy = new ChatObjectAccessPolicy();
 
     @Override
     public Long addChat(User user, String chatName, Integer agentId) {
@@ -67,7 +69,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public boolean updateFeedback(Long id, Integer score, String feedback) {
+    public boolean updateFeedback(Long id, Integer score, String feedback, User user) {
+        checkQueryAccess(id, user);
         QueryDO intelligentQueryDO = new QueryDO();
         intelligentQueryDO.setId(id);
         intelligentQueryDO.setQuestionId(id);
@@ -119,7 +122,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public QueryResp getChatQuery(Long queryId) {
+    public QueryResp getChatQuery(Long queryId, User user) {
+        checkQueryAccess(queryId, user);
         return chatQueryRepository.getChatQuery(queryId);
     }
 
@@ -193,6 +197,7 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public ChatQueryDO saveQueryResult(ChatExecuteReq chatExecuteReq, QueryResult queryResult) {
+        checkQueryAccess(chatExecuteReq.getQueryId(), chatExecuteReq.getUser());
         ChatQueryDO chatQueryDO = chatQueryRepository.getChatQueryDO(chatExecuteReq.getQueryId());
         chatQueryDO.setQuestionId(chatExecuteReq.getQueryId());
         chatQueryDO.setQueryResult(JsonUtil.toString(queryResult));
@@ -209,12 +214,22 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public void deleteQuery(Long queryId) {
+    public void deleteQuery(Long queryId, User user) {
+        checkQueryAccess(queryId, user);
         ChatQueryDO chatQuery = chatQueryRepository.getChatQueryDO(queryId);
         if (Objects.nonNull(chatQuery)) {
             chatQuery.setQueryState(0);
             chatQueryRepository.updateChatQuery(chatQuery);
         }
+    }
+
+    @Override
+    public void checkQueryAccess(Long queryId, User user) {
+        ChatQueryDO query = chatQueryRepository.getChatQueryDO(queryId);
+        if (query == null) {
+            throw new IllegalArgumentException("Query does not exist: " + queryId);
+        }
+        objectAccessPolicy.checkQueryAccess(queryId, query.getUserName(), user);
     }
 
     @Override

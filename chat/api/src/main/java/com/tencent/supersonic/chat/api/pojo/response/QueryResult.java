@@ -28,4 +28,7 @@ public class QueryResult {
     private List<SchemaElement> recommendedDimensions;
     private AggregateInfo aggregateInfo;
     private String errorMsg;
+    private ChartRecommendation recommendedChart;
+    private List<ChartRecommendation> candidateCharts;
+    private BusinessExplanation businessExplanation;
 }

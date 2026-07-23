@@ -54,8 +54,10 @@ public class ChatController {
     @PostMapping("/updateQAFeedback")
     public Boolean updateQAFeedback(@RequestParam(value = "id") Long id,
             @RequestParam(value = "score") Integer score,
-            @RequestParam(value = "feedback", required = false) String feedback) {
-        return chatService.updateFeedback(id, score, feedback);
+            @RequestParam(value = "feedback", required = false) String feedback,
+            HttpServletRequest request, HttpServletResponse response) {
+        return chatService.updateFeedback(id, score, feedback,
+                UserHolder.findUser(request, response));
     }
 
     @PostMapping("/updateChatIsTop")
@@ -73,13 +75,15 @@ public class ChatController {
     }
 
     @GetMapping("/getChatQuery/{queryId}")
-    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId) {
-        return chatService.getChatQuery(queryId);
+    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId,
+            HttpServletRequest request, HttpServletResponse response) {
+        return chatService.getChatQuery(queryId, UserHolder.findUser(request, response));
     }
 
     @DeleteMapping("/{queryId}")
-    public boolean deleteChatQuery(@PathVariable(value = "queryId") Long queryId) {
-        chatService.deleteQuery(queryId);
+    public boolean deleteChatQuery(@PathVariable(value = "queryId") Long queryId,
+            HttpServletRequest request, HttpServletResponse response) {
+        chatService.deleteQuery(queryId, UserHolder.findUser(request, response));
         return true;
     }
 

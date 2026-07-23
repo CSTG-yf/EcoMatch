@@ -26,6 +26,7 @@ import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import com.tencent.supersonic.headless.server.service.ModelService;
 import com.tencent.supersonic.headless.server.service.SchemaService;
+import com.tencent.supersonic.headless.server.security.DataMaskingService;
 import com.tencent.supersonic.headless.server.utils.QueryStructUtils;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
@@ -62,6 +63,8 @@ public class S2DataPermissionAspect {
     private SchemaService schemaService;
     @Autowired
     private AuthService authService;
+    @Autowired
+    private DataMaskingService dataMaskingService;
 
     @Pointcut("@annotation(com.tencent.supersonic.headless.server.annotation.S2DataPermission)")
     private void s2PermissionCheck() {}
@@ -119,7 +122,9 @@ public class S2DataPermissionAspect {
         // 7. add hint to user
         Object result = joinPoint.proceed();
         if (result instanceof SemanticQueryResp) {
-            addHint(modelIds, (SemanticQueryResp) result, authorizedResource);
+            SemanticQueryResp queryResp = (SemanticQueryResp) result;
+            dataMaskingService.mask(queryResp, semanticSchemaResp, user);
+            addHint(modelIds, queryResp, authorizedResource);
         }
         return result;
     }

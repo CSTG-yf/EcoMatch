@@ -112,6 +112,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         if (Objects.isNull(queryId)) {
             queryId = chatManageService.createChatQuery(chatParseReq);
             chatParseReq.setQueryId(queryId);
+        } else {
+            chatManageService.checkQueryAccess(queryId, chatParseReq.getUser());
         }
 
         ParseContext parseContext = buildParseContext(chatParseReq, new ChatParseResp(queryId));
@@ -139,6 +141,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     @Override
     public QueryResult execute(ChatExecuteReq chatExecuteReq) {
+        chatManageService.checkQueryAccess(chatExecuteReq.getQueryId(), chatExecuteReq.getUser());
         QueryResult queryResult = new QueryResult();
         ExecuteContext executeContext = buildExecuteContext(chatExecuteReq);
         for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
