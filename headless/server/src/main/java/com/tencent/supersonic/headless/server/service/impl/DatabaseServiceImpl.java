@@ -7,6 +7,7 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.request.DatabaseReq;
@@ -235,7 +236,7 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
     private SemanticQueryResp queryWithColumns(String sql, DatabaseResp database) {
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         SqlUtils sqlUtils = this.sqlUtils.init(database);
-        log.info("query SQL: {}", StringUtils.normalizeSpace(sql));
+        log.info("query SQL [{}]", SensitiveLogUtils.summarize(StringUtils.normalizeSpace(sql)));
         return queryExecutionGateway.execute(sql, () -> {
             sqlUtils.queryInternal(sql, queryResultWithColumns);
             return queryResultWithColumns;

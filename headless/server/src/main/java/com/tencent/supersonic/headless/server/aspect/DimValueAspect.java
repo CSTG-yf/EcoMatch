@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DimValueMap;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
@@ -63,7 +64,7 @@ public class DimValueAspect {
         if (queryReq instanceof QuerySqlReq) {
             return handleSqlDimValue(joinPoint);
         }
-        throw new InvalidArgumentException("queryReq is not Invalid:" + queryReq);
+        throw new InvalidArgumentException("Unsupported semantic query request");
     }
 
     private SemanticQueryResp handleStructDimValue(ProceedingJoinPoint joinPoint) throws Throwable {
@@ -91,7 +92,7 @@ public class DimValueAspect {
         QuerySqlReq querySqlReq = (QuerySqlReq) args[0];
         MetaFilter metaFilter = new MetaFilter(Lists.newArrayList(querySqlReq.getModelIds()));
         String sql = querySqlReq.getSql();
-        log.debug("correctorSql before replacing:{}", sql);
+        log.debug("dimension value correction input [{}]", SensitiveLogUtils.summarize(sql));
         List<FieldExpression> fieldExpressionList = SqlSelectHelper.getWhereExpressions(sql);
         List<DimensionResp> dimensions = dimensionService.getDimensions(metaFilter);
         Set<String> fieldNames =
@@ -122,7 +123,7 @@ public class DimValueAspect {
             }
         }
         sql = SqlReplaceHelper.replaceValue(sql, filedNameToValueMap);
-        log.debug("correctorSql after replacing:{}", sql);
+        log.debug("dimension value correction output [{}]", SensitiveLogUtils.summarize(sql));
         querySqlReq.setSql(sql);
         if (StringUtils.isEmpty(querySqlReq.getSqlInfo().getParsedS2SQL())
                 && StringUtils.isEmpty(querySqlReq.getSqlInfo().getCorrectedS2SQL())) {

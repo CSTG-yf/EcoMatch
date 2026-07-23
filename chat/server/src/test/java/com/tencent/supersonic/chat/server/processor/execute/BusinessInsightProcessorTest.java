@@ -170,6 +170,40 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void usesCompositionIntentForSafeCategoricalPieRecommendation() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("branch", "A", "balance", 10),
+                Map.of("branch", "B", "balance", 20), Map.of("branch", "C", "balance", 30)));
+        ExecuteContext context =
+                new ExecuteContext(ChatExecuteReq.builder().queryText("各分支行贷款余额占比").build());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("PIE", result.getRecommendedChart().getChartType());
+    }
+
+    @Test
+    void doesNotUsePieForCompositionIntentWithNegativeValues() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("profit", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("branch", "A", "profit", 10),
+                Map.of("branch", "B", "profit", -5), Map.of("branch", "C", "profit", 20)));
+        ExecuteContext context =
+                new ExecuteContext(ChatExecuteReq.builder().queryText("各分支行利润占比").build());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("BAR", result.getRecommendedChart().getChartType());
+        assertTrue(result.getCandidateCharts().stream()
+                .noneMatch(chart -> "PIE".equals(chart.getChartType())));
+    }
+
+    @Test
     void reachesRequiredAccuracyOnFrozenDataset() throws Exception {
         Path dataset = locateDataset();
         int total = 0;

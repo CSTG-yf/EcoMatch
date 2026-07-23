@@ -30,6 +30,7 @@ import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -193,9 +194,9 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     public QueryResult parseAndExecute(ChatParseReq chatParseReq) {
         ChatParseResp parseResp = parse(chatParseReq);
         if (CollectionUtils.isEmpty(parseResp.getSelectedParses())) {
-            log.debug("chatId:{}, agentId:{}, queryText:{}, parseResp.getSelectedParses() is empty",
+            log.debug("chatId:{}, agentId:{}, query:[{}], selected parses are empty",
                     chatParseReq.getChatId(), chatParseReq.getAgentId(),
-                    chatParseReq.getQueryText());
+                    SensitiveLogUtils.summarize(chatParseReq.getQueryText()));
             return null;
         }
         ChatExecuteReq executeReq = new ChatExecuteReq();
@@ -308,7 +309,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     private String replaceFilters(ChatQueryDataReq queryData, SemanticParseInfo parseInfo,
             DataSetSchema dataSetSchema) {
         String correctorSql = parseInfo.getSqlInfo().getCorrectedS2SQL();
-        log.info("correctorSql before replacing:{}", correctorSql);
+        log.debug("Filter replacement input SQL [{}]", SensitiveLogUtils.summarize(correctorSql));
         // get where filter and having filter
         List<FieldExpression> whereExpressionList =
                 SqlSelectHelper.getWhereExpressions(correctorSql);
@@ -339,7 +340,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
         correctorSql = SqlAddHelper.addWhere(correctorSql, addWhereConditions);
         correctorSql = SqlAddHelper.addHaving(correctorSql, addHavingConditions);
-        log.info("correctorSql after replacing:{}", correctorSql);
+        log.debug("Filter replacement output SQL [{}]", SensitiveLogUtils.summarize(correctorSql));
         return correctorSql;
     }
 
@@ -347,14 +348,14 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         List<String> oriMetrics = parseInfo.getMetrics().stream().map(SchemaElement::getName)
                 .collect(Collectors.toList());
         String correctorSql = parseInfo.getSqlInfo().getCorrectedS2SQL();
-        log.info("before replaceMetrics:{}", correctorSql);
+        log.debug("Metric replacement input SQL [{}]", SensitiveLogUtils.summarize(correctorSql));
         log.info("filteredMetrics:{},metrics:{}", oriMetrics, metric);
         Map<String, Pair<String, String>> fieldMap = new HashMap<>();
         if (!CollectionUtils.isEmpty(oriMetrics) && !oriMetrics.contains(metric.getName())) {
             fieldMap.put(oriMetrics.get(0), Pair.of(metric.getName(), metric.getDefaultAgg()));
             correctorSql = SqlReplaceHelper.replaceAggFields(correctorSql, fieldMap);
         }
-        log.info("after replaceMetrics:{}", correctorSql);
+        log.debug("Metric replacement output SQL [{}]", SensitiveLogUtils.summarize(correctorSql));
         return correctorSql;
     }
 

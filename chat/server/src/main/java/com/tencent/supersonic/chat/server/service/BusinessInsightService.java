@@ -48,9 +48,6 @@ public class BusinessInsightService {
             throw new InvalidArgumentException(
                     "queryColumns must not be empty and queryResults must not be null");
         }
-        if (request.getQueryResults().stream().anyMatch(Objects::isNull)) {
-            throw new InvalidArgumentException("queryResults contains a null row");
-        }
         if (request.getQueryResults().size() > config.getMaxInputRows()) {
             throw new InvalidArgumentException(
                     "queryResults exceeds maximum row count: " + config.getMaxInputRows());
@@ -58,6 +55,9 @@ public class BusinessInsightService {
         if (request.getQueryColumns().size() > config.getMaxInputColumns()) {
             throw new InvalidArgumentException(
                     "queryColumns exceeds maximum column count: " + config.getMaxInputColumns());
+        }
+        if (request.getQueryResults().stream().anyMatch(Objects::isNull)) {
+            throw new InvalidArgumentException("queryResults contains a null row");
         }
         validateColumns(request);
         QueryResult result = new QueryResult();

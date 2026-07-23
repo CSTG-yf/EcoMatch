@@ -4,6 +4,7 @@ import javax.sql.DataSource;
 
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.DateUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
@@ -82,11 +83,12 @@ public class SqlUtils {
     public List<Map<String, Object>> execute(String sql) throws ServerException {
         try {
             List<Map<String, Object>> list = jdbcTemplate().queryForList(sql);
-            log.info("list:{}", list);
+            log.debug("SQL execution returned {} rows", list.size());
             return list;
         } catch (Exception e) {
-            log.error(e.toString(), e);
-            throw new ServerException(e.getMessage());
+            log.error("SQL execution failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
+            throw new ServerException("SQL execution failed");
         }
     }
 
@@ -143,14 +145,11 @@ public class SqlUtils {
         return queryResultWithColumns;
     }
 
-    private List<Map<String, Object>> getAllData(ResultSet rs, List<QueryColumn> queryColumns) {
+    List<Map<String, Object>> getAllData(ResultSet rs, List<QueryColumn> queryColumns)
+            throws SQLException {
         List<Map<String, Object>> data = new ArrayList<>();
-        try {
-            while (rs.next()) {
-                data.add(getLineData(rs, queryColumns));
-            }
-        } catch (Exception e) {
-            log.warn("error in getAllData, e:", e);
+        while (rs.next()) {
+            data.add(getLineData(rs, queryColumns));
         }
         return data;
     }

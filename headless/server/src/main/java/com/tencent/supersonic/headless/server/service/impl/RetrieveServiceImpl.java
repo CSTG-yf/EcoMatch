@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.service.impl;
 
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.DictWordType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
@@ -75,7 +76,7 @@ public class RetrieveServiceImpl implements RetrieveService {
 
         // 2. Detect by segment
         List<S2Term> originals = knowledgeBaseService.getTerms(queryText, modelIdToDataSetIds);
-        log.debug("originals terms: {}", originals);
+        log.debug("Retrieved {} original terms", originals.size());
         Set<Long> dataSetIds = queryNLReq.getDataSetIds();
 
         ChatQueryContext chatQueryContext = new ChatQueryContext(queryNLReq);
@@ -95,7 +96,9 @@ public class RetrieveServiceImpl implements RetrieveService {
         }
 
         Map.Entry<MatchText, List<HanlpMapResult>> searchTextEntry = mostSimilarSearchResult.get();
-        log.debug("searchTextEntry:{},queryNLReq:{}", searchTextEntry, queryNLReq);
+        log.debug("Best semantic match [{}], query [{}]",
+                SensitiveLogUtils.summarize(searchTextEntry),
+                SensitiveLogUtils.summarize(queryNLReq));
 
 
         DataSetInfoStat dataSetInfoStat = NatureHelper.getDataSetStat(originals);
@@ -110,7 +113,8 @@ public class RetrieveServiceImpl implements RetrieveService {
         MatchText matchText = searchTextEntry.getKey();
         Map<String, String> natureToNameMap =
                 getNatureToNameMap(searchTextEntry, new HashSet<>(possibleDataSets));
-        log.debug("possibleDataSets:{},natureToNameMap:{}", possibleDataSets, natureToNameMap);
+        log.debug("Semantic retrieval candidates: datasets={}, mappedNatures={}",
+                possibleDataSets.size(), natureToNameMap.size());
 
         for (Map.Entry<String, String> natureToNameEntry : natureToNameMap.entrySet()) {
             Set<SearchResult> results = searchDimensionValue(semanticSchemaDb,
@@ -256,7 +260,8 @@ public class RetrieveServiceImpl implements RetrieveService {
             Map.Entry<MatchText, List<HanlpMapResult>> searchTextEntry) {
 
         Set<SearchResult> searchResults = new LinkedHashSet<>();
-        log.debug("searchMetricAndDimension searchTextEntry:{}", searchTextEntry);
+        log.debug("Searching metric and dimension [{}]",
+                SensitiveLogUtils.summarize(searchTextEntry));
 
         MatchText matchText = searchTextEntry.getKey();
         List<HanlpMapResult> hanlpMapResults = searchTextEntry.getValue();
@@ -288,7 +293,7 @@ public class RetrieveServiceImpl implements RetrieveService {
                 searchResults.add(searchResult);
             }
         }
-        log.info("searchMetricAndDimension searchResults:{}", searchResults);
+        log.debug("Metric and dimension search returned {} results", searchResults.size());
         return searchResults;
     }
 

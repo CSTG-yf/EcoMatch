@@ -16,6 +16,7 @@ import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
@@ -238,9 +239,11 @@ public class S2DataPermissionAspect {
             if (StringUtils.isNotEmpty(joiner.toString())) {
                 String originalSql = querySqlReq.getSql();
                 String modifiedSql = SqlAddHelper.addWhere(originalSql, expression);
-                log.info("Before doRowPermission, querySqlReq: {}", originalSql);
+                log.debug("Applying {} row permission filters to SQL [{}]", dimensionFilters.size(),
+                        SensitiveLogUtils.summarize(originalSql));
                 querySqlReq.setSql(modifiedSql);
-                log.info("After doRowPermission, querySqlReq: {}", modifiedSql);
+                log.debug("Row permission applied to SQL [{}]",
+                        SensitiveLogUtils.summarize(modifiedSql));
             }
         } catch (JSQLParserException e) {
             log.warn("Failed to apply row permission filter: {}", e.getMessage());
@@ -272,13 +275,15 @@ public class S2DataPermissionAspect {
 
         String joinedFilters = joiner.toString();
         if (StringUtils.isNotEmpty(joinedFilters)) {
-            log.info("before doRowPermission, queryStructReq:{}", queryStructReq);
+            log.debug("Applying {} row permission filters to structured query [{}]",
+                    dimensionFilters.size(), SensitiveLogUtils.summarize(queryStructReq));
             Filter filter = new Filter("", FilterOperatorEnum.SQL_PART, joinedFilters);
             List<Filter> filters = Optional.ofNullable(queryStructReq.getOriginalFilter())
                     .orElseGet(ArrayList::new);
             filters.add(filter);
             queryStructReq.setDimensionFilters(filters);
-            log.info("after doRowPermission, queryStructReq:{}", queryStructReq);
+            log.debug("Row permission applied to structured query [{}]",
+                    SensitiveLogUtils.summarize(queryStructReq));
         }
     }
 
@@ -350,13 +355,14 @@ public class S2DataPermissionAspect {
         QueryAuthResReq queryAuthResReq = new QueryAuthResReq();
         queryAuthResReq.setModelIds(new ArrayList<>(modelIds));
         AuthorizedResourceResp authorizedResource = fetchAuthRes(queryAuthResReq, user);
-        log.info("user:{}, domainId:{}, after queryAuthorizedResources:{}", user.getName(),
-                modelIds, authorizedResource);
+        log.debug("Authorization resolved for {} models: resources={}, filters={}", modelIds.size(),
+                authorizedResource.getAuthResList().size(), authorizedResource.getFilters().size());
         return authorizedResource;
     }
 
     private AuthorizedResourceResp fetchAuthRes(QueryAuthResReq queryAuthResReq, User user) {
-        log.info("queryAuthResReq:{}", queryAuthResReq);
+        log.debug("Querying authorization resources [{}]",
+                SensitiveLogUtils.summarize(queryAuthResReq));
         return authService.queryAuthorizedResources(queryAuthResReq, user);
     }
 

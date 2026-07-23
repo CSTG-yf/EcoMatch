@@ -3,11 +3,13 @@ package com.tencent.supersonic.headless.core.executor;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.gateway.QueryExecutionGateway;
+import com.tencent.supersonic.headless.core.gateway.SqlPolicyViolationException;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcExecutorGatewayCoverageTest {
@@ -26,5 +28,13 @@ class JdbcExecutorGatewayCoverageTest {
 
             assertTrue(response.getErrorMsg().contains("Only read-only SELECT"));
         }
+    }
+
+    @Test
+    void hidesDriverDetailsButKeepsPolicyRejectionReason() {
+        assertEquals("Query execution failed", JdbcExecutor.safeErrorMessage(
+                new RuntimeException("SELECT * FROM customer WHERE id_card='secret'")));
+        assertEquals("Only read-only SELECT statements are allowed", JdbcExecutor.safeErrorMessage(
+                new SqlPolicyViolationException("Only read-only SELECT statements are allowed")));
     }
 }

@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.utils;
 
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.ChatWorkflowState;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
@@ -103,8 +104,8 @@ public class ChatWorkflowEngine {
     private void performParsing(ChatQueryContext queryCtx) {
         semanticParsers.forEach(parser -> {
             parser.parse(queryCtx);
-            log.debug("{} result:{}", parser.getClass().getSimpleName(),
-                    JsonUtil.toString(queryCtx));
+            log.debug("{} result [{}]", parser.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(JsonUtil.toString(queryCtx)));
         });
     }
 
@@ -151,14 +152,16 @@ public class ChatWorkflowEngine {
                 if (StringUtils.isNotBlank(explain.getErrMsg())) {
                     errorMsg.add(explain.getErrMsg());
                 }
-                log.info(
-                        "SqlInfoProcessor results:\n"
-                                + "Parsed S2SQL: {}\nCorrected S2SQL: {}\nQuery SQL: {}",
-                        StringUtils.normalizeSpace(parseInfo.getSqlInfo().getParsedS2SQL()),
-                        StringUtils.normalizeSpace(parseInfo.getSqlInfo().getCorrectedS2SQL()),
-                        StringUtils.normalizeSpace(parseInfo.getSqlInfo().getQuerySQL()));
+                log.info("SqlInfoProcessor result: parsed=[{}], corrected=[{}], physical=[{}]",
+                        SensitiveLogUtils.summarize(StringUtils
+                                .normalizeSpace(parseInfo.getSqlInfo().getParsedS2SQL())),
+                        SensitiveLogUtils.summarize(StringUtils
+                                .normalizeSpace(parseInfo.getSqlInfo().getCorrectedS2SQL())),
+                        SensitiveLogUtils.summarize(
+                                StringUtils.normalizeSpace(parseInfo.getSqlInfo().getQuerySQL())));
             } catch (Exception e) {
-                log.warn("get sql info failed:{}", e);
+                log.warn("SQL translation failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 errorMsg.add(String.format("S2SQL:%s %s", parseInfo.getSqlInfo().getParsedS2SQL(),
                         e.getMessage()));
             }
@@ -180,8 +183,8 @@ public class ChatWorkflowEngine {
                         if (StringUtils.isNotBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL())) {
                             parseInfo.getSqlInfo()
                                     .setQuerySQL(parseInfo.getSqlInfo().getCorrectedQuerySQL());
-                            log.info("Physical SQL corrected and updated querySQL: {}",
-                                    parseInfo.getSqlInfo().getQuerySQL());
+                            log.info("Physical SQL corrected [{}]", SensitiveLogUtils
+                                    .summarize(parseInfo.getSqlInfo().getQuerySQL()));
                         }
                         break;
                     }

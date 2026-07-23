@@ -7,6 +7,7 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
@@ -109,7 +110,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
     @SneakyThrows
     public SemanticQueryResp queryByReq(SemanticQueryReq queryReq, User user) {
         TaskStatusEnum state = TaskStatusEnum.SUCCESS;
-        log.info("[queryReq:{}]", queryReq);
+        log.info("semantic query request [{}]", SensitiveLogUtils.summarize(queryReq));
         try {
             // 1.initStatInfo
             statUtils.initStatInfo(queryReq, user);
@@ -166,7 +167,9 @@ public class S2SemanticLayerService implements SemanticLayerService {
 
             return queryResp;
         } catch (Exception e) {
-            log.error("exception in queryByReq:{}, e: ", queryReq, e);
+            log.error("Exception in semantic query [{}]: type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(queryReq), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
             state = TaskStatusEnum.ERROR;
             throw e;
         } finally {
@@ -371,11 +374,12 @@ public class S2SemanticLayerService implements SemanticLayerService {
             try {
                 semanticTranslator.translate(queryStatement);
             } catch (Exception e) {
-                log.warn("Failed to translate for semantic query " + queryStructReq);
+                log.warn("Failed to translate semantic query [{}]",
+                        SensitiveLogUtils.summarize(queryStructReq));
             }
             queryStatements.add(queryStatement);
         }
-        log.info("Union multiple query statements:{}", queryStatements);
+        log.info("Unioned query statements [{}]", SensitiveLogUtils.summarize(queryStatements));
         return queryUtils.unionAll(queryMultiStructReq, queryStatements);
     }
 

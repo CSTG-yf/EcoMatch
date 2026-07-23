@@ -60,8 +60,10 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             QueryResult result = executeContext.getResponse();
             FieldProfile profile = profile(result);
             enrichMetricDefinitions(executeContext, profile);
-            List<ChartRecommendation> charts =
-                    recommendCharts(profile, result.getQueryResults().size(), rules);
+            List<ChartRecommendation> charts = recommendCharts(profile,
+                    result.getQueryResults().size(), executeContext.getRequest() == null ? null
+                            : executeContext.getRequest().getQueryText(),
+                    rules);
             result.setRecommendedChart(charts.get(0));
             result.setCandidateCharts(charts.subList(1, charts.size()));
 
@@ -149,7 +151,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     }
 
     private List<ChartRecommendation> recommendCharts(FieldProfile profile, int rowCount,
-            BusinessInsightConfig rules) {
+            String queryText, BusinessInsightConfig rules) {
         List<ChartRecommendation> charts = new ArrayList<>();
         if (rowCount == 0) {
             charts.add(chart("TABLE", rules.getLowConfidence(), "当前无数据，保留表格结构用于展示空结果",
@@ -165,7 +167,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         } else if (!profile.dates.isEmpty() && !profile.metrics.isEmpty()) {
             charts.add(chart("LINE", 0.96, "时间维度与数值指标适合展示趋势", List.of(profile.dates.get(0)),
                     profile.metrics));
-        } else if (isComposition(profile, rowCount, rules)) {
+        } else if (isComposition(profile, rowCount, queryText, rules)) {
             charts.add(chart("PIE", 0.93, "少量同口径正值分类适合展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         } else if (!profile.categories.isEmpty() && !profile.metrics.isEmpty()) {
@@ -177,7 +179,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
         Set<String> types = new LinkedHashSet<>();
         types.add(charts.get(0).getChartType());
-        if (isComposition(profile, rowCount, rules) && types.add("PIE")) {
+        if (isComposition(profile, rowCount, queryText, rules) && types.add("PIE")) {
             charts.add(chart("PIE", 0.82, "分类数量较少，可用于展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         }
@@ -191,13 +193,16 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         return charts;
     }
 
-    private boolean isComposition(FieldProfile profile, int rowCount, BusinessInsightConfig rules) {
+    private boolean isComposition(FieldProfile profile, int rowCount, String queryText,
+            BusinessInsightConfig rules) {
         if (profile.categories.size() != 1 || profile.metrics.size() != 1 || rowCount < 2
                 || rowCount > rules.getPieMaxCategories() || profile.hasNegativeValue) {
             return false;
         }
         String category = profile.categories.get(0).toLowerCase(Locale.ROOT);
-        return category.matches(".*(metric|type|category|构成|类型|类别).*");
+        String question = StringUtils.defaultString(queryText).toLowerCase(Locale.ROOT);
+        return category.matches(".*(metric|type|category|构成|类型|类别).*")
+                || question.matches(".*(占比|构成|组成|份额|比例|share|composition|percentage).*");
     }
 
     private BusinessExplanation explain(ExecuteContext context, QueryResult result,

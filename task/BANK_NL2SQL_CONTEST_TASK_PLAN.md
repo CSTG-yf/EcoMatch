@@ -78,9 +78,9 @@
 | [x] | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
 | [x] | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | [x] | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，物理查询、加速器和数据库管理 SQL 入口已统一收口；待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
-| [x] | BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路、行权限 fail-open 封堵、重复脱敏幂等及缓存结果日志防泄露） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
-| [x] | BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、同比环比、空结果、小样本策略、结果一致性校验及输入规模保护） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
+| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，执行入口已统一收口且结果集读取异常 fail-closed；待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| [x] | BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路、行权限 fail-open 封堵、重复脱敏幂等及查询链路日志防泄露） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
+| [x] | BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、同比环比、空结果、小样本策略、结果一致性校验、输入规模保护及构成意图识别） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
 | [x] | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | [x] | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
 | [x] | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
@@ -178,7 +178,7 @@
 
 ### BE-06 SQL 安全与性能网关
 
-- 状态：开发、本地性能、超时取消、五阶段分位数、结果缓存、独立热点指标缓存及全部物理执行入口收口验收完成（2026-07-23），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
+- 状态：开发、本地性能、超时取消、结果集读取异常 fail-closed、五阶段分位数、结果缓存、独立热点指标缓存及全部物理执行入口收口验收完成（2026-07-23），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-05；下游被 QA-03、OPS-01 和最终性能验收依赖。
 - 工作内容：
@@ -203,7 +203,7 @@
 
 ### BE-08 金融级权限和动态脱敏
 
-- 状态：已完成（2026-07-23），包含字段级策略、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、重复脱敏幂等和缓存结果日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
+- 状态：已完成（2026-07-23），包含字段级策略、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、重复脱敏幂等，以及 SQL、自然语言问题、权限过滤和结果对象日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
 - 优先级：P0
 - 依赖关系：上游依赖机构、岗位和数据敏感等级规则；下游被 BE-09、FE-06、FE-08 和 QA-02 依赖。
 - 工作内容：
@@ -229,7 +229,7 @@
 
 ### BE-10 业务化解释与图表推荐服务
 
-- 状态：已完成（2026-07-23），独立推荐/解释接口、可配置规则、字段契约、可复算同比环比、空结果、小样本策略、独立一致性校验和输入规模保护已交付，实现说明见 `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md`。
+- 状态：已完成（2026-07-23），独立推荐/解释接口、可配置规则、字段契约、可复算同比环比、空结果、小样本策略、独立一致性校验、输入规模保护和构成类问题意图识别已交付，实现说明见 `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md`。
 - 优先级：P1
 - 依赖关系：上游依赖 DATA-03 和 BE-02；下游被 FE-04、FE-05、FE-09 和业务理解度评测依赖。
 - 工作内容：

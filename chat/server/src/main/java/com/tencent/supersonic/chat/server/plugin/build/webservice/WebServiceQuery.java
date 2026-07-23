@@ -12,6 +12,7 @@ import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
@@ -51,7 +52,7 @@ public class WebServiceQuery extends PluginSemanticQuery {
         Object object = webServiceResponse.getResult();
         // in order to show webServiceQuery result int frontend conveniently,
         // webServiceResponse result format is consistent with queryByStruct result.
-        log.info("webServiceResponse result:{}", JsonUtil.toString(object));
+        log.debug("webServiceResponse result [{}]", SensitiveLogUtils.summarize(object));
         try {
             Map<String, Object> data =
                     JsonUtil.toMap(JsonUtil.toString(object), String.class, Object.class);
@@ -64,7 +65,8 @@ public class WebServiceQuery extends PluginSemanticQuery {
             queryResult.setTextResult(String.valueOf(data.get("data")));
             queryResult.setQueryState(QueryState.SUCCESS);
         } catch (Exception e) {
-            log.info("webServiceResponse result has an exception:{}", e.getMessage());
+            log.warn("WebService response parsing failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return queryResult;
     }
