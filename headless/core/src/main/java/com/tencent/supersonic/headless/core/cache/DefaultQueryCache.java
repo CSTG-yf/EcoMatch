@@ -1,15 +1,15 @@
 package com.tencent.supersonic.headless.core.cache;
 
-import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Collections;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -69,8 +69,7 @@ public class DefaultQueryCache implements QueryCache {
                 .stream().sorted().collect(Collectors.joining(","));
         String attributes = Objects
                 .requireNonNullElse(user.getAttributes(), Collections.<String, String>emptyMap())
-                .entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
+                .entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining(","));
         return String.join("|", user.getName(), String.valueOf(user.isSuperAdmin()), roles,

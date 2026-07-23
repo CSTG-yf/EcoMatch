@@ -7,8 +7,8 @@ import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
-import com.tencent.supersonic.headless.core.pojo.JdbcDataSource;
 import com.tencent.supersonic.headless.core.gateway.ExplainCostPolicy;
+import com.tencent.supersonic.headless.core.pojo.JdbcDataSource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,8 +75,7 @@ public class SqlUtils {
                 .withJdbcDataSource(this.jdbcDataSource).withResultLimit(this.resultLimit)
                 .withIsQueryLogEnable(this.isQueryLogEnable)
                 .withQueryTimeoutSeconds(this.queryTimeoutSeconds)
-                .withExplainCostCheck(this.explainCostCheckEnabled,
-                        this.explainMaxEstimatedRows)
+                .withExplainCostCheck(this.explainCostCheckEnabled, this.explainMaxEstimatedRows)
                 .build();
     }
 

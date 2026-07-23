@@ -34,8 +34,8 @@ public class ExplainCostPolicy {
             for (Map.Entry<String, Object> entry : row.entrySet()) {
                 String key = entry.getKey().toLowerCase(Locale.ROOT);
                 Object value = entry.getValue();
-                if ((key.equals("rows") || key.equals("plan_rows")
-                        || key.equals("estimated_rows")) && value instanceof Number) {
+                if ((key.equals("rows") || key.equals("plan_rows") || key.equals("estimated_rows"))
+                        && value instanceof Number) {
                     max = Math.max(max, ((Number) value).longValue());
                 }
                 if (value != null) {

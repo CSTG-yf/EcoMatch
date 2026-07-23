@@ -1,7 +1,7 @@
 package com.tencent.supersonic.headless.core.cache;
 
-import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 
 public interface QueryCache {
 

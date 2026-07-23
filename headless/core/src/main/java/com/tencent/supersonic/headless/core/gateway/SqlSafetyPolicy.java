@@ -14,8 +14,8 @@ public class SqlSafetyPolicy {
 
     private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "load_file",
             "pg_read_file", "pg_sleep", "sleep", "sys_eval", "sys_exec");
-    private static final Pattern SELECT_ALL = Pattern.compile(
-            "(?is)\\bselect\\s+(?:[a-zA-Z_][\\w$]*\\.)?\\*\\s+from\\b");
+    private static final Pattern SELECT_ALL =
+            Pattern.compile("(?is)\\bselect\\s+(?:[a-zA-Z_][\\w$]*\\.)?\\*\\s+from\\b");
     private static final Pattern BOUNDED_QUERY =
             Pattern.compile("(?is)\\b(where|limit|fetch\\s+first|fetch\\s+next)\\b");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
@@ -61,10 +61,8 @@ public class SqlSafetyPolicy {
                         "Dangerous SQL function is forbidden: " + function);
             }
         }
-        if (SELECT_ALL.matcher(normalized).find()
-                && !BOUNDED_QUERY.matcher(normalized).find()) {
-            throw new SqlPolicyViolationException(
-                    "Unbounded SELECT * queries are forbidden");
+        if (SELECT_ALL.matcher(normalized).find() && !BOUNDED_QUERY.matcher(normalized).find()) {
+            throw new SqlPolicyViolationException("Unbounded SELECT * queries are forbidden");
         }
     }
 }

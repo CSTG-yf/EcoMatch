@@ -48,9 +48,10 @@ public class DataMaskingService {
             if (!isSensitive(column, sensitiveFields)) {
                 continue;
             }
-            Set<String> resultKeys = Stream.of(column.getBizName(), column.getNameEn(),
-                    column.getName()).filter(StringUtils::isNotBlank)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            Set<String> resultKeys =
+                    Stream.of(column.getBizName(), column.getNameEn(), column.getName())
+                            .filter(StringUtils::isNotBlank)
+                            .collect(Collectors.toCollection(LinkedHashSet::new));
             for (Map<String, Object> row : response.getResultList()) {
                 for (String key : resultKeys) {
                     if (row.containsKey(key) && row.get(key) != null) {

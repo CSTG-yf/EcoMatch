@@ -15,8 +15,8 @@ class ExplainCostPolicyTest {
         ExplainCostPolicy policy = new ExplainCostPolicy(100_000);
 
         assertEquals(1200, policy.validate(List.of(Map.of("rows", 1200))));
-        assertEquals(21000, policy.validate(List.of(
-                Map.of("QUERY PLAN", "Seq Scan (cost=0.00..431.00 rows=21000 width=8)"))));
+        assertEquals(21000, policy.validate(
+                List.of(Map.of("QUERY PLAN", "Seq Scan (cost=0.00..431.00 rows=21000 width=8)"))));
     }
 
     @Test
