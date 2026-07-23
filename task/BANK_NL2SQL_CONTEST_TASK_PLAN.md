@@ -74,6 +74,7 @@
 | BE-01 银行语义资源导入框架 | 已完成 | 2026-07-21 | `task/BE-01_BANK_SEMANTIC_IMPORT.md` |
 | BE-02 银行指标治理增强 | 已完成 | 2026-07-21 | `task/BE-02_BANK_METRIC_GOVERNANCE.md` |
 | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
+| BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
 | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
@@ -121,6 +122,7 @@
 
 ### BE-04 十轮上下文引擎
 
+- 状态：已完成（2026-07-23），实现说明见 `task/BE-04_TEN_ROUND_CONTEXT.md`。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-03 以及与 FE-02 共同定义的上下文协议；下游被 FE-02、QA-01 和三类演示场景依赖。
 - 工作内容：

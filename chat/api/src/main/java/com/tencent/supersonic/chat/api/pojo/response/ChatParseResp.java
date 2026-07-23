@@ -18,6 +18,7 @@ public class ChatParseResp {
     private List<SemanticParseInfo> selectedParses = Lists.newArrayList();
     private ParseTimeCostResp parseTimeCost = new ParseTimeCostResp();
     private List<Text2SQLExemplar> usedExemplars;
+    private MultiTurnContextResp multiTurnContext;
 
     public ChatParseResp(Long queryId) {
         this.queryId = queryId;

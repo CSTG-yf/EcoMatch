@@ -2,6 +2,7 @@ package com.tencent.supersonic.chat.server.parser;
 
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
+import com.tencent.supersonic.chat.api.pojo.response.MultiTurnContextResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.server.pojo.ParseContext;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
@@ -21,7 +22,6 @@ import com.tencent.supersonic.headless.api.pojo.enums.MapModeEnum;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.MapResp;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
-import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
@@ -32,7 +32,6 @@ import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.provider.ModelProvider;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,16 +55,21 @@ public class NL2SQLParser implements ChatQueryParser {
     public static final String APP_KEY_MULTI_TURN = "REWRITE_MULTI_TURN";
     private static final String REWRITE_MULTI_TURN_INSTRUCTION = ""
             + "#Role: You are a data product manager experienced in data requirements."
-            + "#Task: Your will be provided with current and history questions asked by a user,"
-            + "along with their mapped schema elements(metric, dimension and value),"
-            + "please try understanding the semantics and rewrite a question." + "#Rules: "
-            + "1.ALWAYS keep relevant entities, metrics, dimensions, values and date ranges."
-            + "2.ONLY respond with the rewritten question."
+            + "#Task: Rewrite the current question into a complete standalone question using the "
+            + "structured history from this chat session." + "#Rules: "
+            + "1.Process history_context in chronological order."
+            + "2.APPEND inherits unspecified metrics, dimensions, filters, date ranges, sorting and granularity."
+            + "3.REPLACE overwrites only the items explicitly changed in the current question."
+            + "4.REMOVE excludes the items explicitly cancelled in the current question."
+            + "5.DRILL_DOWN preserves filters and changes the requested granularity."
+            + "6.Never invent conditions or inherit information outside history_context."
+            + "7.ONLY respond with the rewritten question."
             + "#Current Question: {{current_question}}"
             + "#Current Mapped Schema: {{current_schema}}"
-            + "#History Question: {{history_question}}"
-            + "#History Mapped Schema: {{history_schema}}" + "#History SQL: {{history_sql}}"
+            + "#Context Operation: {{context_operation}}" + "#History Context: {{history_context}}"
             + "#Rewritten Question: ";
+
+    private final MultiTurnContextEngine multiTurnContextEngine = new MultiTurnContextEngine();
 
     public NL2SQLParser() {
         ChatAppManager.register(APP_KEY_MULTI_TURN,
@@ -172,32 +176,30 @@ public class NL2SQLParser implements ChatQueryParser {
             return;
         }
 
+        ChatManageService chatManageService = ContextUtils.getBean(ChatManageService.class);
         List<QueryResp> historyQueries =
-                getHistoryQueries(parseContext.getRequest().getChatId(), 1);
-        if (historyQueries.isEmpty()) {
+                chatManageService.getChatQueries(parseContext.getRequest().getChatId());
+        MultiTurnContextResp context =
+                multiTurnContextEngine.build(historyQueries, parseContext.getRequest().getChatId(),
+                        queryNLReq.getQueryText(), java.time.Instant.now());
+        parseContext.getResponse().setMultiTurnContext(context);
+        if (context.getTurns().isEmpty()) {
             return;
         }
-        QueryResp lastQuery = historyQueries.get(0);
-        SemanticParseInfo lastParseInfo = lastQuery.getParseInfos().get(0);
-        String histSQL = lastParseInfo.getSqlInfo().getCorrectedS2SQL();
-        if (StringUtils.isBlank(histSQL)) // 优化性能,如果问答不是chat bi 则无需重写，因为数据都不全
-            return;
 
-        // derive mapping result of current question and parsing result of last question.
+        // Derive mapping results for the current question before contextual rewriting.
         ChatLayerService chatLayerService = ContextUtils.getBean(ChatLayerService.class);
-        MapResp currentMapResult = chatLayerService.map(queryNLReq); // 优化性能 ,只有满足条件才mapping
+        MapResp currentMapResult = chatLayerService.map(queryNLReq);
 
-        Long dataId = lastParseInfo.getDataSetId();
-        String curtMapStr =
-                generateSchemaPrompt(currentMapResult.getMapInfo().getMatchedElements(dataId));
-        String histMapStr = generateSchemaPrompt(lastParseInfo.getElementMatches());
+        String currentMapStr = currentMapResult.getMapInfo().getDataSetElementMatches().values()
+                .stream().flatMap(List::stream).collect(Collectors
+                        .collectingAndThen(Collectors.toList(), this::generateSchemaPrompt));
 
         Map<String, Object> variables = new HashMap<>();
         variables.put("current_question", currentMapResult.getQueryText());
-        variables.put("current_schema", curtMapStr);
-        variables.put("history_question", lastQuery.getQueryText());
-        variables.put("history_schema", histMapStr);
-        variables.put("history_sql", histSQL);
+        variables.put("current_schema", currentMapStr);
+        variables.put("context_operation", context.getOperation());
+        variables.put("history_context", multiTurnContextEngine.summarize(context));
 
         Prompt prompt = PromptTemplate.from(chatApp.getPrompt()).apply(variables);
         ChatLanguageModel chatLanguageModel =
@@ -207,8 +209,9 @@ public class NL2SQLParser implements ChatQueryParser {
         keyPipelineLog.info("QueryRewrite modelReq:\n{} \nmodelResp:\n{}", prompt.text(), response);
         parseContext.getRequest().setQueryText(rewrittenQuery);
         queryNLReq.setQueryText(rewrittenQuery);
-        log.info("Last Query: {} Current Query: {}, Rewritten Query: {}", lastQuery.getQueryText(),
-                currentMapResult.getQueryText(), rewrittenQuery);
+        context.setRewrittenQuery(rewrittenQuery);
+        log.info("Context rounds: {} Current Query: {}, Rewritten Query: {}",
+                context.getUsedRounds(), currentMapResult.getQueryText(), rewrittenQuery);
     }
 
     private String generateSchemaPrompt(List<SchemaElementMatch> elementMatches) {
@@ -234,19 +237,6 @@ public class NL2SQLParser implements ChatQueryParser {
         prompt.append(String.format("'values:':[%s]", String.join(",", values)));
 
         return prompt.toString();
-    }
-
-    private List<QueryResp> getHistoryQueries(int chatId, int multiNum) {
-        ChatManageService chatManageService = ContextUtils.getBean(ChatManageService.class);
-        List<QueryResp> contextualParseInfoList = chatManageService.getChatQueries(chatId).stream()
-                .filter(q -> Objects.nonNull(q.getQueryResult())
-                        && q.getQueryResult().getQueryState() == QueryState.SUCCESS)
-                .collect(Collectors.toList());
-
-        List<QueryResp> contextualList = contextualParseInfoList.subList(0,
-                Math.min(multiNum, contextualParseInfoList.size()));
-        Collections.reverse(contextualList);
-        return contextualList;
     }
 
     private void addDynamicExemplars(ParseContext parseContext, QueryNLReq queryNLReq) {
