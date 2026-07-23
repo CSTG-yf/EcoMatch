@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-07-23",
+  "sourceWorkbook": "基于大模型与NL2SQL的银行业智能问数系统构建与应用_数据集.xlsx",
+  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "caseCount": 90,
+  "splitCounts": {
+    "train": 30,
+    "dev": 30,
+    "test": 30
+  },
+  "chartTypeCounts": {
+    "KPI_CARD": 15,
+    "LINE": 15,
+    "BAR": 15,
+    "PIE": 15,
+    "COMBO": 15,
+    "TABLE": 15
+  },
+  "sceneCounts": {
+    "OPERATION_ANALYSIS": 45,
+    "RISK_CONTROL": 24,
+    "CUSTOMER_MARKETING": 21
+  },
+  "questionnaireCount": 30,
+  "targetChartAccuracy": 0.9,
+  "targetBusinessUnderstanding": 0.9
+}

@@ -78,6 +78,7 @@
 | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
 | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
+| DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
 
 ## 5. 后端任务
 
@@ -348,6 +349,7 @@
 
 ### DATA-03 图表与业务解释数据集
 
+- 状态：已完成（2026-07-23），实现说明见 `task/DATA-03_CHART_EXPLANATION_DATASET.md`。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-02 的指标口径和三类业务场景样例；下游被 BE-10、FE-04 和业务理解度评测依赖。
 - 标注问题、数据结构、推荐图表、可选图表和不推荐原因。

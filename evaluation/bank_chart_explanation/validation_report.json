@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "casesValidated": 90,
+  "splitCounts": {
+    "train": 30,
+    "dev": 30,
+    "test": 30
+  },
+  "chartTypeCounts": {
+    "KPI_CARD": 15,
+    "LINE": 15,
+    "BAR": 15,
+    "PIE": 15,
+    "COMBO": 15,
+    "TABLE": 15
+  },
+  "sceneCounts": {
+    "OPERATION_ANALYSIS": 45,
+    "RISK_CONTROL": 24,
+    "CUSTOMER_MARKETING": 21
+  },
+  "groundedExplanations": 90,
+  "questionnairesValidated": 30,
+  "ruleBaselineChartAccuracy": 1.0,
+  "oracleBusinessUnderstandingScore": 1.0,
+  "templateOverlap": 0,
+  "sourceWorkbookHashMatched": true
+}
