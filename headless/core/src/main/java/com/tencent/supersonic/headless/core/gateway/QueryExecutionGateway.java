@@ -77,6 +77,7 @@ public class QueryExecutionGateway {
                 long elapsedNanos = System.nanoTime() - executionStart;
                 totalExecutionTimeNanos.addAndGet(elapsedNanos);
                 totalExecutionTimeMs.addAndGet(TimeUnit.NANOSECONDS.toMillis(elapsedNanos));
+                QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXECUTE, elapsedNanos);
                 activeQueries.decrementAndGet();
                 permits.release();
             }

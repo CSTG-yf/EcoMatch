@@ -5,9 +5,11 @@ import com.tencent.supersonic.chat.api.pojo.response.ChartRecommendation;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
 import com.tencent.supersonic.common.pojo.QueryColumn;
+import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
@@ -27,6 +29,16 @@ import java.util.stream.Stream;
 /** Produces evidence-backed chart recommendations and deterministic business explanations. */
 public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
+    private final BusinessInsightConfig configuredRules;
+
+    public BusinessInsightProcessor() {
+        this(null);
+    }
+
+    public BusinessInsightProcessor(BusinessInsightConfig configuredRules) {
+        this.configuredRules = configuredRules;
+    }
+
     @Override
     public boolean accept(ExecuteContext executeContext) {
         QueryResult result = executeContext.getResponse();
@@ -37,17 +49,35 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
     @Override
     public void process(ExecuteContext executeContext) {
-        QueryResult result = executeContext.getResponse();
-        FieldProfile profile = profile(result);
-        enrichMetricDefinitions(executeContext, profile);
-        List<ChartRecommendation> charts =
-                recommendCharts(profile, result.getQueryResults().size());
-        result.setRecommendedChart(charts.get(0));
-        result.setCandidateCharts(charts.subList(1, charts.size()));
+        long explainStart = System.nanoTime();
+        try {
+            BusinessInsightConfig rules = rules();
+            QueryResult result = executeContext.getResponse();
+            FieldProfile profile = profile(result);
+            enrichMetricDefinitions(executeContext, profile);
+            List<ChartRecommendation> charts =
+                    recommendCharts(profile, result.getQueryResults().size(), rules);
+            result.setRecommendedChart(charts.get(0));
+            result.setCandidateCharts(charts.subList(1, charts.size()));
 
-        BusinessExplanation explanation = explain(executeContext, result, profile);
-        result.setBusinessExplanation(explanation);
-        result.setTextSummary(explanation.getSummary());
+            BusinessExplanation explanation = explain(executeContext, result, profile, rules);
+            result.setBusinessExplanation(explanation);
+            result.setTextSummary(explanation.getSummary());
+        } finally {
+            QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXPLAIN,
+                    System.nanoTime() - explainStart);
+        }
+    }
+
+    private BusinessInsightConfig rules() {
+        if (configuredRules != null) {
+            return configuredRules;
+        }
+        try {
+            return ContextUtils.getBean(BusinessInsightConfig.class);
+        } catch (RuntimeException e) {
+            return BusinessInsightConfig.defaults();
+        }
     }
 
     private void enrichMetricDefinitions(ExecuteContext context, FieldProfile profile) {
@@ -113,7 +143,8 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
                 hasNegativeValue);
     }
 
-    private List<ChartRecommendation> recommendCharts(FieldProfile profile, int rowCount) {
+    private List<ChartRecommendation> recommendCharts(FieldProfile profile, int rowCount,
+            BusinessInsightConfig rules) {
         List<ChartRecommendation> charts = new ArrayList<>();
         if (rowCount == 1 && !profile.metrics.isEmpty()) {
             charts.add(chart("KPI_CARD", 0.98, "单行数值结果适合使用指标卡", List.of(), profile.metrics));
@@ -126,7 +157,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         } else if (!profile.dates.isEmpty() && !profile.metrics.isEmpty()) {
             charts.add(chart("LINE", 0.96, "时间维度与数值指标适合展示趋势", List.of(profile.dates.get(0)),
                     profile.metrics));
-        } else if (isComposition(profile, rowCount)) {
+        } else if (isComposition(profile, rowCount, rules)) {
             charts.add(chart("PIE", 0.93, "少量同口径正值分类适合展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         } else if (!profile.categories.isEmpty() && !profile.metrics.isEmpty()) {
@@ -138,7 +169,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
         Set<String> types = new LinkedHashSet<>();
         types.add(charts.get(0).getChartType());
-        if (isComposition(profile, rowCount) && types.add("PIE")) {
+        if (isComposition(profile, rowCount, rules) && types.add("PIE")) {
             charts.add(chart("PIE", 0.82, "分类数量较少，可用于展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         }
@@ -152,9 +183,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         return charts;
     }
 
-    private boolean isComposition(FieldProfile profile, int rowCount) {
-        if (profile.categories.size() != 1 || profile.metrics.size() != 1 || rowCount > 6
-                || profile.hasNegativeValue) {
+    private boolean isComposition(FieldProfile profile, int rowCount, BusinessInsightConfig rules) {
+        if (profile.categories.size() != 1 || profile.metrics.size() != 1
+                || rowCount > rules.getPieMaxCategories() || profile.hasNegativeValue) {
             return false;
         }
         String category = profile.categories.get(0).toLowerCase(Locale.ROOT);
@@ -162,7 +193,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     }
 
     private BusinessExplanation explain(ExecuteContext context, QueryResult result,
-            FieldProfile profile) {
+            FieldProfile profile, BusinessInsightConfig rules) {
         List<String> evidence = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         for (String metric : profile.metrics) {
@@ -187,14 +218,18 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
                     evidence.add(String.format("%s首末记录变化%s%%", label, format(change)));
                 }
             }
-            appendAnomalyEvidence(label, values, evidence);
+            appendAnomalyEvidence(label, values, evidence, rules);
         }
         appendContributionEvidence(result.getQueryResults(), profile, evidence);
 
         String timeRange = resolveTimeRange(result.getQueryResults(), profile.dates);
+        boolean hasQualityWarning =
+                result.getQueryResults().size() < rules.getSmallSampleThreshold()
+                        || profile.metrics.isEmpty() || evidence.isEmpty();
         warnings.add("结论仅适用于当前查询结果的数据范围，不得外推到未展示机构或时间");
-        if (result.getQueryResults().size() < 3) {
-            warnings.add("结果少于3条，仅描述查询事实，不输出趋势、异常点或因果结论");
+        if (result.getQueryResults().size() < rules.getSmallSampleThreshold()) {
+            warnings.add(String.format("结果少于%d条，仅描述查询事实，不输出趋势、异常点或因果结论",
+                    rules.getSmallSampleThreshold()));
         }
         if (profile.metrics.isEmpty()) {
             warnings.add("未识别到数值指标，不输出增减或贡献度结论");
@@ -208,14 +243,15 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
                 context.getRequest() == null ? null : context.getRequest().getQueryText();
         String summary = buildSummary(queryText, result.getQueryResults().size(), timeRange,
                 evidence, warnings, profile.definitions);
-        double confidence = evidence.isEmpty() ? 0.65 : warnings.isEmpty() ? 0.95 : 0.82;
+        double confidence = evidence.isEmpty() ? rules.getLowConfidence()
+                : !hasQualityWarning ? rules.getHighConfidence() : rules.getEvidenceConfidence();
         return BusinessExplanation.builder().summary(summary).confidence(confidence)
                 .timeRange(timeRange).evidence(evidence).warnings(warnings)
                 .metricDefinitions(profile.definitions).build();
     }
 
     private void appendAnomalyEvidence(String metric, List<BigDecimal> values,
-            List<String> evidence) {
+            List<String> evidence, BusinessInsightConfig rules) {
         if (values.size() < 5) {
             return;
         }
@@ -226,9 +262,11 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         if (standardDeviation == 0) {
             return;
         }
-        List<String> anomalies = values.stream()
-                .filter(value -> Math.abs(value.doubleValue() - average) > 2 * standardDeviation)
-                .map(this::format).collect(Collectors.toList());
+        List<String> anomalies =
+                values.stream()
+                        .filter(value -> Math.abs(value.doubleValue() - average) > rules
+                                .getAnomalyZScore() * standardDeviation)
+                        .map(this::format).collect(Collectors.toList());
         if (!anomalies.isEmpty()) {
             evidence.add(String.format("%s存在统计异常候选值：%s", metric, String.join("、", anomalies)));
         }

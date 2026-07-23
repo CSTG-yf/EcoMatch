@@ -45,6 +45,7 @@ import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
+import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import lombok.extern.slf4j.Slf4j;
@@ -108,35 +109,42 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     @Override
     public ChatParseResp parse(ChatParseReq chatParseReq) {
-        Long queryId = chatParseReq.getQueryId();
-        if (Objects.isNull(queryId)) {
-            queryId = chatManageService.createChatQuery(chatParseReq);
-            chatParseReq.setQueryId(queryId);
-        } else {
-            chatManageService.checkQueryAccess(queryId, chatParseReq.getUser());
-        }
-
-        ParseContext parseContext = buildParseContext(chatParseReq, new ChatParseResp(queryId));
-        for (ChatQueryParser parser : chatQueryParsers) {
-            if (parser.accept(parseContext)) {
-                parser.parse(parseContext);
+        long start = System.nanoTime();
+        try {
+            Long queryId = chatParseReq.getQueryId();
+            if (Objects.isNull(queryId)) {
+                queryId = chatManageService.createChatQuery(chatParseReq);
+                chatParseReq.setQueryId(queryId);
+            } else {
+                chatManageService.checkQueryAccess(queryId, chatParseReq.getUser());
             }
-        }
 
-        for (ParseResultProcessor processor : parseResultProcessors) {
-            if (processor.accept(parseContext)) {
-                processor.process(parseContext);
+            ParseContext parseContext = buildParseContext(chatParseReq, new ChatParseResp(queryId));
+            for (ChatQueryParser parser : chatQueryParsers) {
+                if (parser.accept(parseContext)) {
+                    parser.parse(parseContext);
+                }
             }
-        }
 
-        if (!parseContext.needFeedback()) {
-            parseContext.getResponse().getParseTimeCost().setParseTime(System.currentTimeMillis()
-                    - parseContext.getResponse().getParseTimeCost().getParseStartTime());
-            chatManageService.batchAddParse(chatParseReq, parseContext.getResponse());
-            chatManageService.updateParseCostTime(parseContext.getResponse());
-        }
+            for (ParseResultProcessor processor : parseResultProcessors) {
+                if (processor.accept(parseContext)) {
+                    processor.process(parseContext);
+                }
+            }
 
-        return parseContext.getResponse();
+            if (!parseContext.needFeedback()) {
+                parseContext.getResponse().getParseTimeCost()
+                        .setParseTime(System.currentTimeMillis() - parseContext.getResponse()
+                                .getParseTimeCost().getParseStartTime());
+                chatManageService.batchAddParse(chatParseReq, parseContext.getResponse());
+                chatManageService.updateParseCostTime(parseContext.getResponse());
+            }
+
+            return parseContext.getResponse();
+        } finally {
+            QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.PARSE,
+                    System.nanoTime() - start);
+        }
     }
 
     @Override

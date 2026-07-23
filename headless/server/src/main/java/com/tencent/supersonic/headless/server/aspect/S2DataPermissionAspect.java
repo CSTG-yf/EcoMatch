@@ -90,21 +90,21 @@ public class S2DataPermissionAspect {
         if (queryReq == null) {
             throw new InvalidArgumentException("queryReq is not Invalid");
         }
-        if (!queryReq.isNeedAuth()) {
-            log.info("needAuth is false, there is no need to check permissions.");
-            return joinPoint.proceed();
-        }
         User user = (User) objects[1];
+        SemanticSchemaResp semanticSchemaResp = getSemanticSchemaResp(queryReq);
+        if (!queryReq.isNeedAuth()) {
+            log.info("needAuth is false, authorization checks are skipped but masking remains.");
+            return proceedAndMask(joinPoint, semanticSchemaResp, user);
+        }
         if (Objects.isNull(user) || StringUtils.isEmpty(user.getName())) {
             throw new RuntimeException("please provide user information");
         }
 
-        SemanticSchemaResp semanticSchemaResp = getSemanticSchemaResp(queryReq);
         Set<Long> modelIds = getModelIdInQuery(queryReq, semanticSchemaResp);
 
         // 2. determine whether admin of the model
         if (checkModelAdmin(user, modelIds)) {
-            return joinPoint.proceed();
+            return proceedAndMask(joinPoint, semanticSchemaResp, user);
         }
         // 3. determine whether the model is visible to cur user
         checkModelVisible(user, modelIds);
@@ -120,11 +120,19 @@ public class S2DataPermissionAspect {
         checkRowPermission(queryReq, authorizedResource);
 
         // 7. add hint to user
-        Object result = joinPoint.proceed();
+        Object result = proceedAndMask(joinPoint, semanticSchemaResp, user);
         if (result instanceof SemanticQueryResp) {
             SemanticQueryResp queryResp = (SemanticQueryResp) result;
-            dataMaskingService.mask(queryResp, semanticSchemaResp, user);
             addHint(modelIds, queryResp, authorizedResource);
+        }
+        return result;
+    }
+
+    private Object proceedAndMask(ProceedingJoinPoint joinPoint,
+            SemanticSchemaResp semanticSchemaResp, User user) throws Throwable {
+        Object result = joinPoint.proceed();
+        if (result instanceof SemanticQueryResp) {
+            dataMaskingService.mask((SemanticQueryResp) result, semanticSchemaResp, user);
         }
         return result;
     }

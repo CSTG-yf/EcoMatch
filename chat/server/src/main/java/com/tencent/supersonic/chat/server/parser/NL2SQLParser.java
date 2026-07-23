@@ -23,6 +23,7 @@ import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.MapResp;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.data.message.AiMessage;
@@ -133,28 +134,35 @@ public class NL2SQLParser implements ChatQueryParser {
 
         // next go with llm-based parsers unless LLM is disabled or use feedback is needed.
         if (parseContext.needLLMParse() && !parseContext.needFeedback()) {
-            // either the user or the system selects one parse from the candidate parses.
-            if (Objects.isNull(parseContext.getRequest().getSelectedParse())
-                    && parseContext.getResponse().getSelectedParses().isEmpty()) {
-                return;
-            }
+            long modelStart = System.nanoTime();
+            try {
+                // either the user or the system selects one parse from the candidate parses.
+                if (Objects.isNull(parseContext.getRequest().getSelectedParse())
+                        && parseContext.getResponse().getSelectedParses().isEmpty()) {
+                    return;
+                }
 
-            QueryNLReq queryNLReq = QueryReqConverter.buildQueryNLReq(parseContext);
-            queryNLReq.setText2SQLType(Text2SQLType.LLM_OR_RULE);
-            SemanticParseInfo userSelectParse = parseContext.getRequest().getSelectedParse();
-            queryNLReq.setSelectedParseInfo(Objects.nonNull(userSelectParse) ? userSelectParse
-                    : parseContext.getResponse().getSelectedParses().get(0));
-            parseContext.setResponse(new ChatParseResp(parseContext.getResponse().getQueryId()));
+                QueryNLReq queryNLReq = QueryReqConverter.buildQueryNLReq(parseContext);
+                queryNLReq.setText2SQLType(Text2SQLType.LLM_OR_RULE);
+                SemanticParseInfo userSelectParse = parseContext.getRequest().getSelectedParse();
+                queryNLReq.setSelectedParseInfo(Objects.nonNull(userSelectParse) ? userSelectParse
+                        : parseContext.getResponse().getSelectedParses().get(0));
+                parseContext
+                        .setResponse(new ChatParseResp(parseContext.getResponse().getQueryId()));
 
-            rewriteMultiTurn(parseContext, queryNLReq);
-            addDynamicExemplars(parseContext, queryNLReq);
-            doParse(queryNLReq, parseContext.getResponse());
-
-            // try again with all semantic fields passed to LLM
-            if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
-                queryNLReq.setSelectedParseInfo(null);
-                queryNLReq.setMapModeEnum(MapModeEnum.ALL);
+                rewriteMultiTurn(parseContext, queryNLReq);
+                addDynamicExemplars(parseContext, queryNLReq);
                 doParse(queryNLReq, parseContext.getResponse());
+
+                // try again with all semantic fields passed to LLM
+                if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
+                    queryNLReq.setSelectedParseInfo(null);
+                    queryNLReq.setMapModeEnum(MapModeEnum.ALL);
+                    doParse(queryNLReq, parseContext.getResponse());
+                }
+            } finally {
+                QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.MODEL,
+                        System.nanoTime() - modelStart);
             }
         }
     }

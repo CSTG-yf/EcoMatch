@@ -21,6 +21,7 @@ import com.tencent.supersonic.headless.chat.knowledge.helper.HanlpHelper;
 import com.tencent.supersonic.headless.chat.knowledge.helper.NatureHelper;
 import com.tencent.supersonic.headless.core.cache.QueryCache;
 import com.tencent.supersonic.headless.core.executor.QueryExecutor;
+import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import com.tencent.supersonic.headless.core.pojo.SqlQuery;
 import com.tencent.supersonic.headless.core.pojo.StructQuery;
@@ -92,7 +93,13 @@ public class S2SemanticLayerService implements SemanticLayerService {
     @Override
     public SemanticTranslateResp translate(SemanticQueryReq queryReq, User user) throws Exception {
         QueryStatement queryStatement = buildQueryStatement(queryReq, user);
-        semanticTranslator.translate(queryStatement);
+        long translateStart = System.nanoTime();
+        try {
+            semanticTranslator.translate(queryStatement);
+        } finally {
+            QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.TRANSLATE,
+                    System.nanoTime() - translateStart);
+        }
         return SemanticTranslateResp.builder().querySQL(queryStatement.getSql())
                 .isOk(queryStatement.isOk()).errMsg(queryStatement.getErrMsg()).build();
     }
@@ -124,7 +131,13 @@ public class S2SemanticLayerService implements SemanticLayerService {
             // 3 translate query
             QueryStatement queryStatement = buildQueryStatement(queryReq, user);
             if (!queryStatement.isTranslated()) {
-                semanticTranslator.translate(queryStatement);
+                long translateStart = System.nanoTime();
+                try {
+                    semanticTranslator.translate(queryStatement);
+                } finally {
+                    QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.TRANSLATE,
+                            System.nanoTime() - translateStart);
+                }
             }
 
             // Check whether the dimensions of the metric drill-down are correct temporarily,
