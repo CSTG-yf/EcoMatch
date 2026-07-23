@@ -72,6 +72,24 @@ class BusinessInsightServiceTest {
                 explanation.getWarnings().stream().anyMatch(warning -> warning.contains("未返回数据")));
     }
 
+    @Test
+    void rejectsInputThatExceedsConfiguredRowLimit() {
+        BusinessInsightConfig config =
+                new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95, 2, 100);
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(config).explain(request()));
+    }
+
+    @Test
+    void rejectsInputThatExceedsConfiguredColumnLimit() {
+        BusinessInsightConfig config =
+                new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95, 10_000, 1);
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(config).recommend(request()));
+    }
+
     private BusinessInsightReq request() {
         BusinessInsightReq request = new BusinessInsightReq();
         request.setQueryText("各机构贷款余额");

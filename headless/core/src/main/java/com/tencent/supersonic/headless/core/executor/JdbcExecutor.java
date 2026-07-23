@@ -23,36 +23,39 @@ public class JdbcExecutor implements QueryExecutor {
 
     @Override
     public SemanticQueryResp execute(QueryStatement queryStatement) {
-        // accelerate query if possible
+        String sql = StringUtils.normalizeSpace(queryStatement.getSql());
+        log.info("executing SQL: {}", sql);
+        SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
+        try {
+            QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
+            SemanticQueryResp result = gateway.execute(queryStatement.getSql(),
+                    () -> executeInternal(queryStatement, queryResultWithColumns));
+            result.setSql(sql);
+            return result;
+        } catch (Exception e) {
+            log.error("queryInternal with error ", e);
+            queryResultWithColumns.setErrorMsg(e.getMessage());
+        }
+        return queryResultWithColumns;
+    }
+
+    private SemanticQueryResp executeInternal(QueryStatement queryStatement,
+            SemanticQueryResp queryResultWithColumns) {
         for (QueryAccelerator queryAccelerator : ComponentFactory.getQueryAccelerators()) {
             if (queryAccelerator.check(queryStatement)) {
-                SemanticQueryResp semanticQueryResp = queryAccelerator.query(queryStatement);
-                if (Objects.nonNull(semanticQueryResp)
-                        && !semanticQueryResp.getResultList().isEmpty()) {
+                SemanticQueryResp accelerated = queryAccelerator.query(queryStatement);
+                if (Objects.nonNull(accelerated) && accelerated.getResultList() != null
+                        && !accelerated.getResultList().isEmpty()) {
                     log.info("query by Accelerator {}",
                             queryAccelerator.getClass().getSimpleName());
-                    return semanticQueryResp;
+                    return accelerated;
                 }
             }
         }
 
         SqlUtils sqlUtils = ContextUtils.getBean(SqlUtils.class);
-        String sql = StringUtils.normalizeSpace(queryStatement.getSql());
-        log.info("executing SQL: {}", sql);
         DatabaseResp database = queryStatement.getOntology().getDatabase();
-        SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
-        try {
-            SqlUtils sqlUtil = sqlUtils.init(database);
-            QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
-            gateway.execute(queryStatement.getSql(), () -> {
-                sqlUtil.queryInternal(queryStatement.getSql(), queryResultWithColumns);
-                return queryResultWithColumns;
-            });
-            queryResultWithColumns.setSql(sql);
-        } catch (Exception e) {
-            log.error("queryInternal with error ", e);
-            queryResultWithColumns.setErrorMsg(e.getMessage());
-        }
+        sqlUtils.init(database).queryInternal(queryStatement.getSql(), queryResultWithColumns);
         return queryResultWithColumns;
     }
 }

@@ -25,8 +25,10 @@ import java.util.Set;
 public class BusinessInsightService {
 
     private final BusinessInsightProcessor processor;
+    private final BusinessInsightConfig config;
 
     public BusinessInsightService(BusinessInsightConfig config) {
+        this.config = config;
         this.processor = new BusinessInsightProcessor(config);
     }
 
@@ -48,6 +50,14 @@ public class BusinessInsightService {
         }
         if (request.getQueryResults().stream().anyMatch(Objects::isNull)) {
             throw new InvalidArgumentException("queryResults contains a null row");
+        }
+        if (request.getQueryResults().size() > config.getMaxInputRows()) {
+            throw new InvalidArgumentException(
+                    "queryResults exceeds maximum row count: " + config.getMaxInputRows());
+        }
+        if (request.getQueryColumns().size() > config.getMaxInputColumns()) {
+            throw new InvalidArgumentException(
+                    "queryColumns exceeds maximum column count: " + config.getMaxInputColumns());
         }
         validateColumns(request);
         QueryResult result = new QueryResult();

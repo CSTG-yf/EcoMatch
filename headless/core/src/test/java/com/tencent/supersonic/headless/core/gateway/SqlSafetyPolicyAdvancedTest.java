@@ -41,4 +41,22 @@ class SqlSafetyPolicyAdvancedTest {
                         + "SELECT account_id FROM recent UNION ALL "
                         + "SELECT account_id FROM archive_account LIMIT 100"));
     }
+
+    @Test
+    void acceptsUnboundedProjectionOverBoundedDerivedResult() {
+        assertDoesNotThrow(() -> policy
+                .validate("WITH recent AS (SELECT * FROM account WHERE data_date >= '2026-01-01') "
+                        + "SELECT * FROM recent"));
+        assertDoesNotThrow(() -> policy
+                .validate("SELECT * FROM (SELECT * FROM account WHERE branch_id = 1) filtered"));
+    }
+
+    @Test
+    void rejectsDerivedResultJoinedWithUnboundedBaseTable() {
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate(
+                        "WITH recent AS (SELECT * FROM account WHERE data_date >= '2026-01-01') "
+                                + "SELECT * FROM recent JOIN customer "
+                                + "ON recent.customer_id = customer.id"));
+    }
 }

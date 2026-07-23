@@ -3,7 +3,7 @@
 ## 已实现
 
 - 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、危险函数、锁语句和文件写入，避免注释分隔绕过。
-- 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行。
+- 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 执行前运行 `EXPLAIN`，兼容结构化行数和 PostgreSQL 文本计划，超过阈值时拒绝查询。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
 - 提供网关运行快照，包含最大并发、可用许可、活动查询、接收、拒绝、成功、失败和平均执行耗时。
@@ -12,6 +12,7 @@
 - 聚合指标查询进入独立热点指标缓存，默认保留 60 分钟，与普通 10 分钟结果缓存隔离，并单独统计命中率。
 - 提供仅超级管理员可访问的 `GET /api/semantic/query/gateway/stats` 监控接口，同时返回网关运行快照、五阶段耗时和缓存命中率。
 - JDBC 层统一设置查询超时、最大结果行数和 Fetch Size；超时由驱动取消执行。
+- JDBC、查询加速器和数据库管理 SQL 均在实际执行前进入统一网关，避免加速器命中或管理接口绕过只读策略、限流和性能监控。
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度，避免权限结果跨用户复用。
 
 ## 配置
@@ -31,7 +32,9 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数，以及 UNION、CTE、嵌套子查询中的无界 `SELECT *` 绕过。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *` 绕过，以及受限派生查询的兼容性。
+- `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝。
+- `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关。
 - `ExplainCostPolicyTest`：结构化及文本执行计划、超阈值拒绝。
 - `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，并校验接收和拒绝计数。
 - `QueryExecutionGatewayTest`：校验策略拒绝、执行失败、活动查询和平均耗时快照。
@@ -48,7 +51,7 @@
 - 状态：已完成（2026-07-23）。
 - 数据规模：H2 内存数据库，`bank_account` 表 10,000 行。
 - 测试规模：20 次预热、200 次串行采样、8 线程 200 次并发查询。
-- 最新实测结果：平均 `7.15 ms`、P95 `12 ms`、P99 `19 ms`，并发查询无拒绝。
+- 最新实测结果：平均 `6.92 ms`、P95 `11 ms`、P99 `13 ms`，并发查询无拒绝。
 - 验收结论：本地标准测试环境满足“单轮查询平均响应时间不高于 3 秒”的性能门槛。
 - 完整报告：`task/BE-06_PERFORMANCE_REPORT.md`。
 

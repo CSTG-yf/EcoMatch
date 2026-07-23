@@ -2,16 +2,22 @@ package com.tencent.supersonic.headless.core.gateway;
 
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.Statements;
 import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
+import net.sf.jsqlparser.statement.select.FromItem;
+import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 
+import java.util.Collections;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
@@ -65,6 +71,11 @@ public class SqlSafetyPolicy {
     }
 
     private void validateSelectAllQueries(Select statement) {
+        Set<String> cteNames = statement.getWithItemsList() == null ? Collections.emptySet()
+                : statement.getWithItemsList().stream()
+                        .filter(withItem -> withItem.getAlias() != null)
+                        .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
+                        .collect(Collectors.toSet());
         for (Select select : SqlSelectHelper.getAllSelect(statement)) {
             if (!(select instanceof PlainSelect)) {
                 continue;
@@ -76,10 +87,36 @@ public class SqlSafetyPolicy {
                                     || expression instanceof AllTableColumns);
             boolean bounded = plainSelect.getWhere() != null || plainSelect.getLimit() != null
                     || plainSelect.getFetch() != null;
-            if (selectsAll && !bounded) {
+            if (selectsAll && !bounded && !readsOnlyDerivedSources(plainSelect, cteNames)) {
                 throw new SqlPolicyViolationException(
                         "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
             }
         }
+    }
+
+    private boolean readsOnlyDerivedSources(PlainSelect select, Set<String> cteNames) {
+        if (!isDerivedSource(select.getFromItem(), cteNames)) {
+            return false;
+        }
+        if (select.getJoins() == null) {
+            return true;
+        }
+        for (Join join : select.getJoins()) {
+            if (!isDerivedSource(join.getRightItem(), cteNames)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isDerivedSource(FromItem source, Set<String> cteNames) {
+        if (source instanceof ParenthesedSelect) {
+            return true;
+        }
+        if (source instanceof Table) {
+            String tableName = ((Table) source).getName();
+            return tableName != null && cteNames.contains(tableName.toLowerCase(Locale.ROOT));
+        }
+        return false;
     }
 }

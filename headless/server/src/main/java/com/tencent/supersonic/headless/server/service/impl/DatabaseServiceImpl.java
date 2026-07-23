@@ -17,6 +17,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptor;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptorFactory;
+import com.tencent.supersonic.headless.core.gateway.QueryExecutionGateway;
 import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import com.tencent.supersonic.headless.core.utils.SqlVariableParseUtils;
@@ -44,6 +45,8 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
 
     @Autowired
     private SqlUtils sqlUtils;
+    @Autowired
+    private QueryExecutionGateway queryExecutionGateway;
 
     @Lazy
     @Autowired
@@ -233,8 +236,10 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         SqlUtils sqlUtils = this.sqlUtils.init(database);
         log.info("query SQL: {}", StringUtils.normalizeSpace(sql));
-        sqlUtils.queryInternal(sql, queryResultWithColumns);
-        return queryResultWithColumns;
+        return queryExecutionGateway.execute(sql, () -> {
+            sqlUtils.queryInternal(sql, queryResultWithColumns);
+            return queryResultWithColumns;
+        });
     }
 
     private DatabaseDO getDatabaseDO(Long id) {
