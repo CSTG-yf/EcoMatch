@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bank NL2SQL positive sample",
+  "type": "object",
+  "required": [
+    "id",
+    "source",
+    "split",
+    "templateGroup",
+    "difficulty",
+    "question",
+    "normalizedIntent",
+    "s2sql",
+    "physicalSql",
+    "sqlDialect",
+    "complexity",
+    "expectedResultSummary",
+    "expectedResult"
+  ],
+  "properties": {
+    "id": {"type": "string"},
+    "source": {"const": "competition_workbook"},
+    "split": {"enum": ["train", "dev", "test"]},
+    "templateGroup": {"type": "string"},
+    "difficulty": {"enum": ["简单", "普通", "复杂"]},
+    "question": {"type": "string", "minLength": 1},
+    "normalizedIntent": {"type": "object"},
+    "s2sql": {"type": "string", "minLength": 1},
+    "physicalSql": {"type": "string", "minLength": 1},
+    "sqlDialect": {"const": "sqlite"},
+    "complexity": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "SINGLE_TABLE",
+          "MULTI_TABLE",
+          "NESTED_QUERY",
+          "AGGREGATION",
+          "YOY",
+          "MOM",
+          "TOP_N",
+          "CROSS_ORGANIZATION"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "expectedResultSummary": {"type": "string", "minLength": 1},
+    "expectedResult": {
+      "type": "object",
+      "required": ["columns", "rowCount", "rows", "sha256"]
+    }
+  },
+  "additionalProperties": false
+}

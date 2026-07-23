@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DATA-01 Bank Financial Intent Sample",
+  "type": "object",
+  "required": [
+    "id", "split", "question", "scene", "intent", "metrics", "dimensions",
+    "time", "organizations", "filters", "linguisticFeatures", "templateGroup"
+  ],
+  "properties": {
+    "id": {"type": "string"},
+    "source": {"enum": ["competition_workbook", "curated_augmentation"]},
+    "sourceSplit": {"type": ["string", "null"]},
+    "split": {"enum": ["train", "dev", "test"]},
+    "difficulty": {"type": "string"},
+    "question": {"type": "string"},
+    "answer": {"type": "string"},
+    "scene": {"enum": ["OPERATION_ANALYSIS", "RISK_CONTROL", "CUSTOMER_MARKETING"]},
+    "intent": {
+      "enum": ["POINT_QUERY", "COMPARISON", "RANKING", "TREND", "CHANGE", "RATIO", "THRESHOLD", "AGGREGATION"]
+    },
+    "metrics": {"type": "array"},
+    "dimensions": {"type": "array", "items": {"type": "string"}},
+    "time": {"type": "object"},
+    "organizations": {"type": "array"},
+    "filters": {"type": "array"},
+    "linguisticFeatures": {"type": "array", "items": {"type": "string"}},
+    "clarificationExpected": {"type": "boolean"},
+    "templateGroup": {"type": "string"},
+    "referenceDate": {"type": "string", "format": "date"}
+  }
+}

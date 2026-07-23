@@ -1,6 +1,7 @@
 ### headless-chat SPIs
 
 com.tencent.supersonic.headless.chat.mapper.SchemaMapper=\
+    com.tencent.supersonic.headless.chat.mapper.BankFinancialMapper, \
     com.tencent.supersonic.headless.chat.mapper.EmbeddingMapper, \
     com.tencent.supersonic.headless.chat.mapper.KeywordMapper, \
     com.tencent.supersonic.headless.chat.mapper.QueryFilterMapper, \

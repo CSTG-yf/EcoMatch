@@ -1,0 +1,15 @@
+{
+  "evaluatedAt": "2026-07-22",
+  "dataset": "test.jsonl",
+  "caseCount": 52,
+  "intentAccuracy": 0.9808,
+  "metricSetAccuracy": 1.0,
+  "clarificationAccuracy": 1.0,
+  "acceptanceThreshold": {
+    "intentAccuracy": 0.94,
+    "metricSetAccuracy": 0.94,
+    "clarificationAccuracy": 0.9
+  },
+  "result": "PASS",
+  "testClass": "BankIntentFrozenDatasetTest"
+}

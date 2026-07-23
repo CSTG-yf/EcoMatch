@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-07-23",
+  "sourceWorkbook": "基于大模型与NL2SQL的银行业智能问数系统构建与应用_数据集.xlsx",
+  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "counts": {
+    "train": 32,
+    "dev": 32,
+    "test": 32
+  },
+  "positiveCount": 96,
+  "errorCount": 96,
+  "featureCounts": {
+    "SINGLE_TABLE": 72,
+    "MULTI_TABLE": 24,
+    "NESTED_QUERY": 36,
+    "AGGREGATION": 48,
+    "YOY": 12,
+    "MOM": 12,
+    "TOP_N": 12,
+    "CROSS_ORGANIZATION": 36
+  },
+  "errorTypeCounts": {
+    "MAPPING_ERROR": 16,
+    "DEFINITION_ERROR": 16,
+    "JOIN_ERROR": 16,
+    "FILTER_ERROR": 16,
+    "SYNTAX_ERROR": 16,
+    "EXECUTION_ERROR": 16
+  },
+  "templateOverlap": {
+    "trainDev": 0,
+    "trainTest": 0,
+    "devTest": 0
+  },
+  "physicalSqlExecution": {
+    "engine": "SQLite",
+    "passed": 96,
+    "failed": 0
+  }
+}

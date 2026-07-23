@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-07-22",
+  "sourceWorkbook": "基于大模型与NL2SQL的银行业智能问数系统构建与应用_数据集.xlsx",
+  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "sourceQuestionCount": 200,
+  "augmentationCount": 12,
+  "reassignedForTemplateIsolation": 9,
+  "counts": {
+    "train": 121,
+    "dev": 39,
+    "test": 52
+  },
+  "templateCounts": {
+    "train": 72,
+    "dev": 27,
+    "test": 32
+  },
+  "templateOverlap": {
+    "trainDev": 0,
+    "trainTest": 0,
+    "devTest": 0
+  },
+  "intentCounts": {
+    "POINT_QUERY": 32,
+    "RATIO": 22,
+    "RANKING": 54,
+    "COMPARISON": 8,
+    "THRESHOLD": 17,
+    "AGGREGATION": 22,
+    "CHANGE": 55,
+    "TREND": 2
+  },
+  "sceneCounts": {
+    "OPERATION_ANALYSIS": 141,
+    "RISK_CONTROL": 67,
+    "CUSTOMER_MARKETING": 4
+  },
+  "featureCounts": {
+    "ABBREVIATION": 171,
+    "COLLOQUIAL": 6,
+    "AMBIGUOUS": 17,
+    "STANDARD": 36,
+    "VAGUE_TIME": 26,
+    "TYPO": 2
+  },
+  "clarificationCount": 50
+}
