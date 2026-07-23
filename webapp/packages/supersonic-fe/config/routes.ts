@@ -160,6 +160,12 @@ const ROUTES = [
     ],
   },
   {
+    path: '/governance',
+    name: 'governance',
+    component: './SemanticModel/Governance',
+    envEnableList: [ENV_KEY.SEMANTIC],
+  },
+  {
     path: '/tag',
     name: 'tag',
     component: './SemanticModel/Insights',

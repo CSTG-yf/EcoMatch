@@ -79,6 +79,7 @@
 | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
 | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
+| FE-07 指标与术语治理后台 | 已完成 | 2026-07-23 | `task/FE-07_METRIC_TERM_GOVERNANCE.md` |
 
 ## 5. 后端任务
 
@@ -294,6 +295,7 @@
 
 ### FE-07 指标与术语治理后台
 
+- 状态：已完成（2026-07-23），实现说明见 `task/FE-07_METRIC_TERM_GOVERNANCE.md`。
 - 优先级：P1
 - 依赖关系：上游依赖 BE-01 和 BE-02；下游为指标导入、版本治理和口径一致性运营流程。
 - 工作内容：
