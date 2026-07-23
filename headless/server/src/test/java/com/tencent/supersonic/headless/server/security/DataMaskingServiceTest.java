@@ -53,6 +53,18 @@ class DataMaskingServiceTest {
     }
 
     @Test
+    void handlesNullRolesWithoutSkippingMasking() {
+        DataMaskingService service = new DataMaskingService("", "data_steward");
+        SemanticQueryResp response = response("mobile", "13812345678");
+        User analyst = User.get(2L, "analyst");
+        analyst.setRoles(null);
+
+        service.mask(response, schema("mobile"), analyst);
+
+        assertEquals("138****5678", response.getResultList().get(0).get("mobile"));
+    }
+
+    @Test
     void masksAllSupportedSensitiveValueTypes() {
         DataMaskingService service = new DataMaskingService("", "");
 

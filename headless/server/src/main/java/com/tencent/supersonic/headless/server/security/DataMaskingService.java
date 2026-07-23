@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -68,7 +69,8 @@ public class DataMaskingService {
 
     private boolean canViewRawData(User user) {
         return user != null && (user.isSuperAdmin() || rawUsers.contains(user.getName())
-                || !java.util.Collections.disjoint(rawRoles, user.getRoles()));
+                || !Collections.disjoint(rawRoles,
+                        user.getRoles() == null ? Collections.emptySet() : user.getRoles()));
     }
 
     private Set<String> getSensitiveFields(SemanticSchemaResp schema) {

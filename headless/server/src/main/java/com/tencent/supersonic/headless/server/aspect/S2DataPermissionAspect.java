@@ -48,12 +48,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
 @Aspect
 @Slf4j
 public class S2DataPermissionAspect {
+
+    private static final Pattern UNSAFE_PERMISSION_EXPRESSION = Pattern.compile(
+            "(?is)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|truncate|grant|revoke|call|merge)\\b)");
 
     @Autowired
     private QueryStructUtils queryStructUtils;
@@ -101,6 +105,10 @@ public class S2DataPermissionAspect {
         }
 
         Set<Long> modelIds = getModelIdInQuery(queryReq, semanticSchemaResp);
+        if (CollectionUtils.isEmpty(modelIds)) {
+            throw new InvalidArgumentException(
+                    "Unable to determine the model scope for an authorized query");
+        }
 
         // 2. determine whether admin of the model
         if (checkModelAdmin(user, modelIds)) {
@@ -218,6 +226,7 @@ public class S2DataPermissionAspect {
             log.debug("Dimension filters are empty");
             return;
         }
+        validateDimensionFilters(dimensionFilters);
 
         StringJoiner joiner = new StringJoiner(" OR ");
         dimensionFilters.stream().filter(
@@ -234,7 +243,9 @@ public class S2DataPermissionAspect {
                 log.info("After doRowPermission, querySqlReq: {}", modifiedSql);
             }
         } catch (JSQLParserException e) {
-            log.error("JSQLParser encountered an exception: {}", e.toString());
+            log.error("Failed to apply row permission filter", e);
+            throw new InvalidPermissionException(
+                    "Row permission filter is invalid; query execution was denied");
         }
     }
 
@@ -254,6 +265,7 @@ public class S2DataPermissionAspect {
             log.debug("dimensionFilters is empty");
             return;
         }
+        validateDimensionFilters(dimensionFilters);
 
         StringJoiner joiner = new StringJoiner(" OR ");
         dimensionFilters.forEach(filter -> joiner.add(" ( " + filter + " ) "));
@@ -267,6 +279,22 @@ public class S2DataPermissionAspect {
             filters.add(filter);
             queryStructReq.setDimensionFilters(filters);
             log.info("after doRowPermission, queryStructReq:{}", queryStructReq);
+        }
+    }
+
+    private void validateDimensionFilters(List<String> dimensionFilters) {
+        for (String expression : dimensionFilters) {
+            if (UNSAFE_PERMISSION_EXPRESSION.matcher(expression).find()) {
+                throw new InvalidPermissionException(
+                        "Unsafe row permission filter; query execution was denied");
+            }
+            try {
+                CCJSqlParserUtil.parseCondExpression(expression);
+            } catch (JSQLParserException e) {
+                log.error("Failed to parse row permission filter", e);
+                throw new InvalidPermissionException(
+                        "Row permission filter is invalid; query execution was denied");
+            }
         }
     }
 

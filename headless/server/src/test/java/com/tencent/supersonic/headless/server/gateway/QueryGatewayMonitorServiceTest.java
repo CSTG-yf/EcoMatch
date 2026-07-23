@@ -27,6 +27,7 @@ class QueryGatewayMonitorServiceTest {
         assertTrue(snapshot.stages().containsKey("translate"));
         assertTrue(snapshot.stages().containsKey("execute"));
         assertTrue(snapshot.stages().containsKey("explain"));
+        assertEquals(0, snapshot.cache().requests());
     }
 
     @Test

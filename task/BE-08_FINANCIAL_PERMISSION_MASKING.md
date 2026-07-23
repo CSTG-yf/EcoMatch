@@ -10,6 +10,8 @@
 - 原值权限支持超级管理员、用户白名单和角色白名单。
 - 查询缓存按用户隔离，避免权限或脱敏结果跨用户串用。
 - 查询详情、续用解析、执行、结果保存、反馈和删除增加对象所有者鉴权，超级管理员保留审计访问能力。
+- 需要鉴权的查询无法确定模型范围时直接拒绝，避免空模型集合触发管理员判断旁路。
+- SQL 与结构化查询共用行权限表达式校验，拦截多语句、注释、子查询和 DML/DDL 关键字；表达式解析失败时 fail-closed，不执行未过滤查询。
 
 ## 配置
 
@@ -22,8 +24,8 @@
 
 - `AuthGroupMatcherTest`：用户、组织、角色和属性条件。
 - `DataMaskingServiceTest`：邮箱、手机号、证件、账号、文本和数值脱敏，管理员、用户及角色白名单原值访问。
-- `DataMaskingServiceTest`：空列定义和空语义集合边界不会中断查询响应。
-- `S2DataPermissionMaskingTest`：验证 `needAuth=false` 和模型管理员路径均不能绕过动态脱敏。
+- `DataMaskingServiceTest`：空列定义、空语义集合和空角色集合边界不会中断查询响应。
+- `S2DataPermissionMaskingTest`：验证 `needAuth=false` 和模型管理员路径均不能绕过动态脱敏，并覆盖空模型范围及行权限注入拒绝。
 - `ChatObjectAccessPolicyTest`：所有者、超级管理员和越权访问。
 
 安全注入、提示词绕过、分享链接和全接口越权扫描由 QA-02 继续覆盖。

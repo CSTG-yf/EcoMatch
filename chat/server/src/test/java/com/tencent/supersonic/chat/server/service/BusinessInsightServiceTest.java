@@ -48,6 +48,30 @@ class BusinessInsightServiceTest {
         assertThrows(RuntimeException.class, () -> service.recommend(new BusinessInsightReq()));
     }
 
+    @Test
+    void rejectsResultThatDoesNotMatchDeclaredColumns() {
+        BusinessInsightService service =
+                new BusinessInsightService(BusinessInsightConfig.defaults());
+        BusinessInsightReq request = request();
+        request.setQueryResults(List.of(Map.of("unknown", 1)));
+
+        assertThrows(RuntimeException.class, () -> service.explain(request));
+    }
+
+    @Test
+    void explainsEmptyResultWithoutMakingClaims() {
+        BusinessInsightService service =
+                new BusinessInsightService(BusinessInsightConfig.defaults());
+        BusinessInsightReq request = request();
+        request.setQueryResults(List.of());
+
+        BusinessExplanation explanation = service.explain(request);
+
+        assertTrue(explanation.getEvidence().isEmpty());
+        assertTrue(
+                explanation.getWarnings().stream().anyMatch(warning -> warning.contains("未返回数据")));
+    }
+
     private BusinessInsightReq request() {
         BusinessInsightReq request = new BusinessInsightReq();
         request.setQueryText("各机构贷款余额");

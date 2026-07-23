@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BusinessInsightProcessorTest {
@@ -58,6 +59,53 @@ class BusinessInsightProcessorTest {
         assertEquals("BAR", result.getRecommendedChart().getChartType());
         assertTrue(result.getBusinessExplanation().getWarnings().stream()
                 .anyMatch(warning -> warning.contains("少于3条")));
+        assertFalse(result.getBusinessExplanation().getEvidence().stream()
+                .anyMatch(evidence -> evidence.contains("变化") || evidence.contains("异常")));
+    }
+
+    @Test
+    void identifiesNumericColumnWhenFirstRowIsNull() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "CATEGORY")));
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("branch", "A");
+        first.put("amount", null);
+        Map<String, Object> second = new LinkedHashMap<>();
+        second.put("branch", "B");
+        second.put("amount", 20);
+        Map<String, Object> third = new LinkedHashMap<>();
+        third.put("branch", "C");
+        third.put("amount", 30);
+        result.setQueryResults(List.of(first, second, third));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("BAR", result.getRecommendedChart().getChartType());
+        assertTrue(result.getBusinessExplanation().getEvidence().contains("amount范围为20至30"));
+    }
+
+    @Test
+    void returnsControlledExplanationForEmptyResult() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
+        result.setQueryResults(List.of());
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+        BusinessInsightProcessor processor = new BusinessInsightProcessor();
+
+        assertTrue(processor.accept(context));
+        processor.process(context);
+
+        assertEquals("TABLE", result.getRecommendedChart().getChartType());
+        assertTrue(result.getCandidateCharts().stream()
+                .noneMatch(chart -> "PIE".equals(chart.getChartType())));
+        assertTrue(result.getBusinessExplanation().getEvidence().isEmpty());
+        assertTrue(result.getBusinessExplanation().getWarnings().stream()
+                .anyMatch(warning -> warning.contains("未返回数据")));
     }
 
     @Test

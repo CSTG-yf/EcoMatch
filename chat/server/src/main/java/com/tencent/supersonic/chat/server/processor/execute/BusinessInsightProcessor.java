@@ -43,8 +43,8 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     public boolean accept(ExecuteContext executeContext) {
         QueryResult result = executeContext.getResponse();
         return result != null && QueryState.SUCCESS.equals(result.getQueryState())
-                && result.getQueryResults() != null && !result.getQueryResults().isEmpty()
-                && result.getQueryColumns() != null && !result.getQueryColumns().isEmpty();
+                && result.getQueryResults() != null && result.getQueryColumns() != null
+                && !result.getQueryColumns().isEmpty();
     }
 
     @Override
@@ -117,13 +117,12 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         List<String> categories = new ArrayList<>();
         Map<String, String> definitions = new LinkedHashMap<>();
         Map<String, String> metricLabels = new LinkedHashMap<>();
-        Map<String, Object> sample = result.getQueryResults().get(0);
 
         for (QueryColumn column : result.getQueryColumns()) {
             String field = fieldName(column);
-            Object value = sample.get(field);
             if (SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
-                    || value instanceof Number) {
+                    || result.getQueryResults().stream().map(row -> row.get(field))
+                            .anyMatch(Number.class::isInstance)) {
                 metrics.add(field);
                 metricLabels.put(field, field);
                 if (StringUtils.isNotBlank(column.getComment())) {
@@ -146,7 +145,10 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     private List<ChartRecommendation> recommendCharts(FieldProfile profile, int rowCount,
             BusinessInsightConfig rules) {
         List<ChartRecommendation> charts = new ArrayList<>();
-        if (rowCount == 1 && !profile.metrics.isEmpty()) {
+        if (rowCount == 0) {
+            charts.add(chart("TABLE", rules.getLowConfidence(), "当前无数据，保留表格结构用于展示空结果",
+                    profile.categories, profile.metrics));
+        } else if (rowCount == 1 && !profile.metrics.isEmpty()) {
             charts.add(chart("KPI_CARD", 0.98, "单行数值结果适合使用指标卡", List.of(), profile.metrics));
         } else if (profile.categories.size() >= 3) {
             charts.add(
@@ -184,7 +186,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     }
 
     private boolean isComposition(FieldProfile profile, int rowCount, BusinessInsightConfig rules) {
-        if (profile.categories.size() != 1 || profile.metrics.size() != 1
+        if (profile.categories.size() != 1 || profile.metrics.size() != 1 || rowCount < 2
                 || rowCount > rules.getPieMaxCategories() || profile.hasNegativeValue) {
             return false;
         }
@@ -196,6 +198,8 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             FieldProfile profile, BusinessInsightConfig rules) {
         List<String> evidence = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        boolean emptyResult = result.getQueryResults().isEmpty();
+        boolean smallSample = result.getQueryResults().size() < rules.getSmallSampleThreshold();
         for (String metric : profile.metrics) {
             List<BigDecimal> values = result.getQueryResults().stream().map(row -> row.get(metric))
                     .map(this::toDecimal).filter(Objects::nonNull).collect(Collectors.toList());
@@ -206,7 +210,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             BigDecimal max = values.stream().max(Comparator.naturalOrder()).orElseThrow();
             String label = profile.metricLabels.getOrDefault(metric, metric);
             evidence.add(String.format("%s范围为%s至%s", label, format(min), format(max)));
-            if (values.size() > 1) {
+            if (!smallSample && values.size() > 1) {
                 BigDecimal first = values.get(0);
                 BigDecimal last = values.get(values.size() - 1);
                 evidence.add(
@@ -217,17 +221,22 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
                                     .multiply(BigDecimal.valueOf(100));
                     evidence.add(String.format("%s首末记录变化%s%%", label, format(change)));
                 }
+                if (isComparisonMetric(label) || isComparisonMetric(metric)) {
+                    evidence.add(String.format("%s最新记录为%s", label, format(last)));
+                }
             }
-            appendAnomalyEvidence(label, values, evidence, rules);
+            if (!smallSample) {
+                appendAnomalyEvidence(label, values, evidence, rules);
+            }
         }
         appendContributionEvidence(result.getQueryResults(), profile, evidence);
 
         String timeRange = resolveTimeRange(result.getQueryResults(), profile.dates);
-        boolean hasQualityWarning =
-                result.getQueryResults().size() < rules.getSmallSampleThreshold()
-                        || profile.metrics.isEmpty() || evidence.isEmpty();
+        boolean hasQualityWarning = smallSample || profile.metrics.isEmpty() || evidence.isEmpty();
         warnings.add("结论仅适用于当前查询结果的数据范围，不得外推到未展示机构或时间");
-        if (result.getQueryResults().size() < rules.getSmallSampleThreshold()) {
+        if (emptyResult) {
+            warnings.add("当前查询未返回数据，不输出趋势、异常点、贡献度或因果结论");
+        } else if (smallSample) {
             warnings.add(String.format("结果少于%d条，仅描述查询事实，不输出趋势、异常点或因果结论",
                     rules.getSmallSampleThreshold()));
         }
@@ -299,6 +308,11 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     private boolean isRiskMetric(String metric) {
         String normalized = metric.toLowerCase(Locale.ROOT);
         return normalized.matches(".*(risk|overdue|nonperform|逾期|不良|风险).*");
+    }
+
+    private boolean isComparisonMetric(String metric) {
+        String normalized = metric.toLowerCase(Locale.ROOT);
+        return normalized.matches(".*(同比|环比|yoy|mom|year.?over.?year|month.?over.?month).*");
     }
 
     private boolean isRiskProfile(FieldProfile profile) {

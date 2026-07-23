@@ -23,9 +23,10 @@ public class QueryGatewayMonitorService {
                     "Only a super administrator can view query gateway metrics");
         }
         return new GatewayMonitorSnapshot(queryExecutionGateway.snapshot(),
-                QueryPerformanceMonitor.snapshot());
+                QueryPerformanceMonitor.snapshot(), QueryPerformanceMonitor.cacheSnapshot());
     }
 
     public record GatewayMonitorSnapshot(QueryExecutionGateway.QueryGatewayStats gateway,
-            Map<String, QueryPerformanceMonitor.StageStats> stages) {}
+            Map<String, QueryPerformanceMonitor.StageStats> stages,
+            QueryPerformanceMonitor.CacheStats cache) {}
 }
