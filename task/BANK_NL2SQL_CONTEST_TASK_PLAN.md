@@ -76,23 +76,6 @@
 | DATA-01 运行时意图数据集 | 已完成 | `evaluation/bank_intent/validate_dataset.py`：212条、模板交集0；冻结集52条 | BE-03、BE-04、QA-01 |
 | BE-03 金融意图识别 | 已完成 | `BankIntentFrozenDatasetTest` 报告：意图98.08%、指标100%、澄清100% | BE-04、FE-02、FE-03、QA-01 |
 | DATA-02 可执行NL2SQL数据集 | 已完成 | 96条正样本全部执行通过、96条负样本分类验证通过、模板交集0 | BE-05、BE-06、QA-01 |
-| DATA-01 官方语义帧交付层 | 已完成（补充审计数据） | `datasets/data01/deliverables/`：官方200题、官方120/40/40划分、完整语义帧和数据说明 | 意图协议映射、QA-01错误分析 |
-
-### 4.2 意图协议一致性门禁
-
-当前存在两套用途不同的意图枚举，不能直接混用：
-
-- 运行时协议：`BankIntentType` 的 `POINT_QUERY/COMPARISON/RANKING/TREND/CHANGE/RATIO/THRESHOLD/AGGREGATION`，由 BE-03、`evaluation/bank_intent` 和 DATA-02 直接使用。
-- 官方语义帧协议：`METRIC_QUERY/COMPARISON/RANKING/TREND/CONDITION_FILTER/PROFILE_ANALYSIS/CLARIFICATION_REQUIRED`，用于保存官方题目的编排语义和复杂操作。
-
-冻结规则如下：
-
-1. BE-03、BE-04、BE-05 和在线接口以 `BankIntentType` 为运行时唯一主意图协议。
-2. `CLARIFICATION_REQUIRED` 是编排结果，不直接替换运行时意图；映射为 `clarificationExpected/clarifications`。
-3. 官方语义帧转换运行时意图时必须结合 `operations`，不能只按主意图名称一对一转换。例如 `METRIC_QUERY+RATIO` 映射 `RATIO`，`COMPARISON+MOM/YOY` 映射 `CHANGE`。
-4. 在 QA-01 合并两类数据前，新增并冻结版本化映射表和转换测试；未经过转换的官方语义帧不得直接作为 BE-03 冻结集标签。
-
-该门禁记为 `INTENT-CONTRACT-01`，上游依赖官方语义帧交付层和 BE-03 运行时协议；下游被 QA-01 合并评测、官方题回灌和后续模型训练依赖。BE-04、BE-05 等在线模块继续直接使用已经冻结的 `BankIntentType`，不被该数据转换工作阻断。
 
 ## 5. 后端任务
 
@@ -344,7 +327,7 @@
 
 - 状态：已完成（2026-07-22），交付说明见 `task/DATA-01_FINANCIAL_INTENT_DATASET.md`。
 - 优先级：P0
-- 依赖关系：上游依赖赛题场景定义、银行术语库和指标口径；运行时数据直接被 BE-03、BE-04 和 QA-01 使用，补充官方语义帧进入 QA-01 前需经过 INTENT-CONTRACT-01。
+- 依赖关系：上游依赖赛题场景定义、银行术语库和指标口径；下游被 BE-03、BE-04 和 QA-01 依赖。
 - 建设经营分析、风险管控和客户营销三类问题集。
 - 覆盖标准表达、简称、口语、错别字、模糊时间和歧义问题。
 - 每条数据标注意图、指标、维度、时间、机构和筛选条件。
@@ -370,7 +353,7 @@
 ### QA-01 统一自动评测平台
 
 - 优先级：P0
-- 依赖关系：上游依赖 DATA-01、DATA-02、DATA-03、BE-03、BE-04、BE-05、BE-10 和 INTENT-CONTRACT-01；下游被 FE-09、版本优化和发布门禁依赖。
+- 依赖关系：上游依赖 DATA-01、DATA-02、DATA-03、BE-03、BE-04、BE-05 和 BE-10；下游被 FE-09、版本优化和发布门禁依赖。
 - 整合现有 evaluation 和 benchmark。
 - 输出意图准确率、SQL 执行成功率、执行结果一致率和平均响应时间。
 - 增加 10 轮连续对话、图表匹配、权限越权和动态脱敏评测。
@@ -403,33 +386,55 @@
 
 ## 8. 依赖关系
 
-```text
-[已完成] BE-01 -> [已完成] BE-02
-[已完成] DATA-01运行时数据 -> [已完成] BE-03 -> BE-04 -> FE-02
-[已完成] DATA-01官方语义帧 + [已完成] BE-03 -> [待冻结] INTENT-CONTRACT-01 -> QA-01
+```mermaid
+flowchart LR
+    BE01["✅ BE-01 语义导入"] --> BE02["✅ BE-02 指标治理"]
+    BE02 --> FE07["FE-07 治理后台"]
 
-[已完成] BE-01 + BE-02 + DATA-02 -> BE-05 -> BE-06
+    DATA01["✅ DATA-01 意图数据"] --> BE03["✅ BE-03 意图标准化"]
+    BE01 --> BE03
+    BE03 --> BE04["BE-04 十轮上下文"]
 
-[已完成] BE-01 + BE-02 -> FE-07
-[已完成] BE-02 + 三类场景样例 -> DATA-03 -> BE-10 -> FE-04 -> FE-05/FE-06
+    CONTRACT["上下文协议冻结"] --> BE04
+    CONTRACT --> FE02["FE-02 澄清交互"]
 
-机构/岗位/敏感等级规则 -> BE-08 -> BE-09 -> FE-08
-BE-05 + BE-06 + 目标数据源/联邦环境 -> BE-07
-BE-06 + BE-07 + BE-08 + 外部接口文档 -> BE-11
+    DATA02["✅ DATA-02 NL2SQL 数据"] --> BE05["BE-05 复杂 NL2SQL"]
+    BE01 --> BE05
+    BE02 --> BE05
+    BE05 --> BE06["BE-06 SQL 网关"]
+    BE06 --> BE07["BE-07 联邦查询"]
+    BE07 --> BE11["BE-11 外部集成"]
+    BE11 --> OPS["OPS-01 国产化"]
 
-DATA-01 + DATA-02 + DATA-03 + BE-03 + BE-04 + BE-05 + BE-10
-  -> QA-01 -> FE-09/发布门禁
+    DATA03["DATA-03 图表解释数据"] --> BE10["BE-10 推荐与解释"]
+    BE02 --> BE10
 
-BE-08 + BE-09 + FE-06 + FE-08 -> QA-02
-BE-05 + BE-06 + BE-07 + BE-10 + 稳定测试环境 -> QA-03
-BE-06 + BE-07 + BE-11 + 国产目标环境 -> OPS-01 -> 最终集成验收
+    BE03 --> FE01["FE-01 问数工作台"]
+    BE04 --> FE01
+    BE05 --> FE01
+    BE10 --> FE01
+    FE01 --> FE02
+    FE01 --> FE04["FE-04 图表下钻"]
+
+    BE10 --> FE04
+    FE04 --> FE05["FE-05 看板"]
+    FE05 --> FE06["FE-06 导出分享"]
+    FE06 --> QA02["QA-02 安全门禁"]
+
+    POLICY["机构、岗位、敏感规则"] --> BE08["BE-08 权限脱敏"]
+    BE08 --> BE09["BE-09 审计告警"]
+    BE08 --> FE05
+    BE08 --> FE06
+    BE09 --> FE06
+    BE09 --> FE08["FE-08 安全后台"]
+    FE08 --> QA02
+    BE08 --> BE11
 ```
 
 ### 8.1 当前可独立启动的模块
 
 | 模块 | 是否可立即启动 | 已满足依赖 | 尚需在集成前补齐 |
 | --- | --- | --- | --- |
-| INTENT-CONTRACT-01 | 是，P0首要 | DATA-01、BE-03均已完成 | 冻结映射表、转换器和双向测试 |
 | BE-04 十轮上下文引擎 | 可并行开发核心状态模型 | BE-03和运行时意图协议已完成 | 与FE-02冻结上下文协议 |
 | BE-05 复杂NL2SQL | 是 | BE-01、BE-02、DATA-02均已完成 | 使用运行时意图协议做端到端回归 |
 | FE-07 指标与术语治理后台 | 是 | BE-01、BE-02均已完成 | 仅需冻结前端接口契约 |
