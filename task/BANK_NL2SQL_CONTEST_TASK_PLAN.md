@@ -69,39 +69,45 @@
 
 ### 4.1 当前完成状态
 
-当前共 27 个任务，已完成 11 个，另有 1 个开发完成待环境验收，完成率 40.7%。
+当前共 27 个任务，已完成 11 个，另有 1 个开发完成待环境验收，整体完成率 40.7%。`[x]` 表示已满足当前任务完成定义，`[ ]` 表示仍有验收项或尚未开始。
 
-| 任务 | 状态 | 完成日期 | 交付说明 |
-| --- | --- | --- | --- |
-| BE-01 银行语义资源导入框架 | 已完成 | 2026-07-21 | `task/BE-01_BANK_SEMANTIC_IMPORT.md` |
-| BE-02 银行指标治理增强 | 已完成 | 2026-07-21 | `task/BE-02_BANK_METRIC_GOVERNANCE.md` |
-| BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
-| BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
-| BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| BE-06 SQL 安全与性能网关 | 开发、本地性能、超时取消、阶段分位数、结果及热点指标缓存已完成，待 QA-03 目标环境验收 | 2026-07-23 | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
-| BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路和行权限 fail-open 封堵） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
-| BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、配置、同比环比、空结果和小样本策略） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
-| DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
-| DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
-| DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
-| FE-07 指标与术语治理后台 | 已完成 | 2026-07-23 | `task/FE-07_METRIC_TERM_GOVERNANCE.md` |
+| 完成标记 | 任务 | 状态 | 完成日期 | 交付说明 |
+| --- | --- | --- | --- | --- |
+| [x] | BE-01 银行语义资源导入框架 | 已完成 | 2026-07-21 | `task/BE-01_BANK_SEMANTIC_IMPORT.md` |
+| [x] | BE-02 银行指标治理增强 | 已完成 | 2026-07-21 | `task/BE-02_BANK_METRIC_GOVERNANCE.md` |
+| [x] | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
+| [x] | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
+| [x] | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
+| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成；待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| [x] | BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路和行权限 fail-open 封堵） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
+| [x] | BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、配置、同比环比、空结果和小样本策略） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
+| [x] | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
+| [x] | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
+| [x] | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
+| [x] | FE-07 指标与术语治理后台 | 已完成 | 2026-07-23 | `task/FE-07_METRIC_TERM_GOVERNANCE.md` |
 
 ### 4.2 下一步可启动任务
 
-| 启动批次 | 任务 | 依赖状态 | 后续解锁 |
-| --- | --- | --- | --- |
-| 立即并行 | BE-09 审计与异常行为告警 | BE-08 已完成 | FE-08、QA-02、安全合规验收 |
-| 立即并行 | FE-01 银行智能问数工作台 | BE-03、BE-04、BE-05、BE-10 均已完成 | FE-02、FE-03、三类演示场景 |
-| 立即并行 | QA-01 统一自动评测平台 | DATA-01/02/03、BE-03/04/05/10 均已完成 | FE-09、版本优化、发布门禁 |
-| 环境就绪后 | QA-03 性能与稳定性测试 | BE-06 开发及 H2 本地性能基线完成；仍需 BE-07、目标数据库和稳定测试环境 | BE-06 最终性能验收、发布门禁 |
-| 环境就绪后 | BE-07 跨库联邦查询 | BE-06 开发完成，并需 Trino/Presto 和目标数据源清单 | BE-11、OPS-01、跨库演示 |
+| 启动批次 | 任务 | 当前状态 | 依赖关系 | 后续解锁 |
+| --- | --- | --- | --- | --- |
+| 立即并行 | BE-09 审计与异常行为告警 | 可启动 | BE-08 已完成 | FE-08、QA-02、安全合规验收 |
+| 立即并行 | FE-01 银行智能问数工作台 | 可启动 | BE-03、BE-04、BE-05、BE-10 均已完成 | FE-02、FE-03、三类演示场景 |
+| 立即并行 | QA-01 统一自动评测平台 | 可启动 | DATA-01/02/03、BE-03/04/05/10 均已完成 | FE-09、版本优化、发布门禁 |
+| 第二批 | FE-02 多轮上下文与澄清交互 | 等待 FE-01 | BE-03、BE-04 已完成；FE-01 未完成 | 多轮场景验收 |
+| 第二批 | FE-03 SQL 与可信度解释 | 等待 FE-01 | BE-02、BE-03、BE-05 已完成；FE-01 未完成 | 业务验收、错误分析 |
+| 第二批 | FE-04 智能图表与下钻 | 等待 FE-01 | BE-10、DATA-03 已完成；FE-01 未完成 | FE-05、FE-06、图表评测 |
+| 第二批 | FE-08 权限、审计和告警后台 | 等待 BE-09 | BE-08 已完成；BE-09 未完成 | QA-02、安全演示 |
+| 环境就绪后 | BE-07 跨库联邦查询 | 等待联邦环境 | BE-06 开发完成；仍需 Trino/Presto 和目标数据源清单 | BE-11、OPS-01、跨库演示 |
+| 环境就绪后 | QA-03 性能与稳定性测试 | 等待目标环境 | BE-06 开发及 H2 本地性能基线完成；仍需 BE-07、目标数据库和稳定测试环境 | BE-06 最终验收、发布门禁 |
 
 推荐执行顺序：
 
-1. 并行启动 BE-09、FE-01 和 QA-01。
-2. FE-01 完成后并行启动 FE-02、FE-03、FE-04。
-3. 联邦环境就绪后启动 BE-07，再推进 BE-11 和 OPS-01。
-4. 稳定测试环境就绪后执行 QA-03，完成 BE-06 响应时间和稳定性验收。
+1. 第一优先级并行启动 BE-09、FE-01 和 QA-01，三项之间无直接阻塞依赖。
+2. FE-01 完成后并行启动 FE-02、FE-03、FE-04；BE-09 完成后同步启动 FE-08。
+3. FE-04 完成后推进 FE-05；待 BE-09、FE-04、FE-05 完成后推进 FE-06。
+4. QA-01 完成后启动 FE-09，并将意图、SQL、多轮和图表评测纳入发布门禁。
+5. 联邦环境就绪后启动 BE-07，再推进 BE-11 和 OPS-01。
+6. 稳定测试环境就绪后执行 QA-03，完成 BE-06 响应时间和稳定性最终验收。
 
 ## 5. 后端任务
 
