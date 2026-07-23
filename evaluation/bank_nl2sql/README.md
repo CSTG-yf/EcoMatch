@@ -71,3 +71,22 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.
 ```
 
 预测文件每行只含 `id` 与 `sql`。评测器只读取 `test.jsonl` 作为评测金标，拒绝任何写 SQL，并报告解析成功率、执行成功率、结果一致率、难度与 SQL 能力分布。代码中的 `dataset_access.load_records(..., purpose="training")` 只会返回 train/dev，读取测试金标必须显式传入 `allow_test_gold=True`。
+
+## 真实模型盲测
+
+`run_model_blind_eval.py` 只将保留题的 `id`、`question` 和 SQLite schema/机构/指标元数据发送给 OpenAI 兼容模型；它不会把金标 SQL、标准结果或答案文本放入请求。预测生成与评分必须分两步执行：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_model_blind_eval.py `
+  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite `
+  --base-url http://<model-host>:<port>/v1 --model <model-id> `
+  --output .local-dev/bank-nl2sql/model-blind-predictions.jsonl `
+  --metadata-output .local-dev/bank-nl2sql/model-blind-run.json
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.py `
+  evaluation/bank_nl2sql .local-dev/bank-nl2sql/model-blind-predictions.jsonl `
+  .local-dev/bank-nl2sql/bank_benchmark.sqlite `
+  --report .local-dev/bank-nl2sql/model-blind-report.json
+```
+
+2026-07-23 的首个真实模型基线使用局域网 `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`、温度 0，对 49 道保留题完成了全量预测：解析成功率 100%，执行成功率 91.8367%，结果一致率 0%。这是失败基线而非验收通过；在改进语义翻译/提示词链路前不得将其用于发布结论。生成的预测、运行元数据和报告仅存放在 `.local-dev/bank-nl2sql/`。

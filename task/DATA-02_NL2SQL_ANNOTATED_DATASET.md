@@ -157,7 +157,7 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ### Task 5：QA-01 评测适配
 
-- 状态：基础实现已完成（2026-07-23）。`evaluate_predictions.py` 已实现只读 SQL 门禁、盲测结果比较和按难度/SQL 能力/错误类别统计；金标回放 49 条保留题的解析、执行和结果一致率均为 100%。语义 Dataset 与问答链路已接通并通过运行时冒烟；真实模型的全量盲测分数仍待产出。
+- 状态：基础实现及首次真实模型盲测已完成（2026-07-23）。`evaluate_predictions.py` 已实现只读 SQL 门禁、盲测结果比较和按难度/SQL 能力/错误类别统计；金标回放 49 条保留题的解析、执行和结果一致率均为 100%。局域网 `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf` 在温度 0 的全量保留题盲测中生成 49/49 条预测，解析成功率 100%，执行成功率 91.8367%（45/49），结果一致率 0%（0/49）；该结果为失败基线，尚不能通过 QA-01 验收。`run_model_blind_eval.py` 确保模型请求只含题号、题目和 schema 元数据，预测和报告保存在 `.local-dev/bank-nl2sql/`。
 - Owner/Boundary：`evaluate_gold.py` 和现有 `evaluation` 适配层；不实现 BE-05 优化。
 - Dependency：Task 4 冻结数据。
 - Mode：`BDD_TDD`。
