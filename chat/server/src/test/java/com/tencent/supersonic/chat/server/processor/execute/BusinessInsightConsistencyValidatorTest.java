@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -22,6 +23,25 @@ class BusinessInsightConsistencyValidatorTest {
         result.getRecommendedChart().setMetricFields(List.of("fabricated_metric"));
 
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
+    void rejectsRecommendedOrCandidateChartThatReferencesMaskedFields() {
+        QueryResult recommended = validResult();
+        recommended.setDataMasked(true);
+        recommended.setMaskedColumns(Set.of("BALANCE"));
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(recommended));
+
+        QueryResult candidate = validResult();
+        candidate.setDataMasked(true);
+        candidate.setMaskedColumns(Set.of("balance"));
+        candidate.getRecommendedChart().setMetricFields(List.of());
+        candidate.setCandidateCharts(List.of(ChartRecommendation.builder().chartType("BAR")
+                .confidence(0.8).reason("candidate").dimensionFields(List.of("month"))
+                .metricFields(List.of("balance")).build()));
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(candidate));
     }
 
     @Test

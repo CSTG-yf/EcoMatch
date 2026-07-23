@@ -369,6 +369,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             queryResult.setQuerySql(queryResp.getSql());
             queryResult.setQueryResults(queryResp.getResultList());
             queryResult.setQueryColumns(queryResp.getColumns());
+            queryResult.setDataMasked(queryResp.isDataMasked());
+            queryResult.setMaskedColumns(queryResp.getMaskedColumns());
         } else {
             queryResult.setQueryResults(new ArrayList<>());
             queryResult.setQueryColumns(new ArrayList<>());

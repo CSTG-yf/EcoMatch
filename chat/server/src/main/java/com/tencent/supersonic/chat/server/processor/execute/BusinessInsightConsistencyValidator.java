@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -22,6 +23,7 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Independently verifies that generated charts and explanations are grounded in query results. */
 final class BusinessInsightConsistencyValidator {
@@ -41,17 +43,19 @@ final class BusinessInsightConsistencyValidator {
         Set<String> fields = result.getQueryColumns().stream().map(this::fieldName)
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        validateChart(result.getRecommendedChart(), fields, "recommended chart");
+        Set<String> maskedFields = normalizedMaskedFields(result);
+        validateChart(result.getRecommendedChart(), fields, maskedFields, "recommended chart");
         if (result.getCandidateCharts() == null) {
             throw inconsistent("candidate charts are missing");
         }
         for (ChartRecommendation candidate : result.getCandidateCharts()) {
-            validateChart(candidate, fields, "candidate chart");
+            validateChart(candidate, fields, maskedFields, "candidate chart");
         }
         validateExplanation(result);
     }
 
-    private void validateChart(ChartRecommendation chart, Set<String> fields, String location) {
+    private void validateChart(ChartRecommendation chart, Set<String> fields,
+            Set<String> maskedFields, String location) {
         if (chart == null || StringUtils.isBlank(chart.getChartType())
                 || StringUtils.isBlank(chart.getReason())) {
             throw inconsistent(location + " is incomplete");
@@ -65,6 +69,12 @@ final class BusinessInsightConsistencyValidator {
         referenced.removeAll(fields);
         if (!referenced.isEmpty()) {
             throw inconsistent(location + " references unknown fields: " + referenced);
+        }
+        List<String> maskedReferences =
+                Stream.concat(chart.getDimensionFields().stream(), chart.getMetricFields().stream())
+                        .filter(field -> maskedFields.contains(normalize(field))).toList();
+        if (!maskedReferences.isEmpty()) {
+            throw inconsistent(location + " references masked fields: " + maskedReferences);
         }
     }
 
@@ -136,6 +146,7 @@ final class BusinessInsightConsistencyValidator {
 
     private NumericFacts numericFacts(QueryResult result) {
         List<String> metrics = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
                 .filter(column -> SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
                         || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
                                 .anyMatch(Number.class::isInstance))
@@ -178,6 +189,7 @@ final class BusinessInsightConsistencyValidator {
     private void appendTemporalPercentages(QueryResult result, List<String> metrics,
             List<BigDecimal> percentages) {
         String dateField = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
                 .filter(column -> SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
                         || looksLikeDateField(fieldName(column)))
                 .map(this::fieldName).findFirst().orElse(null);
@@ -226,6 +238,7 @@ final class BusinessInsightConsistencyValidator {
 
     private String resolveTimeRange(QueryResult result) {
         String dateField = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
                 .filter(column -> SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
                         || looksLikeDateField(fieldName(column)))
                 .map(this::fieldName).findFirst().orElse(null);
@@ -275,6 +288,23 @@ final class BusinessInsightConsistencyValidator {
 
     private BigDecimal decimalOrNull(Object value) {
         return BusinessNumericUtils.parse(value);
+    }
+
+    private Set<String> normalizedMaskedFields(QueryResult result) {
+        if (result.getMaskedColumns() == null) {
+            return Set.of();
+        }
+        return result.getMaskedColumns().stream().filter(Objects::nonNull).map(this::normalize)
+                .collect(Collectors.toSet());
+    }
+
+    private boolean isMasked(QueryResult result, String field) {
+        return result.getMaskedColumns() != null && result.getMaskedColumns().stream()
+                .filter(Objects::nonNull).anyMatch(masked -> masked.equalsIgnoreCase(field));
+    }
+
+    private String normalize(String field) {
+        return StringUtils.defaultString(field).toLowerCase(Locale.ROOT);
     }
 
     private boolean containsNonFiniteNumber(String value) {
