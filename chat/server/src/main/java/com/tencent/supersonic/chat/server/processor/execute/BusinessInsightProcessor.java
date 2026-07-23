@@ -33,6 +33,8 @@ import java.util.stream.Stream;
 public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
     private final BusinessInsightConfig configuredRules;
+    private final BusinessInsightConsistencyValidator consistencyValidator =
+            new BusinessInsightConsistencyValidator();
 
     public BusinessInsightProcessor() {
         this(null);
@@ -66,6 +68,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             BusinessExplanation explanation = explain(executeContext, result, profile, rules);
             result.setBusinessExplanation(explanation);
             result.setTextSummary(explanation.getSummary());
+            consistencyValidator.validate(result);
         } finally {
             QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXPLAIN,
                     System.nanoTime() - explainStart);

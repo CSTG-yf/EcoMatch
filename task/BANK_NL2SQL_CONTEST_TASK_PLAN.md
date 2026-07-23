@@ -78,9 +78,9 @@
 | [x] | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
 | [x] | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | [x] | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成；待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
-| [x] | BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路和行权限 fail-open 封堵） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
-| [x] | BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、配置、同比环比、空结果和小样本策略） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
+| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，已覆盖复杂 SQL 绕过；待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| [x] | BE-08 金融级权限和动态脱敏 | 已完成（含字段策略、脱敏旁路、行权限 fail-open 封堵及重复脱敏幂等） | 2026-07-23 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
+| [x] | BE-10 业务化解释与图表推荐服务 | 已完成（含独立接口、同比环比、空结果、小样本策略及结果一致性校验） | 2026-07-23 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
 | [x] | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | [x] | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
 | [x] | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |

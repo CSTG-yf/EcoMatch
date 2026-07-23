@@ -1,8 +1,12 @@
 package com.tencent.supersonic.headless.core.gateway;
 
+import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.Statements;
+import net.sf.jsqlparser.statement.select.AllColumns;
+import net.sf.jsqlparser.statement.select.AllTableColumns;
+import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
 
 import java.util.Locale;
@@ -14,10 +18,6 @@ public class SqlSafetyPolicy {
 
     private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "load_file",
             "pg_read_file", "pg_sleep", "sleep", "sys_eval", "sys_exec");
-    private static final Pattern SELECT_ALL =
-            Pattern.compile("(?is)\\bselect\\s+(?:[a-zA-Z_][\\w$]*\\.)?\\*\\s+from\\b");
-    private static final Pattern BOUNDED_QUERY =
-            Pattern.compile("(?is)\\b(where|limit|fetch\\s+first|fetch\\s+next)\\b");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
 
@@ -50,7 +50,7 @@ public class SqlSafetyPolicy {
             throw new SqlPolicyViolationException("Only read-only SELECT statements are allowed");
         }
 
-        String normalized = sql.toLowerCase(Locale.ROOT);
+        String normalized = statement.toString().toLowerCase(Locale.ROOT);
         if (LOCK_OR_FILE_WRITE.matcher(normalized).find()) {
             throw new SqlPolicyViolationException("Locking and file-writing clauses are forbidden");
         }
@@ -61,8 +61,25 @@ public class SqlSafetyPolicy {
                         "Dangerous SQL function is forbidden: " + function);
             }
         }
-        if (SELECT_ALL.matcher(normalized).find() && !BOUNDED_QUERY.matcher(normalized).find()) {
-            throw new SqlPolicyViolationException("Unbounded SELECT * queries are forbidden");
+        validateSelectAllQueries((Select) statement);
+    }
+
+    private void validateSelectAllQueries(Select statement) {
+        for (Select select : SqlSelectHelper.getAllSelect(statement)) {
+            if (!(select instanceof PlainSelect)) {
+                continue;
+            }
+            PlainSelect plainSelect = (PlainSelect) select;
+            boolean selectsAll =
+                    plainSelect.getSelectItems().stream().map(item -> item.getExpression())
+                            .anyMatch(expression -> expression instanceof AllColumns
+                                    || expression instanceof AllTableColumns);
+            boolean bounded = plainSelect.getWhere() != null || plainSelect.getLimit() != null
+                    || plainSelect.getFetch() != null;
+            if (selectsAll && !bounded) {
+                throw new SqlPolicyViolationException(
+                        "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
+            }
         }
     }
 }

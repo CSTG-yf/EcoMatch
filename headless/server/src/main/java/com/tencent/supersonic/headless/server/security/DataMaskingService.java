@@ -55,7 +55,9 @@ public class DataMaskingService {
             return;
         }
 
-        Set<String> maskedColumns = new LinkedHashSet<>();
+        Set<String> maskedColumns =
+                Stream.ofNullable(response.getMaskedColumns()).flatMap(java.util.Collection::stream)
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
         for (QueryColumn column : response.getColumns()) {
             if (!isSensitive(column, sensitiveFields)) {
                 continue;
