@@ -76,12 +76,24 @@ public class LLMRequestService {
         llmReq.setCurrentDate(DateUtils.getBeforeDate(0));
         llmReq.setTerms(getMappedTerms(queryCtx, dataSetId));
         llmReq.setSqlGenType(sqlGenType);
+        if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
+            llmReq.setBankMaxCandidates(bankMaxCandidates());
+        }
         llmReq.setChatAppConfig(queryCtx.getRequest().getChatAppConfig());
         llmReq.setDynamicExemplars(queryCtx.getRequest().getDynamicExemplars());
         llmReq.setSemanticIntentHints(SemanticIntentHints.fromQuery(queryText,
                 queryCtx.getBankIntentResult(), llmSchema, LocalDate.now()));
 
         return llmReq;
+    }
+
+    private int bankMaxCandidates() {
+        try {
+            return Math.max(1, Math.min(3,
+                    Integer.parseInt(parserConfig.getParameterValue(PARSER_BANK_MAX_CANDIDATES))));
+        } catch (RuntimeException ignored) {
+            return 1;
+        }
     }
 
     public LLMResp runText2SQL(LLMReq llmReq) {

@@ -60,10 +60,11 @@ class BankPlanGenStrategyTest {
         when(model.generate(anyString())).thenThrow(new RuntimeException("connection timeout"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
-        BankQueryPlanParseException exception =
-                assertThrows(BankQueryPlanParseException.class, () -> strategy.generate(request()));
+        BankNl2SqlError exception =
+                assertThrows(BankNl2SqlError.class, () -> strategy.generate(request()));
 
-        assertEquals(BankQueryPlanParseException.Reason.MODEL_FAILURE, exception.getReason());
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, exception.getCategory());
+        assertFalse(exception.isRetryable());
     }
 
     @Test
@@ -82,6 +83,38 @@ class BankPlanGenStrategyTest {
                         && repairPrompt.contains("INTENT_REQUIRED")
                         && repairPrompt.contains("/intent 必须精确填写：RANKING")
                         && repairPrompt.contains("/time/startDate 必须精确填写：2026-03-31")));
+    }
+
+    @Test
+    void shouldMergeEquivalentValidPlansIntoOneSemanticCandidateDiagnostic() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = request();
+        request.setBankMaxCandidates(2);
+
+        LLMResp response = strategy.generate(request);
+
+        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.candidateCount"));
+        assertEquals(1,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.uniqueCandidateCount"));
+        assertEquals(0,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.rejectedCandidateCount"));
+        verify(model, org.mockito.Mockito.times(2)).generate(anyString());
+    }
+
+    @Test
+    void shouldStopAfterOneStructuredRepairWhenThePlanRemainsInvalid() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenReturn(validPlanJson().replace("\"RANKING\"", "\"UNKNOWN\""));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        BankNl2SqlError exception =
+                assertThrows(BankNl2SqlError.class, () -> strategy.generate(request()));
+
+        assertFalse(exception.isRetryable());
+        verify(model, org.mockito.Mockito.times(2)).generate(anyString());
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionCoordinator;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
@@ -73,7 +74,11 @@ public class LLMSqlParser implements SemanticParser {
                         llmResp.setSqlOutput(candidate.getS2sql());
                         llmResp.setSqlRespMap(Map.of(candidate.getS2sql(),
                                 LLMSqlResp.builder().sqlWeight(1D).build()));
-                        attemptDiagnostics = candidate.diagnostics();
+                        attemptDiagnostics = new HashMap<>();
+                        if (llmResp.getBankCandidateDiagnostics() != null) {
+                            attemptDiagnostics.putAll(llmResp.getBankCandidateDiagnostics());
+                        }
+                        candidate.diagnostics().forEach(attemptDiagnostics::putIfAbsent);
                     }
                     // deduplicate the S2SQL result list and build parserInfo
                     sqlRespMap = responseService.getDeduplicationSqlResp(currentRetry, llmResp);
@@ -86,6 +91,10 @@ public class LLMSqlParser implements SemanticParser {
                 }
             } catch (Exception e) {
                 log.error("currentRetryRound:{}, runText2SQL failed", currentRetry, e);
+                if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
+                        && !BankNl2SqlError.allowsParserRetry(e)) {
+                    break;
+                }
             }
             SqlGenStrategy strategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
             ChatApp chatApp =

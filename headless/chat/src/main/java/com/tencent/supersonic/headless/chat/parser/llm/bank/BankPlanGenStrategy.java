@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Generates a constrained semantic plan; the plan is compiled to S2SQL only in T4. */
@@ -29,6 +30,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
 
     private final BankQueryPlanResponseParser responseParser = new BankQueryPlanResponseParser();
+    private final BankPlanCandidateRanker candidateRanker = new BankPlanCandidateRanker();
 
     public BankPlanGenStrategy() {
         ChatAppManager.register(APP_KEY,
@@ -62,25 +64,51 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         ChatLanguageModel model = getChatLanguageModel(modelConfig);
 
         String prompt = buildPrompt(llmReq.getQueryText(), hints);
-        String candidate = null;
-        try {
-            candidate = model.generate(prompt);
-            KEY_PIPELINE_LOG.info("BankPlanGenStrategy modelReq:\n{}\nmodelResp:\n{}", prompt,
-                    candidate);
-            return planResponse(llmReq, responseParser.parse(candidate, hints));
-        } catch (BankQueryPlanParseException exception) {
+        int candidateLimit = Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
+        List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
+        BankQueryPlanParseException lastParseException = null;
+        boolean repairAttempted = false;
+        for (int candidateIndex = 0; candidateIndex < candidateLimit; candidateIndex++) {
+            String candidate = null;
             try {
-                String repairPrompt = buildRepairPrompt(prompt, candidate, exception, hints);
-                String repairedCandidate = model.generate(repairPrompt);
-                KEY_PIPELINE_LOG.info("BankPlanGenStrategy repairReq:\n{}\nmodelResp:\n{}",
-                        repairPrompt, repairedCandidate);
-                return planResponse(llmReq, responseParser.parse(repairedCandidate, hints));
-            } catch (RuntimeException repairException) {
-                throw repairException;
+                candidate = model.generate(prompt);
+                candidates.add(
+                        candidateRanker.evaluate(responseParser.parse(candidate, hints), hints));
+            } catch (BankQueryPlanParseException exception) {
+                lastParseException = exception;
+                candidates.add(BankPlanCandidateRanker.Candidate
+                        .rejected("rejected-plan-" + candidateIndex, exception.getReason().name()));
+                if (!repairAttempted) {
+                    repairAttempted = true;
+                    try {
+                        String repairedCandidate = model
+                                .generate(buildRepairPrompt(prompt, candidate, exception, hints));
+                        candidates.add(candidateRanker
+                                .evaluate(responseParser.parse(repairedCandidate, hints), hints));
+                    } catch (BankQueryPlanParseException repairException) {
+                        lastParseException = repairException;
+                        candidates.add(BankPlanCandidateRanker.Candidate.rejected(
+                                "rejected-repair-" + candidateIndex,
+                                repairException.getReason().name()));
+                    } catch (RuntimeException repairException) {
+                        throw BankNl2SqlError.modelFailure(repairException);
+                    }
+                }
+            } catch (RuntimeException exception) {
+                throw BankNl2SqlError.modelFailure(exception);
             }
-        } catch (RuntimeException exception) {
-            throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MODEL_FAILURE,
-                    "bank query plan model generation failed", exception);
+        }
+        try {
+            BankPlanCandidateRanker.Selection selection = candidateRanker.select(candidates);
+            KEY_PIPELINE_LOG.info(
+                    "BankPlanGenStrategy selected {} unique candidate(s), rejected {}",
+                    selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount());
+            return planResponse(llmReq, selection.getSelected().getPlan(), selection.diagnostics());
+        } catch (IllegalArgumentException exception) {
+            if (lastParseException != null) {
+                throw BankNl2SqlError.afterSingleRepair(lastParseException);
+            }
+            throw exception;
         }
     }
 
@@ -101,10 +129,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 + ratioCorrectionRequirement(hints) + changeCorrectionRequirement(hints);
     }
 
-    private LLMResp planResponse(LLMReq llmReq, BankQueryPlan plan) {
+    private LLMResp planResponse(LLMReq llmReq, BankQueryPlan plan,
+            Map<String, Object> candidateDiagnostics) {
         LLMResp response = new LLMResp();
         response.setQuery(llmReq.getQueryText());
         response.setBankQueryPlan(plan);
+        response.setBankCandidateDiagnostics(candidateDiagnostics);
         return response;
     }
 

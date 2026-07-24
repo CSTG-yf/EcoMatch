@@ -21,6 +21,8 @@ public class LLMResp {
 
     private BankQueryPlan bankQueryPlan;
 
+    private Map<String, Object> bankCandidateDiagnostics;
+
     private List<String> fields;
 
     private Map<String, LLMSqlResp> sqlRespMap;

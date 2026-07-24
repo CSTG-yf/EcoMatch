@@ -50,6 +50,10 @@ public class ParserConfig extends ParameterConfig {
             new Parameter("s2.parser.self-consistency.number", "1", "self-consistency执行个数",
                     "执行越多效果可能越好，但token消耗越大", "number", "语义解析配置");
 
+    public static final Parameter PARSER_BANK_MAX_CANDIDATES =
+            new Parameter("s2.parser.bank.max-candidates", "1", "银行受约束计划候选数",
+                    "默认单候选；仅在已验证的失败模式下可提高至 2 或 3", "number", "语义解析配置");
+
     public static final Parameter PARSER_SHOW_COUNT =
             new Parameter("s2.parser.show.count", "3", "解析结果展示个数", "前端展示的解析个数", "number", "语义解析配置");
 
@@ -65,6 +69,7 @@ public class ParserConfig extends ParameterConfig {
     public List<Parameter> getSysParameters() {
         return Lists.newArrayList(PARSER_STRATEGY_TYPE, PARSER_LINKING_VALUE_ENABLE,
                 PARSER_RULE_CORRECTOR_ENABLE, PARSER_FEW_SHOT_NUMBER,
-                PARSER_SELF_CONSISTENCY_NUMBER, PARSER_SHOW_COUNT, PARSER_FIELDS_COUNT_THRESHOLD);
+                PARSER_SELF_CONSISTENCY_NUMBER, PARSER_BANK_MAX_CANDIDATES, PARSER_SHOW_COUNT,
+                PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

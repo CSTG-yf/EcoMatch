@@ -58,7 +58,7 @@ public class LLMResponseService {
             properties.putAll(diagnostics);
         }
         parseInfo.setProperties(properties);
-        parseInfo.setScore(queryCtx.getRequest().getQueryText().length() * (1 + weight));
+        parseInfo.setScore(parseScore(queryCtx.getRequest().getQueryText(), weight, diagnostics));
         parseInfo.setQueryMode(semanticQuery.getQueryMode());
         parseInfo.getSqlInfo().setParsedS2SQL(s2SQL);
         parseInfo.getSqlInfo().setCorrectedS2SQL(s2SQL);
@@ -94,5 +94,15 @@ public class LLMResponseService {
             result.put(key, entry.getValue());
         }
         return result;
+    }
+
+    static double parseScore(String queryText, Double weight, Map<String, ?> diagnostics) {
+        Object semanticScore =
+                diagnostics == null ? null : diagnostics.get("bank.nl2sql.semanticScore");
+        if (semanticScore instanceof Number number && Double.isFinite(number.doubleValue())
+                && number.doubleValue() >= 0D) {
+            return number.doubleValue();
+        }
+        return (queryText == null ? 0 : queryText.length()) * (1 + (weight == null ? 0D : weight));
     }
 }

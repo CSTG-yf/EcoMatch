@@ -15,4 +15,9 @@ class ParserConfigTest {
 
         Assert.assertTrue(exposed);
     }
+
+    @Test
+    void keepsConstrainedBankCandidatesSingleByDefault() {
+        Assert.assertEquals("1", ParserConfig.PARSER_BANK_MAX_CANDIDATES.getDefaultValue());
+    }
 }
