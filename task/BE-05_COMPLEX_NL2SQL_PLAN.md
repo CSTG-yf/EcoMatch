@@ -339,6 +339,7 @@ flowchart LR
 
 ### T5：候选校验、语义排序与受控纠错
 
+- 状态：已完成（2026-07-24）。已实现候选硬校验、按语义证据的稳定排序、等价候选去重、全局最多一次纠错与安全候选诊断；模型失败、计划无效和下游执行错误均不会被隐式多次重试。对应单元测试已通过。
 - Mode：`BDD_TDD`
 - Dependency：T3、T4。
 - Owner/Boundary：候选选择和错误策略，不修改数据库执行器。
@@ -361,7 +362,7 @@ flowchart LR
 
 ### T6：SuperSonic 全链路集成、特性开关与回滚
 
-- 状态：进行中（2026-07-23）。已新增 `BankNl2SqlExecutionCoordinator`：在受控策略产生有效 `BankQueryPlan` 后，`STRUCT` 路径会确定性渲染为 S2SQL，模板路径保留受控 S2SQL；两者均进入现有 `LLMSqlParser → Translator → Executor` 链路。解析结果已写入路线、指纹、输出列与候选数量诊断，不保存原始模型输出。真实“银行问数”模型已完成 H2 冒烟：单点查询与机构排名查询均走 `bank.nl2sql.route=STRUCT` 并执行 `SUCCESS`，响应分别返回银行长表和带 `rank_position` 的长表；比率查询走 `bank.nl2sql.route=S2SQL_TEMPLATE` 并执行 `SUCCESS`，返回分子、分母与百分比的稳定长表。当前仍需完成非银行回归和开关回滚验证；T7 冒烟发现输出契约差异后，T6 保持进行中。
+- 状态：进行中（2026-07-24）。候选排序、去重、单次纠错、错误封装和安全诊断已接入 `LLMSqlParser → Translator → Executor`；解析响应保留路线、指纹、输出契约和候选摘要，但不记录原始模型输出。相关 Maven 回归为 82 通过、1 跳过。受控策略默认仍为单候选，现有服务行为不因候选机制而改变；剩余验证为非银行回归与关闭开关后的行为回滚。
 - Mode：`BDD_TDD`
 - Dependency：T5。
 - Owner/Boundary：将新策略接入 Mapper → Parser → Translator → Executor；不做分数调优。
@@ -385,7 +386,7 @@ flowchart LR
 
 ### T7：train/dev 评分迭代
 
-- 状态：进行中（2026-07-23）。基线代表性 dev 冒烟 10 题为：解析 100%（10/10）、执行 100%（10/10）、结果一致率 0%（0/10）。输出契约候选 `output-contract-v1` 在同一题集复测为：解析 100%（10/10）、执行 100%（10/10）、结果一致率 20%（2/10）；机构维度保留候选 `retain-bank-organization-dimension-v1` 升至 30%（3/10）；比率 CTE 与分子/分母/百分比输出候选 `ratio-cte-v1` 升至 40%（4/10）。三个候选均按结果一致率提升被保留；本轮真实模型已验证比率路径从计划、翻译到执行均成功。余下 6 项均为 `RESULT_MISMATCH`，主要集中于趋势/变化、比较、阈值和多指标聚合。下一轮只基于运行产物选择下一项 T4 确定性编译能力，不调宽评测容差、不读取测试集。
+- 状态：进行中（2026-07-24）。完整 dev 已在可鉴权的真实“银行问数”链路运行。`dev-full-candidate-ranker-v6.json`：解析 100%（36/36）、执行 94.44%（34/36）、结果一致率 66.67%（24/36）；与此前 `dev-full-comprehensive-v4.json` 的解析/执行 100%、结果一致率 72.22%（26/36）相比，H-01/H-02 的执行结果不稳定，其中 H-01 已独立复现为成功。两次报告共同识别 10 条固定 `RESULT_MISMATCH`；它们涉及“前/后三”行数、同比/环比要求和题干指定机构与预期行不一致。由于 72.22% 仍未达到 80% 门槛，T7 不升级，且不读取或运行冻结 test。
 - Mode：`SCORE_LOOP`，执行时使用 `ccdawn-score-loop` 工作流。
 - Dependency：T6。
 - Owner/Boundary：只基于 train/dev 调整 Prompt、校验、编译或排序；一次实验只改变一个主要机制。
