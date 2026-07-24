@@ -13,11 +13,15 @@ import java.util.stream.Collectors;
 final class BankS2SqlTemplateFactory {
 
     String compileChange(TemplateContext context) {
-        if (context.metrics().size() != 1 || !context.metricFilters().isEmpty()) {
+        if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
-                    "change compilation currently requires one metric and no metric filter");
+                    "change compilation requires at least one metric and no metric filter");
         }
+        if (context.metrics().size() > 1) {
+            return compileMultiMetricChange(context);
+        }
+
         String metric = context.metrics().get(0).identifier();
         String groupColumns = String.join(", ", context.dimensions());
         LocalDate currentStartDate = context.plan().getTime()
@@ -86,6 +90,79 @@ final class BankS2SqlTemplateFactory {
                         baselineSelect, context.dataSetName(), baselineWhere, groupBy,
                         dimensionSelect, joinConditions, orderBy)
                 .trim();
+    }
+
+    private String compileMultiMetricChange(TemplateContext context) {
+        String groupColumns = String.join(", ", context.dimensions());
+        LocalDate currentStartDate = context.plan().getTime()
+                .getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                        ? context.plan().getTime().getEndDate()
+                        : context.plan().getTime().getStartDate();
+        String currentWhere = where(context.dimensionFilters(), context.dateField(),
+                currentStartDate, context.plan().getTime().getEndDate());
+        String baselineWhere = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getBaselineStartDate(),
+                context.plan().getTime().getBaselineEndDate());
+        String currentSelect = aggregateSelects(groupColumns, context.metrics(), "current_value");
+        String baselineSelect = aggregateSelects(groupColumns, context.metrics(), "baseline_value");
+        String groupBy = groupColumns.isEmpty() ? "" : "\n  GROUP BY " + groupColumns;
+        String join = groupColumns.isEmpty() ? "CROSS JOIN bank_baseline"
+                : "INNER JOIN bank_baseline ON " + context.dimensions().stream().map(
+                        dimension -> "bank_current." + dimension + " = bank_baseline." + dimension)
+                        .collect(Collectors.joining(" AND "));
+        String selects = context.metrics().stream()
+                .map(metric -> multiMetricChangeSelect(context.dimensions(), metric.identifier()))
+                .collect(Collectors.joining("\nUNION ALL\n"));
+        String orderBy = context.dimensions().isEmpty() ? "metric_code ASC"
+                : "metric_code ASC, " + String.join(", ", context.dimensions()) + " ASC";
+        return """
+                WITH bank_current AS (
+                  SELECT %s
+                  FROM %s
+                  WHERE %s
+                  %s
+                ), bank_baseline AS (
+                  SELECT %s
+                  FROM %s
+                  WHERE %s
+                  %s
+                )
+                %s
+                ORDER BY %s
+                """.formatted(currentSelect, context.dataSetName(), currentWhere, groupBy,
+                baselineSelect, context.dataSetName(), baselineWhere, groupBy, selects, orderBy)
+                .trim();
+    }
+
+    private String aggregateSelects(String groupColumns, List<ResolvedMetric> metrics,
+            String valueSuffix) {
+        String aggregates = metrics.stream().map(metric -> "SUM(" + metric.identifier() + ") AS "
+                + metric.identifier() + "_" + valueSuffix).collect(Collectors.joining(", "));
+        return groupColumns.isEmpty() ? aggregates : groupColumns + ", " + aggregates;
+    }
+
+    private String multiMetricChangeSelect(List<String> dimensions, String metric) {
+        String metricCode = "'" + metric + "' AS metric_code";
+        String values = "bank_current." + metric + "_current_value AS current_value, "
+                + "bank_baseline." + metric + "_baseline_value AS baseline_value, "
+                + "bank_current." + metric + "_current_value - bank_baseline." + metric
+                + "_baseline_value AS absolute_change, " + "CASE WHEN bank_baseline." + metric
+                + "_baseline_value = 0 THEN NULL " + "ELSE (bank_current." + metric
+                + "_current_value - bank_baseline." + metric
+                + "_baseline_value) * 100.0 / bank_baseline." + metric
+                + "_baseline_value END AS percent_change";
+        if (dimensions.isEmpty()) {
+            return "SELECT " + metricCode + ", " + values
+                    + "\nFROM bank_current CROSS JOIN bank_baseline";
+        }
+        String dimensionSelect = dimensions.stream()
+                .map(dimension -> "bank_current." + dimension + " AS " + dimension)
+                .collect(Collectors.joining(", "));
+        String join = dimensions.stream()
+                .map(dimension -> "bank_current." + dimension + " = bank_baseline." + dimension)
+                .collect(Collectors.joining(" AND "));
+        return "SELECT " + dimensionSelect + ", " + metricCode + ", " + values
+                + "\nFROM bank_current INNER JOIN bank_baseline ON " + join;
     }
 
     String compileMonthAndYearChange(TemplateContext context) {

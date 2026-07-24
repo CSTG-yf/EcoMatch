@@ -172,6 +172,28 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldProvideAnExplicitPeriodBaselineForAChangeRange() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validPeriodChangePlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(periodChangeRequest());
+
+        assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
+                response.getBankQueryPlan().getTime().getComparison());
+        assertEquals(LocalDate.of(2025, 12, 31),
+                response.getBankQueryPlan().getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 6, 30),
+                response.getBankQueryPlan().getTime().getBaselineStartDate());
+        verify(model).generate(org.mockito.ArgumentMatchers
+                .<String>argThat(prompt -> prompt.contains("\"startDate\":\"2025-12-31\"")
+                        && prompt.contains("\"endDate\":\"2025-12-31\"")
+                        && prompt.contains("\"comparison\":\"PERIOD_OVER_PERIOD\"")
+                        && prompt.contains("\"baselineStartDate\":\"2025-06-30\"")
+                        && prompt.contains("\"baselineEndDate\":\"2025-06-30\"")));
+    }
+
+    @Test
     void shouldNormalizeACombinedMonthAndYearQuestionToTheDualBaselinePlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validChangePlanJson()
@@ -307,6 +329,30 @@ class BankPlanGenStrategyTest {
                 "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT"}],
                 "dimensions":[],"organizations":[{"code":"ORG003"}],
                 "time":{"startDate":"2025-01-01","endDate":"2025-04-30","granularity":"DAY","comparison":"START_OF_YEAR","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"calculation":{"type":"CHANGE"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq periodChangeRequest() {
+        LLMReq request = changeRequest();
+        request.setQueryText("from half year end to year end");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        return request;
+    }
+
+    private String validPeriodChangePlanJson() {
+        return """
+                {"version":"1.0","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT"}],
+                "dimensions":[],"organizations":[{"code":"ORG003"}],
+                "time":{"startDate":"2025-12-31","endDate":"2025-12-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2025-06-30","baselineEndDate":"2025-06-30"},
                 "filters":[],"calculation":{"type":"CHANGE"},
                 "orderBy":[],"limit":null,
                 "output":{"columns":["ZB001"],"orderSensitive":true}}

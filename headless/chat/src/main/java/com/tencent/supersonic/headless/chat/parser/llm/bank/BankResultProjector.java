@@ -45,6 +45,7 @@ public class BankResultProjector {
             case RANKED_LONG_FORM -> projectRankedLongForm(contract, sourceRows);
             case DAILY_AVERAGE_RANKING -> projectDailyAverageRanking(contract, sourceRows);
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
+            case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
         };
     }
 
@@ -301,6 +302,35 @@ public class BankResultProjector {
         return Projection.applied(columns(contract), rows);
     }
 
+    private Projection projectMultiMetricChange(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup current = value(sourceRow, "current_value");
+            ValueLookup baseline = value(sourceRow, "baseline_value");
+            ValueLookup absoluteChange = value(sourceRow, "absolute_change");
+            ValueLookup percentChange = value(sourceRow, "percent_change");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found() || !current.found()
+                    || !baseline.found() || !absoluteChange.found() || !percentChange.found()) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
+            row.put("current_value", current.value());
+            row.put("baseline_value", baseline.value());
+            row.put("absolute_change", absoluteChange.value());
+            row.put("percent_change", percentChange.value());
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
     private Projection projectComparison(Contract contract, List<Map<String, Object>> sourceRows) {
         if (contract.getMetrics().size() != 1) {
             return Projection.notApplied();
@@ -458,6 +488,10 @@ public class BankResultProjector {
         if (contract.getType() == ProjectionType.MOM_YOY_CHANGE) {
             return List.of("current_value", "baseline_value", "absolute_change", "percent_change");
         }
+        if (contract.getType() == ProjectionType.MULTI_METRIC_CHANGE) {
+            return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",
+                    "absolute_change", "percent_change");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 && rankedMetricCodeFirst(contract)) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
@@ -485,7 +519,8 @@ public class BankResultProjector {
         PROVINCIAL_AVERAGE_THRESHOLD,
         AGGREGATION_SUMMARY,
         TREND,
-        MOM_YOY_CHANGE
+        MOM_YOY_CHANGE,
+        MULTI_METRIC_CHANGE
     }
 
     @Data

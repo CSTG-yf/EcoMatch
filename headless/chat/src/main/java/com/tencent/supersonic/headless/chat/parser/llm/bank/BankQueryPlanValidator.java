@@ -179,8 +179,7 @@ public class BankQueryPlanValidator {
             errors.add(error("CHANGE_COMPARISON_REQUIRED",
                     "change queries require an explicit non-NONE baseline comparison"));
         }
-        if (!Objects.equals(hints.getRequiredStartDate(), time.getStartDate())
-                || !Objects.equals(hints.getRequiredEndDate(), time.getEndDate())) {
+        if (!matchesRecognizedTimeRange(time, hints)) {
             errors.add(
                     error("TIME_RANGE_MISMATCH", "plan must preserve the recognized time range"));
         }
@@ -200,6 +199,22 @@ public class BankQueryPlanValidator {
             errors.add(error("COMPARISON_BASELINE_INVALID",
                     "comparison baseline must be a complete range earlier than the query range"));
         }
+    }
+
+    private boolean matchesRecognizedTimeRange(BankQueryPlan.TimeRange time,
+            SemanticIntentHints hints) {
+        if (Objects.equals(hints.getRequiredStartDate(), time.getStartDate())
+                && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())) {
+            return true;
+        }
+        return hints.getExpectedIntent() == BankIntentType.CHANGE
+                && hints.getRequiredStartDate() != null && hints.getRequiredEndDate() != null
+                && hints.getRequiredStartDate().isBefore(hints.getRequiredEndDate())
+                && time.getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD
+                && Objects.equals(hints.getRequiredEndDate(), time.getStartDate())
+                && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())
+                && Objects.equals(hints.getRequiredStartDate(), time.getBaselineStartDate())
+                && Objects.equals(hints.getRequiredStartDate(), time.getBaselineEndDate());
     }
 
     private void validateFilters(BankQueryPlan plan, SemanticIntentHints hints,

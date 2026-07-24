@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import org.apache.commons.lang3.StringUtils;
@@ -47,6 +48,19 @@ public class BankQueryPlanResponseParser {
             throw new BankQueryPlanParseException(
                     BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
                     "model response contains an unsupported plan property", exception);
+        } catch (InvalidFormatException exception) {
+            String field = exception.getPath().isEmpty() ? ""
+                    : exception.getPath().get(exception.getPath().size() - 1).getFieldName();
+            if ("null".equals(exception.getValue())
+                    && ("startDate".equals(field) || "endDate".equals(field))) {
+                throw new BankQueryPlanParseException(
+                        BankQueryPlanParseException.Reason.MALFORMED_JSON,
+                        "time." + field
+                                + " must be an ISO-8601 date or JSON null, not the string \"null\"",
+                        exception);
+            }
+            throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MALFORMED_JSON,
+                    "model response is not complete strict JSON", exception);
         } catch (JsonProcessingException exception) {
             throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MALFORMED_JSON,
                     "model response is not complete strict JSON", exception);

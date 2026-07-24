@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -340,6 +341,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private String timeTemplate(SemanticIntentHints hints) {
         if (hints.getExpectedIntent() == BankIntentType.CHANGE) {
+            if (isExplicitChangeRange(hints)) {
+                String currentDate = hints.getRequiredEndDate().toString();
+                String baselineDate = hints.getRequiredStartDate().toString();
+                return "{\"startDate\":\"" + currentDate + "\",\"endDate\":\"" + currentDate
+                        + "\",\"granularity\":\"DAY\",\"comparison\":\"PERIOD_OVER_PERIOD\",\"baselineStartDate\":\""
+                        + baselineDate + "\",\"baselineEndDate\":\"" + baselineDate + "\"}";
+            }
             String baselineDate = hints.getRequiredStartDate().minusDays(1).toString();
             return "{\"startDate\":\"" + hints.getRequiredStartDate() + "\",\"endDate\":\""
                     + hints.getRequiredEndDate()
@@ -437,9 +445,23 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (hints.getExpectedIntent() != BankIntentType.CHANGE) {
             return "";
         }
+        if (isExplicitChangeRange(hints)) {
+            String currentDate = hints.getRequiredEndDate().toString();
+            String baselineDate = hints.getRequiredStartDate().toString();
+            return "\n- /time/startDate and /time/endDate must both be " + currentDate
+                    + "; /time/comparison must be PERIOD_OVER_PERIOD; /time/baselineStartDate and "
+                    + "/time/baselineEndDate must both be " + baselineDate;
+        }
         String baselineDate = hints.getRequiredStartDate().minusDays(1).toString();
         return "\n- /time/comparison must be START_OF_YEAR; /time/baselineStartDate and "
                 + "/time/baselineEndDate must both be " + baselineDate;
+    }
+
+    private boolean isExplicitChangeRange(SemanticIntentHints hints) {
+        LocalDate startDate = hints.getRequiredStartDate();
+        LocalDate endDate = hints.getRequiredEndDate();
+        return startDate != null && endDate != null && startDate.isBefore(endDate)
+                && !startDate.equals(LocalDate.of(startDate.getYear(), 1, 1));
     }
 
     private String calculationBaselineCatalog(SemanticIntentHints hints) {

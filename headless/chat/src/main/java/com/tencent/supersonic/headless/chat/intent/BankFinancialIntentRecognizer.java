@@ -252,6 +252,7 @@ public class BankFinancialIntentRecognizer {
         collectDates(text, HALF_YEAR_END, hits, matcher -> LocalDate.of(integer(matcher, 1),
                 "上".equals(matcher.group(2)) ? 6 : 12, "上".equals(matcher.group(2)) ? 30 : 31),
                 "HALF_YEAR");
+        addImplicitYearEndForExplicitRange(text, hits);
 
         if (hits.stream().findFirst().isPresent() && text.contains("年初")) {
             int year = hits.get(0).start().getYear();
@@ -272,6 +273,17 @@ public class BankFinancialIntentRecognizer {
                 hits.size() > 1 || !start.equals(end) ? "RANGE" : hits.get(0).granularity();
         return TimeSlot.builder().expression(expression).startDate(start).endDate(end)
                 .granularity(granularity).ambiguous(false).build();
+    }
+
+    private void addImplicitYearEndForExplicitRange(String text, List<DateHit> hits) {
+        if (!text.contains("到年末") || hits.isEmpty() || hits.stream().anyMatch(
+                hit -> hit.end().getMonthValue() == 12 && hit.end().getDayOfMonth() == 31)) {
+            return;
+        }
+        int year =
+                hits.stream().map(DateHit::end).max(LocalDate::compareTo).orElseThrow().getYear();
+        LocalDate yearEnd = LocalDate.of(year, 12, 31);
+        hits.add(new DateHit("年末", yearEnd, yearEnd, "YEAR"));
     }
 
     private TimeSlot relativeTime(String text, LocalDate referenceDate) {

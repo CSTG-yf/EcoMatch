@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
+import com.tencent.supersonic.headless.api.pojo.SchemaValueMap;
 import com.tencent.supersonic.headless.chat.intent.BankIntentType;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -148,6 +150,44 @@ class BankQueryPlanCompilerTest {
         assertEquals(
                 List.of("current_value", "baseline_value", "absolute_change", "percent_change"),
                 compiled.getOutputColumns());
+    }
+
+    @Test
+    void shouldCompileMultipleMetricChangeAsStableLongForm() {
+        BankQueryPlan plan = changePlan();
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
+        plan.getOutput().setColumns(List.of("ZB001", "ZB002"));
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, changeHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
+        assertTrue(compiled.getS2sql().contains("'ZB002' AS metric_code"));
+        assertTrue(compiled.getS2sql().contains("UNION ALL"));
+        assertTrue(compiled.getS2sql().contains("ORDER BY metric_code ASC"));
+        assertEquals(List.of("metric_code", "current_value", "baseline_value", "absolute_change",
+                "percent_change"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
+    void shouldPreserveOrganizationCodeToDisplayNameForMultipleMetricChange() {
+        LLMReq.LLMSchema schema = schema();
+        SchemaValueMap organization = new SchemaValueMap();
+        organization.setTechName("ORG004");
+        organization.setBizName("江苏省D市农商行");
+        schema.getDimensions().get(0).setSchemaValueMaps(List.of(organization));
+
+        BankQueryPlan plan = changePlan();
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
+        plan.getOutput().setColumns(List.of("ZB001", "ZB002"));
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, changeHints(), schema);
+
+        assertEquals(Map.of("ORG004", "江苏省D市农商行"),
+                compiled.getResultContract().getOrganizationNames());
     }
 
     @Test

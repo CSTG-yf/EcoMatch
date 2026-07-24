@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.parser.llm;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
@@ -10,7 +11,6 @@ import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionC
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
-import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.MapUtils;
 

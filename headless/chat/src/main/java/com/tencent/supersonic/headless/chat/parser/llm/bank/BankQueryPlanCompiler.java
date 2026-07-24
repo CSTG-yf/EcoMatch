@@ -137,11 +137,16 @@ public class BankQueryPlanCompiler {
                 yield CompiledQuery.s2sql(
                         monthAndYear ? templateFactory.compileMonthAndYearChange(templateContext)
                                 : templateFactory.compileChange(templateContext),
-                        calculatedOutputColumns(dimensions, "current_value", "baseline_value",
-                                "absolute_change", "percent_change"),
+                        metrics.size() == 1
+                                ? calculatedOutputColumns(dimensions, "current_value",
+                                        "baseline_value", "absolute_change", "percent_change")
+                                : calculatedOutputColumns(dimensions, "metric_code", "current_value",
+                                        "baseline_value", "absolute_change", "percent_change"),
                         monthAndYear ? BankResultProjector.Contract.builder()
                                 .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE).build()
-                                : null);
+                                : metrics.size() > 1
+                                        ? multiMetricChangeResultContract(plan, index)
+                                        : null);
             }
             case RATIO -> {
                 ResolvedMetric denominator = ratioDenominator(plan, metrics);
@@ -220,6 +225,30 @@ public class BankQueryPlanCompiler {
                 .metrics(List.of(
                         BankResultProjector.MetricBinding.builder().semanticColumn("metric_value")
                                 .metricCode(metricCode(metrics.get(0).schemaElement())).build()))
+                .build();
+    }
+
+    private BankResultProjector.Contract multiMetricChangeResultContract(BankQueryPlan plan,
+            SchemaIndex index) {
+        if (plan.getOrganizations().isEmpty()) {
+            return null;
+        }
+        SchemaElement organization = organizationDimension(plan, index);
+        Map<String, String> organizationNames = new LinkedHashMap<>();
+        if (organization.getSchemaValueMaps() != null) {
+            for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
+                if (valueMap != null && StringUtils.isNotBlank(valueMap.getTechName())
+                        && StringUtils.isNotBlank(valueMap.getBizName())) {
+                    organizationNames.put(valueMap.getTechName(), valueMap.getBizName());
+                }
+            }
+        }
+        return BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
+                .organizationColumn(identifier(organization)).organizationNames(organizationNames)
+                .selectedOrganizationCodes(
+                        plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
+                                .filter(StringUtils::isNotBlank).sorted().toList())
                 .build();
     }
 

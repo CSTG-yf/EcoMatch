@@ -34,6 +34,27 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldProjectMultipleMetricChangeToTheStableOrganizationContract() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "江苏省A市农商行"))
+                .selectedOrganizationCodes(List.of("ORG001")).build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("metric_code", "zb001", "current_value", new BigDecimal("42.25"),
+                        "baseline_value", new BigDecimal("41.78"), "absolute_change",
+                        new BigDecimal("0.47"), "percent_change", new BigDecimal("1.12"))));
+
+        assertEquals(List.of("org_code", "org_name", "metric_code", "current_value",
+                "baseline_value", "absolute_change", "percent_change"), projection.getColumns());
+        assertEquals(List.of(row("org_code", "ORG001", "org_name", "江苏省A市农商行", "metric_code",
+                "ZB001", "current_value", new BigDecimal("42.25"), "baseline_value",
+                new BigDecimal("41.78"), "absolute_change", new BigDecimal("0.47"),
+                "percent_change", new BigDecimal("1.12"))), projection.getRows());
+    }
+
+    @Test
     void shouldAddStableRankPositionsAfterProjectingOrganizationRows() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.RANKED_LONG_FORM)

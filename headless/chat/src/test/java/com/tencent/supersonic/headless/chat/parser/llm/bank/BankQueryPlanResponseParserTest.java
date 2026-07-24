@@ -44,6 +44,20 @@ class BankQueryPlanResponseParserTest {
     }
 
     @Test
+    void shouldExplainThatTextualNullIsNotAValidDateForRepair() {
+        String output =
+                validPlanJson().replace("\"startDate\": \"2026-03-31\"", "\"startDate\": \"null\"");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, hints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.MALFORMED_JSON, exception.getReason());
+        assertEquals(
+                "time.startDate must be an ISO-8601 date or JSON null, not the string \"null\"",
+                exception.getMessage());
+    }
+
+    @Test
     void shouldRejectPlanThatDropsTheRecognizedOrganization() {
         String output = validPlanJson().replace("  \"organizations\": [{\"code\": \"ORG004\"}],\n",
                 "  \"organizations\": [],\n");

@@ -74,6 +74,16 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldResolveAnUnqualifiedYearEndAgainstTheExplicitHalfYear() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行从2025年上半年末到年末，存款、贷款、不良率和净利润的变动方向分别是什么？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+        assertEquals(LocalDate.of(2025, 6, 30), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+    }
+
+    @Test
     void shouldExpandComprehensivePerformanceRankingToTheBankProfile() {
         BankIntentResult result = recognizer.recognize(
                 "\u6c5f\u82cf\u7701F\u5e02\u519c\u5546\u884c\u57282025-11-30\u7684\u6307\u6807\u4e2d\u54ea\u4e9b\u8868\u73b0\u8f83\u597d\uff1f\u54ea\u4e9b\u8868\u73b0\u8f83\u5dee\uff1f",

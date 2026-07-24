@@ -123,3 +123,35 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
 ```
 
 报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、阶段耗时、标准错误类别、S2SQL 与物理 SQL 摘要；不会写出实际查询行或金标答案。
+
+## 页面问答验收
+
+后端接口评测用于定位解析、编译和执行问题；产品效果验收必须经由已登录的“银行问数”页面。页面验收分两步：
+
+1. `run_ui_chat_capture.mjs` 连接一个已登录、已打开银行问数页面的 Chromium 调试会话，在 `#chatInput` 输入 dev 问题，并从页面渲染的表格读取表头、所有分页和终态；它不会自行调用 `/api/chat/query/*`。
+2. `evaluate_ui_capture.py` 将页面采集报告与本地 dev 金标比较。展示中的千位分隔符、空值和后续分页会在评分前归一化，输出是有效 JSON，且不包含金标行。
+
+页面采集运行器只允许 `train` 或 `dev`，因此不会因误操作读取冻结 test。需要验证单一已知开发题时可传入 `--record-id <ID>`；先启动专用浏览器并在其中登录一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/Start-Ui-Evaluation-Browser.ps1 -AgentId 33
+```
+
+随后运行采集和评分：
+
+```powershell
+node evaluation/bank_nl2sql/run_ui_chat_capture.mjs `
+  --browser-debug-url http://127.0.0.1:9222 `
+  --dataset evaluation/bank_nl2sql `
+  --split dev `
+  --page-url http://127.0.0.1:9000/webapp/chat?agentId=33 `
+  --agent-id 33 `
+  --output .local-dev/bank-nl2sql/ui-dev-capture.json
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_ui_capture.py `
+  evaluation/bank_nl2sql .local-dev/bank-nl2sql/ui-dev-capture.json `
+  --split dev `
+  --output .local-dev/bank-nl2sql/ui-dev-score.json
+```
+
+页面表格使用 `data-testid="ui-chat-result-table"` 和列语义标识供采集器定位；这些属性不改变用户界面或查询行为。
