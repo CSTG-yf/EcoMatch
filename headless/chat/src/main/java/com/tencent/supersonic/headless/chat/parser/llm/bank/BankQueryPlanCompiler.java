@@ -40,6 +40,7 @@ public class BankQueryPlanCompiler {
 
     private static final String ORGANIZATION_DIMENSION = "bank_organization";
     private static final String TIME_DIMENSION = "bank_data_date";
+    private static final int DAILY_AVERAGE_RANKING_MAX_LIMIT = 10_000;
 
     private final BankQueryPlanValidator validator;
     private final BankS2SqlTemplateFactory templateFactory;
@@ -122,13 +123,26 @@ public class BankQueryPlanCompiler {
                         calculatedOutputColumns(dimensions, "metric_value"),
                         comparisonResultContract(plan, metrics, dimensions, index));
             }
+            if (requiresDailyAverageRankingTemplate(plan, metrics, dimensions, metricFilters)) {
+                return dailyAverageRanking(plan, schema, metrics, dimensions,
+                        executionDimensionFilters, metricFilters, index.partitionTime(), index);
+            }
             return direct(plan, schema, metrics, dimensions, executionDimensionFilters, metricFilters,
                     outputColumns, index.partitionTime(), index);
         }
         return switch (plan.getCalculation().getType()) {
-            case CHANGE -> CompiledQuery.s2sql(templateFactory.compileChange(templateContext),
-                    calculatedOutputColumns(dimensions, "current_value", "baseline_value",
-                            "absolute_change", "percent_change"));
+            case CHANGE -> {
+                boolean monthAndYear =
+                        plan.getTime().getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY;
+                yield CompiledQuery.s2sql(
+                        monthAndYear ? templateFactory.compileMonthAndYearChange(templateContext)
+                                : templateFactory.compileChange(templateContext),
+                        calculatedOutputColumns(dimensions, "current_value", "baseline_value",
+                                "absolute_change", "percent_change"),
+                        monthAndYear ? BankResultProjector.Contract.builder()
+                                .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE).build()
+                                : null);
+            }
             case RATIO -> {
                 ResolvedMetric denominator = ratioDenominator(plan, metrics);
                 yield CompiledQuery.s2sql(
@@ -164,6 +178,15 @@ public class BankQueryPlanCompiler {
                 && metrics.size() == 1 && metricFilters.isEmpty()
                 && dimensions.stream().map(ResolvedDimension::identifier)
                         .anyMatch(ORGANIZATION_DIMENSION::equals);
+    }
+
+    private boolean requiresDailyAverageRankingTemplate(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
+            List<Filter> metricFilters) {
+        return plan.getIntent() == BankIntentType.RANKING && metrics.size() == 1
+                && metrics.get(0).planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG
+                && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)
+                        .toList().equals(List.of(ORGANIZATION_DIMENSION));
     }
 
     private List<Filter> executionDimensionFilters(BankQueryPlan plan,
@@ -270,6 +293,38 @@ public class BankQueryPlanCompiler {
                 resultContract(plan, metrics, dimensions, index));
     }
 
+    /**
+     * Retrieves the daily values through the semantic query API, then lets the result projector
+     * calculate each organization's full-period average and top/bottom ranks. The S2SQL translator
+     * cannot safely preserve a metric's generated CASE expression inside nested aggregation CTEs,
+     * while a structured request expands the metric before it reaches the physical query.
+     */
+    private CompiledQuery dailyAverageRanking(BankQueryPlan plan, LLMReq.LLMSchema schema,
+            List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
+            List<Filter> dimensionFilters, List<Filter> metricFilters, SchemaElement partitionTime,
+            SchemaIndex index) {
+        List<ResolvedDimension> dailyDimensions = new ArrayList<>(dimensions);
+        dailyDimensions.add(new ResolvedDimension(partitionTime));
+
+        QueryStructReq request = new QueryStructReq();
+        request.setDataSetId(schema.getDataSetId());
+        request.setDataSetName(schema.getDataSetName());
+        request.setQueryType(QueryType.AGGREGATE);
+        request.setGroups(dailyDimensions.stream().map(ResolvedDimension::identifier)
+                .collect(Collectors.toList()));
+        request.setAggregators(List.of(new Aggregator(metrics.get(0).identifier(),
+                AggOperatorEnum.SUM, metrics.get(0).identifier())));
+        request.setDimensionFilters(dimensionFilters);
+        request.setMetricFilters(metricFilters);
+        request.setDateInfo(dateInfo(plan, partitionTime, dailyDimensions));
+        request.setOrders(List.of());
+        request.setLimit(DAILY_AVERAGE_RANKING_MAX_LIMIT);
+        return CompiledQuery.struct(request,
+                List.of(ORGANIZATION_DIMENSION, dateField(partitionTime),
+                        metrics.get(0).identifier()),
+                dailyAverageRankingResultContract(plan, metrics, dimensions, index));
+    }
+
     private BankResultProjector.Contract resultContract(BankQueryPlan plan,
             List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions, SchemaIndex index) {
         if (plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT
@@ -319,7 +374,23 @@ public class BankQueryPlanCompiler {
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
-                .metrics(metricBindings).build();
+                .metrics(metricBindings).topRankLimit(rankFilterLimit(plan, "rank"))
+                .bottomRankLimit(rankFilterLimit(plan, "rank_from_bottom")).build();
+    }
+
+    private Integer rankFilterLimit(BankQueryPlan plan, String field) {
+        return plan.getFilters().stream().filter(filter -> field.equals(filter.getField()))
+                .map(BankQueryPlan.Filter::getValue).filter(StringUtils::isNotBlank).findFirst()
+                .map(Integer::valueOf).orElse(null);
+    }
+
+    private BankResultProjector.Contract dailyAverageRankingResultContract(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions, SchemaIndex index) {
+        BankResultProjector.Contract contract = resultContract(plan, metrics, dimensions, index);
+        if (contract != null) {
+            contract.setType(BankResultProjector.ProjectionType.DAILY_AVERAGE_RANKING);
+        }
+        return contract;
     }
 
     private BankResultProjector.Contract trendResultContract(BankQueryPlan plan,

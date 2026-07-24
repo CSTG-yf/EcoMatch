@@ -69,6 +69,39 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void shouldAcceptSelectedOrganizationRankWithoutTopN() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setLimit(null);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("机构", "数据日期")).requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
+    void shouldKeepTopNRequiredForUnboundedRanking() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setOrganizations(List.of());
+        plan.setLimit(null);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("机构", "数据日期")).requiredMetrics(Set.of("ZB001"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("RANKING_LIMIT_REQUIRED"));
+    }
+
+    @Test
     void shouldRejectRankingPlanThatGroupsByDateInsteadOfOrganization() {
         BankQueryPlan plan = completeRankingPlan();
         plan.setDimensions(List.of("数据日期"));

@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Generates a constrained semantic plan; the plan is compiled to S2SQL only in T4. */
@@ -103,7 +105,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             KEY_PIPELINE_LOG.info(
                     "BankPlanGenStrategy selected {} unique candidate(s), rejected {}",
                     selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount());
-            return planResponse(llmReq, selection.getSelected().getPlan(), selection.diagnostics());
+            return planResponse(llmReq, normalizePlanForQuestion(llmReq.getQueryText(),
+                    selection.getSelected().getPlan(), hints), selection.diagnostics());
         } catch (IllegalArgumentException exception) {
             if (lastParseException != null) {
                 throw BankNl2SqlError.afterSingleRepair(lastParseException);
@@ -136,6 +139,112 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         response.setBankQueryPlan(plan);
         response.setBankCandidateDiagnostics(candidateDiagnostics);
         return response;
+    }
+
+    private BankQueryPlan normalizePlanForQuestion(String queryText, BankQueryPlan plan,
+            SemanticIntentHints hints) {
+        if (plan == null || plan.getTime() == null || queryText == null) {
+            return plan;
+        }
+        if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
+            return normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
+        }
+        if (hints.getExpectedIntent() != BankIntentType.CHANGE || !queryText.contains("环比")
+                || !queryText.contains("同比")) {
+            return plan;
+        }
+        plan.setIntent(BankIntentType.CHANGE);
+        plan.setMetrics(hints
+                .getRequiredMetrics().stream().sorted().map(metric -> BankQueryPlan.Metric.builder()
+                        .bizName(metric).aggregation(BankQueryPlan.Aggregation.DEFAULT).build())
+                .toList());
+        plan.setDimensions(List.of());
+        plan.setOrganizations(hints.getRequiredOrganizationCodes().stream().sorted()
+                .map(code -> BankQueryPlan.Organization.builder().code(code).build()).toList());
+        plan.setFilters(
+                hints.getRequiredFilters().stream()
+                        .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
+                                .operator(filter.operator()).value(filter.value()).build())
+                        .toList());
+        plan.getTime().setStartDate(hints.getRequiredStartDate());
+        plan.getTime().setEndDate(hints.getRequiredEndDate());
+        plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.CHANGE).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        plan.setOutput(BankQueryPlan.Output.builder()
+                .columns(plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList())
+                .orderSensitive(true).build());
+        return plan;
+    }
+
+    private boolean isAnnualAverageTopAndBottomRanking(String queryText,
+            SemanticIntentHints hints) {
+        return hints.getExpectedIntent() == BankIntentType.RANKING && queryText.contains("全年")
+                && (queryText.contains("均值") || queryText.contains("日均")
+                        || queryText.contains("平均"))
+                && Pattern.compile("前([1-9]\\d*|[一二三四五六七八九十])和后([1-9]\\d*|[一二三四五六七八九十])")
+                        .matcher(queryText).find();
+    }
+
+    private BankQueryPlan normalizeAnnualAverageTopAndBottomRanking(String queryText,
+            BankQueryPlan plan, SemanticIntentHints hints) {
+        Matcher matcher = Pattern.compile("前([1-9]\\d*|[一二三四五六七八九十])和后([1-9]\\d*|[一二三四五六七八九十])")
+                .matcher(queryText);
+        if (!matcher.find() || hints.getRequiredMetrics().size() != 1) {
+            return plan;
+        }
+        int topLimit = rankLimit(matcher.group(1));
+        int bottomLimit = rankLimit(matcher.group(2));
+        String metric = hints.getRequiredMetrics().iterator().next();
+        plan.setIntent(BankIntentType.RANKING);
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                .aggregation(BankQueryPlan.Aggregation.AVG).build()));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setOrganizations(List.of());
+        plan.setFilters(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE")
+                        .value(String.valueOf(topLimit)).build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE")
+                        .value(String.valueOf(bottomLimit)).build()));
+        plan.getTime().setStartDate(hints.getRequiredStartDate());
+        plan.getTime().setEndDate(hints.getRequiredEndDate());
+        plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.NONE);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.DIRECT).build());
+        plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field(metric)
+                .direction(BankQueryPlan.SortDirection.DESC).build()));
+        plan.setLimit(hints.getRequiredLimit() == null ? topLimit + bottomLimit
+                : hints.getRequiredLimit());
+        plan.setOutput(BankQueryPlan.Output.builder().columns(List.of("bank_organization", metric))
+                .orderSensitive(true).build());
+        return plan;
+    }
+
+    private int rankLimit(String value) {
+        if (value.matches("[1-9]\\d*")) {
+            return Integer.parseInt(value);
+        }
+        return switch (value) {
+            case "一" -> 1;
+            case "二" -> 2;
+            case "三" -> 3;
+            case "四" -> 4;
+            case "五" -> 5;
+            case "六" -> 6;
+            case "七" -> 7;
+            case "八" -> 8;
+            case "九" -> 9;
+            case "十" -> 10;
+            default -> throw new IllegalArgumentException("unsupported ranking limit: " + value);
+        };
     }
 
     private ChatApp resolveChatApp(LLMReq llmReq) {

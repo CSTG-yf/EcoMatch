@@ -26,6 +26,7 @@ import static com.tencent.supersonic.headless.chat.parser.ParserConfig.*;
 public class LLMRequestService {
 
     private static final String BANK_ORGANIZATION_DIMENSION = "bank_organization";
+    private static final String BANK_DATA_DATE_DIMENSION = "bank_data_date";
 
     @Autowired
     private ParserConfig parserConfig;
@@ -38,7 +39,7 @@ public class LLMRequestService {
     public LLMReq getLlmReq(ChatQueryContext queryCtx, Long dataSetId) {
         Map<Long, String> dataSetIdToName = queryCtx.getSemanticSchema().getDataSetIdToName();
         String queryText = queryCtx.getRequest().getQueryText();
-        LLMReq.SqlGenType sqlGenType =
+        LLMReq.SqlGenType configuredSqlGenType =
                 LLMReq.SqlGenType.valueOf(parserConfig.getParameterValue(PARSER_STRATEGY_TYPE));
 
         LLMReq.LLMSchema llmSchema = new LLMReq.LLMSchema();
@@ -51,6 +52,9 @@ public class LLMRequestService {
             llmSchema.setMetrics(getMappedMetrics(queryCtx, dataSetId));
             llmSchema.setDimensions(getMappedDimensions(queryCtx, dataSetId));
         }
+        LLMReq.SqlGenType sqlGenType = selectSqlGenType(configuredSqlGenType,
+                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
+                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmSchema.setDimensions(ensureBankOrganizationDimension(llmSchema.getDimensions(),
                     queryCtx.getSemanticSchema().getDimensions(), dataSetId));
@@ -85,6 +89,32 @@ public class LLMRequestService {
                 queryCtx.getBankIntentResult(), llmSchema, LocalDate.now()));
 
         return llmReq;
+    }
+
+    static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,
+            List<SchemaElement> availableDimensions, Long dataSetId,
+            boolean bankConstrainedPlanEnabled) {
+        if (bankConstrainedPlanEnabled && isBankDataset(availableDimensions, dataSetId)) {
+            return LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN;
+        }
+        return configuredSqlGenType;
+    }
+
+    private static boolean isBankDataset(List<SchemaElement> availableDimensions, Long dataSetId) {
+        if (availableDimensions == null) {
+            return false;
+        }
+        Set<String> businessDimensions = availableDimensions.stream().filter(Objects::nonNull)
+                .filter(dimension -> belongsToDataSet(dimension, dataSetId))
+                .map(SchemaElement::getBizName).filter(Objects::nonNull).map(String::toLowerCase)
+                .collect(Collectors.toSet());
+        return businessDimensions.contains(BANK_ORGANIZATION_DIMENSION)
+                && businessDimensions.contains(BANK_DATA_DATE_DIMENSION);
+    }
+
+    private static boolean belongsToDataSet(SchemaElement dimension, Long dataSetId) {
+        return dataSetId == null || dimension.getDataSetId() == null
+                || Objects.equals(dataSetId, dimension.getDataSetId());
     }
 
     private int bankMaxCandidates() {

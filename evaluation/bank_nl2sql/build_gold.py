@@ -40,14 +40,26 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     )
 
 
-def build_gold_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[str, Any]:
-    """Populate every official DATA-02 record with gold SQL and exact result rows."""
+def build_gold_dataset(
+    dataset_path: Path | str,
+    database_path: Path | str,
+    *,
+    splits: tuple[str, ...] = SPLITS,
+    write_gold_manifest: bool = True,
+) -> dict[str, Any]:
+    """Populate selected official DATA-02 records with gold SQL and exact result rows."""
 
     dataset_path = Path(dataset_path).resolve()
     database_path = Path(database_path).resolve()
     if not database_path.is_file():
         raise FileNotFoundError(f"Benchmark database does not exist: {database_path}")
-    records_by_split = {split: _read_jsonl(dataset_path / f"{split}.jsonl") for split in SPLITS}
+    selected_splits = tuple(dict.fromkeys(splits))
+    invalid_splits = set(selected_splits) - set(SPLITS)
+    if not selected_splits or invalid_splits:
+        raise ValueError(f"Unsupported DATA-02 splits: {sorted(invalid_splits) or 'none'}")
+    if write_gold_manifest and set(selected_splits) != set(SPLITS):
+        raise ValueError("Partial materialisation must not overwrite gold_manifest.json")
+    records_by_split = {split: _read_jsonl(dataset_path / f"{split}.jsonl") for split in selected_splits}
 
     connection = sqlite3.connect(database_path)
     try:
@@ -79,9 +91,10 @@ def build_gold_dataset(dataset_path: Path | str, database_path: Path | str) -> d
         "splitCounts": {split: len(records) for split, records in records_by_split.items()},
         "sqlExecution": "PASS",
     }
-    (dataset_path / "gold_manifest.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    if write_gold_manifest:
+        (dataset_path / "gold_manifest.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     return report
 
 
@@ -89,8 +102,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="DATA-02 directory containing train/dev/test JSONL")
     parser.add_argument("database", type=Path, help="SQLite benchmark database")
+    parser.add_argument("--splits", nargs="+", choices=SPLITS, default=SPLITS)
+    parser.add_argument("--no-gold-manifest", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(build_gold_dataset(args.dataset, args.database), ensure_ascii=False, sort_keys=True))
+    print(
+        json.dumps(
+            build_gold_dataset(
+                args.dataset,
+                args.database,
+                splits=tuple(args.splits),
+                write_gold_manifest=not args.no_gold_manifest,
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

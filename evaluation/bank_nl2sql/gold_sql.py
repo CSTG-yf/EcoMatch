@@ -192,6 +192,47 @@ def _rank_direction(record: dict[str, Any], metric_code: str) -> str:
     return "ASC" if metric_code in LOWER_IS_BETTER else "DESC"
 
 
+def _top_and_bottom_limits(question: str) -> tuple[int, int] | None:
+    match = re.search(r"前([1-9]\d*)和后([1-9]\d*)", question)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _rank_limit(question: str) -> int:
+    match = re.search(r"(?:前|后|最后的?)([1-9]\d*|[一二三四五六七八九十])", question)
+    if not match:
+        return 1
+    value = match.group(1)
+    if value.isascii():
+        return int(value)
+    return {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}[value]
+
+
+def _annual_average_top_bottom_rank_query(
+    record: dict[str, Any], metric_code: str, top_limit: int, bottom_limit: int
+) -> GoldSqlSpec:
+    start_date, end_date = _date_range(record)
+    sql = f"""WITH averaged AS (
+  SELECT o.org_code, o.org_name, d.metric_code, AVG(d.metric_value) AS metric_value
+  FROM bank_metric_daily d
+  JOIN bank_organization o ON o.org_code = d.org_code
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+  GROUP BY o.org_code, o.org_name, d.metric_code
+), ranked AS (
+  SELECT org_code, org_name, metric_code, metric_value,
+         ROW_NUMBER() OVER (ORDER BY metric_value DESC, org_code) AS rank_position,
+         COUNT(*) OVER () AS total_count
+  FROM averaged
+)
+SELECT org_code, org_name, metric_code, metric_value, rank_position
+FROM ranked
+WHERE rank_position <= {top_limit} OR rank_position > total_count - {bottom_limit}
+ORDER BY CASE WHEN rank_position <= {top_limit} THEN 0 ELSE 1 END, rank_position"""
+    return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK", "DATE_RANGE", "AVERAGE", "TOP_BOTTOM"])
+
+
 def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
     try:
         metric_codes = _metric_codes(record)
@@ -202,8 +243,15 @@ def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
     metric_code = metric_codes[0]
     direction = _rank_direction(record, metric_code)
     question = str(record.get("question", ""))
-    limit_match = re.search(r"(?:前|后|最后的?)([1-9]\d*)", question)
-    limit = int(limit_match.group(1)) if limit_match else 1
+    top_and_bottom = _top_and_bottom_limits(question)
+    if top_and_bottom and "全年" in question and any(token in question for token in ("均值", "日均", "平均")):
+        return _annual_average_top_bottom_rank_query(record, metric_code, *top_and_bottom)
+    limit = _rank_limit(question)
+    organizations = _organization_codes(record)
+    if organizations:
+        result_filter = "org_code IN (" + ", ".join(_sql_literal(code) for code in organizations) + ")"
+    else:
+        result_filter = f"rank_position <= {limit}"
     sql = f"""WITH ranked AS (
   SELECT o.org_code, o.org_name, d.metric_code, d.metric_value,
          ROW_NUMBER() OVER (ORDER BY metric_value {direction}) AS rank_position
@@ -213,9 +261,9 @@ def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
 )
 SELECT org_code, org_name, metric_code, metric_value, rank_position
 FROM ranked
-WHERE rank_position <= {limit}
+WHERE {result_filter}
 ORDER BY rank_position"""
-    if limit == 1:
+    if not organizations and limit == 1:
         sql = sql.replace("rank_position <= 1", "rank_position = 1")
     return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK"])
 
@@ -287,6 +335,42 @@ def _baseline_date(record: dict[str, Any], current_date: str) -> str:
     raise GoldSqlError(f"Cannot resolve baseline date for {record.get('id')}")
 
 
+def _mom_yoy_change_query(record: dict[str, Any], current_date: str) -> GoldSqlSpec:
+    metric_code = _metric_codes(record)[0]
+    org_code = _organization_codes(record)[0]
+    current = date.fromisoformat(current_date)
+    month_baseline = _previous_month(current).isoformat()
+    year_baseline = current.replace(year=current.year - 1).isoformat()
+    sql = f"""WITH values_at_dates AS (
+  SELECT data_date, metric_value
+  FROM bank_metric_daily
+  WHERE org_code = {_sql_literal(org_code)}
+    AND metric_code = {_sql_literal(metric_code)}
+    AND data_date IN (
+      {_sql_literal(current_date)}, {_sql_literal(month_baseline)}, {_sql_literal(year_baseline)}
+    )
+), current_row AS (
+  SELECT metric_value AS current_value
+  FROM values_at_dates
+  WHERE data_date = {_sql_literal(current_date)}
+), comparisons AS (
+  SELECT 1 AS comparison_order, current_value,
+         (SELECT metric_value FROM values_at_dates WHERE data_date = {_sql_literal(month_baseline)}) AS baseline_value
+  FROM current_row
+  UNION ALL
+  SELECT 2 AS comparison_order, current_value,
+         (SELECT metric_value FROM values_at_dates WHERE data_date = {_sql_literal(year_baseline)}) AS baseline_value
+  FROM current_row
+)
+SELECT current_value, baseline_value,
+       current_value - baseline_value AS absolute_change,
+       CASE WHEN baseline_value = 0 THEN NULL
+            ELSE (current_value - baseline_value) * 100.0 / baseline_value END AS percent_change
+FROM comparisons
+ORDER BY comparison_order"""
+    return GoldSqlSpec(sql, sql, ["CHANGE", "BASELINE_COMPARISON", "MOM_YOY"])
+
+
 def _change_query(record: dict[str, Any]) -> GoldSqlSpec:
     question = str(record.get("question", ""))
     if "逐季" in question or re.search(r"20\d{2}\s*(?:年)?\s*Q1", question, flags=re.IGNORECASE):
@@ -297,8 +381,15 @@ def _change_query(record: dict[str, Any]) -> GoldSqlSpec:
         year_match = re.search(r"(20\d{2})年", question)
         if year_match:
             current_date = f"{year_match.group(1)}-12-31"
-    baseline_date = _baseline_date(record, current_date)
     organizations = _organization_codes(record)
+    if (
+        "环比" in question
+        and "同比" in question
+        and len(metric_codes) == 1
+        and len(organizations) == 1
+    ):
+        return _mom_yoy_change_query(record, current_date)
+    baseline_date = _baseline_date(record, current_date)
     if len(metric_codes) != 1 or len(organizations) != 1:
         return _multi_change_query(record, metric_codes, current_date, baseline_date)
     metric_code, org_code = metric_codes[0], organizations[0]

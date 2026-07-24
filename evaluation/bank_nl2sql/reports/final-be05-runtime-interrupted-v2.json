@@ -1,0 +1,36 @@
+{
+  "run": {
+    "split": "test",
+    "frozen": true,
+    "agentId": 33,
+    "captureMethod": "authenticated-ui",
+    "status": "interrupted",
+    "reason": "Two runtime calls produced no terminal model response after the local frontend was recovered. The remaining samples were not submitted to avoid accumulating requests against an unhealthy model queue."
+  },
+  "dataset": {
+    "requestedRecordCount": 49,
+    "submittedRecordCount": 36,
+    "unsubmittedRecordCount": 13
+  },
+  "terminalOutcomes": {
+    "done": 33,
+    "serviceFailure": 1,
+    "modelResponseTimeout": 2
+  },
+  "controlledFailures": [
+    {
+      "id": "TST-H-09",
+      "category": "SERVICE_FAILURE"
+    },
+    {
+      "id": "TST-H-10",
+      "category": "MODEL_RESPONSE_TIMEOUT"
+    },
+    {
+      "id": "TST-M-19",
+      "category": "MODEL_RESPONSE_TIMEOUT"
+    }
+  ],
+  "score": null,
+  "scoreNote": "No 49-record aggregate score is issued for an interrupted frozen-test run."
+}

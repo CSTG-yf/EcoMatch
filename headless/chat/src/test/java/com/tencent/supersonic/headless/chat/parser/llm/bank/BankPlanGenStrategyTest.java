@@ -170,6 +170,43 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldNormalizeACombinedMonthAndYearQuestionToTheDualBaselinePlan() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validChangePlanJson()
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = changeRequest();
+        request.setQueryText(
+                "\u73af\u6bd4\u548c\u540c\u6bd4\u5206\u522b\u53d8\u52a8\u4e86\u591a\u5c11");
+
+        LLMResp response = strategy.generate(request);
+
+        assertEquals(BankQueryPlan.TimeComparison.MOM_AND_YOY,
+                response.getBankQueryPlan().getTime().getComparison());
+        assertEquals(List.of(), response.getBankQueryPlan().getDimensions());
+        assertEquals(null, response.getBankQueryPlan().getTime().getBaselineStartDate());
+        assertEquals(null, response.getBankQueryPlan().getTime().getBaselineEndDate());
+    }
+
+    @Test
+    void shouldNormalizeAnnualAverageTopAndBottomQuestionToBothRankFilters() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validAnnualAverageRankingPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualAverageRankingRequest());
+
+        assertEquals(BankQueryPlan.Aggregation.AVG,
+                response.getBankQueryPlan().getMetrics().get(0).getAggregation());
+        assertEquals(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("3").build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE").value("3")
+                        .build()),
+                response.getBankQueryPlan().getFilters());
+        assertEquals(Integer.valueOf(6), response.getBankQueryPlan().getLimit());
+    }
+
+    @Test
     void shouldProvideTheDateDimensionAndQuarterGranularityForTrendPlans() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validTrendPlanJson());
@@ -271,6 +308,34 @@ class BankPlanGenStrategyTest {
                 "filters":[],"calculation":{"type":"CHANGE"},
                 "orderBy":[],"limit":null,
                 "output":{"columns":["ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq annualAverageRankingRequest() {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText(
+                "2025\u5e74\u5168\u5e74\u5404\u9879\u8d37\u6b3e\u4f59\u989d\u5747\u503c\u6392\u540d\u524d3\u548c\u540e3\u7684\u519c\u5546\u884c\uff1f");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).requiredLimit(6).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private String validAnnualAverageRankingPlanJson() {
+        return """
+                {"version":"1.0","intent":"RANKING",
+                "metrics":[{"bizName":"ZB002","aggregation":"AVG"}],
+                "dimensions":["bank_organization"],"organizations":[],
+                "time":{"startDate":"2025-01-01","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"DIRECT"},
+                "orderBy":[{"field":"ZB002","direction":"DESC"}],"limit":6,
+                "output":{"columns":["bank_organization","ZB002"],"orderSensitive":true}}
                 """;
     }
 

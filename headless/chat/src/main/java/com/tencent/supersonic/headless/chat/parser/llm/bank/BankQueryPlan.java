@@ -41,7 +41,7 @@ public class BankQueryPlan {
                     "granularity","comparison"],"properties":{"startDate":{"type":"string","format":"date"},
                     "endDate":{"type":"string","format":"date"},"granularity":{"enum":["DAY","MONTH",
                     "QUARTER","HALF_YEAR","YEAR","RANGE"]},"comparison":{"enum":["NONE","YEAR_OVER_YEAR",
-                    "PERIOD_OVER_PERIOD","START_OF_YEAR"]},"baselineStartDate":{"type":"string","format":"date"},
+                    "PERIOD_OVER_PERIOD","START_OF_YEAR","MOM_AND_YOY"]},"baselineStartDate":{"type":"string","format":"date"},
                     "baselineEndDate":{"type":"string","format":"date"}}},"filters":{"type":"array",
                     "items":{"type":"object","additionalProperties":false,"properties":{"field":{"type":"string"},
                     "operator":{"type":"string"},"value":{"type":"string"},"values":{"type":"array",
@@ -87,7 +87,7 @@ public class BankQueryPlan {
     }
 
     public enum TimeComparison {
-        NONE, YEAR_OVER_YEAR, PERIOD_OVER_PERIOD, START_OF_YEAR
+        NONE, YEAR_OVER_YEAR, PERIOD_OVER_PERIOD, START_OF_YEAR, MOM_AND_YOY
     }
 
     public enum CalculationType {

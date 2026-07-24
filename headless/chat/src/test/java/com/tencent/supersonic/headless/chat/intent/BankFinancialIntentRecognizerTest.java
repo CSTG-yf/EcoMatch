@@ -82,7 +82,18 @@ class BankFinancialIntentRecognizerTest {
         assertEquals(BankIntentType.RANKING, result.getIntent());
         assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
                 metricCodes(result));
+        assertTrue(result.getFilters().isEmpty());
         assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
+    void shouldKeepTheTopThreeFilterForGoodPerformanceOnly() {
+        BankIntentResult result =
+                recognizer.recognize("江苏省F市农商行在2025-11-30的指标中哪些表现较好？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank", result.getFilters().get(0).getField());
+        assertEquals("3", result.getFilters().get(0).getValue());
     }
 
     private Set<String> metricCodes(BankIntentResult result) {

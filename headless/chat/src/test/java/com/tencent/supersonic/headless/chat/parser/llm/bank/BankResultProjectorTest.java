@@ -136,6 +136,63 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldProjectRankedLongFormToRequestedTopAndBottomSlices() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.RANKED_LONG_FORM)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "A", "ORG002", "B", "ORG003", "C", "ORG004",
+                        "D", "ORG005", "E"))
+                .metrics(List.of(BankResultProjector.MetricBinding.builder().semanticColumn("ZB001")
+                        .metricCode("ZB001").build()))
+                .topRankLimit(2).bottomRankLimit(2).build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "ZB001", new BigDecimal("5")),
+                        row("bank_organization", "ORG002", "ZB001", new BigDecimal("4")),
+                        row("bank_organization", "ORG003", "ZB001", new BigDecimal("3")),
+                        row("bank_organization", "ORG004", "ZB001", new BigDecimal("2")),
+                        row("bank_organization", "ORG005", "ZB001", new BigDecimal("1"))));
+
+        assertEquals(
+                List.of(row("org_code", "ORG001", "org_name", "A", "metric_code", "ZB001",
+                        "metric_value", new BigDecimal("5"), "rank_position", 1),
+                        row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB001",
+                                "metric_value", new BigDecimal("4"), "rank_position", 2),
+                        row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB001",
+                                "metric_value", new BigDecimal("2"), "rank_position", 4),
+                        row("org_code", "ORG005", "org_name", "E", "metric_code", "ZB001",
+                                "metric_value", new BigDecimal("1"), "rank_position", 5)),
+                projection.getRows());
+    }
+
+    @Test
+    void shouldAverageDailyValuesBeforeProjectingTopAndBottomRanks() {
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.DAILY_AVERAGE_RANKING)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG001", "A", "ORG002", "B", "ORG003", "C"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("ZB001").metricCode("ZB001").build()))
+                        .topRankLimit(1).bottomRankLimit(1).build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "ZB001", new BigDecimal("4")),
+                        row("bank_organization", "ORG001", "ZB001", new BigDecimal("6")),
+                        row("bank_organization", "ORG002", "ZB001", new BigDecimal("2")),
+                        row("bank_organization", "ORG002", "ZB001", new BigDecimal("4")),
+                        row("bank_organization", "ORG003", "ZB001", new BigDecimal("1")),
+                        row("bank_organization", "ORG003", "ZB001", new BigDecimal("3"))));
+
+        assertEquals(List.of(
+                row("org_code", "ORG001", "org_name", "A", "metric_code", "ZB001", "metric_value",
+                        new BigDecimal("5.000000000000000"), "rank_position", 1),
+                row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB001", "metric_value",
+                        new BigDecimal("2.000000000000000"), "rank_position", 3)),
+                projection.getRows());
+    }
+
+    @Test
     void shouldProjectProvinceAverageThresholdRowsToTheStableBankContract() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD)

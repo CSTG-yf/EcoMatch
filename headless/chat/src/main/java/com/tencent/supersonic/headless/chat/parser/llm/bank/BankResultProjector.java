@@ -9,6 +9,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -42,6 +43,8 @@ public class BankResultProjector {
             case TREND -> projectTrend(contract, sourceRows);
             case LONG_FORM -> projectLongForm(contract, sourceRows);
             case RANKED_LONG_FORM -> projectRankedLongForm(contract, sourceRows);
+            case DAILY_AVERAGE_RANKING -> projectDailyAverageRanking(contract, sourceRows);
+            case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
         };
     }
 
@@ -147,6 +150,9 @@ public class BankResultProjector {
                     rank = index + 1;
                 }
                 previous = value.numericValue();
+                if (!isRequestedRankSlice(contract, rank, values.size())) {
+                    continue;
+                }
                 if (!contract.getSelectedOrganizationCodes().isEmpty() && !contract
                         .getSelectedOrganizationCodes().contains(value.organizationCode())) {
                     continue;
@@ -167,6 +173,108 @@ public class BankResultProjector {
             }
         }
         return Projection.applied(columns(contract), rankedRows);
+    }
+
+    private boolean isRequestedRankSlice(Contract contract, int rank, int totalCount) {
+        Integer topRankLimit = contract.getTopRankLimit();
+        Integer bottomRankLimit = contract.getBottomRankLimit();
+        if (topRankLimit == null && bottomRankLimit == null) {
+            return true;
+        }
+        if (topRankLimit != null && rank <= topRankLimit) {
+            return true;
+        }
+        return bottomRankLimit != null && rank > totalCount - bottomRankLimit;
+    }
+
+    private Projection projectDailyAverageRanking(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().size() != 1) {
+            return Projection.notApplied();
+        }
+        MetricBinding metric = contract.getMetrics().get(0);
+        Map<String, DailyAverage> averages = new LinkedHashMap<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricValue = value(sourceRow, metric.getSemanticColumn());
+            BigDecimal numericValue = metricValue.found() ? decimal(metricValue.value()) : null;
+            if (StringUtils.isBlank(organizationCode) || numericValue == null) {
+                return Projection.notApplied();
+            }
+            averages.computeIfAbsent(organizationCode, ignored -> new DailyAverage())
+                    .add(numericValue);
+        }
+        List<RankedValue> values = averages.entrySet().stream()
+                .map(entry -> new RankedValue(entry.getKey(), entry.getValue().average(),
+                        entry.getValue().average()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        Comparator<RankedValue> comparator = Comparator.comparing(RankedValue::numericValue);
+        if ("DESC".equals(rankingDirection(metric.getMetricCode()))) {
+            comparator = comparator.reversed();
+        }
+        values.sort(comparator.thenComparing(RankedValue::organizationCode));
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        BigDecimal previous = null;
+        int rank = 0;
+        for (int index = 0; index < values.size(); index++) {
+            RankedValue value = values.get(index);
+            if (index == 0 || value.numericValue().compareTo(previous) != 0) {
+                rank = index + 1;
+            }
+            previous = value.numericValue();
+            if (!isRequestedRankSlice(contract, rank, values.size())) {
+                continue;
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty() && !contract
+                    .getSelectedOrganizationCodes().contains(value.organizationCode())) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", value.organizationCode());
+            row.put("org_name", contract.getOrganizationNames()
+                    .getOrDefault(value.organizationCode(), value.organizationCode()));
+            row.put("metric_code", metric.getMetricCode());
+            row.put("metric_value", value.value());
+            row.put("rank_position", rank);
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    private Projection projectMomYoyChange(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (sourceRows == null || sourceRows.size() != 1) {
+            return Projection.notApplied();
+        }
+        Map<String, Object> sourceRow = sourceRows.get(0);
+        ValueLookup current = value(sourceRow, "current_value");
+        ValueLookup monthBaseline = value(sourceRow, "mom_baseline_value");
+        ValueLookup yearBaseline = value(sourceRow, "yoy_baseline_value");
+        BigDecimal currentValue = current.found() ? decimal(current.value()) : null;
+        BigDecimal monthValue = monthBaseline.found() ? decimal(monthBaseline.value()) : null;
+        BigDecimal yearValue = yearBaseline.found() ? decimal(yearBaseline.value()) : null;
+        if (currentValue == null || monthValue == null || yearValue == null) {
+            return Projection.notApplied();
+        }
+        return Projection.applied(columns(contract),
+                List.of(changeRow(current.value(), currentValue, monthBaseline.value(), monthValue),
+                        changeRow(current.value(), currentValue, yearBaseline.value(), yearValue)));
+    }
+
+    private Map<String, Object> changeRow(Object currentValue, BigDecimal currentNumeric,
+            Object baselineValue, BigDecimal baselineNumeric) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        BigDecimal change = currentNumeric.subtract(baselineNumeric);
+        row.put("current_value", currentValue);
+        row.put("baseline_value", baselineValue);
+        row.put("absolute_change", change);
+        row.put("percent_change",
+                baselineNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
+                        : change.multiply(BigDecimal.valueOf(100)).divide(baselineNumeric, 15,
+                                RoundingMode.HALF_UP));
+        return row;
     }
 
     private Projection projectRatio(Contract contract, List<Map<String, Object>> sourceRows) {
@@ -347,13 +455,17 @@ public class BankResultProjector {
         if (contract.getType() == ProjectionType.TREND) {
             return List.of("data_date", "metric_value", "quarter_change");
         }
+        if (contract.getType() == ProjectionType.MOM_YOY_CHANGE) {
+            return List.of("current_value", "baseline_value", "absolute_change", "percent_change");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 && rankedMetricCodeFirst(contract)) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
         }
         List<String> columns =
                 new ArrayList<>(List.of("org_code", "org_name", "metric_code", "metric_value"));
-        if (contract.getType() == ProjectionType.RANKED_LONG_FORM) {
+        if (contract.getType() == ProjectionType.RANKED_LONG_FORM
+                || contract.getType() == ProjectionType.DAILY_AVERAGE_RANKING) {
             columns.add("rank_position");
         }
         return columns;
@@ -367,11 +479,13 @@ public class BankResultProjector {
     public enum ProjectionType {
         LONG_FORM,
         RANKED_LONG_FORM,
+        DAILY_AVERAGE_RANKING,
         RATIO,
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
         AGGREGATION_SUMMARY,
-        TREND
+        TREND,
+        MOM_YOY_CHANGE
     }
 
     @Data
@@ -392,6 +506,8 @@ public class BankResultProjector {
         private List<String> selectedOrganizationCodes = new ArrayList<>();
         @Builder.Default
         private List<MetricBinding> metrics = new ArrayList<>();
+        private Integer topRankLimit;
+        private Integer bottomRankLimit;
     }
 
     @Data
@@ -440,6 +556,20 @@ public class BankResultProjector {
             BigDecimal numericValue) {}
 
     private record RankedValue(String organizationCode, Object value, BigDecimal numericValue) {}
+
+    private static class DailyAverage {
+        private BigDecimal sum = BigDecimal.ZERO;
+        private int count;
+
+        private void add(BigDecimal value) {
+            sum = sum.add(value);
+            count++;
+        }
+
+        private BigDecimal average() {
+            return sum.divide(BigDecimal.valueOf(count), 15, RoundingMode.HALF_UP);
+        }
+    }
 
     private record TrendValue(String sortKey, Object date, Object value, BigDecimal numericValue) {}
 }

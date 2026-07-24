@@ -305,6 +305,8 @@ public class BankFinancialIntentRecognizer {
 
     private List<FilterSlot> extractFilters(String text) {
         List<FilterSlot> filters = new ArrayList<>();
+        boolean comprehensivePerformanceProfile = isComprehensivePerformanceRanking(text)
+                && containsAny(text, "表现较好") && containsAny(text, "表现较差");
         Matcher threshold = THRESHOLD.matcher(text);
         while (threshold.find()) {
             filters.add(FilterSlot.builder().field("metric_value")
@@ -315,11 +317,11 @@ public class BankFinancialIntentRecognizer {
             filters.add(FilterSlot.builder().field("benchmark").operator("COMPARE")
                     .value("PROVINCE_AVERAGE").sourceText("全省均值").build());
         }
-        if (containsAny(text, "前三", "表现较好")) {
+        if (!comprehensivePerformanceProfile && containsAny(text, "前三", "表现较好")) {
             filters.add(FilterSlot.builder().field("rank").operator("LTE").value("3")
                     .sourceText("前三").build());
         }
-        if (containsAny(text, "后四", "表现较差")) {
+        if (!comprehensivePerformanceProfile && containsAny(text, "后四", "表现较差")) {
             filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE").value("4")
                     .sourceText("后四").build());
         }

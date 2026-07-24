@@ -186,12 +186,14 @@ public class BankQueryPlanValidator {
         }
         if (time.getComparison() != null
                 && time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                && time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY
                 && (time.getBaselineStartDate() == null || time.getBaselineEndDate() == null)) {
             errors.add(error("COMPARISON_BASELINE_REQUIRED",
                     "comparison queries require an absolute baseline range"));
         }
         if (time.getComparison() != null
                 && time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                && time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY
                 && time.getBaselineStartDate() != null && time.getBaselineEndDate() != null
                 && (time.getBaselineStartDate().isAfter(time.getBaselineEndDate())
                         || !time.getBaselineEndDate().isBefore(time.getStartDate()))) {
@@ -284,7 +286,10 @@ public class BankQueryPlanValidator {
                 && (plan.getLimit() < 1 || plan.getLimit() > hints.getMaxLimit())) {
             errors.add(error("INVALID_LIMIT", "limit must be within the configured maximum"));
         }
-        if (plan.getIntent() == BankIntentType.RANKING && plan.getLimit() == null) {
+        boolean ranksSelectedOrganization = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).anyMatch(StringUtils::isNotBlank);
+        if (plan.getIntent() == BankIntentType.RANKING && plan.getLimit() == null
+                && !ranksSelectedOrganization) {
             errors.add(error("RANKING_LIMIT_REQUIRED", "ranking requires a TopN limit"));
         }
         if (hints.getRequiredLimit() != null

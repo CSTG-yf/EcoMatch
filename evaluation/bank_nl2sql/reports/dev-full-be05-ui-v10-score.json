@@ -1,0 +1,357 @@
+Exit code: 0
+Wall time: 1.3 seconds
+Output:
+{
+  "byDifficulty": {
+    "复杂": {
+      "count": 12,
+      "matched": 12,
+      "resultAccuracy": 1.0
+    },
+    "普通": {
+      "count": 17,
+      "matched": 17,
+      "resultAccuracy": 1.0
+    },
+    "简单": {
+      "count": 7,
+      "matched": 7,
+      "resultAccuracy": 1.0
+    }
+  },
+  "items": [
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-01",
+      "match": true,
+      "parse": true,
+      "rowCount": 5
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-02",
+      "match": true,
+      "parse": true,
+      "rowCount": 5
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-03",
+      "match": true,
+      "parse": true,
+      "rowCount": 8
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-04",
+      "match": true,
+      "parse": true,
+      "rowCount": 8
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-05",
+      "match": true,
+      "parse": true,
+      "rowCount": 6
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-06",
+      "match": true,
+      "parse": true,
+      "rowCount": 6
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-07",
+      "match": true,
+      "parse": true,
+      "rowCount": 4
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-08",
+      "match": true,
+      "parse": true,
+      "rowCount": 4
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-09",
+      "match": true,
+      "parse": true,
+      "rowCount": 2
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-10",
+      "match": true,
+      "parse": true,
+      "rowCount": 2
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-11",
+      "match": true,
+      "parse": true,
+      "rowCount": 3
+    },
+    {
+      "difficulty": "复杂",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-H-12",
+      "match": true,
+      "parse": true,
+      "rowCount": 3
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-01",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-02",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-03",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-07",
+      "match": true,
+      "parse": true,
+      "rowCount": 3
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-08",
+      "match": true,
+      "parse": true,
+      "rowCount": 3
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-09",
+      "match": true,
+      "parse": true,
+      "rowCount": 3
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-10",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-11",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-12",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-13",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-14",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-15",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-16",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-17",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-18",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-19",
+      "match": true,
+      "parse": true,
+      "rowCount": 13
+    },
+    {
+      "difficulty": "普通",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-M-20",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-01",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-02",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-03",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-04",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-05",
+      "match": true,
+      "parse": true,
+      "rowCount": 2
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-07",
+      "match": true,
+      "parse": true,
+      "rowCount": 1
+    },
+    {
+      "difficulty": "简单",
+      "errorCategory": null,
+      "execute": true,
+      "id": "VAL-S-08",
+      "match": true,
+      "parse": true,
+      "rowCount": 13
+    }
+  ],
+  "matchedGoldCount": 36,
+  "metrics": {
+    "executionSuccessRate": 1.0,
+    "parseSuccessRate": 1.0,
+    "resultAccuracy": 1.0
+  },
+  "mismatches": [],
+  "recordCount": 36,
+  "sourceReport": "dev-full-be05-ui-v10.json"
+}

@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -84,6 +85,49 @@ final class BankS2SqlTemplateFactory {
                 .formatted(currentSelect, context.dataSetName(), currentWhere, groupBy,
                         baselineSelect, context.dataSetName(), baselineWhere, groupBy,
                         dimensionSelect, joinConditions, orderBy)
+                .trim();
+    }
+
+    String compileMonthAndYearChange(TemplateContext context) {
+        if (context.metrics().size() != 1 || !context.metricFilters().isEmpty()
+                || !context.dimensions().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "month-and-year comparison requires one ungrouped metric and no metric filter");
+        }
+        String metric = context.metrics().get(0).identifier();
+        LocalDate currentDate = context.plan().getTime().getEndDate();
+        LocalDate monthBaseline = YearMonth.from(currentDate).minusMonths(1).atEndOfMonth();
+        LocalDate yearBaseline = currentDate.minusYears(1);
+        String currentWhere =
+                where(context.dimensionFilters(), context.dateField(), currentDate, currentDate);
+        String monthWhere = where(context.dimensionFilters(), context.dateField(), monthBaseline,
+                monthBaseline);
+        String yearWhere =
+                where(context.dimensionFilters(), context.dateField(), yearBaseline, yearBaseline);
+        return """
+                WITH bank_current AS (
+                  SELECT SUM(%s) AS current_value
+                  FROM %s
+                  WHERE %s
+                ), bank_month_baseline AS (
+                  SELECT SUM(%s) AS baseline_value
+                  FROM %s
+                  WHERE %s
+                ), bank_year_baseline AS (
+                  SELECT SUM(%s) AS baseline_value
+                  FROM %s
+                  WHERE %s
+                )
+                SELECT bank_current.current_value,
+                       bank_month_baseline.baseline_value AS mom_baseline_value,
+                       bank_year_baseline.baseline_value AS yoy_baseline_value
+                FROM bank_current
+                CROSS JOIN bank_month_baseline
+                CROSS JOIN bank_year_baseline
+                """
+                .formatted(metric, context.dataSetName(), currentWhere, metric,
+                        context.dataSetName(), monthWhere, metric, context.dataSetName(), yearWhere)
                 .trim();
     }
 
@@ -213,6 +257,27 @@ final class BankS2SqlTemplateFactory {
                 ORDER BY aggregate_value DESC, bank_organization ASC
                 """.formatted(context.dateField(), metric, context.dataSetName(), where,
                 "aggregation_date", outerWhere).trim();
+    }
+
+    String compileDailyAverageRanking(TemplateContext context) {
+        requireSingleMetricWithoutMetricFilters(context, "daily-average ranking");
+        if (!context.dimensions().equals(List.of("bank_organization"))) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "daily-average ranking requires only the organization dimension");
+        }
+        String metric = context.metrics().get(0).identifier();
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String limit = "";
+        return """
+                SELECT bank_organization, %s, SUM(%s) AS %s
+                FROM %s
+                WHERE %s
+                GROUP BY bank_organization, %s
+                ORDER BY bank_organization ASC, %s ASC%s
+                """.formatted(context.dateField(), metric, metric, context.dataSetName(), where,
+                context.dateField(), context.dateField(), limit).trim();
     }
 
     private void requireSingleMetricWithoutMetricFilters(TemplateContext context,

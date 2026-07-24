@@ -67,6 +67,36 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileAnnualAverageTopAndBottomRankingToAControlledTemplate() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setOrganizations(List.of());
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                .aggregation(BankQueryPlan.Aggregation.AVG).build()));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                .endDate(LocalDate.of(2025, 12, 31)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setFilters(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("3").build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE").value("3")
+                        .build()));
+        plan.setLimit(6);
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, annualAverageRankingHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.STRUCT, compiled.getRoute());
+        assertEquals(List.of("bank_organization", "bank_data_date"),
+                compiled.getStructReq().getGroups());
+        assertEquals("ZB001", compiled.getStructReq().getAggregators().get(0).getColumn());
+        assertEquals(10_000, compiled.getStructReq().getLimit());
+        assertEquals(List.of("bank_organization", "数据日期", "ZB001"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.DAILY_AVERAGE_RANKING,
+                compiled.getResultContract().getType());
+        assertEquals(Integer.valueOf(3), compiled.getResultContract().getTopRankLimit());
+        assertEquals(Integer.valueOf(3), compiled.getResultContract().getBottomRankLimit());
+    }
+
+    @Test
     void shouldAttachTheStableLongFormContractToAnOrganizationComparison() {
         BankQueryPlan plan = rankingPlan();
         plan.setIntent(BankIntentType.COMPARISON);
@@ -141,6 +171,36 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql().contains("\u6570\u636e\u65e5\u671f <= '2025-04-30'"));
         assertFalse(compiled.getS2sql().contains("\u6570\u636e\u65e5\u671f >= '2025-01-01'"));
         assertTrue(compiled.getS2sql().contains("\u6570\u636e\u65e5\u671f >= '2024-12-31'"));
+    }
+
+    @Test
+    void shouldCompileMonthAndYearComparisonAsTwoOrderedBaselines() {
+        BankQueryPlan plan = changePlan();
+        plan.getTime().setStartDate(LocalDate.of(2026, 4, 30));
+        plan.getTime().setEndDate(LocalDate.of(2026, 4, 30));
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30)).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertFalse(compiled.getS2sql().contains("UNION ALL"));
+        assertTrue(compiled.getS2sql().contains("'2026-03-31'"));
+        assertTrue(compiled.getS2sql().contains("'2025-04-30'"));
+        assertTrue(compiled.getS2sql().contains("mom_baseline_value"));
+        assertTrue(compiled.getS2sql().contains("yoy_baseline_value"));
+        assertEquals(
+                List.of("current_value", "baseline_value", "absolute_change", "percent_change"),
+                compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.MOM_YOY_CHANGE,
+                compiled.getResultContract().getType());
     }
 
     @Test
@@ -429,6 +489,14 @@ class BankQueryPlanCompilerTest {
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+    }
+
+    private SemanticIntentHints annualAverageRankingHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).requiredLimit(6).maxLimit(100).build();
     }
 
     private SemanticIntentHints changeHints() {

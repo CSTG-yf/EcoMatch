@@ -15,7 +15,7 @@
   "augmentationCount": 12,
   "contentSha256": {
     "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
-    "dev.jsonl": "41f2b0c0afa3bcf1759b3804d6fc112f92a709c2b4419ca8cbf7820544b300fa",
+    "dev.jsonl": "369f7864c1951ab3a77aacdc30258147b177aa97f19457c31923da00131424ef",
     "gold_manifest.json": "dcc650e261482a910f8fb352291342b8338777664c25fff075849b7fcce0919f",
     "manifest.json": "1e50a583c41b77fe0f96640cdfda37e04cf4826676d0331390c6d436c767a9f4",
     "schema.json": "56d0db738ad0748927fa7ef78eb92efe0c2b0fb8301869d9c427caf71ee9a334",

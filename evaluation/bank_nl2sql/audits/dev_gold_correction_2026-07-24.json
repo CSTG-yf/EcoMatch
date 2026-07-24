@@ -1,0 +1,88 @@
+{
+  "auditDate": "2026-07-24",
+  "scope": {
+    "modified": [
+      "dev.jsonl"
+    ],
+    "notReadOrModified": [
+      "test.jsonl"
+    ]
+  },
+  "sourceWorkbook": {
+    "sha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+    "answerSheetIndex": 4,
+    "dailyMetricSheetIndex": 3
+  },
+  "method": {
+    "sourceCheck": "Compared the source answer sheet with daily metric rows.",
+    "materialisation": "Regenerated only the development split against the derived SQLite benchmark.",
+    "databaseSha256": "f4c1e95ec5fc2f91f6a1eae757e2610f2d99f5cf674814fa4c96be78a9f06264"
+  },
+  "corrections": [
+    {
+      "id": "VAL-H-05",
+      "defect": "Used a point-in-time top three result for an annual-average top-and-bottom ranking.",
+      "regeneratedFeatures": [
+        "RANKING",
+        "WINDOW_RANK",
+        "DATE_RANGE",
+        "AVERAGE",
+        "TOP_BOTTOM"
+      ]
+    },
+    {
+      "id": "VAL-H-06",
+      "defect": "Used a point-in-time top three result for an annual-average top-and-bottom ranking.",
+      "regeneratedFeatures": [
+        "RANKING",
+        "WINDOW_RANK",
+        "DATE_RANGE",
+        "AVERAGE",
+        "TOP_BOTTOM"
+      ]
+    },
+    {
+      "id": "VAL-H-09",
+      "defect": "Stored only year-over-year output although the source answer requires month-over-month and year-over-year.",
+      "regeneratedFeatures": [
+        "CHANGE",
+        "BASELINE_COMPARISON",
+        "MOM_YOY"
+      ]
+    },
+    {
+      "id": "VAL-H-10",
+      "defect": "Stored only year-over-year output although the source answer requires month-over-month and year-over-year.",
+      "regeneratedFeatures": [
+        "CHANGE",
+        "BASELINE_COMPARISON",
+        "MOM_YOY"
+      ]
+    },
+    {
+      "id": "VAL-M-07",
+      "defect": "Stored only the first row of a Chinese-number top-three ranking."
+    },
+    {
+      "id": "VAL-M-08",
+      "defect": "Stored only the first row of a Chinese-number top-three ranking."
+    },
+    {
+      "id": "VAL-M-09",
+      "defect": "Stored only the first row of a Chinese-number top-three ranking."
+    },
+    {
+      "id": "VAL-M-10",
+      "defect": "Stored the global first-ranked institution instead of the selected institution's global rank."
+    },
+    {
+      "id": "VAL-M-11",
+      "defect": "Stored the global first-ranked institution instead of the selected institution's global rank."
+    },
+    {
+      "id": "VAL-M-12",
+      "defect": "Stored the global first-ranked institution instead of the selected institution's global rank."
+    }
+  ],
+  "followUp": "Run the development gate before any held-out evaluation, then recreate the release manifest only after all gates pass."
+}

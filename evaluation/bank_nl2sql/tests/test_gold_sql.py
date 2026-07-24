@@ -57,6 +57,18 @@ class GoldSqlTest(unittest.TestCase):
         self.assertIn("rank_position = 1", spec.sql)
         self.assertEqual(spec.features, ["RANKING", "WINDOW_RANK"])
 
+    def test_ranking_query_accepts_chinese_top_number(self) -> None:
+        spec = build_gold_sql(
+            record(
+                "\u4e0d\u826f\u8d37\u6b3e\u7387\u6392\u540d\u524d\u4e09",
+                "RANKING",
+                ["ZB013"],
+                ["2025-09-30"],
+                [],
+            )
+        )
+        self.assertIn("rank_position <= 3", spec.sql)
+
     def test_year_end_change_uses_explicit_baseline(self) -> None:
         spec = build_gold_sql(
             record(
@@ -71,6 +83,48 @@ class GoldSqlTest(unittest.TestCase):
         self.assertIn("'2024-12-31'", spec.sql)
         self.assertIn("current_value - baseline_value", spec.sql)
         self.assertEqual(spec.features, ["CHANGE", "BASELINE_COMPARISON"])
+
+    def test_selected_organization_ranking_keeps_the_global_rank(self) -> None:
+        spec = build_gold_sql(
+            record(
+                "2025-11-30\u67d0\u94f6\u884c\u6392\u7b2c\u51e0",
+                "RANKING",
+                ["ZB012"],
+                ["2025-11-30"],
+                ["ORG007"],
+            )
+        )
+        self.assertIn("WHERE org_code IN ('ORG007')", spec.sql)
+        self.assertNotIn("rank_position = 1", spec.sql)
+
+    def test_annual_average_ranking_returns_both_top_and_bottom_groups(self) -> None:
+        spec = build_gold_sql(
+            record(
+                "2025\u5e74\u5168\u5e74\u51c0\u5229\u6da6\u5747\u503c\u6392\u540d\u524d3\u548c\u540e3",
+                "RANKING",
+                ["ZB011"],
+                ["2025\u5e74\u5168\u5e74"],
+                [],
+            )
+        )
+        self.assertIn("AVG(d.metric_value) AS metric_value", spec.sql)
+        self.assertIn("rank_position > total_count - 3", spec.sql)
+        self.assertEqual(spec.features, ["RANKING", "WINDOW_RANK", "DATE_RANGE", "AVERAGE", "TOP_BOTTOM"])
+
+    def test_change_query_returns_month_over_month_and_year_over_year(self) -> None:
+        spec = build_gold_sql(
+            record(
+                "2026-04-30\u51c0\u5229\u6da6\u73af\u6bd4\u548c\u540c\u6bd4\u5206\u522b\u53d8\u52a8",
+                "CHANGE",
+                ["ZB011"],
+                ["2026-04-30"],
+                ["ORG010"],
+            )
+        )
+        self.assertIn("UNION ALL", spec.sql)
+        self.assertIn("'2026-03-31'", spec.sql)
+        self.assertIn("'2025-04-30'", spec.sql)
+        self.assertEqual(spec.features, ["CHANGE", "BASELINE_COMPARISON", "MOM_YOY"])
 
     def test_unsupported_intent_is_rejected(self) -> None:
         with self.assertRaises(GoldSqlError):
