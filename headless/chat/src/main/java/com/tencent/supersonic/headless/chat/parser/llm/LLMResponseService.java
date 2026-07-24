@@ -18,6 +18,7 @@ import org.apache.commons.collections.MapUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -28,6 +29,11 @@ public class LLMResponseService {
 
     public void addParseInfo(ChatQueryContext queryCtx, ParseResult parseResult, String s2SQL,
             Double weight) {
+        addParseInfo(queryCtx, parseResult, s2SQL, weight, Collections.emptyMap());
+    }
+
+    public void addParseInfo(ChatQueryContext queryCtx, ParseResult parseResult, String s2SQL,
+            Double weight, Map<String, Object> diagnostics) {
         if (Objects.isNull(weight)) {
             weight = 0D;
         }
@@ -48,6 +54,9 @@ public class LLMResponseService {
                         .dbSchema(parseResult.getLlmResp().getSchema())
                         .sql(parseResult.getLlmResp().getSqlOutput()).build();
         properties.put(Text2SQLExemplar.PROPERTY_KEY, exemplar);
+        if (diagnostics != null) {
+            properties.putAll(diagnostics);
+        }
         parseInfo.setProperties(properties);
         parseInfo.setScore(queryCtx.getRequest().getQueryText().length() * (1 + weight));
         parseInfo.setQueryMode(semanticQuery.getQueryMode());

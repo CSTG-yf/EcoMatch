@@ -15,7 +15,7 @@ public class ParserConfig extends ParameterConfig {
     public static final Parameter PARSER_STRATEGY_TYPE =
             new Parameter("s2.parser.s2sql.strategy", "ONE_PASS_SELF_CONSISTENCY", "LLM解析生成S2SQL策略",
                     "ONE_PASS_SELF_CONSISTENCY: 通过投票方式一步生成sql", "list", "语义解析配置",
-                    Lists.newArrayList("ONE_PASS_SELF_CONSISTENCY"));
+                    Lists.newArrayList("ONE_PASS_SELF_CONSISTENCY", "BANK_CONSTRAINED_PLAN"));
 
     public static final Parameter PARSER_RULE_CORRECTOR_ENABLE =
             new Parameter("s2.parser.rule.corrector.enable", "false", "是否开启规则修正器",
@@ -63,8 +63,8 @@ public class ParserConfig extends ParameterConfig {
 
     @Override
     public List<Parameter> getSysParameters() {
-        return Lists.newArrayList(PARSER_LINKING_VALUE_ENABLE, PARSER_RULE_CORRECTOR_ENABLE,
-                PARSER_FEW_SHOT_NUMBER, PARSER_SELF_CONSISTENCY_NUMBER, PARSER_SHOW_COUNT,
-                PARSER_FIELDS_COUNT_THRESHOLD);
+        return Lists.newArrayList(PARSER_STRATEGY_TYPE, PARSER_LINKING_VALUE_ENABLE,
+                PARSER_RULE_CORRECTOR_ENABLE, PARSER_FEW_SHOT_NUMBER,
+                PARSER_SELF_CONSISTENCY_NUMBER, PARSER_SHOW_COUNT, PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

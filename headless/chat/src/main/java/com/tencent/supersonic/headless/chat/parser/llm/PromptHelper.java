@@ -39,14 +39,26 @@ public class PromptHelper {
                 Integer.parseInt(parserConfig.getParameterValue(PARSER_SELF_CONSISTENCY_NUMBER));
 
         List<Text2SQLExemplar> exemplars = Lists.newArrayList();
-        exemplars.addAll(llmReq.getDynamicExemplars());
+        if (!CollectionUtils.isEmpty(llmReq.getDynamicExemplars())) {
+            exemplars.addAll(llmReq.getDynamicExemplars());
+        }
 
-        int recallSize = exemplarRecallNumber - llmReq.getDynamicExemplars().size();
+        int recallSize = exemplarRecallNumber - exemplars.size();
         if (recallSize > 0) {
-            exemplars.addAll(exemplarService.recallExemplars(llmReq.getQueryText(), recallSize));
+            List<Text2SQLExemplar> recalled =
+                    exemplarService.recallExemplars(llmReq.getQueryText(), recallSize);
+            if (!CollectionUtils.isEmpty(recalled)) {
+                exemplars.addAll(recalled);
+            }
         }
 
         List<List<Text2SQLExemplar>> results = new ArrayList<>();
+        if (exemplars.isEmpty()) {
+            for (int i = 0; i < selfConsistencyNumber; i++) {
+                results.add(Lists.newArrayList());
+            }
+            return results;
+        }
         // use random collection of exemplars for each self-consistency inference
         for (int i = 0; i < selfConsistencyNumber; i++) {
             List<Text2SQLExemplar> shuffledList = new ArrayList<>(exemplars);
@@ -57,6 +69,10 @@ public class PromptHelper {
             if ((noSame.size() - same.size()) > fewShotNumber) {// 去除部分最低分
                 noSame.sort(Comparator.comparingDouble(Text2SQLExemplar::getSimilarity));
                 noSame = noSame.subList((noSame.size() - fewShotNumber) / 2, noSame.size());
+            }
+            if (noSame.isEmpty()) {
+                results.add(new ArrayList<>(same.subList(0, Math.min(same.size(), fewShotNumber))));
+                continue;
             }
             Text2SQLExemplar mostSimilar = noSame.get(noSame.size() - 1);
             Collections.shuffle(noSame);

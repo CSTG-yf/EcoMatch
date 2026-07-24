@@ -28,9 +28,12 @@ import java.util.stream.Collectors;
 public class BankFinancialIntentRecognizer {
 
     public static final double CLARIFICATION_THRESHOLD = 0.75D;
+    private static final List<String> COMPREHENSIVE_PERFORMANCE_METRICS =
+            List.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017");
 
     private static final Pattern ISO_DATE =
             Pattern.compile("(20\\d{2})[-/](\\d{1,2})[-/](\\d{1,2})");
+    private static final Pattern ISO_QUARTER = Pattern.compile("(?i)(20\\d{2})\\s*Q([1-4])");
     private static final Pattern CHINESE_DATE =
             Pattern.compile("(20\\d{2})年(\\d{1,2})月(\\d{1,2})日");
     private static final Pattern MONTH_END = Pattern.compile("(20\\d{2})年(\\d{1,2})月(?:末|底)");
@@ -136,6 +139,11 @@ public class BankFinancialIntentRecognizer {
                             .build());
         }
         addCompositeMetrics(text, matches);
+        if (isComprehensivePerformanceRanking(text)) {
+            for (String code : COMPREHENSIVE_PERFORMANCE_METRICS) {
+                addMetric(matches, code, "comprehensive performance profile");
+            }
+        }
         return new ArrayList<>(matches.values());
     }
 
@@ -161,6 +169,11 @@ public class BankFinancialIntentRecognizer {
                 .matchedText(metric.getName()).confidence(0.94D).reason(reason).build());
     }
 
+    private boolean isComprehensivePerformanceRanking(String text) {
+        return text.contains("\u6307\u6807")
+                && containsAny(text, "\u8868\u73b0\u8f83\u597d", "\u8868\u73b0\u8f83\u5dee");
+    }
+
     private List<OrganizationSlot> extractOrganizations(String text) {
         List<OrganizationSlot> result = new ArrayList<>();
         for (OrganizationDefinition organization : BankFinancialLexicon.organizations().values()) {
@@ -176,7 +189,11 @@ public class BankFinancialIntentRecognizer {
     }
 
     private List<IntentCandidate> classify(String text, int organizationCount) {
+        boolean explicitQuarterlyTrend = text.contains("\u9010\u5b63");
         Map<BankIntentType, ScoredReason> scores = new EnumMap<>(BankIntentType.class);
+        if (explicitQuarterlyTrend) {
+            score(scores, BankIntentType.TREND, 0.99D, "explicit quarterly trend");
+        }
         score(scores, BankIntentType.POINT_QUERY, 0.72D, "默认单点指标查询");
         if (containsAny(text, "趋势", "走势", "逐月", "逐日", "每天", "连续", "全年变化")) {
             score(scores, BankIntentType.TREND, 0.99D, "命中趋势或时间序列表达");
@@ -215,6 +232,9 @@ public class BankFinancialIntentRecognizer {
     private TimeSlot extractTime(String text, LocalDate referenceDate) {
         List<DateHit> hits = new ArrayList<>();
         collectDates(text, ISO_DATE, hits, matcher -> date(matcher, 1, 2, 3), "DAY");
+        collectDates(text, ISO_QUARTER, hits, matcher -> YearMonth
+                .of(integer(matcher, 1), Integer.parseInt(matcher.group(2)) * 3).atEndOfMonth(),
+                "QUARTER");
         collectDates(text, CHINESE_DATE, hits, matcher -> date(matcher, 1, 2, 3), "DAY");
         collectDates(text, MONTH_END, hits,
                 matcher -> YearMonth.of(integer(matcher, 1), integer(matcher, 2)).atEndOfMonth(),
@@ -308,7 +328,8 @@ public class BankFinancialIntentRecognizer {
 
     private void addClarifications(BankIntentResult result, String text) {
         boolean broadMetric = BROAD_METRIC.matcher(text).find();
-        if (result.getMetrics().isEmpty() || broadMetric) {
+        if ((result.getMetrics().isEmpty() || broadMetric)
+                && !isComprehensivePerformanceRanking(text)) {
             List<String> options;
             if (text.contains("贷款")) {
                 options = metricNames("ZB002", "ZB013", "ZB014", "ZB017");

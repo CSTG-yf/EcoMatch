@@ -90,3 +90,36 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.
 ```
 
 2026-07-23 的首个真实模型基线使用局域网 `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`、温度 0，对 49 道保留题完成了全量预测：解析成功率 100%，执行成功率 91.8367%，结果一致率 0%。这是失败基线而非验收通过；在改进语义翻译/提示词链路前不得将其用于发布结论。生成的预测、运行元数据和报告仅存放在 `.local-dev/bank-nl2sql/`。
+
+## SuperSonic 端到端评测
+
+`run_supersonic_eval.py` 通过真实的 SuperSonic 两步接口进行评测：
+
+1. `POST /api/chat/query/parse`；
+2. `POST /api/chat/query/execute`。
+
+它只将题目、`agentId`、`chatId` 和运行开关传给服务端；金标 SQL、标准结果、答案文本均只在本地用于评分。默认运行 `dev`，不会读取 `test.jsonl`。本地 HTTP 调用需要提供已登录用户的 Bearer Token（推荐通过环境变量 `SUPSERSONIC_AUTH_TOKEN` 传入），不会尝试读取浏览器 Cookie 或本地存储。
+
+```powershell
+$env:SUPSERSONIC_AUTH_TOKEN = '<已登录用户的访问令牌>'
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
+  evaluation/bank_nl2sql `
+  --split dev `
+  --base-url http://127.0.0.1:9000 `
+  --agent-id <绑定银行数据集的助理ID> `
+  --output .local-dev/bank-nl2sql/supersonic-dev-report.json
+```
+
+测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
+  evaluation/bank_nl2sql `
+  --split test --acknowledge-final-test `
+  --base-url http://127.0.0.1:9000 `
+  --agent-id <绑定银行数据集的助理ID> `
+  --run-registry .local-dev/bank-nl2sql/supersonic-final-test-runs.json `
+  --output .local-dev/bank-nl2sql/supersonic-final-report.json
+```
+
+报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、阶段耗时、标准错误类别、S2SQL 与物理 SQL 摘要；不会写出实际查询行或金标答案。

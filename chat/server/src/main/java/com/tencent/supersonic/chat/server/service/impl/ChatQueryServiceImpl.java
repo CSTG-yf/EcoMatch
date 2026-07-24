@@ -13,6 +13,7 @@ import com.tencent.supersonic.chat.server.parser.ChatQueryParser;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
 import com.tencent.supersonic.chat.server.pojo.ParseContext;
+import com.tencent.supersonic.chat.server.processor.execute.BankResultProjectionHandler;
 import com.tencent.supersonic.chat.server.processor.execute.DataInterpretProcessor;
 import com.tencent.supersonic.chat.server.processor.execute.ExecuteResultProcessor;
 import com.tencent.supersonic.chat.server.processor.parse.ParseResultProcessor;
@@ -94,6 +95,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             ComponentFactory.getParseProcessors();
     private final List<ExecuteResultProcessor> executeResultProcessors =
             ComponentFactory.getExecuteProcessors();
+    private final BankResultProjectionHandler bankResultProjectionHandler =
+            new BankResultProjectionHandler();
 
     @Override
     public List<SearchResult> search(ChatParseReq chatParseReq) {
@@ -157,6 +160,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                     processor.process(executeContext);
                 }
             }
+            bankResultProjectionHandler.apply(queryResult);
             saveQueryResult(chatExecuteReq, queryResult);
         }
 

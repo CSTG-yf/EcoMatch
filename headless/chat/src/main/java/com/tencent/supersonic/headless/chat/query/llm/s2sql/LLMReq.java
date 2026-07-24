@@ -25,6 +25,7 @@ public class LLMReq {
     private String currentDate;
     private String priorExts;
     private SqlGenType sqlGenType;
+    private SemanticIntentHints semanticIntentHints;
     private Map<String, ChatApp> chatAppConfig;
     private String customPrompt;
     private List<Text2SQLExemplar> dynamicExemplars;
@@ -76,7 +77,8 @@ public class LLMReq {
     }
 
     public enum SqlGenType {
-        ONE_PASS_SELF_CONSISTENCY("1_pass_self_consistency");
+        ONE_PASS_SELF_CONSISTENCY("1_pass_self_consistency"),
+        BANK_CONSTRAINED_PLAN("bank_constrained_plan");
 
         private final String name;
 

@@ -60,6 +60,31 @@ class BankFinancialIntentRecognizerTest {
         assertEquals(Set.of("ZB016"), metricCodes(result));
     }
 
+    @Test
+    void shouldRecognizeIsoQuarterRangeAsTrend() {
+        BankIntentResult result = recognizer.recognize(
+                "\u5206\u6790\u6c5f\u82cf\u7701D\u5e02\u519c\u5546\u884c\u5404\u9879\u5b58\u6b3e\u4f59\u989d\u4ece2025Q1\u672b\u52302026Q1\u672b\u7684\u9010\u5b63\u53d8\u5316",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+        assertEquals("ORG004", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 3, 31), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2026, 3, 31), result.getTime().getEndDate());
+    }
+
+    @Test
+    void shouldExpandComprehensivePerformanceRankingToTheBankProfile() {
+        BankIntentResult result = recognizer.recognize(
+                "\u6c5f\u82cf\u7701F\u5e02\u519c\u5546\u884c\u57282025-11-30\u7684\u6307\u6807\u4e2d\u54ea\u4e9b\u8868\u73b0\u8f83\u597d\uff1f\u54ea\u4e9b\u8868\u73b0\u8f83\u5dee\uff1f",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
+                metricCodes(result));
+        assertFalse(result.isClarificationRequired());
+    }
+
     private Set<String> metricCodes(BankIntentResult result) {
         return result.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
                 .collect(Collectors.toSet());

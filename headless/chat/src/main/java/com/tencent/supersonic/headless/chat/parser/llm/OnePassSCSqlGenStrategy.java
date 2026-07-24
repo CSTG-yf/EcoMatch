@@ -75,6 +75,11 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
     }
 
     @Override
+    public String getAppKey() {
+        return APP_KEY;
+    }
+
+    @Override
     public LLMResp generate(LLMReq llmReq) {
         LLMResp llmResp = new LLMResp();
         llmResp.setQuery(llmReq.getQueryText());

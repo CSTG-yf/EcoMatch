@@ -1,6 +1,7 @@
 package com.tencent.supersonic.common.jsqlparser;
 
 import net.sf.jsqlparser.expression.*;
+import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.select.SelectItem;
@@ -19,6 +20,12 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
     }
 
     protected void visitBinaryExpression(BinaryExpression expr) {
+        expr.setLeftExpression(replace(expr.getLeftExpression(), fieldExprMap));
+        expr.setRightExpression(replace(expr.getRightExpression(), fieldExprMap));
+    }
+
+    @Override
+    public void visit(InExpression expr) {
         expr.setLeftExpression(replace(expr.getLeftExpression(), fieldExprMap));
         expr.setRightExpression(replace(expr.getRightExpression(), fieldExprMap));
     }

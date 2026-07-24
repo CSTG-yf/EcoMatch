@@ -164,9 +164,9 @@ public class BankSemanticImportService {
             throws Exception {
         MetaFilter filter = new MetaFilter(Lists.newArrayList(config.getModelId()));
         List<DimensionResp> existingDimensions = dimensionService.getDimensions(filter);
-        Map<String, DimensionResp> existing = existingDimensions.stream()
-                .collect(Collectors.toMap(DimensionResp::getBizName, Function.identity(),
-                        (left, right) -> left, LinkedHashMap::new));
+        Map<String, DimensionResp> existing =
+                existingDimensions.stream().collect(Collectors.toMap(DimensionResp::getBizName,
+                        Function.identity(), (left, right) -> left, LinkedHashMap::new));
         List<DimensionReq> requests = Arrays.asList(dateDimension(config),
                 organizationDimension(workbook, config), indicatorDimension(workbook, config));
         Map<String, DimensionResp> result = new LinkedHashMap<>();
