@@ -23,6 +23,7 @@ import com.tencent.supersonic.headless.api.pojo.response.MapResp;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.data.message.AiMessage;
@@ -100,11 +101,19 @@ public class NL2SQLParser implements ChatQueryParser {
                         MapModeEnum.MODERATE)) {
                     queryNLReq.setMapModeEnum(mode);
                     doParse(queryNLReq, parseResp);
+                    if (parseResp.isTerminalError()) {
+                        parseContext.setResponse(parseResp);
+                        return;
+                    }
                 }
 
                 if (parseResp.getSelectedParses().isEmpty() && candidateParses.isEmpty()) {
                     queryNLReq.setMapModeEnum(MapModeEnum.LOOSE);
                     doParse(queryNLReq, parseResp);
+                    if (parseResp.isTerminalError()) {
+                        parseContext.setResponse(parseResp);
+                        return;
+                    }
                 }
 
                 if (parseResp.getSelectedParses().isEmpty()) {
@@ -146,6 +155,10 @@ public class NL2SQLParser implements ChatQueryParser {
             addDynamicExemplars(parseContext, queryNLReq);
             doParse(queryNLReq, parseContext.getResponse());
 
+            if (parseContext.getResponse().isTerminalError()) {
+                return;
+            }
+
             // try again with all semantic fields passed to LLM
             if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
                 queryNLReq.setSelectedParseInfo(null);
@@ -163,7 +176,9 @@ public class NL2SQLParser implements ChatQueryParser {
         }
         resp.setState(parseResp.getState());
         resp.setParseTimeCost(parseResp.getParseTimeCost());
-        resp.setErrorMsg(parseResp.getErrorMsg());
+        String errorMsg = parseResp.getErrorMsg();
+        resp.setTerminalError(BankNl2SqlError.isTerminalParserError(errorMsg));
+        resp.setErrorMsg(BankNl2SqlError.toUserMessage(errorMsg));
     }
 
     private void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {

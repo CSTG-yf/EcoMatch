@@ -53,7 +53,9 @@ public class ChatWorkflowEngine {
                     break;
                 case PARSING:
                     performParsing(queryCtx);
-                    if (queryCtx.getCandidateQueries().isEmpty()) {
+                    if (parseResult.getState().equals(ParseResp.ParseState.FAILED)) {
+                        queryCtx.setChatWorkflowState(ChatWorkflowState.FINISHED);
+                    } else if (queryCtx.getCandidateQueries().isEmpty()) {
                         parseResult.setState(ParseResp.ParseState.FAILED);
                         parseResult.setErrorMsg("No semantic queries can be parsed out.");
                         queryCtx.setChatWorkflowState(ChatWorkflowState.FINISHED);
@@ -101,11 +103,14 @@ public class ChatWorkflowEngine {
     }
 
     private void performParsing(ChatQueryContext queryCtx) {
-        semanticParsers.forEach(parser -> {
+        for (SemanticParser parser : semanticParsers) {
             parser.parse(queryCtx);
             log.debug("{} result:{}", parser.getClass().getSimpleName(),
                     JsonUtil.toString(queryCtx));
-        });
+            if (queryCtx.getParseResp().getState().equals(ParseResp.ParseState.FAILED)) {
+                break;
+            }
+        }
     }
 
     private void performCorrecting(ChatQueryContext queryCtx) {

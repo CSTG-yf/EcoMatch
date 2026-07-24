@@ -10,6 +10,7 @@ import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionC
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
+import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.MapUtils;
 
@@ -44,9 +45,21 @@ public class LLMSqlParser implements SemanticParser {
 
             // 3.invoke LLM service to do parsing.
             tryParse(queryCtx, dataSetId);
+        } catch (BankNl2SqlError e) {
+            failConstrainedPlan(queryCtx, e);
+            log.error("failed to parse constrained bank query", e);
         } catch (Exception e) {
             log.error("failed to parse query:", e);
         }
+    }
+
+    private void failConstrainedPlan(ChatQueryContext queryCtx, BankNl2SqlError error) {
+        ParseResp parseResp = queryCtx.getParseResp();
+        if (parseResp == null) {
+            return;
+        }
+        parseResp.setState(ParseResp.ParseState.FAILED);
+        parseResp.setErrorMsg(error.toParserErrorMessage());
     }
 
     private void tryParse(ChatQueryContext queryCtx, Long dataSetId) {
@@ -93,7 +106,10 @@ public class LLMSqlParser implements SemanticParser {
                 log.error("currentRetryRound:{}, runText2SQL failed", currentRetry, e);
                 if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
                         && !BankNl2SqlError.allowsParserRetry(e)) {
-                    break;
+                    if (e instanceof BankNl2SqlError bankError) {
+                        throw bankError;
+                    }
+                    throw e;
                 }
             }
             SqlGenStrategy strategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
