@@ -40,6 +40,8 @@ class BankPlanGenStrategyTest {
         assertEquals(BankIntentType.RANKING, response.getBankQueryPlan().getIntent());
         assertEquals("json_object", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getJsonFormatType());
+        assertEquals(0, request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
+                .getChatModelConfig().getMaxRetries());
         verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt -> {
             assertFalse(prompt.contains("bank_daily_metrics"));
             assertFalse(prompt.toUpperCase().contains("SELECT"));

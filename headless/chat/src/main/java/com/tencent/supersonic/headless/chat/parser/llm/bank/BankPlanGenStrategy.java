@@ -63,6 +63,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // honor provider-specific JSON Schema constraints. Keep the transport constraint small
         // and make the plan contract explicit in the prompt and validator.
         modelConfig.setJsonFormatType("json_object");
+        // This route already owns one structured repair for an invalid plan. Retrying an HTTP
+        // timeout underneath that repair can multiply a 60-second timeout into minutes and leave
+        // the chat request without a terminal outcome.
+        modelConfig.setMaxRetries(0);
         ChatLanguageModel model = getChatLanguageModel(modelConfig);
 
         String prompt = buildPrompt(llmReq.getQueryText(), hints);

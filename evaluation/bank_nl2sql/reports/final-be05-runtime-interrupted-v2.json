@@ -5,7 +5,7 @@
     "agentId": 33,
     "captureMethod": "authenticated-ui",
     "status": "interrupted",
-    "reason": "Two runtime calls produced no terminal model response after the local frontend was recovered. The remaining samples were not submitted to avoid accumulating requests against an unhealthy model queue."
+    "reason": "Two runtime calls produced no terminal response while the local frontend was unstable. Direct model endpoint health checks subsequently passed; the end-to-end agent path requires diagnosis before the remaining samples are submitted."
   },
   "dataset": {
     "requestedRecordCount": 49,
