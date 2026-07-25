@@ -7,6 +7,7 @@ import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.ShowCaseResp;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
+import com.tencent.supersonic.common.pojo.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,14 +55,18 @@ public class ChatController {
     @PostMapping("/updateQAFeedback")
     public Boolean updateQAFeedback(@RequestParam(value = "id") Long id,
             @RequestParam(value = "score") Integer score,
-            @RequestParam(value = "feedback", required = false) String feedback) {
-        return chatService.updateFeedback(id, score, feedback);
+            @RequestParam(value = "feedback", required = false) String feedback,
+            HttpServletRequest request, HttpServletResponse response) {
+        return chatService.updateFeedback(id, score, feedback,
+                UserHolder.findUser(request, response));
     }
 
     @PostMapping("/updateChatIsTop")
     public Boolean updateChatIsTop(@RequestParam(value = "chatId") Long chatId,
-            @RequestParam(value = "isTop") int isTop) {
-        return chatService.updateChatIsTop(chatId, isTop);
+            @RequestParam(value = "isTop") int isTop, HttpServletRequest request,
+            HttpServletResponse response) {
+        return chatService.updateChatIsTop(chatId, isTop,
+                UserHolder.findUser(request, response));
     }
 
     @PostMapping("/pageQueryInfo")
@@ -73,19 +78,23 @@ public class ChatController {
     }
 
     @GetMapping("/getChatQuery/{queryId}")
-    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId) {
-        return chatService.getChatQuery(queryId);
+    public QueryResp getChatQuery(@PathVariable("queryId") Long queryId, HttpServletRequest request,
+            HttpServletResponse response) {
+        return chatService.getChatQuery(queryId, UserHolder.findUser(request, response));
     }
 
     @DeleteMapping("/{queryId}")
-    public boolean deleteChatQuery(@PathVariable(value = "queryId") Long queryId) {
-        chatService.deleteQuery(queryId);
+    public boolean deleteChatQuery(@PathVariable(value = "queryId") Long queryId,
+            HttpServletRequest request, HttpServletResponse response) {
+        chatService.deleteQuery(queryId, UserHolder.findUser(request, response));
         return true;
     }
 
     @PostMapping("/queryShowCase")
     public ShowCaseResp queryShowCase(@RequestBody PageQueryInfoReq pageQueryInfoCommand,
-            @RequestParam(value = "agentId") int agentId) {
-        return chatService.queryShowCase(pageQueryInfoCommand, agentId);
+            @RequestParam(value = "agentId") int agentId, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return chatService.queryShowCase(pageQueryInfoCommand, agentId, user);
     }
 }

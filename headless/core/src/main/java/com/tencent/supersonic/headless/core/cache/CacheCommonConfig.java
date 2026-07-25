@@ -22,4 +22,10 @@ public class CacheCommonConfig {
 
     @Value("${s2.query.cache.enable:true}")
     private Boolean cacheEnable;
+
+    @Value("${s2.cache.hot-metric.expire.after.write:60}")
+    private Integer hotMetricExpireAfterWrite;
+
+    @Value("${s2.cache.hot-metric.max.size:1000}")
+    private Integer hotMetricMaximumSize;
 }

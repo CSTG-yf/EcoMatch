@@ -23,6 +23,7 @@ com.tencent.supersonic.chat.server.processor.execute.ExecuteResultProcessor=\
     com.tencent.supersonic.chat.server.processor.execute.MetricRecommendProcessor,\
     com.tencent.supersonic.chat.server.processor.execute.DimensionRecommendProcessor,\
     com.tencent.supersonic.chat.server.processor.execute.MetricRatioCalcProcessor,\
+    com.tencent.supersonic.chat.server.processor.execute.BusinessInsightProcessor,\
     com.tencent.supersonic.chat.server.processor.execute.DataInterpretProcessor
 
 ### auth-authentication SPIs

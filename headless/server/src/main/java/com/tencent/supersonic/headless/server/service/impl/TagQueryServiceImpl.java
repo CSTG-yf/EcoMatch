@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.service.impl;
 
 import com.tencent.supersonic.common.pojo.DateConf;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.ValueDistribution;
@@ -146,7 +147,8 @@ public class TagQueryServiceImpl implements TagQueryService {
         querySqlReq.setSql(sql);
         querySqlReq.setNeedAuth(false);
         querySqlReq.setModelIds(modelIds);
-        log.info("queryTagDateFromDbBySql, QuerySqlReq:{}", querySqlReq.toCustomizedString());
+        log.info("queryTagDateFromDbBySql request [{}]",
+                SensitiveLogUtils.summarize(querySqlReq.toCustomizedString()));
         try {
             SemanticQueryResp semanticQueryResp = queryService.queryByReq(querySqlReq, user);
             if (!CollectionUtils.isEmpty(semanticQueryResp.getResultList())) {

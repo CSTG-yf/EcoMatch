@@ -29,6 +29,7 @@ public class AuthServiceImpl implements AuthService {
     private JdbcTemplate jdbcTemplate;
 
     private UserService userService;
+    private final AuthGroupMatcher authGroupMatcher = new AuthGroupMatcher();
 
     public AuthServiceImpl(JdbcTemplate jdbcTemplate, UserService userService) {
         this.jdbcTemplate = jdbcTemplate;
@@ -82,7 +83,7 @@ public class AuthServiceImpl implements AuthService {
         }
         Set<String> userOrgIds = userService.getUserAllOrgId(user.getName());
         List<AuthGroup> groups =
-                getAuthGroups(req.getModelIds(), user.getName(), new ArrayList<>(userOrgIds));
+                getAuthGroups(req.getModelIds(), user, new ArrayList<>(userOrgIds));
         AuthorizedResourceResp resource = new AuthorizedResourceResp();
         Map<Long, List<AuthGroup>> authGroupsByModelId =
                 groups.stream().collect(Collectors.groupingBy(AuthGroup::getModelId));
@@ -112,25 +113,16 @@ public class AuthServiceImpl implements AuthService {
         return resource;
     }
 
-    private List<AuthGroup> getAuthGroups(List<Long> modelIds, String userName,
+    private List<AuthGroup> getAuthGroups(List<Long> modelIds, User user,
             List<String> departmentIds) {
         List<AuthGroup> groups = load().stream().filter(group -> {
             if (!modelIds.contains(group.getModelId())) {
                 return false;
             }
-            if (!CollectionUtils.isEmpty(group.getAuthorizedUsers())
-                    && group.getAuthorizedUsers().contains(userName)) {
-                return true;
-            }
-            for (String departmentId : departmentIds) {
-                if (!CollectionUtils.isEmpty(group.getAuthorizedDepartmentIds())
-                        && group.getAuthorizedDepartmentIds().contains(departmentId)) {
-                    return true;
-                }
-            }
-            return false;
+            return authGroupMatcher.matches(group, user, departmentIds);
         }).collect(Collectors.toList());
-        log.info("user:{} department:{} authGroups:{}", userName, departmentIds, groups);
+        log.info("user:{} department:{} roles:{} authGroups:{}", user.getName(), departmentIds,
+                user.getRoles(), groups);
         return groups;
     }
 }

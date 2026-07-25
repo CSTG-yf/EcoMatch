@@ -13,6 +13,7 @@ import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.common.pojo.enums.RatioOverType;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.DateUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.AggregateInfo;
 import com.tencent.supersonic.headless.api.pojo.MetricInfo;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
@@ -84,12 +85,16 @@ public class MetricRatioCalcProcessor implements ExecuteResultProcessor {
                 .filter(m -> resultMetricNames.contains(m.getBizName())).findFirst();
 
         AggregateInfo aggregateInfo = new AggregateInfo();
-        if (!ratioMetric.isPresent()) {
+        if (!ratioMetric.isPresent()
+                || isMasked(queryResult.getMaskedColumns(), ratioMetric.get().getBizName())) {
             return aggregateInfo;
         }
 
         try {
             String dateField = QueryReqBuilder.getDateField(semanticParseInfo.getDateInfo());
+            if (isMasked(queryResult.getMaskedColumns(), dateField)) {
+                return aggregateInfo;
+            }
             Optional<String> lastDayOp = queryResult.getQueryResults().stream()
                     .filter(r -> r.containsKey(dateField)).map(r -> r.get(dateField).toString())
                     .sorted(Comparator.reverseOrder()).findFirst();
@@ -132,7 +137,8 @@ public class MetricRatioCalcProcessor implements ExecuteResultProcessor {
 
             aggregateInfo.getMetricInfos().add(metricInfo);
         } catch (Exception e) {
-            log.error("queryRatio error {}", e);
+            log.error("queryRatio failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return aggregateInfo;
     }
@@ -169,11 +175,15 @@ public class MetricRatioCalcProcessor implements ExecuteResultProcessor {
         Optional<QueryColumn> valueColumn = queryResp.getColumns().stream()
                 .filter(c -> c.getBizName().equals(metric.getBizName())).findFirst();
 
-        if (!valueColumn.isPresent()) {
+        if (!valueColumn.isPresent()
+                || isMasked(queryResp.getMaskedColumns(), valueColumn.get().getBizName())) {
             return metricInfo;
         }
         String valueField = String.format("%s_%s", valueColumn.get().getBizName(),
                 aggOperatorEnum.getOperator());
+        if (isMasked(queryResp.getMaskedColumns(), valueField)) {
+            return metricInfo;
+        }
         if (result.containsKey(valueColumn.get().getBizName())) {
             DecimalFormat df = new DecimalFormat("#.####");
             metricInfo.setValue(df.format(result.get(valueColumn.get().getBizName())));
@@ -198,6 +208,11 @@ public class MetricRatioCalcProcessor implements ExecuteResultProcessor {
                         : statisticsOverName, ratio);
         metricInfo.setName(metric.getName());
         return metricInfo;
+    }
+
+    private static boolean isMasked(Set<String> maskedColumns, String field) {
+        return maskedColumns != null && field != null && maskedColumns.stream()
+                .filter(Objects::nonNull).anyMatch(masked -> masked.equalsIgnoreCase(field));
     }
 
     private DateConf getRatioDateConf(AggOperatorEnum aggOperatorEnum,

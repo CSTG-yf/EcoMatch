@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.utils;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONException;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -58,8 +59,8 @@ public class AliasGenerateHelper {
 
         Prompt prompt = PromptTemplate.from(NAME_ALIAS_INSTRUCTION).apply(variable);
         String response = getChatCompletion(prompt);
-        keyPipelineLog.info("AliasGenerateHelper.generateAlias modelReq:\n{} \nmodelResp:\n{}",
-                prompt.text(), response);
+        keyPipelineLog.info("AliasGenerateHelper.generateAlias modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(response));
         return response;
     }
 
@@ -69,9 +70,8 @@ public class AliasGenerateHelper {
 
         Prompt prompt = PromptTemplate.from(VALUE_ALIAS_INSTRUCTION).apply(variable);
         String response = getChatCompletion(prompt);
-        keyPipelineLog.info(
-                "AliasGenerateHelper.generateValueAlias modelReq:\n{} " + "\nmodelResp:\n{}",
-                prompt.text(), response);
+        keyPipelineLog.info("AliasGenerateHelper.generateValueAlias modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(response));
 
 
         return response;

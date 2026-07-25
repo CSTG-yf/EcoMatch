@@ -7,6 +7,7 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.request.DatabaseReq;
@@ -17,6 +18,9 @@ import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptor;
 import com.tencent.supersonic.headless.core.adaptor.db.DbAdaptorFactory;
+import com.tencent.supersonic.headless.core.gateway.QueryExecutionGateway;
+import com.tencent.supersonic.headless.core.gateway.QueryRejectedException;
+import com.tencent.supersonic.headless.core.gateway.SqlPolicyViolationException;
 import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import com.tencent.supersonic.headless.core.utils.SqlVariableParseUtils;
@@ -44,6 +48,8 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
 
     @Autowired
     private SqlUtils sqlUtils;
+    @Autowired
+    private QueryExecutionGateway queryExecutionGateway;
 
     @Lazy
     @Autowired
@@ -232,9 +238,19 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
     private SemanticQueryResp queryWithColumns(String sql, DatabaseResp database) {
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         SqlUtils sqlUtils = this.sqlUtils.init(database);
-        log.info("query SQL: {}", StringUtils.normalizeSpace(sql));
-        sqlUtils.queryInternal(sql, queryResultWithColumns);
-        return queryResultWithColumns;
+        log.info("query SQL [{}]", SensitiveLogUtils.summarize(StringUtils.normalizeSpace(sql)));
+        try {
+            return queryExecutionGateway.execute(sql, () -> {
+                sqlUtils.queryInternal(sql, queryResultWithColumns);
+                return queryResultWithColumns;
+            });
+        } catch (QueryRejectedException | SqlPolicyViolationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.error("Direct query execution failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw new QueryRejectedException("Query execution failed", e);
+        }
     }
 
     private DatabaseDO getDatabaseDO(Long id) {

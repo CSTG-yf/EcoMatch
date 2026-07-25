@@ -17,6 +17,13 @@
         <result column="is_top" property="isTop"/>
     </resultMap>
 
+    <select id="getChat" resultMap="IntelligentConversion">
+        select *
+        from s2_chat
+        where chat_id = #{chatId}
+          and is_delete = 0
+    </select>
+
     <select id="getAll" resultMap="IntelligentConversion">
         select *
         from s2_chat

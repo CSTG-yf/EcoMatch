@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.facade.rest;
 
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import com.tencent.supersonic.headless.api.pojo.SqlEvaluation;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
@@ -63,7 +64,9 @@ public class SqlQueryApiController {
                     try {
                         return semanticLayerService.queryByReq(querySqlReq, user);
                     } catch (Exception e) {
-                        log.error("querySqlReq:{},queryByReq error:", querySqlReq, e);
+                        log.error("SQL batch query failed [{}]: type={}, error=[{}]",
+                                SensitiveLogUtils.summarize(querySqlReq),
+                                e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                         return new SemanticQueryResp();
                     }
                 })).collect(Collectors.toList());

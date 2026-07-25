@@ -7,6 +7,7 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
@@ -21,6 +22,7 @@ import com.tencent.supersonic.headless.chat.knowledge.helper.HanlpHelper;
 import com.tencent.supersonic.headless.chat.knowledge.helper.NatureHelper;
 import com.tencent.supersonic.headless.core.cache.QueryCache;
 import com.tencent.supersonic.headless.core.executor.QueryExecutor;
+import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import com.tencent.supersonic.headless.core.pojo.SqlQuery;
 import com.tencent.supersonic.headless.core.pojo.StructQuery;
@@ -30,6 +32,7 @@ import com.tencent.supersonic.headless.core.utils.ComponentFactory;
 import com.tencent.supersonic.headless.server.annotation.S2DataPermission;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import com.tencent.supersonic.headless.server.manager.SemanticSchemaManager;
+import com.tencent.supersonic.headless.server.security.DataMaskingService;
 import com.tencent.supersonic.headless.server.service.*;
 import com.tencent.supersonic.headless.server.utils.MetricDrillDownChecker;
 import com.tencent.supersonic.headless.server.utils.QueryUtils;
@@ -60,6 +63,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
     private final DomainService domainService;
     private final DimensionService dimensionService;
     private final TranslatorConfig translatorConfig;
+    private final DataMaskingService dataMaskingService;
     private final QueryCache queryCache = ComponentFactory.getQueryCache();
     private final List<QueryExecutor> queryExecutors = ComponentFactory.getQueryExecutors();
 
@@ -69,7 +73,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
             MetricDrillDownChecker metricDrillDownChecker,
             KnowledgeBaseService knowledgeBaseService, MetricService metricService,
             DimensionService dimensionService, DomainService domainService,
-            TranslatorConfig translatorConfig) {
+            TranslatorConfig translatorConfig, DataMaskingService dataMaskingService) {
         this.statUtils = statUtils;
         this.queryUtils = queryUtils;
         this.semanticSchemaManager = semanticSchemaManager;
@@ -82,6 +86,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
         this.dimensionService = dimensionService;
         this.domainService = domainService;
         this.translatorConfig = translatorConfig;
+        this.dataMaskingService = dataMaskingService;
     }
 
     public DataSetSchema getDataSetSchema(Long id) {
@@ -92,7 +97,13 @@ public class S2SemanticLayerService implements SemanticLayerService {
     @Override
     public SemanticTranslateResp translate(SemanticQueryReq queryReq, User user) throws Exception {
         QueryStatement queryStatement = buildQueryStatement(queryReq, user);
-        semanticTranslator.translate(queryStatement);
+        long translateStart = System.nanoTime();
+        try {
+            semanticTranslator.translate(queryStatement);
+        } finally {
+            QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.TRANSLATE,
+                    System.nanoTime() - translateStart);
+        }
         return SemanticTranslateResp.builder().querySQL(queryStatement.getSql())
                 .isOk(queryStatement.isOk()).errMsg(queryStatement.getErrMsg()).build();
     }
@@ -102,17 +113,16 @@ public class S2SemanticLayerService implements SemanticLayerService {
     @SneakyThrows
     public SemanticQueryResp queryByReq(SemanticQueryReq queryReq, User user) {
         TaskStatusEnum state = TaskStatusEnum.SUCCESS;
-        log.info("[queryReq:{}]", queryReq);
+        log.info("semantic query request [{}]", SensitiveLogUtils.summarize(queryReq));
         try {
             // 1.initStatInfo
             statUtils.initStatInfo(queryReq, user);
 
             // 2.query from cache
-            String cacheKey = queryCache.getCacheKey(queryReq);
+            String cacheKey = queryCache.getCacheKey(queryReq, user);
             Object query = queryCache.query(queryReq, cacheKey);
             if (Objects.nonNull(query)) {
-                log.info("cacheKey:{},query:{}", cacheKey,
-                        StringUtils.normalizeSpace(query.toString()));
+                log.debug("query cache hit, key:{}", cacheKey);
             }
             if (Objects.nonNull(query)) {
                 SemanticQueryResp queryResp = (SemanticQueryResp) query;
@@ -124,7 +134,13 @@ public class S2SemanticLayerService implements SemanticLayerService {
             // 3 translate query
             QueryStatement queryStatement = buildQueryStatement(queryReq, user);
             if (!queryStatement.isTranslated()) {
-                semanticTranslator.translate(queryStatement);
+                long translateStart = System.nanoTime();
+                try {
+                    semanticTranslator.translate(queryStatement);
+                } finally {
+                    QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.TRANSLATE,
+                            System.nanoTime() - translateStart);
+                }
             }
 
             // Check whether the dimensions of the metric drill-down are correct temporarily,
@@ -140,26 +156,38 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 }
             }
 
-            // 5.reset cache and set stateInfo
-            Boolean setCacheSuccess = queryCache.put(cacheKey, queryResp);
-            if (setCacheSuccess) {
-                // if result is not null, update cache data
-                statUtils.updateResultCacheKey(cacheKey);
-            }
             if (Objects.isNull(queryResp)) {
                 state = TaskStatusEnum.ERROR;
             } else {
                 queryResp.appendErrorMsg(queryStatement.getErrMsg());
+                maskBeforeCache(queryReq, queryResp, user);
+            }
+
+            // 5.reset cache and set stateInfo
+            Boolean setCacheSuccess = queryCache.put(queryReq, cacheKey, queryResp);
+            if (setCacheSuccess) {
+                // if result is not null, update cache data
+                statUtils.updateResultCacheKey(cacheKey);
             }
 
             return queryResp;
         } catch (Exception e) {
-            log.error("exception in queryByReq:{}, e: ", queryReq, e);
+            log.error("Exception in semantic query [{}]: type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(queryReq), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
             state = TaskStatusEnum.ERROR;
             throw e;
         } finally {
             statUtils.statInfo2DbAsync(state);
         }
+    }
+
+    private void maskBeforeCache(SemanticQueryReq queryReq, SemanticQueryResp queryResp,
+            User user) {
+        SchemaFilterReq filter = new SchemaFilterReq();
+        filter.setModelIds(queryReq.getModelIds());
+        filter.setDataSetId(queryReq.getDataSetId());
+        dataMaskingService.mask(queryResp, schemaService.fetchSemanticSchema(filter), user);
     }
 
     @Override
@@ -359,11 +387,12 @@ public class S2SemanticLayerService implements SemanticLayerService {
             try {
                 semanticTranslator.translate(queryStatement);
             } catch (Exception e) {
-                log.warn("Failed to translate for semantic query " + queryStructReq);
+                log.warn("Failed to translate semantic query [{}]",
+                        SensitiveLogUtils.summarize(queryStructReq));
             }
             queryStatements.add(queryStatement);
         }
-        log.info("Union multiple query statements:{}", queryStatements);
+        log.info("Unioned query statements [{}]", SensitiveLogUtils.summarize(queryStatements));
         return queryUtils.unionAll(queryMultiStructReq, queryStatements);
     }
 

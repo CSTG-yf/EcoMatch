@@ -9,8 +9,10 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DimValueMap;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
+import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
@@ -32,6 +34,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Aspect
 @Component
@@ -60,7 +64,7 @@ public class DimValueAspect {
         if (queryReq instanceof QuerySqlReq) {
             return handleSqlDimValue(joinPoint);
         }
-        throw new InvalidArgumentException("queryReq is not Invalid:" + queryReq);
+        throw new InvalidArgumentException("Unsupported semantic query request");
     }
 
     private SemanticQueryResp handleStructDimValue(ProceedingJoinPoint joinPoint) throws Throwable {
@@ -88,21 +92,26 @@ public class DimValueAspect {
         QuerySqlReq querySqlReq = (QuerySqlReq) args[0];
         MetaFilter metaFilter = new MetaFilter(Lists.newArrayList(querySqlReq.getModelIds()));
         String sql = querySqlReq.getSql();
-        String originalSql = sql;
-        log.debug("correctorSql before replacing:{}", sql);
+        log.debug("dimension value correction input [{}]", SensitiveLogUtils.summarize(sql));
         List<FieldExpression> fieldExpressionList = SqlSelectHelper.getWhereExpressions(sql);
         List<DimensionResp> dimensions = dimensionService.getDimensions(metaFilter);
+        Set<String> fieldNames =
+                dimensions.stream().map(SchemaItem::getName).collect(Collectors.toSet());
         Map<String, Map<String, String>> filedNameToValueMap = new HashMap<>();
         for (FieldExpression expression : fieldExpressionList) {
+            if (!fieldNames.contains(expression.getFieldName())) {
+                continue;
+            }
             for (DimensionResp dimension : dimensions) {
-                if (!matchesDimensionField(expression.getFieldName(), dimension)
+                if (!expression.getFieldName().equals(dimension.getBizName())
                         || CollectionUtils.isEmpty(dimension.getDimValueMaps())) {
                     continue;
                 }
                 // consider '=' filter
                 if (expression.getOperator().equals(FilterOperatorEnum.EQUALS.getValue())) {
                     dimension.getDimValueMaps().stream().forEach(dimValue -> {
-                        if (matchesAlias(dimValue, expression.getFieldValue().toString())) {
+                        if (!CollectionUtils.isEmpty(dimValue.getAlias()) && dimValue.getAlias()
+                                .contains(expression.getFieldValue().toString())) {
                             getFiledNameToValueMap(filedNameToValueMap,
                                     expression.getFieldValue().toString(), dimValue.getTechName(),
                                     expression.getFieldName());
@@ -114,10 +123,10 @@ public class DimValueAspect {
             }
         }
         sql = SqlReplaceHelper.replaceValue(sql, filedNameToValueMap);
-        log.debug("correctorSql after replacing:{}", sql);
+        log.debug("dimension value correction output [{}]", SensitiveLogUtils.summarize(sql));
         querySqlReq.setSql(sql);
-        if (StringUtils.isEmpty(querySqlReq.getSqlInfo().getQuerySQL())
-                || StringUtils.equals(querySqlReq.getSqlInfo().getQuerySQL(), originalSql)) {
+        if (StringUtils.isEmpty(querySqlReq.getSqlInfo().getParsedS2SQL())
+                && StringUtils.isEmpty(querySqlReq.getSqlInfo().getCorrectedS2SQL())) {
             querySqlReq.getSqlInfo().setQuerySQL(sql);
         }
         Map<String, Map<String, String>> techNameToBizName = getTechNameToBizName(dimensions);
@@ -139,7 +148,8 @@ public class DimValueAspect {
             for (int i = 0; i < values.size(); i++) {
                 Boolean flag = false;
                 for (DimValueMap dimValueMap : dimension.getDimValueMaps()) {
-                    if (matchesAlias(dimValueMap, values.get(i))) {
+                    if (!CollectionUtils.isEmpty(dimValueMap.getAlias())
+                            && dimValueMap.getAlias().contains(values.get(i))) {
                         flag = true;
                         revisedValues.add(dimValueMap.getTechName());
                         break;
@@ -219,9 +229,8 @@ public class DimValueAspect {
                             List<String> values = (List) value;
                             List<String> valuesNew = new ArrayList<>();
                             for (String valueSingle : values) {
-                                String technicalValue = getTechnicalValue(aliasPair, valueSingle);
-                                if (technicalValue != null) {
-                                    valuesNew.add(technicalValue);
+                                if (aliasPair.containsKey(valueSingle)) {
+                                    valuesNew.add(aliasPair.get(valueSingle));
                                 } else {
                                     valuesNew.add(valueSingle);
                                 }
@@ -229,9 +238,8 @@ public class DimValueAspect {
                             filter.setValue(valuesNew);
                         }
                         if (value instanceof String) {
-                            String technicalValue = getTechnicalValue(aliasPair, (String) value);
-                            if (technicalValue != null) {
-                                filter.setValue(technicalValue);
+                            if (aliasPair.containsKey(value)) {
+                                filter.setValue(aliasPair.get(value));
                             }
                         }
                     }
@@ -279,25 +287,6 @@ public class DimValueAspect {
             }
         }
         return result;
-    }
-
-    private boolean matchesAlias(DimValueMap dimValueMap, String value) {
-        return !CollectionUtils.isEmpty(dimValueMap.getAlias()) && dimValueMap.getAlias().stream()
-                .anyMatch(alias -> StringUtils.equalsIgnoreCase(alias, value));
-    }
-
-    private boolean matchesDimensionField(String fieldName, DimensionResp dimension) {
-        if (StringUtils.equalsIgnoreCase(fieldName, dimension.getBizName())) {
-            return true;
-        }
-        return SqlSelectHelper.getFieldsFromExpr(dimension.getExpr()).stream()
-                .anyMatch(field -> StringUtils.equalsIgnoreCase(fieldName, field));
-    }
-
-    private String getTechnicalValue(Map<String, String> aliasAndTechName, String value) {
-        return aliasAndTechName.entrySet().stream()
-                .filter(entry -> StringUtils.equalsIgnoreCase(entry.getKey(), value))
-                .map(Map.Entry::getValue).findFirst().orElse(null);
     }
 
     private boolean needSkipDimValue(DimValueMap dimValueMap) {

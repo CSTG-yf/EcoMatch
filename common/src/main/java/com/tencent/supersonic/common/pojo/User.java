@@ -1,16 +1,18 @@
 package com.tencent.supersonic.common.pojo;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.Serializable;
 import java.sql.Timestamp;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
 public class User implements Serializable {
 
     private Long id;
@@ -24,6 +26,20 @@ public class User implements Serializable {
     private Integer isAdmin;
 
     private Timestamp lastLogin;
+
+    private Set<String> roles = new HashSet<>();
+
+    private Map<String, String> attributes = new HashMap<>();
+
+    public User(Long id, String name, String displayName, String email, Integer isAdmin,
+            Timestamp lastLogin) {
+        this.id = id;
+        this.name = name;
+        this.displayName = displayName;
+        this.email = email;
+        this.isAdmin = isAdmin;
+        this.lastLogin = lastLogin;
+    }
 
     public static User get(Long id, String name, String displayName, String email,
             Integer isAdmin) {

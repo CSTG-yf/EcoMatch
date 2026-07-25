@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.core.translator;
 import com.tencent.supersonic.common.calcite.SqlMergeWithUtils;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.core.pojo.OntologyQuery;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
@@ -51,15 +52,16 @@ public class DefaultSemanticTranslator implements SemanticTranslator {
                 optimizer.rewrite(queryStatement);
             }
         }
-        log.debug("translated query SQL: [{}]",
-                StringUtils.normalizeSpace(queryStatement.getSql()));
+        log.debug("translated query SQL [{}]",
+                SensitiveLogUtils.summarize(StringUtils.normalizeSpace(queryStatement.getSql())));
     }
 
     private void mergeOntologyQuery(QueryStatement queryStatement) throws Exception {
         OntologyQuery ontologyQuery = queryStatement.getOntologyQuery();
         if (Objects.isNull(ontologyQuery) || StringUtils.isBlank(ontologyQuery.getSql())) {
-            throw new Exception(String.format("parse ontology sql [%s] error [%s]",
-                    StringUtils.normalizeSpace(queryStatement.getSqlQuery().getSql()),
+            throw new Exception(String.format("parse ontology SQL [%s] error [%s]",
+                    SensitiveLogUtils.summarize(
+                            StringUtils.normalizeSpace(queryStatement.getSqlQuery().getSql())),
                     queryStatement.getErrMsg()));
         }
         log.info("parse with ontologyQuery fields: [{}]", ontologyQuery.getFields());

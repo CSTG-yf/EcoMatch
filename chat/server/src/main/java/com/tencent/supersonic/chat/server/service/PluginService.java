@@ -14,7 +14,7 @@ public interface PluginService {
 
     void updatePlugin(ChatPlugin plugin, User user);
 
-    void deletePlugin(Long id);
+    void deletePlugin(Long id, User user);
 
     List<ChatPlugin> getPluginList();
 

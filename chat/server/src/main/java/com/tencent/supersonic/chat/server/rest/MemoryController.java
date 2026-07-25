@@ -31,11 +31,15 @@ public class MemoryController {
     public Boolean createMemory(@RequestBody ChatMemoryCreateReq chatMemoryCreateReq,
             HttpServletRequest request, HttpServletResponse response) {
         User user = UserHolder.findUser(request, response);
-        memoryService.createMemory(ChatMemory.builder().agentId(chatMemoryCreateReq.getAgentId())
-                .s2sql(chatMemoryCreateReq.getS2sql()).question(chatMemoryCreateReq.getQuestion())
-                .dbSchema(chatMemoryCreateReq.getDbSchema()).status(chatMemoryCreateReq.getStatus())
-                .humanReviewRet(MemoryReviewResult.POSITIVE).createdBy(user.getName())
-                .createdAt(new Date()).build());
+        memoryService.createMemory(
+                ChatMemory.builder().agentId(chatMemoryCreateReq.getAgentId())
+                        .s2sql(chatMemoryCreateReq.getS2sql())
+                        .question(chatMemoryCreateReq.getQuestion())
+                        .dbSchema(chatMemoryCreateReq.getDbSchema())
+                        .status(chatMemoryCreateReq.getStatus())
+                        .humanReviewRet(MemoryReviewResult.POSITIVE).createdBy(user.getName())
+                        .createdAt(new Date()).build(),
+                user);
         return true;
     }
 
@@ -48,8 +52,10 @@ public class MemoryController {
     }
 
     @RequestMapping("/pageMemories")
-    public PageInfo<ChatMemory> pageMemories(@RequestBody PageMemoryReq pageMemoryReq) {
-        return memoryService.pageMemories(pageMemoryReq);
+    public PageInfo<ChatMemory> pageMemories(@RequestBody PageMemoryReq pageMemoryReq,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return memoryService.pageMemories(pageMemoryReq, user);
     }
 
     @PostMapping("batchDelete")

@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -75,7 +76,8 @@ public class LLMSqlCorrector extends BaseSemanticCorrector {
         Prompt prompt = generatePrompt(chatQueryContext.getRequest().getQueryText(),
                 semanticParseInfo, chatApp.getPrompt(), exemplar);
         SemanticSql s2Sql = extractor.generateSemanticSql(prompt.toUserMessage().singleText());
-        keyPipelineLog.info("LLMSqlCorrector modelReq:\n{} \nmodelResp:\n{}", prompt.text(), s2Sql);
+        keyPipelineLog.info("LLMSqlCorrector modelReq=[{}], modelResp=[{}]",
+                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(s2Sql));
         if ("NEGATIVE".equalsIgnoreCase(s2Sql.getOpinion())
                 && StringUtils.isNotBlank(s2Sql.getSql())) {
             semanticParseInfo.getSqlInfo().setCorrectedS2SQL(s2Sql.getSql());

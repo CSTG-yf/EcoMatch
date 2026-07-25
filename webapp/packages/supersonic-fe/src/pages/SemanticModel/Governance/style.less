@@ -1,0 +1,266 @@
+.page {
+  box-sizing: border-box;
+  width: 100vw;
+  max-width: 100%;
+  min-height: 100%;
+  padding: 24px 28px;
+  overflow-x: hidden;
+  color: #1f2937;
+  background: #f5f7f9;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 72px;
+  gap: 24px;
+  margin: -24px -28px 0;
+  padding: 18px 28px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 22px;
+    line-height: 30px;
+    letter-spacing: 0;
+  }
+}
+
+.modelSelect {
+  width: min(420px, 42vw);
+}
+
+.statBand {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  margin: 20px 0 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+
+  > div {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    align-items: center;
+    min-width: 0;
+    padding: 16px 18px;
+    border-right: 1px solid #e5e7eb;
+
+    &:last-child {
+      border-right: 0;
+    }
+
+    > :global(.anticon) {
+      color: #3f6f62;
+      font-size: 18px;
+    }
+
+    span {
+      overflow: hidden;
+      color: #667085;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    strong {
+      color: #111827;
+      font-size: 22px;
+      line-height: 28px;
+    }
+  }
+
+  .dangerStat > :global(.anticon),
+  .dangerStat strong {
+    color: #c2413b;
+  }
+}
+
+.workspaceTabs {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 20px 20px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+
+  :global(.ant-tabs-nav) {
+    margin-bottom: 14px;
+  }
+
+  :global(.ant-tabs-content-holder),
+  :global(.ant-tabs-tabpane) {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+}
+
+.tableToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 48px;
+  margin-bottom: 10px;
+}
+
+.metricNameCell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  > span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+.importPanel {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 12px 0 24px;
+}
+
+.importBody {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 24px;
+}
+
+.importForm {
+  padding-top: 18px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+}
+
+.hashText {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  vertical-align: bottom;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.metricSummary {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #eef0f2;
+}
+
+.detailForm {
+  max-width: 760px;
+  padding-top: 4px;
+}
+
+.versionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.compareToolbar {
+  min-height: 40px;
+}
+
+.versionCompare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.snapshotPanel {
+  min-width: 0;
+  border: 1px solid #d9dee5;
+  border-radius: 4px;
+
+  > span {
+    display: block;
+    padding: 10px 12px;
+    border-bottom: 1px solid #d9dee5;
+  }
+
+  pre {
+    max-height: 360px;
+    margin: 0;
+    padding: 12px;
+    overflow: auto;
+    color: #344054;
+    font-size: 12px;
+    line-height: 20px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background: #f8fafb;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding: 16px;
+  }
+
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    margin: -16px -16px 0;
+    padding: 16px;
+  }
+
+  .modelSelect {
+    width: 100%;
+  }
+
+  .statBand {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    > div:nth-child(2) {
+      border-right: 0;
+    }
+
+    > div:nth-child(-n + 2) {
+      border-bottom: 1px solid #e5e7eb;
+    }
+  }
+
+  .tableToolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .formGrid,
+  .versionCompare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .statBand {
+    grid-template-columns: minmax(0, 1fr);
+
+    > div {
+      border-right: 0;
+      border-bottom: 1px solid #e5e7eb;
+
+      &:last-child {
+        border-bottom: 0;
+      }
+    }
+  }
+
+  .workspaceTabs {
+    padding: 0 10px 12px;
+  }
+}

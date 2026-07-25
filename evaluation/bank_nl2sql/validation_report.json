@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "positiveSqlExecuted": 96,
+  "negativeCasesValidated": 96,
+  "featureCounts": {
+    "SINGLE_TABLE": 72,
+    "MULTI_TABLE": 24,
+    "NESTED_QUERY": 36,
+    "AGGREGATION": 48,
+    "CROSS_ORGANIZATION": 36,
+    "YOY": 12,
+    "MOM": 12,
+    "TOP_N": 12
+  },
+  "errorTypeCounts": {
+    "MAPPING_ERROR": 16,
+    "DEFINITION_ERROR": 16,
+    "JOIN_ERROR": 16,
+    "FILTER_ERROR": 16,
+    "SYNTAX_ERROR": 16,
+    "EXECUTION_ERROR": 16
+  },
+  "templateOverlap": 0
+}

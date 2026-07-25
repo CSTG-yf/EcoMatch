@@ -16,12 +16,15 @@ import com.tencent.supersonic.chat.server.persistence.dataobject.QueryDO;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryRepository;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatRepository;
 import com.tencent.supersonic.chat.server.pojo.ChatMemory;
+import com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicy;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.chat.server.service.MemoryService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -41,6 +44,7 @@ public class ChatManageServiceImpl implements ChatManageService {
     private ChatQueryRepository chatQueryRepository;
     @Autowired
     private MemoryService memoryService;
+    private final ChatObjectAccessPolicy objectAccessPolicy = new ChatObjectAccessPolicy();
 
     @Override
     public Long addChat(User user, String chatName, Integer agentId) {
@@ -67,7 +71,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public boolean updateFeedback(Long id, Integer score, String feedback) {
+    public boolean updateFeedback(Long id, Integer score, String feedback, User user) {
+        checkQueryAccess(id, user);
         QueryDO intelligentQueryDO = new QueryDO();
         intelligentQueryDO.setId(id);
         intelligentQueryDO.setQuestionId(id);
@@ -93,7 +98,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public boolean updateChatIsTop(Long chatId, int isTop) {
+    public boolean updateChatIsTop(Long chatId, int isTop, User user) {
+        checkChatAccess(chatId, user);
         return chatRepository.updateConversionIsTop(chatId, isTop);
     }
 
@@ -115,11 +121,14 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public Long createChatQuery(ChatParseReq chatParseReq) {
+        Integer chatId = chatParseReq.getChatId();
+        checkChatAccess(chatId == null ? null : chatId.longValue(), chatParseReq.getUser());
         return chatQueryRepository.createChatQuery(chatParseReq);
     }
 
     @Override
-    public QueryResp getChatQuery(Long queryId) {
+    public QueryResp getChatQuery(Long queryId, User user) {
+        checkQueryAccess(queryId, user);
         return chatQueryRepository.getChatQuery(queryId);
     }
 
@@ -129,14 +138,19 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public List<QueryResp> getChatQueries(Integer chatId) {
+    public List<QueryResp> getChatQueries(Integer chatId, User user) {
+        checkChatAccess(chatId == null ? null : chatId.longValue(), user);
         List<QueryResp> queries = chatQueryRepository.getChatQueries(chatId);
         fillParseInfo(queries);
         return queries;
     }
 
     @Override
-    public ShowCaseResp queryShowCase(PageQueryInfoReq pageQueryInfoReq, int agentId) {
+    public ShowCaseResp queryShowCase(PageQueryInfoReq pageQueryInfoReq, int agentId, User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        pageQueryInfoReq.setUserName(user.getName());
         ShowCaseResp showCaseResp = new ShowCaseResp();
         showCaseResp.setCurrent(pageQueryInfoReq.getCurrent());
         showCaseResp.setPageSize(pageQueryInfoReq.getPageSize());
@@ -193,13 +207,18 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public ChatQueryDO saveQueryResult(ChatExecuteReq chatExecuteReq, QueryResult queryResult) {
+        checkQueryAccess(chatExecuteReq.getQueryId(), chatExecuteReq.getUser());
         ChatQueryDO chatQueryDO = chatQueryRepository.getChatQueryDO(chatExecuteReq.getQueryId());
+        Long persistedChatId = chatQueryDO.getChatId();
+        checkChatAccess(persistedChatId, chatExecuteReq.getUser());
         chatQueryDO.setQuestionId(chatExecuteReq.getQueryId());
         chatQueryDO.setQueryResult(JsonUtil.toString(queryResult));
         chatQueryDO.setQueryState(1);
         updateQuery(chatQueryDO);
-        chatRepository.updateLastQuestion(chatExecuteReq.getChatId().longValue(),
-                chatExecuteReq.getQueryText(), getCurrentTime());
+        if (persistedChatId > 0) {
+            chatRepository.updateLastQuestion(persistedChatId, chatQueryDO.getQueryText(),
+                    getCurrentTime());
+        }
         return chatQueryDO;
     }
 
@@ -209,12 +228,41 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public void deleteQuery(Long queryId) {
+    public void deleteQuery(Long queryId, User user) {
+        checkQueryAccess(queryId, user);
         ChatQueryDO chatQuery = chatQueryRepository.getChatQueryDO(queryId);
         if (Objects.nonNull(chatQuery)) {
             chatQuery.setQueryState(0);
             chatQueryRepository.updateChatQuery(chatQuery);
         }
+    }
+
+    @Override
+    public void checkQueryAccess(Long queryId, User user) {
+        ChatQueryDO query = chatQueryRepository.getChatQueryDO(queryId);
+        if (query == null) {
+            throw new IllegalArgumentException("Query does not exist: " + queryId);
+        }
+        objectAccessPolicy.checkQueryAccess(queryId, query.getUserName(), user);
+    }
+
+    @Override
+    public void checkChatAccess(Long chatId, User user) {
+        if (chatId == null) {
+            throw new IllegalArgumentException("Chat id is required");
+        }
+        if (chatId <= 0) {
+            if (user == null || !user.isSuperAdmin()) {
+                throw new InvalidPermissionException(
+                        "System chat access requires a super administrator");
+            }
+            return;
+        }
+        ChatDO chat = chatRepository.getChat(chatId);
+        if (chat == null) {
+            throw new IllegalArgumentException("Chat does not exist: " + chatId);
+        }
+        objectAccessPolicy.checkChatAccess(chatId, chat.getCreator(), user);
     }
 
     @Override

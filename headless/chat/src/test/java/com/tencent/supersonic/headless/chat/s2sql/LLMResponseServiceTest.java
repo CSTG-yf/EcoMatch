@@ -27,6 +27,8 @@ class LLMResponseServiceTest {
                 llmResponseService.getDeduplicationSqlResp(0, llmResp);
 
         Assert.assertEquals(deduplicationSqlResp.size(), 1);
+        Assert.assertEquals(0.80, deduplicationSqlResp.values().iterator().next().getSqlWeight(),
+                0.001);
 
         sql1 = "SELECT a,b,c,d FROM table1 WHERE column1 = 1 AND column2 = 2 order by a";
         sql2 = "SELECT d,c,b,a FROM table1 WHERE column2 = 2 AND column1 = 1 order by a";

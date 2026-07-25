@@ -6,7 +6,19 @@ public interface CacheManager {
 
     Object get(String key);
 
+    default Boolean putHotMetric(String key, Object value) {
+        return put(key, value);
+    }
+
+    default Object getHotMetric(String key) {
+        return get(key);
+    }
+
     String generateCacheKey(String prefix, String body);
 
     Boolean removeCache(String key);
+
+    default Boolean removeHotMetricCache(String key) {
+        return removeCache(key);
+    }
 }

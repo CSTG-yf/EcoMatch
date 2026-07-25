@@ -7,6 +7,7 @@ import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
 import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.common.pojo.ChatApp;
+import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.ContextUtils;
@@ -67,7 +68,8 @@ public class PlainTextExecutor implements ChatQueryExecutor {
 
     private String getHistoryInputs(ExecuteContext executeContext) {
         StringBuilder historyInput = new StringBuilder();
-        List<QueryResp> queryResps = getHistoryQueries(executeContext.getRequest().getChatId(), 5);
+        List<QueryResp> queryResps = getHistoryQueries(executeContext.getRequest().getChatId(),
+                executeContext.getRequest().getUser(), 5);
         queryResps.forEach(p -> {
             historyInput.append(p.getQueryText());
             historyInput.append(";");
@@ -77,9 +79,10 @@ public class PlainTextExecutor implements ChatQueryExecutor {
         return historyInput.toString();
     }
 
-    private List<QueryResp> getHistoryQueries(int chatId, int multiNum) {
+    private List<QueryResp> getHistoryQueries(int chatId, User user, int multiNum) {
         ChatManageService chatManageService = ContextUtils.getBean(ChatManageService.class);
-        List<QueryResp> contextualParseInfoList = chatManageService.getChatQueries(chatId).stream()
+        List<QueryResp> contextualParseInfoList =
+                chatManageService.getChatQueries(chatId, user).stream()
                 .filter(q -> Objects.nonNull(q.getQueryResult())
                         && q.getQueryResult().getQueryState() == QueryState.SUCCESS)
                 .collect(Collectors.toList());

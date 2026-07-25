@@ -16,6 +16,7 @@ import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
@@ -24,6 +25,7 @@ import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
+import com.tencent.supersonic.headless.server.security.DataMaskingService;
 import com.tencent.supersonic.headless.server.service.ModelService;
 import com.tencent.supersonic.headless.server.service.SchemaService;
 import com.tencent.supersonic.headless.server.utils.QueryStructUtils;
@@ -47,12 +49,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
 @Aspect
 @Slf4j
 public class S2DataPermissionAspect {
+
+    private static final Pattern UNSAFE_PERMISSION_EXPRESSION = Pattern.compile(
+            "(?is)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|truncate|grant|revoke|call|merge)\\b)");
 
     @Autowired
     private QueryStructUtils queryStructUtils;
@@ -62,6 +68,8 @@ public class S2DataPermissionAspect {
     private SchemaService schemaService;
     @Autowired
     private AuthService authService;
+    @Autowired
+    private DataMaskingService dataMaskingService;
 
     @Pointcut("@annotation(com.tencent.supersonic.headless.server.annotation.S2DataPermission)")
     private void s2PermissionCheck() {}
@@ -87,21 +95,25 @@ public class S2DataPermissionAspect {
         if (queryReq == null) {
             throw new InvalidArgumentException("queryReq is not Invalid");
         }
-        if (!queryReq.isNeedAuth()) {
-            log.info("needAuth is false, there is no need to check permissions.");
-            return joinPoint.proceed();
-        }
         User user = (User) objects[1];
+        SemanticSchemaResp semanticSchemaResp = getSemanticSchemaResp(queryReq);
+        if (!queryReq.isNeedAuth()) {
+            log.info("needAuth is false, authorization checks are skipped but masking remains.");
+            return proceedAndMask(joinPoint, semanticSchemaResp, user);
+        }
         if (Objects.isNull(user) || StringUtils.isEmpty(user.getName())) {
             throw new RuntimeException("please provide user information");
         }
 
-        SemanticSchemaResp semanticSchemaResp = getSemanticSchemaResp(queryReq);
         Set<Long> modelIds = getModelIdInQuery(queryReq, semanticSchemaResp);
+        if (CollectionUtils.isEmpty(modelIds)) {
+            throw new InvalidArgumentException(
+                    "Unable to determine the model scope for an authorized query");
+        }
 
         // 2. determine whether admin of the model
         if (checkModelAdmin(user, modelIds)) {
-            return joinPoint.proceed();
+            return proceedAndMask(joinPoint, semanticSchemaResp, user);
         }
         // 3. determine whether the model is visible to cur user
         checkModelVisible(user, modelIds);
@@ -117,9 +129,19 @@ public class S2DataPermissionAspect {
         checkRowPermission(queryReq, authorizedResource);
 
         // 7. add hint to user
+        Object result = proceedAndMask(joinPoint, semanticSchemaResp, user);
+        if (result instanceof SemanticQueryResp) {
+            SemanticQueryResp queryResp = (SemanticQueryResp) result;
+            addHint(modelIds, queryResp, authorizedResource);
+        }
+        return result;
+    }
+
+    private Object proceedAndMask(ProceedingJoinPoint joinPoint,
+            SemanticSchemaResp semanticSchemaResp, User user) throws Throwable {
         Object result = joinPoint.proceed();
         if (result instanceof SemanticQueryResp) {
-            addHint(modelIds, (SemanticQueryResp) result, authorizedResource);
+            dataMaskingService.mask((SemanticQueryResp) result, semanticSchemaResp, user);
         }
         return result;
     }
@@ -205,6 +227,7 @@ public class S2DataPermissionAspect {
             log.debug("Dimension filters are empty");
             return;
         }
+        validateDimensionFilters(dimensionFilters);
 
         StringJoiner joiner = new StringJoiner(" OR ");
         dimensionFilters.stream().filter(
@@ -216,12 +239,16 @@ public class S2DataPermissionAspect {
             if (StringUtils.isNotEmpty(joiner.toString())) {
                 String originalSql = querySqlReq.getSql();
                 String modifiedSql = SqlAddHelper.addWhere(originalSql, expression);
-                log.info("Before doRowPermission, querySqlReq: {}", originalSql);
+                log.debug("Applying {} row permission filters to SQL [{}]", dimensionFilters.size(),
+                        SensitiveLogUtils.summarize(originalSql));
                 querySqlReq.setSql(modifiedSql);
-                log.info("After doRowPermission, querySqlReq: {}", modifiedSql);
+                log.debug("Row permission applied to SQL [{}]",
+                        SensitiveLogUtils.summarize(modifiedSql));
             }
         } catch (JSQLParserException e) {
-            log.error("JSQLParser encountered an exception: {}", e.toString());
+            log.warn("Failed to apply row permission filter: {}", e.getMessage());
+            throw new InvalidPermissionException(
+                    "Row permission filter is invalid; query execution was denied");
         }
     }
 
@@ -241,19 +268,38 @@ public class S2DataPermissionAspect {
             log.debug("dimensionFilters is empty");
             return;
         }
+        validateDimensionFilters(dimensionFilters);
 
         StringJoiner joiner = new StringJoiner(" OR ");
         dimensionFilters.forEach(filter -> joiner.add(" ( " + filter + " ) "));
 
         String joinedFilters = joiner.toString();
         if (StringUtils.isNotEmpty(joinedFilters)) {
-            log.info("before doRowPermission, queryStructReq:{}", queryStructReq);
+            log.debug("Applying {} row permission filters to structured query [{}]",
+                    dimensionFilters.size(), SensitiveLogUtils.summarize(queryStructReq));
             Filter filter = new Filter("", FilterOperatorEnum.SQL_PART, joinedFilters);
             List<Filter> filters = Optional.ofNullable(queryStructReq.getOriginalFilter())
                     .orElseGet(ArrayList::new);
             filters.add(filter);
             queryStructReq.setDimensionFilters(filters);
-            log.info("after doRowPermission, queryStructReq:{}", queryStructReq);
+            log.debug("Row permission applied to structured query [{}]",
+                    SensitiveLogUtils.summarize(queryStructReq));
+        }
+    }
+
+    private void validateDimensionFilters(List<String> dimensionFilters) {
+        for (String expression : dimensionFilters) {
+            if (UNSAFE_PERMISSION_EXPRESSION.matcher(expression).find()) {
+                throw new InvalidPermissionException(
+                        "Unsafe row permission filter; query execution was denied");
+            }
+            try {
+                CCJSqlParserUtil.parseCondExpression(expression);
+            } catch (JSQLParserException e) {
+                log.warn("Failed to parse row permission filter: {}", e.getMessage());
+                throw new InvalidPermissionException(
+                        "Row permission filter is invalid; query execution was denied");
+            }
         }
     }
 
@@ -309,13 +355,14 @@ public class S2DataPermissionAspect {
         QueryAuthResReq queryAuthResReq = new QueryAuthResReq();
         queryAuthResReq.setModelIds(new ArrayList<>(modelIds));
         AuthorizedResourceResp authorizedResource = fetchAuthRes(queryAuthResReq, user);
-        log.info("user:{}, domainId:{}, after queryAuthorizedResources:{}", user.getName(),
-                modelIds, authorizedResource);
+        log.debug("Authorization resolved for {} models: resources={}, filters={}", modelIds.size(),
+                authorizedResource.getAuthResList().size(), authorizedResource.getFilters().size());
         return authorizedResource;
     }
 
     private AuthorizedResourceResp fetchAuthRes(QueryAuthResReq queryAuthResReq, User user) {
-        log.info("queryAuthResReq:{}", queryAuthResReq);
+        log.debug("Querying authorization resources [{}]",
+                SensitiveLogUtils.summarize(queryAuthResReq));
         return authService.queryAuthorizedResources(queryAuthResReq, user);
     }
 

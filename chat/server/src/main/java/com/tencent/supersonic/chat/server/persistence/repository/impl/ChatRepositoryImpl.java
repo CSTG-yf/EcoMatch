@@ -28,6 +28,11 @@ public class ChatRepositoryImpl implements ChatRepository {
     }
 
     @Override
+    public ChatDO getChat(Long chatId) {
+        return chatMapper.getChat(chatId);
+    }
+
+    @Override
     public List<ChatDO> getAll(String creator, Integer agentId) {
         return chatMapper.getAll(creator, agentId);
     }

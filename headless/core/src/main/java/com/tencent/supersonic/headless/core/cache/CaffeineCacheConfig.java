@@ -29,6 +29,16 @@ public class CaffeineCacheConfig {
                 .initialCapacity(caffeineInitialCapacity).maximumSize(caffeineMaximumSize).build();
     }
 
+    @Bean(name = "hotMetricCaffeineCache")
+    public Cache<String, Object> hotMetricCaffeineCache() {
+        int maximumSize = Math.max(1, cacheCommonConfig.getHotMetricMaximumSize());
+        return Caffeine.newBuilder()
+                .expireAfterWrite(Math.max(1, cacheCommonConfig.getHotMetricExpireAfterWrite()),
+                        TimeUnit.MINUTES)
+                .initialCapacity(Math.min(caffeineInitialCapacity, maximumSize))
+                .maximumSize(maximumSize).build();
+    }
+
     @Bean(name = "searchCaffeineCache")
     public Cache<Long, Object> searchCaffeineCache() {
         return Caffeine.newBuilder().expireAfterWrite(10000, TimeUnit.MINUTES)

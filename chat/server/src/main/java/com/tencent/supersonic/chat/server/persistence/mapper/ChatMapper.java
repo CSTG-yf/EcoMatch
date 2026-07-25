@@ -11,6 +11,8 @@ public interface ChatMapper {
 
     boolean createChat(ChatDO chatDO);
 
+    ChatDO getChat(Long chatId);
+
     List<ChatDO> getAll(String creator, Integer agentId);
 
     Boolean updateChatName(Long chatId, String chatName, String lastTime, String creator);

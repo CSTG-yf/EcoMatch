@@ -4,9 +4,12 @@ import javax.sql.DataSource;
 
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.DateUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
+import com.tencent.supersonic.headless.core.gateway.ExplainCostPolicy;
+import com.tencent.supersonic.headless.core.gateway.QueryRejectedException;
 import com.tencent.supersonic.headless.core.pojo.JdbcDataSource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +47,18 @@ public class SqlUtils {
     @Value("${s2.source.enable-query-log:false}")
     private boolean isQueryLogEnable;
 
+    @Value("${s2.source.query-timeout-seconds:30}")
+    private int queryTimeoutSeconds;
+
+    @Value("${s2.source.explain-cost-check-enabled:true}")
+    private boolean explainCostCheckEnabled;
+
+    @Value("${s2.source.explain-max-estimated-rows:1000000}")
+    private long explainMaxEstimatedRows;
+
+    @Value("${s2.source.explain-require-estimate:false}")
+    private boolean explainRequireEstimate;
+
     @Getter
     private DataType dataTypeEnum;
 
@@ -63,17 +78,22 @@ public class SqlUtils {
                 .withType(database.getType()).withJdbcUrl(database.getUrl())
                 .withUsername(database.getUsername()).withPassword(database.getPassword())
                 .withJdbcDataSource(this.jdbcDataSource).withResultLimit(this.resultLimit)
-                .withIsQueryLogEnable(this.isQueryLogEnable).build();
+                .withIsQueryLogEnable(this.isQueryLogEnable)
+                .withQueryTimeoutSeconds(this.queryTimeoutSeconds)
+                .withExplainCostCheck(this.explainCostCheckEnabled, this.explainMaxEstimatedRows,
+                        this.explainRequireEstimate)
+                .build();
     }
 
     public List<Map<String, Object>> execute(String sql) throws ServerException {
         try {
             List<Map<String, Object>> list = jdbcTemplate().queryForList(sql);
-            log.info("list:{}", list);
+            log.debug("SQL execution returned {} rows", list.size());
             return list;
         } catch (Exception e) {
-            log.error(e.toString(), e);
-            throw new ServerException(e.getMessage());
+            log.error("SQL execution failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
+            throw new ServerException("SQL execution failed");
         }
     }
 
@@ -94,11 +114,18 @@ public class SqlUtils {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
         jdbcTemplate.setDatabaseProductName(database.getName());
         jdbcTemplate.setFetchSize(500);
+        jdbcTemplate.setMaxRows(resultLimit);
+        jdbcTemplate.setQueryTimeout(queryTimeoutSeconds);
         return jdbcTemplate;
     }
 
     public void queryInternal(String sql, SemanticQueryResp queryResultWithColumns) {
-        getResult(sql, queryResultWithColumns, jdbcTemplate());
+        JdbcTemplate jdbcTemplate = jdbcTemplate();
+        if (explainCostCheckEnabled) {
+            List<Map<String, Object>> plan = jdbcTemplate.queryForList("EXPLAIN " + sql);
+            new ExplainCostPolicy(explainMaxEstimatedRows, explainRequireEstimate).validate(plan);
+        }
+        getResult(sql, queryResultWithColumns, jdbcTemplate);
     }
 
     private SemanticQueryResp getResult(String sql, SemanticQueryResp queryResultWithColumns,
@@ -109,11 +136,7 @@ public class SqlUtils {
             }
 
             ResultSetMetaData metaData = rs.getMetaData();
-            List<QueryColumn> queryColumns = new ArrayList<>();
-            for (int i = 1; i <= metaData.getColumnCount(); i++) {
-                String key = metaData.getColumnLabel(i);
-                queryColumns.add(new QueryColumn(key, metaData.getColumnTypeName(i)));
-            }
+            List<QueryColumn> queryColumns = getQueryColumns(metaData);
             queryResultWithColumns.setColumns(queryColumns);
 
             List<Map<String, Object>> resultList = getAllData(rs, queryColumns);
@@ -123,14 +146,26 @@ public class SqlUtils {
         return queryResultWithColumns;
     }
 
-    private List<Map<String, Object>> getAllData(ResultSet rs, List<QueryColumn> queryColumns) {
+    List<QueryColumn> getQueryColumns(ResultSetMetaData metaData) throws SQLException {
+        List<QueryColumn> queryColumns = new ArrayList<>();
+        for (int i = 1; i <= metaData.getColumnCount(); i++) {
+            String label = metaData.getColumnLabel(i);
+            QueryColumn column = new QueryColumn(label, metaData.getColumnTypeName(i), label);
+            column.setNameEn(metaData.getColumnName(i));
+            queryColumns.add(column);
+        }
+        return queryColumns;
+    }
+
+    List<Map<String, Object>> getAllData(ResultSet rs, List<QueryColumn> queryColumns)
+            throws SQLException {
         List<Map<String, Object>> data = new ArrayList<>();
-        try {
-            while (rs.next()) {
-                data.add(getLineData(rs, queryColumns));
+        while (rs.next()) {
+            if (resultLimit > 0 && data.size() >= resultLimit) {
+                throw new QueryRejectedException(
+                        "Query result row limit exceeded: " + resultLimit);
             }
-        } catch (Exception e) {
-            log.warn("error in getAllData, e:", e);
+            data.add(getLineData(rs, queryColumns));
         }
         return data;
     }
@@ -167,6 +202,10 @@ public class SqlUtils {
         private JdbcDataSource jdbcDataSource;
         private int resultLimit;
         private boolean isQueryLogEnable;
+        private int queryTimeoutSeconds = 30;
+        private boolean explainCostCheckEnabled = true;
+        private long explainMaxEstimatedRows = 1_000_000;
+        private boolean explainRequireEstimate;
         private String name;
         private String type;
         private String jdbcUrl;
@@ -191,6 +230,19 @@ public class SqlUtils {
 
         SqlUtilsBuilder withIsQueryLogEnable(boolean isQueryLogEnable) {
             this.isQueryLogEnable = isQueryLogEnable;
+            return this;
+        }
+
+        SqlUtilsBuilder withQueryTimeoutSeconds(int queryTimeoutSeconds) {
+            this.queryTimeoutSeconds = queryTimeoutSeconds;
+            return this;
+        }
+
+        SqlUtilsBuilder withExplainCostCheck(boolean enabled, long maxEstimatedRows,
+                boolean requireEstimate) {
+            this.explainCostCheckEnabled = enabled;
+            this.explainMaxEstimatedRows = maxEstimatedRows;
+            this.explainRequireEstimate = requireEstimate;
             return this;
         }
 
@@ -228,6 +280,10 @@ public class SqlUtils {
             sqlUtils.jdbcDataSource = this.jdbcDataSource;
             sqlUtils.resultLimit = this.resultLimit;
             sqlUtils.isQueryLogEnable = this.isQueryLogEnable;
+            sqlUtils.queryTimeoutSeconds = this.queryTimeoutSeconds;
+            sqlUtils.explainCostCheckEnabled = this.explainCostCheckEnabled;
+            sqlUtils.explainMaxEstimatedRows = this.explainMaxEstimatedRows;
+            sqlUtils.explainRequireEstimate = this.explainRequireEstimate;
             sqlUtils.jdbcDataSourceUtils = new JdbcDataSourceUtils(this.jdbcDataSource);
 
             return sqlUtils;

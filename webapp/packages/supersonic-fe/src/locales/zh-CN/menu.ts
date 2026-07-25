@@ -9,6 +9,7 @@ export default {
   'menu.exception.server-error': '500',
   'menu.semanticModel': '语义建模',
   'menu.metric': '指标市场',
+  'menu.governance': '指标治理',
   'menu.metric.metricDetail': '指标详情页',
   'menu.metricEdit': '指标编辑',
   'menu.tag': '标签市场',
