@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BusinessInsightProcessorTest {
@@ -62,6 +63,22 @@ class BusinessInsightProcessorTest {
                 .anyMatch(warning -> warning.contains("少于3条")));
         assertFalse(result.getBusinessExplanation().getEvidence().stream()
                 .anyMatch(evidence -> evidence.contains("变化") || evidence.contains("异常")));
+    }
+
+    @Test
+    void rejectsOversizedMainQueryResultBeforeProfiling() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"),
+                column("amount", "NUMBER")));
+        result.setQueryResults(List.of(row("A", 10), row("B", 20), row("C", 30)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+        BusinessInsightConfig config =
+                new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95, 2, 100);
+
+        assertThrows(IllegalStateException.class,
+                () -> new BusinessInsightProcessor(config).process(context));
     }
 
     @Test

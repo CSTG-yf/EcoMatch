@@ -55,7 +55,7 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- 14 个关联 Maven 模块在 JDK 21 下完成干净编译，103 项安全、权限、性能和解释定向测试通过。
+- 14 个关联 Maven 模块在 JDK 21 下完成干净编译，108 项安全、权限、性能和解释定向测试通过。
 
 ## 本地性能基线
 

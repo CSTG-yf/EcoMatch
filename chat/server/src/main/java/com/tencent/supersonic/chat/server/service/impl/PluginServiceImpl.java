@@ -12,6 +12,8 @@ import com.tencent.supersonic.chat.server.plugin.event.PluginDelEvent;
 import com.tencent.supersonic.chat.server.plugin.event.PluginUpdateEvent;
 import com.tencent.supersonic.chat.server.service.PluginService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -55,6 +57,7 @@ public class PluginServiceImpl implements PluginService {
     public void updatePlugin(ChatPlugin plugin, User user) {
         Long id = plugin.getId();
         PluginDO pluginDO = pluginRepository.getPlugin(id);
+        checkManageAccess(pluginDO, user);
         ChatPlugin oldPlugin = convert(pluginDO);
         convert(plugin, pluginDO, user);
         pluginRepository.updatePlugin(pluginDO);
@@ -62,12 +65,11 @@ public class PluginServiceImpl implements PluginService {
     }
 
     @Override
-    public void deletePlugin(Long id) {
+    public void deletePlugin(Long id, User user) {
         PluginDO pluginDO = pluginRepository.getPlugin(id);
-        if (pluginDO != null) {
-            pluginRepository.deletePlugin(id);
-            publisher.publishEvent(new PluginDelEvent(this, convert(pluginDO)));
-        }
+        checkManageAccess(pluginDO, user);
+        pluginRepository.deletePlugin(id);
+        publisher.publishEvent(new PluginDelEvent(this, convert(pluginDO)));
     }
 
     @Override
@@ -170,9 +172,28 @@ public class PluginServiceImpl implements PluginService {
         }, a -> a, (k1, k2) -> k1));
     }
 
-    // todo
     private List<ChatPlugin> authCheck(List<ChatPlugin> plugins, User user) {
-        return plugins;
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        if (user.isSuperAdmin()) {
+            return plugins;
+        }
+        return plugins.stream().filter(plugin -> user.getName().equals(plugin.getCreatedBy()))
+                .collect(Collectors.toList());
+    }
+
+    private void checkManageAccess(PluginDO plugin, User user) {
+        if (plugin == null) {
+            throw new InvalidArgumentException("Plugin does not exist");
+        }
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        if (!user.isSuperAdmin() && !user.getName().equals(plugin.getCreatedBy())) {
+            throw new InvalidPermissionException(
+                    "No permission to manage plugin " + plugin.getId());
+        }
     }
 
     public ChatPlugin convert(PluginDO pluginDO) {
@@ -197,7 +218,13 @@ public class PluginServiceImpl implements PluginService {
     }
 
     public PluginDO convert(ChatPlugin plugin, PluginDO pluginDO, User user) {
+        Long id = pluginDO.getId();
+        Date createdAt = pluginDO.getCreatedAt();
+        String createdBy = pluginDO.getCreatedBy();
         BeanUtils.copyProperties(plugin, pluginDO);
+        pluginDO.setId(id);
+        pluginDO.setCreatedAt(createdAt);
+        pluginDO.setCreatedBy(createdBy);
         pluginDO.setUpdatedAt(new Date());
         pluginDO.setUpdatedBy(user.getName());
         pluginDO.setDataSet(StringUtils.join(plugin.getDataSetList(), ","));

@@ -83,8 +83,8 @@ public class WebServiceQuery extends PluginSemanticQuery {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<String> entity = new HttpEntity<>(JSON.toJSONString(params), headers);
-        String url = webBase.getUrl() + "?queryText=" + pluginParseResult.getQueryText();
-        URI requestUrl = UriComponentsBuilder.fromHttpUrl(url).build().encode().toUri();
+        URI requestUrl = UriComponentsBuilder.fromHttpUrl(webBase.getUrl())
+                .queryParam("queryText", pluginParseResult.getQueryText()).build().encode().toUri();
         ResponseEntity responseEntity = null;
         Object objectResponse = null;
         restTemplate = ContextUtils.getBean(RestTemplate.class);
@@ -92,11 +92,12 @@ public class WebServiceQuery extends PluginSemanticQuery {
             responseEntity =
                     restTemplate.exchange(requestUrl, HttpMethod.POST, entity, String.class);
             objectResponse = responseEntity.getBody();
-            log.info("objectResponse:{}", objectResponse);
+            log.info("WebService response [{}]", SensitiveLogUtils.summarize(objectResponse));
             Map<String, Object> response = JSON.parseObject(objectResponse.toString());
             webServiceResponse.setResult(response);
         } catch (Exception e) {
-            log.info("Exception:{}", e.getMessage());
+            log.warn("WebService request failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return webServiceResponse;
     }

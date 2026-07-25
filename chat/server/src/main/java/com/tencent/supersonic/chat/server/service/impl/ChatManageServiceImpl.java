@@ -24,6 +24,7 @@ import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -145,7 +146,11 @@ public class ChatManageServiceImpl implements ChatManageService {
     }
 
     @Override
-    public ShowCaseResp queryShowCase(PageQueryInfoReq pageQueryInfoReq, int agentId) {
+    public ShowCaseResp queryShowCase(PageQueryInfoReq pageQueryInfoReq, int agentId, User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        pageQueryInfoReq.setUserName(user.getName());
         ShowCaseResp showCaseResp = new ShowCaseResp();
         showCaseResp.setCurrent(pageQueryInfoReq.getCurrent());
         showCaseResp.setPageSize(pageQueryInfoReq.getPageSize());

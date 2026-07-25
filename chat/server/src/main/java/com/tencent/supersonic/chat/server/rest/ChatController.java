@@ -7,6 +7,7 @@ import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.ShowCaseResp;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
+import com.tencent.supersonic.common.pojo.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -91,7 +92,9 @@ public class ChatController {
 
     @PostMapping("/queryShowCase")
     public ShowCaseResp queryShowCase(@RequestBody PageQueryInfoReq pageQueryInfoCommand,
-            @RequestParam(value = "agentId") int agentId) {
-        return chatService.queryShowCase(pageQueryInfoCommand, agentId);
+            @RequestParam(value = "agentId") int agentId, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return chatService.queryShowCase(pageQueryInfoCommand, agentId, user);
     }
 }

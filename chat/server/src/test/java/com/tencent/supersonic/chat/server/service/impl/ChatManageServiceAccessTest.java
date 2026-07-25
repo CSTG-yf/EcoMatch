@@ -2,6 +2,7 @@ package com.tencent.supersonic.chat.server.service.impl;
 
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
+import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
@@ -64,6 +65,25 @@ class ChatManageServiceAccessTest {
 
         verify(chatRepository).updateLastQuestion(eq(10L), eq("trusted question"), any());
         verify(chatRepository, never()).updateLastQuestion(eq(99L), any(), any());
+    }
+
+    @Test
+    void scopesShowCasesToAuthenticatedUser() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository);
+        PageQueryInfoReq request = new PageQueryInfoReq();
+        request.setCurrent(1);
+        request.setPageSize(10);
+        request.setUserName("mallory");
+        when(queryRepository.queryShowCase(request, 7)).thenReturn(java.util.List.of());
+
+        service.queryShowCase(request, 7, User.get(2L, "alice"));
+
+        org.junit.jupiter.api.Assertions.assertEquals("alice", request.getUserName());
+        verify(queryRepository).queryShowCase(request, 7);
+        assertThrows(InvalidPermissionException.class,
+                () -> service.queryShowCase(new PageQueryInfoReq(), 7, null));
     }
 
     private ChatManageServiceImpl service(ChatRepository chatRepository,

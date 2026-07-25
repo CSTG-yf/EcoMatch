@@ -27,7 +27,9 @@ import com.tencent.supersonic.common.jsqlparser.SqlRemoveHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlReplaceHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
@@ -113,14 +115,20 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         long start = System.nanoTime();
         try {
             Long queryId = chatParseReq.getQueryId();
+            Agent agent;
             if (Objects.isNull(queryId)) {
+                agent = getAuthorizedAgent(chatParseReq.getAgentId(), chatParseReq.getUser());
                 queryId = chatManageService.createChatQuery(chatParseReq);
                 chatParseReq.setQueryId(queryId);
             } else {
                 chatManageService.checkQueryAccess(queryId, chatParseReq.getUser());
+                ChatQueryDO storedQuery = chatManageService.getChatQueryDO(queryId);
+                chatParseReq.setAgentId(storedQuery.getAgentId());
+                agent = getAuthorizedAgent(storedQuery.getAgentId(), chatParseReq.getUser());
             }
 
-            ParseContext parseContext = buildParseContext(chatParseReq, new ChatParseResp(queryId));
+            ParseContext parseContext = new ParseContext(chatParseReq, new ChatParseResp(queryId));
+            parseContext.setAgent(agent);
             for (ChatQueryParser parser : chatQueryParsers) {
                 if (parser.accept(parseContext)) {
                     parser.parse(parseContext);
@@ -213,7 +221,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     private ParseContext buildParseContext(ChatParseReq chatParseReq, ChatParseResp chatParseResp) {
         ParseContext parseContext = new ParseContext(chatParseReq, chatParseResp);
-        Agent agent = agentService.getAgent(chatParseReq.getAgentId());
+        Agent agent = getAuthorizedAgent(chatParseReq.getAgentId(), chatParseReq.getUser());
         parseContext.setAgent(agent);
         return parseContext;
     }
@@ -222,7 +230,9 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         ExecuteContext executeContext = new ExecuteContext(chatExecuteReq);
         SemanticParseInfo parseInfo = chatManageService.getParseInfo(chatExecuteReq.getQueryId(),
                 chatExecuteReq.getParseId());
-        Agent agent = agentService.getAgent(chatExecuteReq.getAgentId());
+        ChatQueryDO storedQuery = chatManageService.getChatQueryDO(chatExecuteReq.getQueryId());
+        chatExecuteReq.setAgentId(storedQuery.getAgentId());
+        Agent agent = getAuthorizedAgent(storedQuery.getAgentId(), chatExecuteReq.getUser());
         executeContext.setAgent(agent);
         executeContext.setParseInfo(parseInfo);
         return executeContext;
@@ -582,9 +592,19 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     @Override
     public Object queryDimensionValue(DimensionValueReq dimensionValueReq, User user) {
         Integer agentId = dimensionValueReq.getAgentId();
-        Agent agent = agentService.getAgent(agentId);
+        Agent agent = getAuthorizedAgent(agentId, user);
         dimensionValueReq.setDataSetIds(agent.getDataSetIds());
         return semanticLayerService.queryDimensionValue(dimensionValueReq, user);
+    }
+
+    private Agent getAuthorizedAgent(Integer agentId, User user) {
+        if (agentId == null || user == null) {
+            throw new InvalidPermissionException("Agent access requires an authenticated user");
+        }
+        return agentService.getAgents(user, AuthType.VIEWER).stream()
+                .filter(agent -> Objects.equals(agentId, agent.getId())).findFirst()
+                .orElseThrow(() -> new InvalidPermissionException(
+                        "No permission to access agent " + agentId));
     }
 
     public void saveQueryResult(ChatExecuteReq chatExecuteReq, QueryResult queryResult) {
