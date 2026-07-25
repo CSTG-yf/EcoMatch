@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.core.gateway;
 
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -32,14 +33,21 @@ public class QueryExecutionGateway {
     private final AtomicLong totalExecutionTimeMs = new AtomicLong();
     private final AtomicLong totalExecutionTimeNanos = new AtomicLong();
 
+    @Autowired
     public QueryExecutionGateway(
             @Value("${s2.query-gateway.max-concurrency:20}") int maxConcurrency,
             @Value("${s2.query-gateway.acquire-timeout-ms:1000}") long acquireTimeoutMs,
-            @Value("${s2.query-gateway.max-sql-length:100000}") int maxSqlLength) {
+            @Value("${s2.query-gateway.max-sql-length:100000}") int maxSqlLength,
+            @Value("${s2.query-gateway.denied-functions:}") String deniedFunctions) {
         this.maxConcurrency = Math.max(1, maxConcurrency);
         this.permits = new Semaphore(this.maxConcurrency, true);
         this.acquireTimeoutMs = Math.max(1, acquireTimeoutMs);
-        this.safetyPolicy = new SqlSafetyPolicy(Math.max(1, maxSqlLength));
+        this.safetyPolicy =
+                new SqlSafetyPolicy(Math.max(1, maxSqlLength), deniedFunctions);
+    }
+
+    public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength) {
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, "");
     }
 
     public <T> T execute(String sql, Supplier<T> action) {

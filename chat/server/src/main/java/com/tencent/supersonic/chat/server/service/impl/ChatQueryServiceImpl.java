@@ -177,6 +177,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     @Override
     public QueryResult getTextSummary(ChatExecuteReq chatExecuteReq) {
+        chatManageService.checkQueryAccess(chatExecuteReq.getQueryId(), chatExecuteReq.getUser());
         String text = DataInterpretProcessor.getTextSummary(chatExecuteReq.getQueryId());
         if (StringUtils.isNotBlank(text)) {
             QueryResult res = new QueryResult();

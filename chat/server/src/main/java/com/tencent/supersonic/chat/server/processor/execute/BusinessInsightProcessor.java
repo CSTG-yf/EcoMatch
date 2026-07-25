@@ -197,8 +197,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             charts.add(chart("PIE", 0.82, "分类数量较少，可用于展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         }
-        if (profile.metrics.size() > 1 && types.add("COMBO")) {
-            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension(profile),
+        List<String> firstDimension = firstDimension(profile);
+        if (profile.metrics.size() > 1 && !firstDimension.isEmpty() && types.add("COMBO")) {
+            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension,
                     profile.metrics));
         }
         if (types.add("TABLE")) {

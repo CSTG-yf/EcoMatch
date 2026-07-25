@@ -46,6 +46,22 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void rejectsUnsupportedTypesAndInvalidChartFieldRoles() {
+        QueryResult unsupported = validResult();
+        unsupported.getRecommendedChart().setChartType("SCATTER");
+        assertThrows(IllegalStateException.class, () -> validator.validate(unsupported));
+
+        QueryResult swappedRoles = validResult();
+        swappedRoles.getRecommendedChart().setDimensionFields(List.of("balance"));
+        swappedRoles.getRecommendedChart().setMetricFields(List.of("month"));
+        assertThrows(IllegalStateException.class, () -> validator.validate(swappedRoles));
+
+        QueryResult invalidPie = validResult();
+        invalidPie.getRecommendedChart().setChartType("PIE");
+        assertThrows(IllegalStateException.class, () -> validator.validate(invalidPie));
+    }
+
+    @Test
     void rejectsExplanationWithFabricatedNumericEvidence() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setEvidence(List.of("balance范围为100至999"));
@@ -103,6 +119,7 @@ class BusinessInsightConsistencyValidatorTest {
                 List.of(column("branch", "STRING"), column("balance", "NUMBER"))));
         result.setQueryResults(List.of(Map.of("branch", "A", "balance", 30),
                 Map.of("branch", "B", "balance", 70)));
+        result.getRecommendedChart().setChartType("BAR");
         result.getRecommendedChart().setDimensionFields(List.of("branch"));
         result.getBusinessExplanation().setTimeRange(null);
         setEvidence(result, "B的balance贡献度最高，为70%",

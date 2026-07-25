@@ -108,6 +108,22 @@ class SqlSafetyPolicyAdvancedTest {
                 + "WINDOW w AS (PARTITION BY \"sleep\"(1))");
     }
 
+    @Test
+    void rejectsConfiguredDatabaseSpecificFunctions() {
+        SqlSafetyPolicy configured =
+                new SqlSafetyPolicy(10_000, "bank_audit_write, utility.remote_call");
+
+        SqlPolicyViolationException direct = assertThrows(SqlPolicyViolationException.class,
+                () -> configured.validate("SELECT \"bank_audit_write\"('secret')"));
+        SqlPolicyViolationException qualified = assertThrows(SqlPolicyViolationException.class,
+                () -> configured.validate("SELECT utility.\"remote_call\"('endpoint')"));
+
+        assertTrue(direct.getMessage().contains("bank_audit_write"));
+        assertTrue(qualified.getMessage().contains("remote_call"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new SqlSafetyPolicy(10_000, "unsafe-function()"));
+    }
+
     private void assertDangerousFunctionRejected(String sql) {
         SqlPolicyViolationException violation =
                 assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));

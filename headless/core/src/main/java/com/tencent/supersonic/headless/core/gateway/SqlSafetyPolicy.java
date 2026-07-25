@@ -22,6 +22,7 @@ import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.select.TableFunction;
 
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -31,7 +32,7 @@ import java.util.stream.Stream;
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
 
-    private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
+    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
             "get_lock", "load_file", "lo_export", "lo_import", "nextval", "pg_advisory_lock",
             "pg_advisory_unlock", "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
             "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "pg_stat_file", "pg_try_advisory_lock",
@@ -39,11 +40,33 @@ public class SqlSafetyPolicy {
             "sleep", "sys_eval", "sys_exec");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
+    private static final Pattern FUNCTION_IDENTIFIER =
+            Pattern.compile("[A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)*");
 
     private final int maxSqlLength;
+    private final Set<String> dangerousFunctions;
 
     public SqlSafetyPolicy(int maxSqlLength) {
+        this(maxSqlLength, "");
+    }
+
+    public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions) {
         this.maxSqlLength = maxSqlLength;
+        Set<String> configured = new LinkedHashSet<>(DEFAULT_DANGEROUS_FUNCTIONS);
+        String additions =
+                additionalDangerousFunctions == null ? "" : additionalDangerousFunctions;
+        for (String rawFunction : additions.split(",")) {
+            String function = rawFunction.trim();
+            if (function.isEmpty()) {
+                continue;
+            }
+            if (!FUNCTION_IDENTIFIER.matcher(function).matches()) {
+                throw new IllegalArgumentException(
+                        "Invalid denied SQL function identifier: " + function);
+            }
+            configured.add(normalizeFunctionIdentifier(function));
+        }
+        this.dangerousFunctions = Collections.unmodifiableSet(configured);
     }
 
     public void validate(String sql) {
@@ -73,7 +96,7 @@ public class SqlSafetyPolicy {
         if (LOCK_OR_FILE_WRITE.matcher(normalized).find()) {
             throw new SqlPolicyViolationException("Locking and file-writing clauses are forbidden");
         }
-        for (String function : DANGEROUS_FUNCTIONS) {
+        for (String function : dangerousFunctions) {
             if (Pattern.compile("(?is)\\b" + Pattern.quote(function) + "\\s*\\(")
                     .matcher(normalized).find()) {
                 throw new SqlPolicyViolationException(
@@ -114,7 +137,7 @@ public class SqlSafetyPolicy {
             @Override
             public void visit(Function function) {
                 String functionName = normalizeFunctionName(function);
-                if (DANGEROUS_FUNCTIONS.contains(functionName)) {
+                if (dangerousFunctions.contains(functionName)) {
                     throw new SqlPolicyViolationException(
                             "Dangerous SQL function is forbidden: " + functionName);
                 }
@@ -224,6 +247,12 @@ public class SqlSafetyPolicy {
         String normalized = name == null ? ""
                 : name.replace("\"", "").replace("`", "").replace("[", "").replace("]", "")
                         .toLowerCase(Locale.ROOT);
+        int qualifier = normalized.lastIndexOf('.');
+        return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
+    }
+
+    private String normalizeFunctionIdentifier(String function) {
+        String normalized = function.toLowerCase(Locale.ROOT);
         int qualifier = normalized.lastIndexOf('.');
         return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
     }

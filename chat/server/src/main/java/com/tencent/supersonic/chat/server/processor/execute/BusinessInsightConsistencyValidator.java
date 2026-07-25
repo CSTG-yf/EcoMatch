@@ -28,6 +28,8 @@ import java.util.stream.Stream;
 /** Independently verifies that generated charts and explanations are grounded in query results. */
 final class BusinessInsightConsistencyValidator {
 
+    private static final Set<String> SUPPORTED_CHART_TYPES =
+            Set.of("KPI_CARD", "LINE", "BAR", "PIE", "COMBO", "TABLE");
     private static final Pattern RANGE =
             Pattern.compile("范围为(-?[0-9]+(?:\\.[0-9]+)?)至" + "(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern FIRST_LAST =
@@ -52,17 +54,18 @@ final class BusinessInsightConsistencyValidator {
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> maskedFields = normalizedMaskedFields(result);
-        validateChart(result.getRecommendedChart(), fields, maskedFields, "recommended chart");
+        validateChart(result, result.getRecommendedChart(), fields, maskedFields,
+                "recommended chart");
         if (result.getCandidateCharts() == null) {
             throw inconsistent("candidate charts are missing");
         }
         for (ChartRecommendation candidate : result.getCandidateCharts()) {
-            validateChart(candidate, fields, maskedFields, "candidate chart");
+            validateChart(result, candidate, fields, maskedFields, "candidate chart");
         }
         validateExplanation(result, metricLabels == null ? Map.of() : metricLabels);
     }
 
-    private void validateChart(ChartRecommendation chart, Set<String> fields,
+    private void validateChart(QueryResult result, ChartRecommendation chart, Set<String> fields,
             Set<String> maskedFields, String location) {
         if (chart == null || StringUtils.isBlank(chart.getChartType())
                 || StringUtils.isBlank(chart.getReason())) {
@@ -72,6 +75,10 @@ final class BusinessInsightConsistencyValidator {
         if (chart.getDimensionFields() == null || chart.getMetricFields() == null) {
             throw inconsistent(location + " field lists are missing");
         }
+        if (!SUPPORTED_CHART_TYPES.contains(chart.getChartType())) {
+            throw inconsistent(location + " type is unsupported: " + chart.getChartType());
+        }
+        validateChartFieldLists(chart, location);
         Set<String> referenced = new LinkedHashSet<>(chart.getDimensionFields());
         referenced.addAll(chart.getMetricFields());
         referenced.removeAll(fields);
@@ -84,6 +91,87 @@ final class BusinessInsightConsistencyValidator {
         if (!maskedReferences.isEmpty()) {
             throw inconsistent(location + " references masked fields: " + maskedReferences);
         }
+        validateChartContract(result, chart, location);
+    }
+
+    private void validateChartFieldLists(ChartRecommendation chart, String location) {
+        List<String> dimensions = chart.getDimensionFields();
+        List<String> metrics = chart.getMetricFields();
+        if (Stream.concat(dimensions.stream(), metrics.stream()).anyMatch(StringUtils::isBlank)) {
+            throw inconsistent(location + " contains blank fields");
+        }
+        Set<String> normalizedDimensions =
+                dimensions.stream().map(this::normalize).collect(Collectors.toSet());
+        Set<String> normalizedMetrics =
+                metrics.stream().map(this::normalize).collect(Collectors.toSet());
+        if (normalizedDimensions.size() != dimensions.size()
+                || normalizedMetrics.size() != metrics.size()) {
+            throw inconsistent(location + " contains duplicate fields");
+        }
+        normalizedDimensions.retainAll(normalizedMetrics);
+        if (!normalizedDimensions.isEmpty()) {
+            throw inconsistent(location + " uses fields as both dimensions and metrics");
+        }
+    }
+
+    private void validateChartContract(QueryResult result, ChartRecommendation chart,
+            String location) {
+        Set<String> numericFields = result.getQueryColumns().stream()
+                .filter(column -> isNumericColumn(result, column)).map(this::fieldName)
+                .collect(Collectors.toSet());
+        Set<String> dateFields = result.getQueryColumns().stream().filter(this::isDateColumn)
+                .map(this::fieldName).collect(Collectors.toSet());
+        List<String> invalidDimensions = chart.getDimensionFields().stream()
+                .filter(numericFields::contains).toList();
+        List<String> invalidMetrics =
+                chart.getMetricFields().stream().filter(field -> !numericFields.contains(field))
+                        .toList();
+        if (!invalidDimensions.isEmpty() || !invalidMetrics.isEmpty()) {
+            throw inconsistent(location + " field roles do not match query column types");
+        }
+        if (!"TABLE".equals(chart.getChartType()) && (chart.getMetricFields().isEmpty()
+                || !hasUsableMetricValue(result, chart.getMetricFields()))) {
+            throw inconsistent(location + " has no usable metric values");
+        }
+        switch (chart.getChartType()) {
+            case "KPI_CARD" -> requireChartShape(result.getQueryResults().size() == 1
+                    && chart.getDimensionFields().isEmpty(), location, "KPI card");
+            case "LINE" -> requireChartShape(chart.getDimensionFields().size() == 1
+                    && dateFields.contains(chart.getDimensionFields().get(0)), location,
+                    "line chart");
+            case "BAR" -> requireChartShape(chart.getDimensionFields().size() == 1, location,
+                    "bar chart");
+            case "PIE" -> requireChartShape(result.getQueryResults().size() >= 2
+                    && chart.getDimensionFields().size() == 1
+                    && !dateFields.contains(chart.getDimensionFields().get(0))
+                    && chart.getMetricFields().size() == 1
+                    && !hasNegativeMetricValue(result, chart.getMetricFields().get(0)), location,
+                    "pie chart");
+            case "COMBO" -> requireChartShape(chart.getDimensionFields().size() == 1
+                    && chart.getMetricFields().size() >= 2, location, "combo chart");
+            case "TABLE" -> {
+                // Tables may display any non-sensitive subset of the query fields.
+            }
+            default -> throw inconsistent(location + " type is unsupported");
+        }
+    }
+
+    private void requireChartShape(boolean valid, String location, String chartType) {
+        if (!valid) {
+            throw inconsistent(location + " does not satisfy " + chartType + " field contract");
+        }
+    }
+
+    private boolean hasUsableMetricValue(QueryResult result, List<String> metricFields) {
+        return result.getQueryResults().stream().filter(Objects::nonNull)
+                .flatMap(row -> metricFields.stream().map(row::get)).map(this::decimalOrNull)
+                .anyMatch(Objects::nonNull);
+    }
+
+    private boolean hasNegativeMetricValue(QueryResult result, String metricField) {
+        return result.getQueryResults().stream().filter(Objects::nonNull)
+                .map(row -> decimalOrNull(row.get(metricField))).filter(Objects::nonNull)
+                .anyMatch(value -> value.signum() < 0);
     }
 
     private void validateExplanation(QueryResult result, Map<String, String> metricLabels) {

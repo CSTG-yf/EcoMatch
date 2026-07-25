@@ -153,6 +153,23 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void doesNotRecommendComboChartWithoutDimension() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(
+                List.of(column("balance", "NUMBER"), column("deposit", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("balance", 100, "deposit", 80),
+                Map.of("balance", 120, "deposit", 90)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertTrue(result.getCandidateCharts().stream()
+                .noneMatch(chart -> "COMBO".equals(chart.getChartType())));
+    }
+
+    @Test
     void derivesContributionAndRiskWarningFromResultData() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
