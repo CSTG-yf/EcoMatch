@@ -50,6 +50,10 @@ final class BusinessInsightConsistencyValidator {
                 || result.getQueryResults() == null) {
             throw inconsistent("query result structure is incomplete");
         }
+        if (result.isDataMasked()
+                && (result.getMaskedColumns() == null || result.getMaskedColumns().isEmpty())) {
+            throw inconsistent("masked result is missing masked field metadata");
+        }
         Set<String> fields = result.getQueryColumns().stream().map(this::fieldName)
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));

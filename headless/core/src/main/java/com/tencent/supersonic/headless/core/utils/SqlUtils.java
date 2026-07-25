@@ -9,6 +9,7 @@ import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.gateway.ExplainCostPolicy;
+import com.tencent.supersonic.headless.core.gateway.QueryRejectedException;
 import com.tencent.supersonic.headless.core.pojo.JdbcDataSource;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -160,6 +161,10 @@ public class SqlUtils {
             throws SQLException {
         List<Map<String, Object>> data = new ArrayList<>();
         while (rs.next()) {
+            if (resultLimit > 0 && data.size() >= resultLimit) {
+                throw new QueryRejectedException(
+                        "Query result row limit exceeded: " + resultLimit);
+            }
             data.add(getLineData(rs, queryColumns));
         }
         return data;

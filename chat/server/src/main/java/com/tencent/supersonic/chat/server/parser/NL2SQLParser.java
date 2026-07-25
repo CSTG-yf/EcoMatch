@@ -186,8 +186,8 @@ public class NL2SQLParser implements ChatQueryParser {
         }
 
         ChatManageService chatManageService = ContextUtils.getBean(ChatManageService.class);
-        List<QueryResp> historyQueries =
-                chatManageService.getChatQueries(parseContext.getRequest().getChatId());
+        List<QueryResp> historyQueries = chatManageService.getChatQueries(
+                parseContext.getRequest().getChatId(), parseContext.getRequest().getUser());
         MultiTurnContextResp context =
                 multiTurnContextEngine.build(historyQueries, parseContext.getRequest().getChatId(),
                         queryNLReq.getQueryText(), java.time.Instant.now());

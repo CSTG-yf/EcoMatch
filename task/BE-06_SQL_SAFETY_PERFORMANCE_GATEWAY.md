@@ -15,6 +15,7 @@
 - 聚合指标查询进入独立热点指标缓存，默认保留 60 分钟，与普通 10 分钟结果缓存隔离，并单独统计命中率。
 - 提供仅超级管理员可访问的 `GET /api/semantic/query/gateway/stats` 监控接口，同时返回网关运行快照、五阶段耗时和缓存命中率。
 - JDBC 层统一设置查询超时、最大结果行数和 Fetch Size；超时由驱动取消执行。
+- JDBC 结果迭代增加应用层行数上限，即使目标驱动忽略 `setMaxRows` 也会在超限时 fail-closed；查询加速器和其他执行实现返回的结果同样在网关执行闭包内二次校验。
 - 结果集迭代期间的驱动异常和读取超时不再被吞掉；异常向网关传播并计入失败，禁止以成功状态返回不完整数据。
 - 策略拒绝保留可操作的安全原因，其他 JDBC/驱动异常统一返回通用查询失败信息，避免把物理 SQL、库表结构或连接细节暴露给调用方。
 - JDBC、查询加速器和数据库管理 SQL 均在实际执行前进入统一网关，避免加速器命中或管理接口绕过只读策略、限流和性能监控。
@@ -42,9 +43,9 @@
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
 - `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/advisory lock 状态函数绕过，覆盖 DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist 及非法配置拒绝，以及受限派生查询兼容性。
-- `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝。
+- `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
-- `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果。
+- `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果；目标驱动忽略最大行数时仍由应用层拒绝超限结果。
 - `ExplainCostPolicyTest`：结构化、嵌套 JSON、文本执行计划、数字字符串、超阈值拒绝及缺失估算 fail-closed。
 - `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，并校验接收和拒绝计数。
 - `QueryExecutionGatewayTest`：校验策略拒绝、执行失败、活动查询和平均耗时快照。
@@ -54,14 +55,14 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- 14 个关联 Maven 模块在 JDK 21 下完成干净编译，97 项安全、权限、性能和解释定向测试通过。
+- 14 个关联 Maven 模块在 JDK 21 下完成干净编译，103 项安全、权限、性能和解释定向测试通过。
 
 ## 本地性能基线
 
 - 状态：已完成（2026-07-23）。
 - 数据规模：H2 内存数据库，`bank_account` 表 10,000 行。
 - 测试规模：20 次预热、200 次串行采样、8 线程 200 次并发查询。
-- 最新实测结果：平均 `9.05 ms`、P95 `17 ms`、P99 `23 ms`，并发查询无拒绝。
+- 最新实测结果：平均 `10.58 ms`、P95 `21 ms`、P99 `32 ms`，并发查询无拒绝。
 - 验收结论：本地标准测试环境满足“单轮查询平均响应时间不高于 3 秒”的性能门槛。
 - 完整报告：`task/BE-06_PERFORMANCE_REPORT.md`。
 

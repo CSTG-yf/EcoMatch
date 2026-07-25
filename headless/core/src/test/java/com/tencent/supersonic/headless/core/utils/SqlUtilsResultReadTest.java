@@ -1,8 +1,10 @@
 package com.tencent.supersonic.headless.core.utils;
 
 import com.tencent.supersonic.common.pojo.QueryColumn;
+import com.tencent.supersonic.headless.core.gateway.QueryRejectedException;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -36,5 +38,19 @@ class SqlUtilsResultReadTest {
 
         assertEquals("contact", column.getBizName());
         assertEquals("mobile", column.getNameEn());
+    }
+
+    @Test
+    void rejectsRowsBeyondApplicationLimitWhenDriverDoesNotEnforceMaxRows() throws Exception {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(resultSet.next()).thenReturn(true, true);
+        when(resultSet.getObject("account_no")).thenReturn("62220001");
+        SqlUtils sqlUtils = new SqlUtils();
+        Field resultLimit = SqlUtils.class.getDeclaredField("resultLimit");
+        resultLimit.setAccessible(true);
+        resultLimit.setInt(sqlUtils, 1);
+
+        assertThrows(QueryRejectedException.class, () -> sqlUtils.getAllData(resultSet,
+                List.of(new QueryColumn("account_no", "VARCHAR"))));
     }
 }
