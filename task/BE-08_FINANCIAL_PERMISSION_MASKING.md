@@ -21,7 +21,10 @@
 - 二次取数在读取解析上下文前校验查询所有者；保存结果时只使用查询记录持久化绑定的 `chatId` 和原始问题更新会话摘要，不信任请求中的会话编号或问题文本。
 - ShowCase 查询强制绑定当前登录用户，并在分页子查询和结果查询两层限制所有者；客户端传入的 `userName` 不参与授权决策。
 - 搜索、解析、执行和维值查询统一通过 Agent `VIEWER` 权限解析可访问 Agent；历史查询执行使用查询记录持久化的 Agent 绑定，不信任请求中的 `agentId`。
+- Agent 更新和删除要求当前用户具备 `ADMIN` 权限，开放 Agent 仅向普通用户授予 `VIEWER` 权限；更新时保留持久化创建者、创建时间和对象编号。
+- NL2SQL Memory 创建、分页、更新和批量删除统一限制在当前用户可管理的 Agent 集合内；混合 Agent 批量删除整体 fail-closed，禁止无条件全量删除。
 - 插件管理列表按创建者过滤，更新和删除仅允许创建者或超级管理员；更新时保留持久化的 `id`、`createdBy` 和 `createdAt`，禁止请求篡改所有者。
+- Chat 模型配置新增、修改、检索和富配置读取要求模型 `ADMIN` 权限，Schema 读取要求 `VIEWER` 权限；配置编号与模型绑定不可通过更新请求篡改。
 - 需要鉴权的查询无法确定模型范围时直接拒绝，避免空模型集合触发管理员判断旁路。
 - SQL 与结构化查询共用行权限表达式校验，拦截多语句、注释、子查询和 DML/DDL 关键字；表达式解析失败时 fail-closed，不执行未过滤查询。
 - 缓存写入和命中日志只记录键与命中状态，不输出查询请求或结果对象；用户、角色和属性作用域经 SHA-256 后进入缓存键，避免身份属性和敏感结果进入日志。
@@ -57,6 +60,9 @@
 - `ChatManageServiceAccessTest`：ShowCase 忽略客户端用户名并强制绑定当前用户。
 - `ChatQueryServiceAccessTest`：摘要轮询和二次取数在访问缓存、历史结果或解析上下文前先执行对象鉴权，不可见 Agent 在进入查询链路前拒绝。
 - `PluginServiceAccessTest`：插件跨用户更新、删除和管理查询 fail-closed，所有者更新不能覆盖创建者。
+- `AgentServiceAccessTest`：开放 Agent 仅可查看不可管理，跨用户更新/删除拒绝，所有者更新保留创建元数据。
+- `MemoryServiceAccessTest`：跨 Agent 创建/更新、混合批量删除和无条件删除拒绝，未指定 Agent 的分页查询按可管理 Agent 集合收口。
+- `ConfigServiceAccessTest`：配置新增/修改、管理检索和 Schema 读取按模型 `ADMIN`/`VIEWER` 权限隔离。
 - `SensitiveLogUtilsTest`：校验日志摘要稳定可关联，且不包含 SQL、证件号等原始内容。
 - `BusinessInsightProcessorTest`：验证脱敏字段不进入数值证据或图表字段，并降级为低置信度表格。
 - `MetricRatioCalcProcessorTest`：验证脱敏指标不会进入同比环比补查和格式化计算。

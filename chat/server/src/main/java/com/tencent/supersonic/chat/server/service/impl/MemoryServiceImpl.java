@@ -13,17 +13,23 @@ import com.tencent.supersonic.chat.api.pojo.request.PageMemoryReq;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatMemoryDO;
 import com.tencent.supersonic.chat.server.persistence.mapper.ChatMemoryMapper;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatMemoryRepository;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.pojo.ChatMemory;
+import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.MemoryService;
 import com.tencent.supersonic.common.config.EmbeddingConfig;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ExemplarService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -31,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,6 +56,10 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
     @Autowired
     private EmbeddingConfig embeddingConfig;
 
+    @Autowired
+    @Lazy
+    private AgentService agentService;
+
     @Override
     public void createMemory(ChatMemory memory) {
         // if an existing enabled memory has the same question, just skip
@@ -62,8 +73,18 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
     }
 
     @Override
+    public void createMemory(ChatMemory memory, User user) {
+        checkManageAccess(memory == null ? null : memory.getAgentId(), manageableAgentIds(user));
+        createMemory(memory);
+    }
+
+    @Override
     public void updateMemory(ChatMemoryUpdateReq chatMemoryUpdateReq, User user) {
         ChatMemoryDO chatMemoryDO = chatMemoryRepository.getMemory(chatMemoryUpdateReq.getId());
+        if (chatMemoryDO == null) {
+            throw new InvalidArgumentException("Memory does not exist");
+        }
+        checkManageAccess(chatMemoryDO.getAgentId(), manageableAgentIds(user));
         boolean hadEnabled =
                 MemoryStatus.ENABLED.toString().equals(chatMemoryDO.getStatus().trim());
 
@@ -111,6 +132,15 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
 
     @Override
     public void batchDelete(ChatMemoryDeleteReq chatMemoryDeleteReq, User user) {
+        if (chatMemoryDeleteReq == null
+                || (CollectionUtils.isEmpty(chatMemoryDeleteReq.getIds())
+                        && chatMemoryDeleteReq.getAgentId() == null)) {
+            throw new InvalidArgumentException("Memory ids or agent id are required");
+        }
+        Set<Integer> manageableAgentIds = manageableAgentIds(user);
+        if (chatMemoryDeleteReq.getAgentId() != null) {
+            checkManageAccess(chatMemoryDeleteReq.getAgentId(), manageableAgentIds);
+        }
         QueryWrapper<ChatMemoryDO> queryWrapper = new QueryWrapper<>();
         if (!CollectionUtils.isEmpty(chatMemoryDeleteReq.getIds())) {
             queryWrapper.lambda().in(ChatMemoryDO::getId, chatMemoryDeleteReq.getIds());
@@ -119,6 +149,8 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
             queryWrapper.lambda().eq(ChatMemoryDO::getAgentId, chatMemoryDeleteReq.getAgentId());
         }
         List<ChatMemoryDO> chatMemoryDOS = chatMemoryRepository.getMemories(queryWrapper);
+        chatMemoryDOS.forEach(
+                memory -> checkManageAccess(memory.getAgentId(), manageableAgentIds));
         List<Long> ids = new ArrayList<>();
         chatMemoryDOS.forEach(chatMemoryDO -> {
             if (MemoryStatus.ENABLED.toString().equals(chatMemoryDO.getStatus().trim())) {
@@ -130,19 +162,34 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
     }
 
     @Override
-    public PageInfo<ChatMemory> pageMemories(PageMemoryReq pageMemoryReq) {
+    public PageInfo<ChatMemory> pageMemories(PageMemoryReq pageMemoryReq, User user) {
         ChatMemoryFilter chatMemoryFilter = pageMemoryReq.getChatMemoryFilter();
+        Set<Integer> manageableAgentIds = manageableAgentIds(user);
+        if (chatMemoryFilter.getAgentId() != null) {
+            checkManageAccess(chatMemoryFilter.getAgentId(), manageableAgentIds);
+        }
         chatMemoryFilter.setSort(pageMemoryReq.getSort());
         chatMemoryFilter.setOrderCondition(pageMemoryReq.getOrderCondition());
         return PageHelper.startPage(pageMemoryReq.getCurrent(), pageMemoryReq.getPageSize())
-                .doSelectPageInfo(() -> getMemories(pageMemoryReq.getChatMemoryFilter()));
+                .doSelectPageInfo(
+                        () -> getMemories(pageMemoryReq.getChatMemoryFilter(), manageableAgentIds));
     }
 
     @Override
     public List<ChatMemory> getMemories(ChatMemoryFilter chatMemoryFilter) {
+        return getMemories(chatMemoryFilter, null);
+    }
+
+    private List<ChatMemory> getMemories(ChatMemoryFilter chatMemoryFilter,
+            Set<Integer> allowedAgentIds) {
         QueryWrapper<ChatMemoryDO> queryWrapper = new QueryWrapper<>();
         if (chatMemoryFilter.getAgentId() != null) {
             queryWrapper.lambda().eq(ChatMemoryDO::getAgentId, chatMemoryFilter.getAgentId());
+        } else if (allowedAgentIds != null) {
+            if (allowedAgentIds.isEmpty()) {
+                return List.of();
+            }
+            queryWrapper.lambda().in(ChatMemoryDO::getAgentId, allowedAgentIds);
         }
         if (chatMemoryFilter.getQueryId() != null) {
             queryWrapper.lambda().eq(ChatMemoryDO::getQueryId, chatMemoryFilter.getQueryId());
@@ -172,6 +219,20 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
         }
         List<ChatMemoryDO> chatMemoryDOS = chatMemoryRepository.getMemories(queryWrapper);
         return chatMemoryDOS.stream().map(this::getMemory).collect(Collectors.toList());
+    }
+
+    private Set<Integer> manageableAgentIds(User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        return agentService.getAgents(user, AuthType.ADMIN).stream().map(Agent::getId)
+                .collect(Collectors.toSet());
+    }
+
+    private void checkManageAccess(Integer agentId, Set<Integer> manageableAgentIds) {
+        if (agentId == null || !manageableAgentIds.contains(agentId)) {
+            throw new InvalidPermissionException("No permission to manage agent memory");
+        }
     }
 
     public void enableMemory(ChatMemoryDO memory) {

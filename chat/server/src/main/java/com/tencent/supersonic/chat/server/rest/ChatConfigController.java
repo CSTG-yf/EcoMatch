@@ -56,13 +56,17 @@ public class ChatConfigController {
     }
 
     @GetMapping("/richDesc/{modelId}")
-    public ChatConfigRichResp getModelExtendRichInfo(@PathVariable("modelId") Long modelId) {
-        return configService.getConfigRichInfo(modelId);
+    public ChatConfigRichResp getModelExtendRichInfo(@PathVariable("modelId") Long modelId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return configService.getConfigRichInfo(modelId, user);
     }
 
     @GetMapping("/richDesc/all")
-    public List<ChatConfigRichResp> getAllChatRichConfig() {
-        return configService.getAllChatRichConfig();
+    public List<ChatConfigRichResp> getAllChatRichConfig(HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return configService.getAllChatRichConfig(user);
     }
 
     @GetMapping("/getDomainDataSetTree")
@@ -73,7 +77,9 @@ public class ChatConfigController {
     }
 
     @GetMapping("/getDataSetSchema/{id}")
-    public DataSetSchema getDataSetSchema(@PathVariable("id") Long id) {
-        return semanticLayerService.getDataSetSchema(id);
+    public DataSetSchema getDataSetSchema(@PathVariable("id") Long id,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return configService.getDataSetSchema(id, user);
     }
 }

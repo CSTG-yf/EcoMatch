@@ -109,6 +109,16 @@ class SqlSafetyPolicyAdvancedTest {
     }
 
     @Test
+    void rejectsDuckDbFileInspectionFunctions() {
+        assertDangerousFunctionRejected("SELECT read_text('/etc/passwd')");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM read_parquet('/var/lib/bank/accounts.parquet') LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM read_csv_auto('C:/bank/customers.csv') LIMIT 1");
+        assertDangerousFunctionRejected("SELECT * FROM glob('/var/lib/bank/*') LIMIT 1");
+    }
+
+    @Test
     void rejectsConfiguredDatabaseSpecificFunctions() {
         SqlSafetyPolicy configured =
                 new SqlSafetyPolicy(10_000, "bank_audit_write, utility.remote_call");

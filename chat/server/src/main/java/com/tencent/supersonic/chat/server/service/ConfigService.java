@@ -8,6 +8,7 @@ import com.tencent.supersonic.chat.api.pojo.response.ChatConfigResp;
 import com.tencent.supersonic.chat.api.pojo.response.ChatConfigRichResp;
 import com.tencent.supersonic.chat.server.config.ChatConfig;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 
 import java.util.List;
 
@@ -21,9 +22,11 @@ public interface ConfigService {
 
     List<ChatConfigResp> search(ChatConfigFilter filter, User user);
 
-    ChatConfigRichResp getConfigRichInfo(Long modelId);
+    ChatConfigRichResp getConfigRichInfo(Long modelId, User user);
+
+    DataSetSchema getDataSetSchema(Long modelId, User user);
 
     ChatConfigResp fetchConfigByModelId(Long modelId);
 
-    List<ChatConfigRichResp> getAllChatRichConfig();
+    List<ChatConfigRichResp> getAllChatRichConfig(User user);
 }

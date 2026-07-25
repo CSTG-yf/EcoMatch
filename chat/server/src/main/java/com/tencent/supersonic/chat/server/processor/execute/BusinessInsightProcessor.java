@@ -59,6 +59,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             BusinessInsightConfig rules = rules();
             QueryResult result = executeContext.getResponse();
             validateInputSize(result, rules);
+            validateInputShape(result);
             FieldProfile profile = profile(result);
             enrichMetricDefinitions(executeContext, profile);
             List<ChartRecommendation> charts = recommendCharts(profile,
@@ -88,6 +89,29 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             throw new IllegalStateException(
                     "Business insight input exceeds maximum column count: "
                             + rules.getMaxInputColumns());
+        }
+    }
+
+    private void validateInputShape(QueryResult result) {
+        if (result.getQueryResults().stream().anyMatch(Objects::isNull)) {
+            throw new IllegalStateException("Business insight input contains a null row");
+        }
+        Set<String> fields = new LinkedHashSet<>();
+        for (QueryColumn column : result.getQueryColumns()) {
+            String field = column == null ? null : fieldName(column);
+            if (StringUtils.isBlank(field)) {
+                throw new IllegalStateException(
+                        "Business insight input contains an unnamed column");
+            }
+            if (!fields.add(field)) {
+                throw new IllegalStateException(
+                        "Business insight input contains duplicate column: " + field);
+            }
+            if (!result.getQueryResults().isEmpty() && result.getQueryResults().stream()
+                    .noneMatch(row -> row.containsKey(field))) {
+                throw new IllegalStateException(
+                        "Business insight input does not contain declared field: " + field);
+            }
         }
     }
 

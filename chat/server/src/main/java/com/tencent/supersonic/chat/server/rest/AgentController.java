@@ -43,8 +43,10 @@ public class AgentController {
     }
 
     @DeleteMapping("/{id}")
-    public boolean deleteAgent(@PathVariable("id") Integer id) {
-        agentService.deleteAgent(id);
+    public boolean deleteAgent(@PathVariable("id") Integer id,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        agentService.deleteAgent(id, user);
         return true;
     }
 

@@ -32,11 +32,14 @@ import java.util.stream.Stream;
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
 
-    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
-            "get_lock", "load_file", "lo_export", "lo_import", "nextval", "pg_advisory_lock",
-            "pg_advisory_unlock", "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
-            "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "pg_stat_file", "pg_try_advisory_lock",
-            "pg_try_advisory_xact_lock", "pg_write_file", "release_lock", "set_config", "setval",
+    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "csv_scan",
+            "dblink_exec", "get_lock", "glob", "json_scan", "load_file", "lo_export", "lo_import",
+            "nextval", "parquet_scan", "pg_advisory_lock", "pg_advisory_unlock",
+            "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
+            "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "pg_stat_file",
+            "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file", "read_blob",
+            "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_ndjson",
+            "read_ndjson_auto", "read_parquet", "read_text", "release_lock", "set_config", "setval",
             "sleep", "sys_eval", "sys_exec");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
