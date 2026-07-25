@@ -70,6 +70,21 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void rejectsBusinessLabelEvidenceUsingValuesFromAnotherMetric() {
+        QueryResult result = validResult();
+        result.getQueryColumns().add(column("deposit", "NUMBER"));
+        result.setQueryResults(List.of(Map.of("month", "2026-01", "balance", 100, "deposit", 1),
+                Map.of("month", "2026-02", "balance", 120, "deposit", 2)));
+        result.getBusinessExplanation().setEvidence(List.of("存款余额范围为100至120"));
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录，时间范围为2026-01至2026-02。存款余额范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertThrows(IllegalStateException.class,
+                () -> validator.validate(result, Map.of("deposit", "存款余额")));
+    }
+
+    @Test
     void rejectsExplanationWithIncorrectTimeRange() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setTimeRange("2025-01至2026-02");

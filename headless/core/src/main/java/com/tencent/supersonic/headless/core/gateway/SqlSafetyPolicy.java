@@ -1,6 +1,9 @@
 package com.tencent.supersonic.headless.core.gateway;
 
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
+import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -12,12 +15,14 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.TableFunction;
 
 import java.util.Collections;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
@@ -86,6 +91,7 @@ public class SqlSafetyPolicy {
             }
             PlainSelect plainSelect = (PlainSelect) select;
             validateReadOnlySelectFeatures(plainSelect);
+            validateDangerousFunctions(plainSelect);
             boolean selectsAll =
                     plainSelect.getSelectItems().stream().map(item -> item.getExpression())
                             .anyMatch(expression -> expression instanceof AllColumns
@@ -97,6 +103,70 @@ public class SqlSafetyPolicy {
                         "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
             }
         }
+    }
+
+    private void validateDangerousFunctions(PlainSelect select) {
+        ExpressionVisitorAdapter visitor = new ExpressionVisitorAdapter() {
+            @Override
+            public void visit(Function function) {
+                String functionName = normalizeFunctionName(function);
+                if (DANGEROUS_FUNCTIONS.contains(functionName)) {
+                    throw new SqlPolicyViolationException(
+                            "Dangerous SQL function is forbidden: " + functionName);
+                }
+                super.visit(function);
+            }
+        };
+        select.getSelectItems().forEach(item -> visit(item.getExpression(), visitor));
+        visit(select.getWhere(), visitor);
+        visit(select.getHaving(), visitor);
+        visit(select.getQualify(), visitor);
+        if (select.getJoins() != null) {
+            select.getJoins().stream()
+                    .flatMap(join -> Stream.ofNullable(join.getOnExpressions())
+                            .flatMap(java.util.Collection::stream))
+                    .forEach(expression -> visit(expression, visitor));
+        }
+        if (select.getGroupBy() != null && select.getGroupBy().getGroupByExpressions() != null) {
+            select.getGroupBy().getGroupByExpressions()
+                    .forEach(expression -> visitIfExpression(expression, visitor));
+        }
+        if (select.getOrderByElements() != null) {
+            select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
+        }
+        visitTableFunction(select.getFromItem(), visitor);
+        if (select.getJoins() != null) {
+            select.getJoins().forEach(join -> visitTableFunction(join.getRightItem(), visitor));
+        }
+    }
+
+    private void visit(Expression expression, ExpressionVisitorAdapter visitor) {
+        if (expression != null) {
+            expression.accept(visitor);
+        }
+    }
+
+    private void visitIfExpression(Object value, ExpressionVisitorAdapter visitor) {
+        if (value instanceof Expression expression) {
+            visit(expression, visitor);
+        }
+    }
+
+    private void visitTableFunction(FromItem fromItem, ExpressionVisitorAdapter visitor) {
+        if (fromItem instanceof TableFunction tableFunction) {
+            tableFunction.getFunction().accept(visitor);
+        }
+    }
+
+    private String normalizeFunctionName(Function function) {
+        String name = function.getMultipartName() == null || function.getMultipartName().isEmpty()
+                ? function.getName()
+                : function.getMultipartName().get(function.getMultipartName().size() - 1);
+        String normalized = name == null ? ""
+                : name.replace("\"", "").replace("`", "").replace("[", "").replace("]", "")
+                        .toLowerCase(Locale.ROOT);
+        int qualifier = normalized.lastIndexOf('.');
+        return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
     }
 
     private void validateReadOnlySelectFeatures(PlainSelect select) {

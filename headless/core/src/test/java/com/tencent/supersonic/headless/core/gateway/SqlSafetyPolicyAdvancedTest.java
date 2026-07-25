@@ -87,4 +87,16 @@ class SqlSafetyPolicyAdvancedTest {
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT pg_stat_file('/etc/passwd')"));
     }
+
+    @Test
+    void rejectsQuotedQualifiedAndNonProjectionDangerousFunctions() {
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT \"pg_read_file\"('/etc/passwd')"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT pg_catalog.\"pg_read_file\"('/etc/passwd')"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT 1 WHERE pg_sleep(1) IS NULL"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT 1 FROM pg_ls_dir('/tmp') LIMIT 1"));
+    }
 }

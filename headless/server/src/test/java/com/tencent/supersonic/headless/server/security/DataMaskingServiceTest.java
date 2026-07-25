@@ -137,6 +137,19 @@ class DataMaskingServiceTest {
         assertTrue(response.getMaskedColumns().contains("CONTACT"));
     }
 
+    @Test
+    void fullyMasksColumnsAndRowKeysWithoutSchemaLineage() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("derived_value", "13812345678");
+        response.getResultList().get(0).put("undeclared_value", "622200001234");
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertEquals("****", response.getResultList().get(0).get("derived_value"));
+        assertEquals("****", response.getResultList().get(0).get("undeclared_value"));
+        assertEquals(Set.of("derived_value", "undeclared_value"), response.getMaskedColumns());
+    }
+
     private SemanticQueryResp response(String field, Object value) {
         SemanticQueryResp response = new SemanticQueryResp();
         response.setColumns(List.of(new QueryColumn(field, "VARCHAR", field)));

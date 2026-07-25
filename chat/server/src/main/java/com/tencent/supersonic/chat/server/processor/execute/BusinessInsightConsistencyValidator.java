@@ -36,6 +36,10 @@ final class BusinessInsightConsistencyValidator {
     private static final Pattern PERCENT = Pattern.compile("(?:变化|最高，为)(-?[0-9]+(?:\\.[0-9]+)?)%");
 
     void validate(QueryResult result) {
+        validate(result, Map.of());
+    }
+
+    void validate(QueryResult result, Map<String, String> metricLabels) {
         if (result == null || result.getQueryColumns() == null
                 || result.getQueryResults() == null) {
             throw inconsistent("query result structure is incomplete");
@@ -51,7 +55,7 @@ final class BusinessInsightConsistencyValidator {
         for (ChartRecommendation candidate : result.getCandidateCharts()) {
             validateChart(candidate, fields, maskedFields, "candidate chart");
         }
-        validateExplanation(result);
+        validateExplanation(result, metricLabels == null ? Map.of() : metricLabels);
     }
 
     private void validateChart(ChartRecommendation chart, Set<String> fields,
@@ -78,7 +82,7 @@ final class BusinessInsightConsistencyValidator {
         }
     }
 
-    private void validateExplanation(QueryResult result) {
+    private void validateExplanation(QueryResult result, Map<String, String> metricLabels) {
         BusinessExplanation explanation = result.getBusinessExplanation();
         if (explanation == null || StringUtils.isBlank(explanation.getSummary())) {
             throw inconsistent("business explanation is missing");
@@ -104,7 +108,7 @@ final class BusinessInsightConsistencyValidator {
         if (!Objects.equals(expectedTimeRange, explanation.getTimeRange())) {
             throw inconsistent("time range is not grounded in query results");
         }
-        validateEvidence(result, explanation.getEvidence());
+        validateEvidence(result, explanation.getEvidence(), metricLabels);
     }
 
     private void requireSummaryContains(String summary, List<String> statements, String type) {
@@ -116,10 +120,11 @@ final class BusinessInsightConsistencyValidator {
         }
     }
 
-    private void validateEvidence(QueryResult result, List<String> evidence) {
+    private void validateEvidence(QueryResult result, List<String> evidence,
+            Map<String, String> metricLabels) {
         NumericFacts allFacts = numericFacts(result);
         for (String statement : evidence) {
-            NumericFacts facts = factsForEvidence(result, statement, allFacts);
+            NumericFacts facts = factsForEvidence(result, statement, allFacts, metricLabels);
             Matcher range = RANGE.matcher(statement);
             Matcher firstLast = FIRST_LAST.matcher(statement);
             Matcher latest = LATEST.matcher(statement);
@@ -156,8 +161,8 @@ final class BusinessInsightConsistencyValidator {
     }
 
     private NumericFacts factsForEvidence(QueryResult result, String statement,
-            NumericFacts allFacts) {
-        String metric = result.getQueryColumns().stream()
+            NumericFacts allFacts, Map<String, String> metricLabels) {
+        Stream<FieldAlias> columnAliases = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
                 .filter(column -> SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
                         || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
@@ -165,7 +170,14 @@ final class BusinessInsightConsistencyValidator {
                 .flatMap(column -> Stream
                         .of(column.getBizName(), column.getNameEn(), column.getName())
                         .filter(StringUtils::isNotBlank)
-                        .map(alias -> new FieldAlias(fieldName(column), alias)))
+                        .map(alias -> new FieldAlias(fieldName(column), alias)));
+        Set<String> metricFields = result.getQueryColumns().stream().map(this::fieldName)
+                .filter(StringUtils::isNotBlank).collect(Collectors.toSet());
+        Stream<FieldAlias> businessAliases = metricLabels.entrySet().stream()
+                .filter(entry -> metricFields.contains(entry.getKey()))
+                .filter(entry -> StringUtils.isNotBlank(entry.getValue()))
+                .map(entry -> new FieldAlias(entry.getKey(), entry.getValue()));
+        String metric = Stream.concat(columnAliases, businessAliases)
                 .filter(alias -> startsWithMetricLabel(statement, alias.alias()))
                 .max(Comparator.comparingInt(alias -> alias.alias().length()))
                 .map(FieldAlias::field).orElse(null);
