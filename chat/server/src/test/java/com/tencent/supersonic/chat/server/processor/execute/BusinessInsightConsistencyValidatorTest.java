@@ -85,6 +85,17 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void rejectsPercentageBorrowedFromAnotherEvidenceType() {
+        QueryResult result = validResult();
+        result.getBusinessExplanation().setEvidence(List.of("balance首末记录变化45.45%"));
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录，时间范围为2026-01至2026-02。balance首末记录变化45.45%。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
     void rejectsExplanationWithIncorrectTimeRange() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setTimeRange("2025-01至2026-02");

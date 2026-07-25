@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SqlSafetyPolicyAdvancedTest {
 
@@ -98,5 +99,9 @@ class SqlSafetyPolicyAdvancedTest {
                 () -> policy.validate("SELECT 1 WHERE pg_sleep(1) IS NULL"));
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT 1 FROM pg_ls_dir('/tmp') LIMIT 1"));
+        SqlPolicyViolationException paginationViolation =
+                assertThrows(SqlPolicyViolationException.class,
+                        () -> policy.validate("SELECT 1 LIMIT sleep(1)"));
+        assertTrue(paginationViolation.getMessage().contains("Dangerous SQL function"));
     }
 }

@@ -94,10 +94,10 @@ public class DataMaskingService {
                         .filter(StringUtils::isNotBlank)
                         .collect(Collectors.toCollection(LinkedHashSet::new));
                 for (String key : matchingKeys) {
+                    maskedColumns.add(key);
                     if (row.get(key) != null) {
                         row.put(key, unknownLineage ? "****"
                                 : maskValue(key, sensitiveField, row.get(key)));
-                        maskedColumns.add(key);
                     }
                 }
             }

@@ -143,11 +143,25 @@ final class BusinessInsightConsistencyValidator {
                     requireValue(facts.rawValues, decimal(value), "anomaly value");
                 }
             } else if (percent.find()) {
-                requireValue(facts.percentages, decimal(percent.group(1)), "percentage");
+                requireValue(percentagesForStatement(facts, statement), decimal(percent.group(1)),
+                        "percentage");
             } else {
                 throw inconsistent("unsupported evidence statement: " + statement);
             }
         }
+    }
+
+    private List<BigDecimal> percentagesForStatement(NumericFacts facts, String statement) {
+        if (statement.contains("贡献度最高")) {
+            return facts.contributionPercentages;
+        }
+        if (statement.contains("环比变化") || statement.contains("同比变化")) {
+            return facts.temporalPercentages;
+        }
+        if (statement.contains("首末记录变化")) {
+            return facts.firstLastPercentages;
+        }
+        return List.of();
     }
 
     private NumericFacts numericFacts(QueryResult result) {
@@ -198,7 +212,9 @@ final class BusinessInsightConsistencyValidator {
         List<ValuePair> ranges = new ArrayList<>();
         List<ValuePair> firstLast = new ArrayList<>();
         List<BigDecimal> latest = new ArrayList<>();
-        List<BigDecimal> percentages = new ArrayList<>();
+        List<BigDecimal> firstLastPercentages = new ArrayList<>();
+        List<BigDecimal> contributionPercentages = new ArrayList<>();
+        List<BigDecimal> temporalPercentages = new ArrayList<>();
         for (String metric : metrics) {
             List<BigDecimal> values = result.getQueryResults().stream().map(row -> row.get(metric))
                     .map(this::decimalOrNull).filter(Objects::nonNull).toList();
@@ -214,19 +230,20 @@ final class BusinessInsightConsistencyValidator {
             firstLast.add(new ValuePair(first, last));
             latest.add(last);
             if (first.signum() != 0) {
-                percentages.add(percentageChange(first, last));
+                firstLastPercentages.add(percentageChange(first, last));
             }
             BigDecimal total = values.stream().filter(value -> value.signum() >= 0)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             if (values.stream().allMatch(value -> value.signum() >= 0) && total.signum() > 0) {
                 for (BigDecimal value : values) {
-                    percentages.add(value.divide(total, 4, RoundingMode.HALF_UP)
+                    contributionPercentages.add(value.divide(total, 4, RoundingMode.HALF_UP)
                             .multiply(BigDecimal.valueOf(100)));
                 }
             }
         }
-        appendTemporalPercentages(result, metrics, percentages);
-        return new NumericFacts(rawValues, ranges, firstLast, latest, percentages);
+        appendTemporalPercentages(result, metrics, temporalPercentages);
+        return new NumericFacts(rawValues, ranges, firstLast, latest, firstLastPercentages,
+                contributionPercentages, temporalPercentages);
     }
 
     private void appendTemporalPercentages(QueryResult result, List<String> metrics,
@@ -376,5 +393,7 @@ final class BusinessInsightConsistencyValidator {
     private record FieldAlias(String field, String alias) {}
 
     private record NumericFacts(List<BigDecimal> rawValues, List<ValuePair> ranges,
-            List<ValuePair> firstLast, List<BigDecimal> latest, List<BigDecimal> percentages) {}
+            List<ValuePair> firstLast, List<BigDecimal> latest,
+            List<BigDecimal> firstLastPercentages, List<BigDecimal> contributionPercentages,
+            List<BigDecimal> temporalPercentages) {}
 }

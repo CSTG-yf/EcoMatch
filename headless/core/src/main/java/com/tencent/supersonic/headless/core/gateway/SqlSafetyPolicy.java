@@ -134,6 +134,24 @@ public class SqlSafetyPolicy {
         if (select.getOrderByElements() != null) {
             select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
         }
+        if (select.getLimit() != null) {
+            visit(select.getLimit().getOffset(), visitor);
+            visit(select.getLimit().getRowCount(), visitor);
+            if (select.getLimit().getByExpressions() != null) {
+                select.getLimit().getByExpressions()
+                        .forEach(expression -> visitIfExpression(expression, visitor));
+            }
+        }
+        if (select.getLimitBy() != null) {
+            visit(select.getLimitBy().getOffset(), visitor);
+            visit(select.getLimitBy().getRowCount(), visitor);
+        }
+        if (select.getOffset() != null) {
+            visit(select.getOffset().getOffset(), visitor);
+        }
+        if (select.getFetch() != null) {
+            visit(select.getFetch().getExpression(), visitor);
+        }
         visitTableFunction(select.getFromItem(), visitor);
         if (select.getJoins() != null) {
             select.getJoins().forEach(join -> visitTableFunction(join.getRightItem(), visitor));
