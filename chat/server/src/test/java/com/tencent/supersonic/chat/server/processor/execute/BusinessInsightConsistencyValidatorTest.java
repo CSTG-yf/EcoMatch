@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class BusinessInsightConsistencyValidatorTest {
@@ -96,6 +97,44 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void validatesContributionCategoryAndMetricTogether() {
+        QueryResult result = validResult();
+        result.setQueryColumns(new java.util.ArrayList<>(
+                List.of(column("branch", "STRING"), column("balance", "NUMBER"))));
+        result.setQueryResults(List.of(Map.of("branch", "A", "balance", 30),
+                Map.of("branch", "B", "balance", 70)));
+        result.getRecommendedChart().setDimensionFields(List.of("branch"));
+        result.getBusinessExplanation().setTimeRange(null);
+        setEvidence(result, "B的balance贡献度最高，为70%",
+                "查询返回2条记录。B的balance贡献度最高，为70%。提示：范围限制。");
+
+        assertDoesNotThrow(() -> validator.validate(result));
+
+        setEvidence(result, "A的balance贡献度最高，为70%",
+                "查询返回2条记录。A的balance贡献度最高，为70%。提示：范围限制。");
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
+    void validatesTemporalComparisonTypeAndPeriodsTogether() {
+        QueryResult result = validResult();
+        result.setQueryResults(List.of(Map.of("month", "2025-01", "balance", 100),
+                Map.of("month", "2025-12", "balance", 200),
+                Map.of("month", "2026-01", "balance", 300)));
+        result.getBusinessExplanation().setTimeRange("2025-01至2026-01");
+        setEvidence(result, "balance同比变化200%（2026-01较2025-01）",
+                "查询返回3条记录，时间范围为2025-01至2026-01。"
+                        + "balance同比变化200%（2026-01较2025-01）。提示：范围限制。");
+
+        assertDoesNotThrow(() -> validator.validate(result));
+
+        setEvidence(result, "balance同比变化50%（2026-01较2025-12）",
+                "查询返回3条记录，时间范围为2025-01至2026-01。"
+                        + "balance同比变化50%（2026-01较2025-12）。提示：范围限制。");
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
     void rejectsExplanationWithIncorrectTimeRange() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setTimeRange("2025-01至2026-02");
@@ -128,5 +167,11 @@ class BusinessInsightConsistencyValidatorTest {
         QueryColumn column = new QueryColumn(name, "VARCHAR", name);
         column.setShowType(showType);
         return column;
+    }
+
+    private void setEvidence(QueryResult result, String evidence, String summary) {
+        result.getBusinessExplanation().setEvidence(List.of(evidence));
+        result.getBusinessExplanation().setSummary(summary);
+        result.setTextSummary(summary);
     }
 }

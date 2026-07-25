@@ -99,9 +99,18 @@ class SqlSafetyPolicyAdvancedTest {
                 () -> policy.validate("SELECT 1 WHERE pg_sleep(1) IS NULL"));
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT 1 FROM pg_ls_dir('/tmp') LIMIT 1"));
-        SqlPolicyViolationException paginationViolation =
-                assertThrows(SqlPolicyViolationException.class,
-                        () -> policy.validate("SELECT 1 LIMIT sleep(1)"));
-        assertTrue(paginationViolation.getMessage().contains("Dangerous SQL function"));
+        assertDangerousFunctionRejected("SELECT 1 LIMIT sleep(1)");
+        assertDangerousFunctionRejected("SELECT DISTINCT ON (\"pg_sleep\"(1)) 1");
+        assertDangerousFunctionRejected("SELECT TOP (\"sleep\"(1)) 1");
+        assertDangerousFunctionRejected(
+                "SELECT 1 FROM dual START WITH \"sleep\"(1) = 0 CONNECT BY 1 = 0");
+        assertDangerousFunctionRejected("SELECT row_number() OVER w FROM bank_account "
+                + "WINDOW w AS (PARTITION BY \"sleep\"(1))");
+    }
+
+    private void assertDangerousFunctionRejected(String sql) {
+        SqlPolicyViolationException violation =
+                assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));
+        assertTrue(violation.getMessage().contains("Dangerous SQL function"));
     }
 }

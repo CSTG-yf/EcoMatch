@@ -115,10 +115,11 @@ public class DataMaskingService {
             }
             for (String key : new HashSet<>(row.keySet())) {
                 if (StringUtils.isNotBlank(key)
-                        && !declaredResultKeys.contains(key.toLowerCase(Locale.ROOT))
-                        && row.get(key) != null) {
-                    row.put(key, "****");
+                        && !declaredResultKeys.contains(key.toLowerCase(Locale.ROOT))) {
                     maskedColumns.add(key);
+                    if (row.get(key) != null) {
+                        row.put(key, "****");
+                    }
                 }
             }
         }

@@ -4,6 +4,10 @@ import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.WindowDefinition;
+import net.sf.jsqlparser.expression.WindowElement;
+import net.sf.jsqlparser.expression.WindowOffset;
+import net.sf.jsqlparser.expression.WindowRange;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -134,6 +138,13 @@ public class SqlSafetyPolicy {
         if (select.getOrderByElements() != null) {
             select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
         }
+        if (select.getDistinct() != null && select.getDistinct().getOnSelectItems() != null) {
+            select.getDistinct().getOnSelectItems()
+                    .forEach(item -> visit(item.getExpression(), visitor));
+        }
+        if (select.getTop() != null) {
+            visit(select.getTop().getExpression(), visitor);
+        }
         if (select.getLimit() != null) {
             visit(select.getLimit().getOffset(), visitor);
             visit(select.getLimit().getRowCount(), visitor);
@@ -152,9 +163,39 @@ public class SqlSafetyPolicy {
         if (select.getFetch() != null) {
             visit(select.getFetch().getExpression(), visitor);
         }
+        if (select.getOracleHierarchical() != null) {
+            visit(select.getOracleHierarchical().getStartExpression(), visitor);
+            visit(select.getOracleHierarchical().getConnectExpression(), visitor);
+        }
+        if (select.getWindowDefinitions() != null) {
+            select.getWindowDefinitions().forEach(window -> visitWindowDefinition(window, visitor));
+        }
         visitTableFunction(select.getFromItem(), visitor);
         if (select.getJoins() != null) {
             select.getJoins().forEach(join -> visitTableFunction(join.getRightItem(), visitor));
+        }
+    }
+
+    private void visitWindowDefinition(WindowDefinition window, ExpressionVisitorAdapter visitor) {
+        visit(window.getPartitionExpressionList(), visitor);
+        if (window.getOrderByElements() != null) {
+            window.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
+        }
+        WindowElement element = window.getWindowElement();
+        if (element == null) {
+            return;
+        }
+        visitWindowOffset(element.getOffset(), visitor);
+        WindowRange range = element.getRange();
+        if (range != null) {
+            visitWindowOffset(range.getStart(), visitor);
+            visitWindowOffset(range.getEnd(), visitor);
+        }
+    }
+
+    private void visitWindowOffset(WindowOffset offset, ExpressionVisitorAdapter visitor) {
+        if (offset != null) {
+            visit(offset.getExpression(), visitor);
         }
     }
 

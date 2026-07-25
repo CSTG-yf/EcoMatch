@@ -4,7 +4,7 @@
 
 - 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、`SELECT INTO`、`FOR SHARE/UPDATE` 行锁、状态变更函数、危险函数和文件写入，避免注释分隔绕过。
 - 拦截 PostgreSQL `pg_read_file`、`pg_read_binary_file`、`pg_ls_dir` 和 `pg_stat_file` 等服务端文件读取/探测函数，避免只读 SQL 被用于读取数据库主机文件系统。
-- 危险函数同时执行 AST 级校验，覆盖带引号或 schema 限定的函数名，以及投影、WHERE、HAVING、QUALIFY、JOIN、GROUP BY、ORDER BY、LIMIT/OFFSET/FETCH 和表函数位置，避免文本变体绕过。
+- 危险函数同时执行 AST 级校验，覆盖带引号或 schema 限定的函数名，以及投影、WHERE、HAVING、QUALIFY、JOIN、GROUP BY、ORDER BY、DISTINCT ON、TOP、LIMIT/OFFSET/FETCH、层级查询、命名窗口和表函数位置，避免文本变体绕过。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 执行前运行 `EXPLAIN`，递归兼容结构化、嵌套 JSON 和文本计划中的估算行数，超过阈值时拒绝查询；支持在目标数据库确认格式后开启“缺失估算即拒绝”。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
@@ -39,7 +39,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/ advisory lock 状态函数绕过，以及受限派生查询兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/advisory lock 状态函数绕过，覆盖 DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数，以及受限派生查询兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果。
@@ -52,14 +52,14 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- 14 个关联 Maven 模块在 JDK 21 下完成编译，90 项安全、权限、性能和解释定向测试通过。
+- 14 个关联 Maven 模块在 JDK 21 下完成编译，93 项安全、权限、性能和解释定向测试通过。
 
 ## 本地性能基线
 
 - 状态：已完成（2026-07-23）。
 - 数据规模：H2 内存数据库，`bank_account` 表 10,000 行。
 - 测试规模：20 次预热、200 次串行采样、8 线程 200 次并发查询。
-- 最新实测结果：平均 `9.33 ms`、P95 `16 ms`、P99 `21 ms`，并发查询无拒绝。
+- 最新实测结果：平均 `8.06 ms`、P95 `11 ms`、P99 `17 ms`，并发查询无拒绝。
 - 验收结论：本地标准测试环境满足“单轮查询平均响应时间不高于 3 秒”的性能门槛。
 - 完整报告：`task/BE-06_PERFORMANCE_REPORT.md`。
 

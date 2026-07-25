@@ -161,6 +161,18 @@ class DataMaskingServiceTest {
         assertEquals(Set.of("mobile"), response.getMaskedColumns());
     }
 
+    @Test
+    void preservesMaskingMetadataWhenUndeclaredValueIsNull() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("mobile", "13800138000");
+        response.getResultList().get(0).put("derived_value", null);
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertTrue(response.isDataMasked());
+        assertEquals(Set.of("mobile", "derived_value"), response.getMaskedColumns());
+    }
+
     private SemanticQueryResp response(String field, Object value) {
         SemanticQueryResp response = new SemanticQueryResp();
         response.setColumns(List.of(new QueryColumn(field, "VARCHAR", field)));
