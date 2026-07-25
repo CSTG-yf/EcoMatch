@@ -64,7 +64,7 @@ public class SqlFilterUtils {
                     joiner.add(SPACE + dealFilter(filter, isBizName) + SPACE);
                 }
             });
-            log.debug("getWhereClause, where sql : {}", joiner);
+            log.debug("getWhereClause, whereMetadata:[{}]", SensitiveLogUtils.summarize(joiner));
             return joiner.toString();
         }
 
@@ -114,7 +114,7 @@ public class SqlFilterUtils {
     }
 
     private String generator(Criterion criterion) {
-        log.debug("criterion :{}", criterion);
+        log.debug("criterionMetadata:[{}]", SensitiveLogUtils.summarize(criterion));
         String sqlPart;
         switch (criterion.getOperator()) {
             case SQL_PART:

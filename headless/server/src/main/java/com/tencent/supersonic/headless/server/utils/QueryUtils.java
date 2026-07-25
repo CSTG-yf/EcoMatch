@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.utils;
 
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.QueryColumn;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import com.tencent.supersonic.headless.api.pojo.request.QueryMultiStructReq;
 import com.tencent.supersonic.headless.api.pojo.response.*;
@@ -177,7 +178,7 @@ public class QueryUtils {
         String unionSql = unionSqlBuilder.substring(0,
                 unionSqlBuilder.length() - Constants.UNIONALL.length());
         sqlParser.setSql(unionSql);
-        log.info("union sql parser:{}", sqlParser);
+        log.info("union SQL metadata:[{}]", SensitiveLogUtils.summarize(unionSql));
         return sqlParser;
     }
 

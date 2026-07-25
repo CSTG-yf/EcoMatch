@@ -209,6 +209,123 @@ CREATE TABLE `s2_query_stat_info` (
 ) ;
 COMMENT ON TABLE s2_query_stat_info IS 'query statistics table';
 
+CREATE TABLE IF NOT EXISTS `s2_audit_event` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `event_id` VARCHAR(64) NOT NULL,
+    `trace_id` VARCHAR(128) NOT NULL,
+    `chat_id` BIGINT,
+    `query_id` BIGINT,
+    `user_name` VARCHAR(128) NOT NULL,
+    `organization_id` VARCHAR(128),
+    `event_type` VARCHAR(64) NOT NULL,
+    `resource_type` VARCHAR(64),
+    `resource_id` VARCHAR(255),
+    `outcome` VARCHAR(32) NOT NULL,
+    `reason_code` VARCHAR(64),
+    `sanitized_question` LONGVARCHAR,
+    `question_hash` VARCHAR(64),
+    `metric_codes` LONGVARCHAR,
+    `sql_type` VARCHAR(32),
+    `sql_digest` VARCHAR(64),
+    `policy_ids` LONGVARCHAR,
+    `masking_summary` LONGVARCHAR,
+    `export_row_count` BIGINT,
+    `file_type` VARCHAR(64),
+    `file_size` BIGINT,
+    `client_ip_hash` VARCHAR(64),
+    `user_agent_hash` VARCHAR(64),
+    `duration_ms` BIGINT,
+    `metadata_json` LONGVARCHAR,
+    `event_time` TIMESTAMP NOT NULL,
+    `previous_hash` VARCHAR(64),
+    `event_hash` VARCHAR(64) NOT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (`event_id`),
+    UNIQUE (`event_hash`),
+    UNIQUE (`trace_id`, `previous_hash`)
+);
+CREATE INDEX IF NOT EXISTS `idx_audit_event_trace_time`
+    ON `s2_audit_event` (`trace_id`, `event_time`);
+CREATE INDEX IF NOT EXISTS `idx_audit_event_user_time`
+    ON `s2_audit_event` (`user_name`, `event_time`);
+CREATE INDEX IF NOT EXISTS `idx_audit_event_org_time`
+    ON `s2_audit_event` (`organization_id`, `event_time`);
+CREATE INDEX IF NOT EXISTS `idx_audit_event_anomaly_scope`
+    ON `s2_audit_event` (`event_type`, `user_name`, `organization_id`, `event_time`);
+CREATE INDEX IF NOT EXISTS `idx_audit_event_type_time`
+    ON `s2_audit_event` (`event_type`, `event_time`);
+
+CREATE TABLE IF NOT EXISTS `s2_audit_rule` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `rule_code` VARCHAR(64) NOT NULL,
+    `rule_name` VARCHAR(128) NOT NULL,
+    `rule_type` VARCHAR(64) NOT NULL,
+    `threshold_value` BIGINT NOT NULL DEFAULT 1,
+    `window_seconds` BIGINT NOT NULL DEFAULT 0,
+    `work_hours_start` VARCHAR(8),
+    `work_hours_end` VARCHAR(8),
+    `severity` VARCHAR(16) NOT NULL,
+    `enabled` BOOLEAN NOT NULL DEFAULT TRUE,
+    `config_json` LONGVARCHAR,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_by` VARCHAR(128) NOT NULL,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_by` VARCHAR(128) NOT NULL,
+    `version` INT NOT NULL DEFAULT 0,
+    UNIQUE (`rule_code`)
+);
+CREATE INDEX IF NOT EXISTS `idx_audit_rule_type_enabled`
+    ON `s2_audit_rule` (`rule_type`, `enabled`);
+
+CREATE TABLE IF NOT EXISTS `s2_security_alert` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `alert_id` VARCHAR(64) NOT NULL,
+    `fingerprint` VARCHAR(64) NOT NULL,
+    `rule_id` BIGINT NOT NULL,
+    `rule_code` VARCHAR(64) NOT NULL,
+    `trace_id` VARCHAR(128),
+    `user_name` VARCHAR(128),
+    `organization_id` VARCHAR(128),
+    `resource_type` VARCHAR(64),
+    `resource_id` VARCHAR(255),
+    `severity` VARCHAR(16) NOT NULL,
+    `status` VARCHAR(32) NOT NULL,
+    `title` VARCHAR(255) NOT NULL,
+    `description` LONGVARCHAR,
+    `evidence_ids` LONGVARCHAR NOT NULL,
+    `occurrence_count` BIGINT NOT NULL DEFAULT 1,
+    `first_seen` TIMESTAMP NOT NULL,
+    `last_seen` TIMESTAMP NOT NULL,
+    `version` INT NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `created_by` VARCHAR(128) NOT NULL,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_by` VARCHAR(128) NOT NULL,
+    UNIQUE (`alert_id`),
+    UNIQUE (`fingerprint`)
+);
+CREATE INDEX IF NOT EXISTS `idx_security_alert_status_time`
+    ON `s2_security_alert` (`status`, `last_seen`);
+CREATE INDEX IF NOT EXISTS `idx_security_alert_rule_status`
+    ON `s2_security_alert` (`rule_id`, `status`);
+CREATE INDEX IF NOT EXISTS `idx_security_alert_severity_time`
+    ON `s2_security_alert` (`severity`, `last_seen`);
+
+CREATE TABLE IF NOT EXISTS `s2_alert_action` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+    `action_id` VARCHAR(64) NOT NULL,
+    `alert_id` VARCHAR(64) NOT NULL,
+    `from_status` VARCHAR(32),
+    `to_status` VARCHAR(32) NOT NULL,
+    `action` VARCHAR(32) NOT NULL,
+    `operator_name` VARCHAR(128) NOT NULL,
+    `comment` VARCHAR(2000),
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (`action_id`)
+);
+CREATE INDEX IF NOT EXISTS `idx_alert_action_alert_time`
+    ON `s2_alert_action` (`alert_id`, `created_at`);
+
 
 CREATE TABLE IF NOT EXISTS `s2_semantic_pasre_info` (
     `id` INT NOT NULL AUTO_INCREMENT,

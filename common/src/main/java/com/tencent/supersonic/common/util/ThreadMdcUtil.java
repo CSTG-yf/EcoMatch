@@ -4,6 +4,7 @@ import org.slf4j.MDC;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 public class ThreadMdcUtil {
     public static void setTraceIdIfAbsent() {
@@ -40,6 +41,23 @@ public class ThreadMdcUtil {
             setTraceIdIfAbsent();
             try {
                 runnable.run();
+            } finally {
+                MDC.clear();
+            }
+        };
+    }
+
+    public static <T> Supplier<T> wrapSupplier(final Supplier<T> supplier,
+            final Map<String, String> context) {
+        return () -> {
+            if (context == null) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(context);
+            }
+            setTraceIdIfAbsent();
+            try {
+                return supplier.get();
             } finally {
                 MDC.clear();
             }

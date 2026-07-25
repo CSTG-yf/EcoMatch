@@ -566,3 +566,115 @@ CREATE TABLE IF NOT EXISTS s2_metric_org_mapping (
 );
 CREATE INDEX IF NOT EXISTS idx_metric_org_external
     ON s2_metric_org_mapping (organization_code, external_metric_code);
+
+CREATE TABLE IF NOT EXISTS s2_audit_event (
+    id BIGSERIAL PRIMARY KEY,
+    event_id VARCHAR(64) NOT NULL UNIQUE,
+    trace_id VARCHAR(128) NOT NULL,
+    chat_id BIGINT,
+    query_id BIGINT,
+    user_name VARCHAR(128) NOT NULL,
+    organization_id VARCHAR(128),
+    event_type VARCHAR(64) NOT NULL,
+    resource_type VARCHAR(64),
+    resource_id VARCHAR(255),
+    outcome VARCHAR(32) NOT NULL,
+    reason_code VARCHAR(64),
+    sanitized_question TEXT,
+    question_hash VARCHAR(64),
+    metric_codes TEXT,
+    sql_type VARCHAR(32),
+    sql_digest VARCHAR(64),
+    policy_ids TEXT,
+    masking_summary TEXT,
+    export_row_count BIGINT,
+    file_type VARCHAR(64),
+    file_size BIGINT,
+    client_ip_hash VARCHAR(64),
+    user_agent_hash VARCHAR(64),
+    duration_ms BIGINT,
+    metadata_json TEXT,
+    event_time TIMESTAMP NOT NULL,
+    previous_hash VARCHAR(64),
+    event_hash VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_event_trace_time
+    ON s2_audit_event (trace_id, event_time);
+CREATE INDEX IF NOT EXISTS idx_audit_event_user_time
+    ON s2_audit_event (user_name, event_time);
+CREATE INDEX IF NOT EXISTS idx_audit_event_org_time
+    ON s2_audit_event (organization_id, event_time);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_audit_event_trace_previous_hash
+    ON s2_audit_event (trace_id, previous_hash);
+CREATE INDEX IF NOT EXISTS idx_audit_event_anomaly_scope
+    ON s2_audit_event (event_type, user_name, organization_id, event_time);
+CREATE INDEX IF NOT EXISTS idx_audit_event_type_time
+    ON s2_audit_event (event_type, event_time);
+
+CREATE TABLE IF NOT EXISTS s2_audit_rule (
+    id BIGSERIAL PRIMARY KEY,
+    rule_code VARCHAR(64) NOT NULL UNIQUE,
+    rule_name VARCHAR(128) NOT NULL,
+    rule_type VARCHAR(64) NOT NULL,
+    threshold_value BIGINT NOT NULL DEFAULT 1,
+    window_seconds BIGINT NOT NULL DEFAULT 0,
+    work_hours_start VARCHAR(8),
+    work_hours_end VARCHAR(8),
+    severity VARCHAR(16) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    config_json TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(128) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(128) NOT NULL,
+    version INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_audit_rule_type_enabled
+    ON s2_audit_rule (rule_type, enabled);
+
+CREATE TABLE IF NOT EXISTS s2_security_alert (
+    id BIGSERIAL PRIMARY KEY,
+    alert_id VARCHAR(64) NOT NULL UNIQUE,
+    fingerprint VARCHAR(64) NOT NULL UNIQUE,
+    rule_id BIGINT NOT NULL,
+    rule_code VARCHAR(64) NOT NULL,
+    trace_id VARCHAR(128),
+    user_name VARCHAR(128),
+    organization_id VARCHAR(128),
+    resource_type VARCHAR(64),
+    resource_id VARCHAR(255),
+    severity VARCHAR(16) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    evidence_ids TEXT NOT NULL,
+    occurrence_count BIGINT NOT NULL DEFAULT 1,
+    first_seen TIMESTAMP NOT NULL,
+    last_seen TIMESTAMP NOT NULL,
+    version INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by VARCHAR(128) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(128) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_security_alert_status_time
+    ON s2_security_alert (status, last_seen);
+CREATE INDEX IF NOT EXISTS idx_security_alert_rule_status
+    ON s2_security_alert (rule_id, status);
+CREATE INDEX IF NOT EXISTS idx_security_alert_severity_time
+    ON s2_security_alert (severity, last_seen);
+
+CREATE TABLE IF NOT EXISTS s2_alert_action (
+    id BIGSERIAL PRIMARY KEY,
+    action_id VARCHAR(64) NOT NULL UNIQUE,
+    alert_id VARCHAR(64) NOT NULL,
+    from_status VARCHAR(32),
+    to_status VARCHAR(32) NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    operator_name VARCHAR(128) NOT NULL,
+    comment VARCHAR(2000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_alert_action_alert_time
+    ON s2_alert_action (alert_id, created_at);

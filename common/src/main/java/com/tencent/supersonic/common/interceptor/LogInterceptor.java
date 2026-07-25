@@ -5,25 +5,19 @@ package com.tencent.supersonic.common.interceptor;
 import com.tencent.supersonic.common.util.TraceIdUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
 
 @Component
-@Slf4j
 public class LogInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
             Object handler) {
-        // use previous traceId
-        String traceId = request.getHeader(TraceIdUtil.TRACE_ID);
-        if (StringUtils.isBlank(traceId)) {
-            TraceIdUtil.setTraceId(TraceIdUtil.generateTraceId());
-        } else {
-            TraceIdUtil.setTraceId(traceId);
-        }
+        // Preserve a safe caller trace ID; replace malformed values to protect MDC and log output.
+        String traceId = TraceIdUtil.resolveTraceId(request.getHeader(TraceIdUtil.TRACE_ID));
+        TraceIdUtil.setTraceId(traceId);
+        response.setHeader(TraceIdUtil.TRACE_ID, traceId);
         return true;
     }
 

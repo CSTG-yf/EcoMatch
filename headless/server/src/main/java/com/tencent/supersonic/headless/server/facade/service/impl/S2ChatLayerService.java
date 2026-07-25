@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
 import com.tencent.supersonic.headless.api.pojo.enums.ChatWorkflowState;
 import com.tencent.supersonic.headless.api.pojo.request.QueryMapReq;
@@ -124,7 +125,8 @@ public class S2ChatLayerService implements ChatLayerService {
                 corrector.correct(queryCtx, semanticParseInfo);
             }
         });
-        log.info("Corrected SQL:{}", semanticParseInfo.getSqlInfo().getCorrectedS2SQL());
+        log.info("Corrected SQL metadata:[{}]",
+                SensitiveLogUtils.summarize(semanticParseInfo.getSqlInfo().getCorrectedS2SQL()));
         return semanticParseInfo;
     }
 

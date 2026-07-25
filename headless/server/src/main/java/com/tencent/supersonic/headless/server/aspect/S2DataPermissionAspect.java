@@ -26,6 +26,10 @@ import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import com.tencent.supersonic.headless.server.security.DataMaskingService;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import com.tencent.supersonic.headless.server.service.ModelService;
 import com.tencent.supersonic.headless.server.service.SchemaService;
 import com.tencent.supersonic.headless.server.utils.QueryStructUtils;
@@ -70,80 +74,166 @@ public class S2DataPermissionAspect {
     private AuthService authService;
     @Autowired
     private DataMaskingService dataMaskingService;
+    @Autowired
+    private AuditEventPublisher auditEventPublisher;
 
     @Pointcut("@annotation(com.tencent.supersonic.headless.server.annotation.S2DataPermission)")
     private void s2PermissionCheck() {}
 
     @Around("s2PermissionCheck()")
     public Object doAround(ProceedingJoinPoint joinPoint) throws Throwable {
-        // 1. check args
         Object[] objects = joinPoint.getArgs();
         boolean needQueryData = true;
         SemanticQueryReq queryReq = null;
-        if (objects[0] instanceof SemanticQueryReq) {
-            queryReq = (SemanticQueryReq) objects[0];
-            if (queryReq instanceof QuerySqlReq) {
-                QuerySqlReq sqlReq = (QuerySqlReq) queryReq;
-                if (sqlReq.getDataSetName() != null) {
-                    String escapedTable = SqlReplaceHelper.escapeTableName(sqlReq.getDataSetName());
-                    sqlReq.setSql(sqlReq.getSql().replaceAll(
-                            String.format(" %s ", sqlReq.getDataSetName()),
-                            String.format(" %s ", escapedTable)));
+        User user = null;
+        SemanticSchemaResp semanticSchemaResp = null;
+        Set<Long> modelIds = Sets.newHashSet();
+        boolean authorizationDecisionFinalized = false;
+        String denialReasonCode = "AUTH_REQUEST_INVALID";
+
+        try {
+            // 1. check args
+            if (objects != null && objects.length > 0 && objects[0] instanceof SemanticQueryReq) {
+                queryReq = (SemanticQueryReq) objects[0];
+                if (queryReq instanceof QuerySqlReq) {
+                    QuerySqlReq sqlReq = (QuerySqlReq) queryReq;
+                    if (sqlReq.getDataSetName() != null) {
+                        String escapedTable =
+                                SqlReplaceHelper.escapeTableName(sqlReq.getDataSetName());
+                        sqlReq.setSql(sqlReq.getSql().replaceAll(
+                                String.format(" %s ", sqlReq.getDataSetName()),
+                                String.format(" %s ", escapedTable)));
+                    }
                 }
             }
-        }
-        if (queryReq == null) {
-            throw new InvalidArgumentException("queryReq is not Invalid");
-        }
-        User user = (User) objects[1];
-        SemanticSchemaResp semanticSchemaResp = getSemanticSchemaResp(queryReq);
-        if (!queryReq.isNeedAuth()) {
-            log.info("needAuth is false, authorization checks are skipped but masking remains.");
-            return proceedAndMask(joinPoint, semanticSchemaResp, user);
-        }
-        if (Objects.isNull(user) || StringUtils.isEmpty(user.getName())) {
-            throw new RuntimeException("please provide user information");
-        }
+            if (queryReq == null) {
+                throw new InvalidArgumentException("queryReq is not Invalid");
+            }
+            if (objects.length > 1 && objects[1] instanceof User) {
+                user = (User) objects[1];
+            }
 
-        Set<Long> modelIds = getModelIdInQuery(queryReq, semanticSchemaResp);
-        if (CollectionUtils.isEmpty(modelIds)) {
-            throw new InvalidArgumentException(
-                    "Unable to determine the model scope for an authorized query");
+            denialReasonCode = "AUTH_SCHEMA_UNAVAILABLE";
+            semanticSchemaResp = getSemanticSchemaResp(queryReq);
+            if (!queryReq.isNeedAuth()) {
+                log.info(
+                        "needAuth is false, authorization checks are skipped but masking remains.");
+                authorizationDecisionFinalized = true;
+                publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_NOT_REQUIRED");
+                return proceedAndMask(joinPoint, semanticSchemaResp, queryReq, modelIds, user);
+            }
+            denialReasonCode = "AUTH_USER_MISSING";
+            if (Objects.isNull(user) || StringUtils.isEmpty(user.getName())) {
+                throw new RuntimeException("please provide user information");
+            }
+
+            denialReasonCode = "AUTH_MODEL_SCOPE_UNRESOLVED";
+            modelIds = getModelIdInQuery(queryReq, semanticSchemaResp);
+            if (CollectionUtils.isEmpty(modelIds)) {
+                throw new InvalidArgumentException(
+                        "Unable to determine the model scope for an authorized query");
+            }
+
+            // 2. determine whether admin of the model
+            denialReasonCode = "AUTH_MODEL_ADMIN_CHECK_FAILED";
+            if (checkModelAdmin(user, modelIds)) {
+                authorizationDecisionFinalized = true;
+                publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_MODEL_ADMIN");
+                return proceedAndMask(joinPoint, semanticSchemaResp, queryReq, modelIds, user);
+            }
+            // 3. determine whether the model is visible to cur user
+            denialReasonCode = "AUTH_MODEL_NOT_VISIBLE";
+            checkModelVisible(user, modelIds);
+
+            // 4. get permissions auth to cur user
+            denialReasonCode = "AUTH_POLICY_RESOLUTION_FAILED";
+            AuthorizedResourceResp authorizedResource = getAuthorizedResource(user, modelIds);
+
+            // 5. check col permission
+            denialReasonCode = "AUTH_SENSITIVE_COLUMN_DENIED";
+            if (needQueryData) {
+                checkColPermission(queryReq, authorizedResource, modelIds, semanticSchemaResp);
+            }
+            // 6. check row permission
+            denialReasonCode = "AUTH_ROW_POLICY_DENIED";
+            checkRowPermission(queryReq, authorizedResource);
+
+            authorizationDecisionFinalized = true;
+            publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_POLICY_ALLOWED");
+
+            // 7. add hint to user
+            Object result = proceedAndMask(joinPoint, semanticSchemaResp, queryReq, modelIds, user);
+            if (result instanceof SemanticQueryResp) {
+                SemanticQueryResp queryResp = (SemanticQueryResp) result;
+                addHint(modelIds, queryResp, authorizedResource);
+            }
+            return result;
+        } catch (Throwable throwable) {
+            if (!authorizationDecisionFinalized) {
+                try {
+                    publishAuthorizationDecision(queryReq, modelIds, user, false, denialReasonCode);
+                } catch (RuntimeException auditFailure) {
+                    throwable.addSuppressed(auditFailure);
+                }
+            }
+            throw throwable;
         }
+    }
 
-        // 2. determine whether admin of the model
-        if (checkModelAdmin(user, modelIds)) {
-            return proceedAndMask(joinPoint, semanticSchemaResp, user);
-        }
-        // 3. determine whether the model is visible to cur user
-        checkModelVisible(user, modelIds);
-
-        // 4. get permissions auth to cur user
-        AuthorizedResourceResp authorizedResource = getAuthorizedResource(user, modelIds);
-
-        // 5. check col permission
-        if (needQueryData) {
-            checkColPermission(queryReq, authorizedResource, modelIds, semanticSchemaResp);
-        }
-        // 6. check row permission
-        checkRowPermission(queryReq, authorizedResource);
-
-        // 7. add hint to user
-        Object result = proceedAndMask(joinPoint, semanticSchemaResp, user);
+    private Object proceedAndMask(ProceedingJoinPoint joinPoint,
+            SemanticSchemaResp semanticSchemaResp, SemanticQueryReq queryReq, Set<Long> modelIds,
+            User user) throws Throwable {
+        Object result = joinPoint.proceed();
         if (result instanceof SemanticQueryResp) {
             SemanticQueryResp queryResp = (SemanticQueryResp) result;
-            addHint(modelIds, queryResp, authorizedResource);
+            dataMaskingService.mask(queryResp, semanticSchemaResp, user);
+            if (queryResp.isDataMasked()) {
+                int maskedColumnCount = queryResp.getMaskedColumns() == null ? 0
+                        : queryResp.getMaskedColumns().size();
+                publishAuditEvent(
+                        AuditEvent.builder().eventType(AuditEventType.MASK_APPLIED)
+                                .outcome(AuditOutcome.SUCCESS).reasonCode("SENSITIVE_RESULT_MASKED")
+                                .resourceType(resolveAuditResourceType(queryReq))
+                                .resourceId(resolveAuditResourceId(queryReq, modelIds))
+                                .maskingSummary("maskedColumnCount=" + maskedColumnCount).build(),
+                        user);
+            }
         }
         return result;
     }
 
-    private Object proceedAndMask(ProceedingJoinPoint joinPoint,
-            SemanticSchemaResp semanticSchemaResp, User user) throws Throwable {
-        Object result = joinPoint.proceed();
-        if (result instanceof SemanticQueryResp) {
-            dataMaskingService.mask((SemanticQueryResp) result, semanticSchemaResp, user);
+    private void publishAuthorizationDecision(SemanticQueryReq queryReq, Set<Long> modelIds,
+            User user, boolean allowed, String reasonCode) {
+        publishAuditEvent(AuditEvent.builder()
+                .eventType(allowed ? AuditEventType.AUTH_ALLOWED : AuditEventType.AUTH_DENIED)
+                .outcome(allowed ? AuditOutcome.SUCCESS : AuditOutcome.DENIED)
+                .reasonCode(reasonCode).resourceType(resolveAuditResourceType(queryReq))
+                .resourceId(resolveAuditResourceId(queryReq, modelIds)).build(), user);
+    }
+
+    private void publishAuditEvent(AuditEvent event, User user) {
+        auditEventPublisher.publishRequired(event, user);
+    }
+
+    private String resolveAuditResourceType(SemanticQueryReq queryReq) {
+        return queryReq != null && queryReq.getDataSetId() != null ? "DATASET" : "MODEL_SCOPE";
+    }
+
+    private String resolveAuditResourceId(SemanticQueryReq queryReq, Set<Long> resolvedModelIds) {
+        if (queryReq != null && queryReq.getDataSetId() != null) {
+            return "id=" + queryReq.getDataSetId();
         }
-        return result;
+        Set<Long> modelScope = new HashSet<>();
+        if (!CollectionUtils.isEmpty(resolvedModelIds)) {
+            modelScope.addAll(resolvedModelIds);
+        } else if (queryReq != null && !CollectionUtils.isEmpty(queryReq.getModelIdSet())) {
+            modelScope.addAll(queryReq.getModelIdSet());
+        }
+        if (modelScope.isEmpty()) {
+            return "unresolved";
+        }
+        return "ids=" + modelScope.stream().sorted().map(String::valueOf)
+                .collect(Collectors.joining(","));
     }
 
     private void checkColPermission(SemanticQueryReq semanticQueryReq,
@@ -246,7 +336,8 @@ public class S2DataPermissionAspect {
                         SensitiveLogUtils.summarize(modifiedSql));
             }
         } catch (JSQLParserException e) {
-            log.warn("Failed to apply row permission filter: {}", e.getMessage());
+            log.warn("Failed to apply row permission filter: errorType={}",
+                    e.getClass().getSimpleName());
             throw new InvalidPermissionException(
                     "Row permission filter is invalid; query execution was denied");
         }
@@ -296,7 +387,8 @@ public class S2DataPermissionAspect {
             try {
                 CCJSqlParserUtil.parseCondExpression(expression);
             } catch (JSQLParserException e) {
-                log.warn("Failed to parse row permission filter: {}", e.getMessage());
+                log.warn("Failed to parse row permission filter: errorType={}",
+                        e.getClass().getSimpleName());
                 throw new InvalidPermissionException(
                         "Row permission filter is invalid; query execution was denied");
             }

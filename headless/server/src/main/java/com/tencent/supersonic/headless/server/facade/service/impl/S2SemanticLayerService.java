@@ -33,6 +33,10 @@ import com.tencent.supersonic.headless.server.annotation.S2DataPermission;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import com.tencent.supersonic.headless.server.manager.SemanticSchemaManager;
 import com.tencent.supersonic.headless.server.security.DataMaskingService;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import com.tencent.supersonic.headless.server.service.*;
 import com.tencent.supersonic.headless.server.utils.MetricDrillDownChecker;
 import com.tencent.supersonic.headless.server.utils.QueryUtils;
@@ -42,9 +46,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -64,16 +70,35 @@ public class S2SemanticLayerService implements SemanticLayerService {
     private final DimensionService dimensionService;
     private final TranslatorConfig translatorConfig;
     private final DataMaskingService dataMaskingService;
-    private final QueryCache queryCache = ComponentFactory.getQueryCache();
-    private final List<QueryExecutor> queryExecutors = ComponentFactory.getQueryExecutors();
+    private final AuditEventPublisher auditEventPublisher;
+    private final QueryCache queryCache;
+    private final List<QueryExecutor> queryExecutors;
 
+    @Autowired
     public S2SemanticLayerService(StatUtils statUtils, QueryUtils queryUtils,
             SemanticSchemaManager semanticSchemaManager, DataSetService dataSetService,
             SchemaService schemaService, SemanticTranslator semanticTranslator,
             MetricDrillDownChecker metricDrillDownChecker,
             KnowledgeBaseService knowledgeBaseService, MetricService metricService,
             DimensionService dimensionService, DomainService domainService,
-            TranslatorConfig translatorConfig, DataMaskingService dataMaskingService) {
+            TranslatorConfig translatorConfig, DataMaskingService dataMaskingService,
+            AuditEventPublisher auditEventPublisher) {
+        this(statUtils, queryUtils, semanticSchemaManager, dataSetService, schemaService,
+                semanticTranslator, metricDrillDownChecker, knowledgeBaseService, metricService,
+                dimensionService, domainService, translatorConfig, dataMaskingService,
+                auditEventPublisher, ComponentFactory.getQueryCache(),
+                ComponentFactory.getQueryExecutors());
+    }
+
+    S2SemanticLayerService(StatUtils statUtils, QueryUtils queryUtils,
+            SemanticSchemaManager semanticSchemaManager, DataSetService dataSetService,
+            SchemaService schemaService, SemanticTranslator semanticTranslator,
+            MetricDrillDownChecker metricDrillDownChecker,
+            KnowledgeBaseService knowledgeBaseService, MetricService metricService,
+            DimensionService dimensionService, DomainService domainService,
+            TranslatorConfig translatorConfig, DataMaskingService dataMaskingService,
+            AuditEventPublisher auditEventPublisher, QueryCache queryCache,
+            List<QueryExecutor> queryExecutors) {
         this.statUtils = statUtils;
         this.queryUtils = queryUtils;
         this.semanticSchemaManager = semanticSchemaManager;
@@ -87,6 +112,9 @@ public class S2SemanticLayerService implements SemanticLayerService {
         this.domainService = domainService;
         this.translatorConfig = translatorConfig;
         this.dataMaskingService = dataMaskingService;
+        this.auditEventPublisher = auditEventPublisher;
+        this.queryCache = queryCache;
+        this.queryExecutors = queryExecutors;
     }
 
     public DataSetSchema getDataSetSchema(Long id) {
@@ -113,7 +141,10 @@ public class S2SemanticLayerService implements SemanticLayerService {
     @SneakyThrows
     public SemanticQueryResp queryByReq(SemanticQueryReq queryReq, User user) {
         TaskStatusEnum state = TaskStatusEnum.SUCCESS;
+        long queryStart = System.nanoTime();
+        String auditSql = getRequestSql(queryReq);
         log.info("semantic query request [{}]", SensitiveLogUtils.summarize(queryReq));
+        publishQueryStarted(queryReq, user, auditSql);
         try {
             // 1.initStatInfo
             statUtils.initStatInfo(queryReq, user);
@@ -127,6 +158,8 @@ public class S2SemanticLayerService implements SemanticLayerService {
             if (Objects.nonNull(query)) {
                 SemanticQueryResp queryResp = (SemanticQueryResp) query;
                 queryResp.setUseCache(true);
+                auditSql = StringUtils.defaultIfBlank(queryResp.getSql(), auditSql);
+                publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, true);
                 return queryResp;
             }
             StatUtils.get().setUseResultCache(false);
@@ -142,6 +175,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
                             System.nanoTime() - translateStart);
                 }
             }
+            auditSql = StringUtils.defaultIfBlank(queryStatement.getSql(), auditSql);
 
             // Check whether the dimensions of the metric drill-down are correct temporarily,
             // add the abstraction of a validator later.
@@ -170,12 +204,20 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 statUtils.updateResultCacheKey(cacheKey);
             }
 
+            if (queryResp == null) {
+                publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_RESULT", null);
+            } else {
+                publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, false);
+            }
+
             return queryResp;
         } catch (Exception e) {
             log.error("Exception in semantic query [{}]: type={}, error=[{}]",
                     SensitiveLogUtils.summarize(queryReq), e.getClass().getSimpleName(),
                     SensitiveLogUtils.summarize(e));
             state = TaskStatusEnum.ERROR;
+            publishQueryFailed(queryReq, user, auditSql, queryStart, "QUERY_EXCEPTION",
+                    e.getClass().getSimpleName());
             throw e;
         } finally {
             statUtils.statInfo2DbAsync(state);
@@ -188,6 +230,128 @@ public class S2SemanticLayerService implements SemanticLayerService {
         filter.setModelIds(queryReq.getModelIds());
         filter.setDataSetId(queryReq.getDataSetId());
         dataMaskingService.mask(queryResp, schemaService.fetchSemanticSchema(filter), user);
+    }
+
+    private void publishQueryStarted(SemanticQueryReq queryReq, User user, String rawSql) {
+        try {
+            auditEventPublisher.publishBestEffort(AuditEvent.builder()
+                    .eventType(AuditEventType.QUERY_STARTED).outcome(AuditOutcome.UNKNOWN)
+                    .resourceType("SEMANTIC_QUERY").resourceId(queryResourceId(queryReq))
+                    .rawSql(rawSql).metricCodes(queryMetricCodes(queryReq, null))
+                    .metadata(queryMetadata(queryReq, null, "STARTED", false, null)).build(), user);
+        } catch (RuntimeException e) {
+            logAuditFailure(AuditEventType.QUERY_STARTED, e);
+        }
+    }
+
+    private void publishQuerySucceeded(SemanticQueryReq queryReq, SemanticQueryResp queryResp,
+            User user, String rawSql, long queryStart, boolean cacheHit) {
+        try {
+            auditEventPublisher.publishBestEffort(AuditEvent.builder()
+                    .eventType(AuditEventType.QUERY_SUCCEEDED).outcome(AuditOutcome.SUCCESS)
+                    .resourceType("SEMANTIC_QUERY").resourceId(queryResourceId(queryReq))
+                    .rawSql(rawSql).metricCodes(queryMetricCodes(queryReq, queryResp))
+                    .maskingSummary(maskingSummary(queryResp)).durationMs(elapsedMillis(queryStart))
+                    .metadata(queryMetadata(queryReq, queryResp, "SUCCEEDED", cacheHit, null))
+                    .build(), user);
+        } catch (RuntimeException e) {
+            logAuditFailure(AuditEventType.QUERY_SUCCEEDED, e);
+        }
+    }
+
+    private void publishQueryFailed(SemanticQueryReq queryReq, User user, String rawSql,
+            long queryStart, String reasonCode, String exceptionType) {
+        try {
+            auditEventPublisher
+                    .publishBestEffort(AuditEvent.builder().eventType(AuditEventType.QUERY_FAILED)
+                            .outcome(AuditOutcome.FAILURE).resourceType("SEMANTIC_QUERY")
+                            .resourceId(queryResourceId(queryReq)).reasonCode(reasonCode)
+                            .rawSql(rawSql).metricCodes(queryMetricCodes(queryReq, null))
+                            .durationMs(elapsedMillis(queryStart))
+                            .metadata(queryMetadata(queryReq, null, "FAILED", false, exceptionType))
+                            .build(), user);
+        } catch (RuntimeException e) {
+            logAuditFailure(AuditEventType.QUERY_FAILED, e);
+        }
+    }
+
+    private void logAuditFailure(AuditEventType eventType, RuntimeException failure) {
+        log.error("Best-effort query audit failed: eventType={}, errorType={}", eventType,
+                failure.getClass().getSimpleName());
+    }
+
+    private Map<String, Object> queryMetadata(SemanticQueryReq queryReq,
+            SemanticQueryResp queryResp, String stage, boolean cacheHit, String exceptionType) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("stage", stage);
+        metadata.put("entryPoint", "queryByReq");
+        metadata.put("queryMode", queryReq == null ? null : queryReq.getClass().getSimpleName());
+        metadata.put("modelIds", queryReq == null ? List.of() : queryReq.getModelIds());
+        metadata.put("dataSetId", queryReq == null ? null : queryReq.getDataSetId());
+        metadata.put("needAuth", queryReq != null && queryReq.isNeedAuth());
+        metadata.put("cacheHit", cacheHit);
+        if (queryResp != null) {
+            metadata.put("rowCount", safeSize(queryResp.getResultList()));
+            metadata.put("columnCount", safeSize(queryResp.getColumns()));
+            metadata.put("maskedFields", queryResp.getMaskedColumns());
+        }
+        if (StringUtils.isNotBlank(exceptionType)) {
+            metadata.put("exceptionType", exceptionType);
+        }
+        return metadata;
+    }
+
+    private Collection<String> queryMetricCodes(SemanticQueryReq queryReq,
+            SemanticQueryResp queryResp) {
+        Set<String> metricCodes = new LinkedHashSet<>();
+        if (queryReq instanceof QueryStructReq structReq) {
+            metricCodes.addAll(structReq.getMetrics());
+        } else if (queryReq instanceof QueryTagReq tagReq) {
+            metricCodes.addAll(tagReq.getMetrics());
+        } else if (queryReq instanceof QueryMultiStructReq multiStructReq
+                && multiStructReq.getQueryStructReqs() != null) {
+            multiStructReq.getQueryStructReqs().stream().filter(Objects::nonNull)
+                    .flatMap(req -> req.getMetrics().stream()).forEach(metricCodes::add);
+        }
+        if (queryResp != null && queryResp.getColumns() != null) {
+            queryResp.getMetricColumns().stream().map(QueryColumn::getBizName)
+                    .filter(StringUtils::isNotBlank).forEach(metricCodes::add);
+        }
+        return metricCodes;
+    }
+
+    private String getRequestSql(SemanticQueryReq queryReq) {
+        if (queryReq instanceof QuerySqlReq querySqlReq) {
+            return querySqlReq.getSql();
+        }
+        if (queryReq != null && queryReq.getSqlInfo() != null) {
+            return queryReq.getSqlInfo().getQuerySQL();
+        }
+        return null;
+    }
+
+    private String queryResourceId(SemanticQueryReq queryReq) {
+        if (queryReq == null) {
+            return null;
+        }
+        if (queryReq.getDataSetId() != null) {
+            return String.valueOf(queryReq.getDataSetId());
+        }
+        return queryReq.getModelIds().stream().map(String::valueOf).sorted()
+                .collect(Collectors.joining(","));
+    }
+
+    private String maskingSummary(SemanticQueryResp queryResp) {
+        int maskedFieldCount = safeSize(queryResp.getMaskedColumns());
+        return queryResp.isDataMasked() ? "MASKED_FIELDS:" + maskedFieldCount : "NONE";
+    }
+
+    private int safeSize(Collection<?> values) {
+        return values == null ? 0 : values.size();
+    }
+
+    private long elapsedMillis(long start) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
     }
 
     @Override

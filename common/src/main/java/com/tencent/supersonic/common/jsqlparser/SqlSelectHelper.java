@@ -2,6 +2,7 @@ package com.tencent.supersonic.common.jsqlparser;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
@@ -227,7 +228,8 @@ public class SqlSelectHelper {
         try {
             statement = CCJSqlParserUtil.parse(sql);
         } catch (JSQLParserException e) {
-            log.error("parse error, sql:{}", sql, e);
+            log.error("SQL parse failed: sqlMetadata=[{}], errorType={}",
+                    SensitiveLogUtils.summarize(sql), e.getClass().getSimpleName());
             throw new RuntimeException(e);
         }
 

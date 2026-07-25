@@ -10,6 +10,7 @@ import com.tencent.supersonic.auth.authentication.persistence.dataobject.UserTok
 import com.tencent.supersonic.auth.authentication.persistence.repository.UserRepository;
 import com.tencent.supersonic.common.pojo.exception.AccessException;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -87,7 +88,8 @@ public class TokenService {
             String appKey = getAppKey(request);
             claims = getClaims(token, appKey);
         } catch (Exception e) {
-            throw new AccessException("parse user info from token failed :" + token);
+            throw new AccessException("parse user info from token failed; tokenMetadata="
+                    + SensitiveLogUtils.summarize(token));
         }
         return claims;
     }
@@ -108,7 +110,10 @@ public class TokenService {
                             .build().parseClaimsJws(getTokenString(token)).getBody();
             return Optional.of(claims);
         } catch (Exception e) {
-            log.info("can not getClaims from appKey:{} token:{}, please login", appKey, token);
+            log.info(
+                    "can not getClaims from appKey:{} tokenMetadata:[{}], failureType:{}, "
+                            + "please login",
+                    appKey, SensitiveLogUtils.summarize(token), e.getClass().getSimpleName());
         }
         return Optional.empty();
     }
