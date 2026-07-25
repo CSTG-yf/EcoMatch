@@ -25,8 +25,9 @@ public class SqlSafetyPolicy {
     private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
             "get_lock", "load_file", "lo_export", "lo_import", "nextval", "pg_advisory_lock",
             "pg_advisory_unlock", "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
-            "pg_sleep", "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file",
-            "release_lock", "set_config", "setval", "sleep", "sys_eval", "sys_exec");
+            "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "pg_stat_file", "pg_try_advisory_lock",
+            "pg_try_advisory_xact_lock", "pg_write_file", "release_lock", "set_config", "setval",
+            "sleep", "sys_eval", "sys_exec");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
 

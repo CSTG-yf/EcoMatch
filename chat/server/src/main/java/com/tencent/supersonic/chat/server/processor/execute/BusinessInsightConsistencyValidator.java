@@ -117,8 +117,9 @@ final class BusinessInsightConsistencyValidator {
     }
 
     private void validateEvidence(QueryResult result, List<String> evidence) {
-        NumericFacts facts = numericFacts(result);
+        NumericFacts allFacts = numericFacts(result);
         for (String statement : evidence) {
+            NumericFacts facts = factsForEvidence(result, statement, allFacts);
             Matcher range = RANGE.matcher(statement);
             Matcher firstLast = FIRST_LAST.matcher(statement);
             Matcher latest = LATEST.matcher(statement);
@@ -151,6 +152,36 @@ final class BusinessInsightConsistencyValidator {
                         || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
                                 .anyMatch(Number.class::isInstance))
                 .map(this::fieldName).toList();
+        return numericFacts(result, metrics);
+    }
+
+    private NumericFacts factsForEvidence(QueryResult result, String statement,
+            NumericFacts allFacts) {
+        String metric = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(column -> SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
+                        || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
+                                .anyMatch(Number.class::isInstance))
+                .flatMap(column -> Stream
+                        .of(column.getBizName(), column.getNameEn(), column.getName())
+                        .filter(StringUtils::isNotBlank)
+                        .map(alias -> new FieldAlias(fieldName(column), alias)))
+                .filter(alias -> startsWithMetricLabel(statement, alias.alias()))
+                .max(Comparator.comparingInt(alias -> alias.alias().length()))
+                .map(FieldAlias::field).orElse(null);
+        return metric == null ? allFacts : numericFacts(result, List.of(metric));
+    }
+
+    private boolean startsWithMetricLabel(String statement, String alias) {
+        if (!statement.regionMatches(true, 0, alias, 0, alias.length())) {
+            return false;
+        }
+        String suffix = statement.substring(alias.length());
+        return Stream.of("范围为", "首条记录为", "最新记录为", "首末记录变化", "存在统计异常候选值", "环比变化", "同比变化")
+                .anyMatch(suffix::startsWith);
+    }
+
+    private NumericFacts numericFacts(QueryResult result, List<String> metrics) {
         List<BigDecimal> rawValues = new ArrayList<>();
         List<ValuePair> ranges = new ArrayList<>();
         List<ValuePair> firstLast = new ArrayList<>();
@@ -329,6 +360,8 @@ final class BusinessInsightConsistencyValidator {
     }
 
     private record ValuePair(BigDecimal first, BigDecimal second) {}
+
+    private record FieldAlias(String field, String alias) {}
 
     private record NumericFacts(List<BigDecimal> rawValues, List<ValuePair> ranges,
             List<ValuePair> firstLast, List<BigDecimal> latest, List<BigDecimal> percentages) {}

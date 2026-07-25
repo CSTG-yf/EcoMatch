@@ -77,4 +77,14 @@ class SqlSafetyPolicyAdvancedTest {
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT pg_advisory_lock(1)"));
     }
+
+    @Test
+    void rejectsPostgresServerFileInspectionFunctions() {
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT pg_read_binary_file('/etc/passwd')"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT pg_ls_dir('/var/lib/postgresql')"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT pg_stat_file('/etc/passwd')"));
+    }
 }

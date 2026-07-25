@@ -12,6 +12,7 @@
 - 原值权限支持超级管理员、用户白名单和角色白名单。
 - 查询缓存按用户隔离，避免权限或脱敏结果跨用户串用。
 - 查询结果在写入缓存前完成动态脱敏；缓存键额外区分鉴权开关和内部原生执行模式，写入及读取采用防御性快照，避免原值进入缓存或响应对象修改污染后续请求。
+- 非空查询结果缺少语义 Schema、维度/指标集合或结果列元数据时 fail-closed，拒绝返回和缓存；空结果无需脱敏元数据即可正常返回。
 - 查询详情、续用解析、执行、结果保存、反馈和删除增加对象所有者鉴权，超级管理员保留审计访问能力。
 - 需要鉴权的查询无法确定模型范围时直接拒绝，避免空模型集合触发管理员判断旁路。
 - SQL 与结构化查询共用行权限表达式校验，拦截多语句、注释、子查询和 DML/DDL 关键字；表达式解析失败时 fail-closed，不执行未过滤查询。
@@ -35,11 +36,11 @@
 
 - `AuthGroupMatcherTest`：用户、组织、角色和属性条件。
 - `DataMaskingServiceTest`：邮箱、手机号、证件、账号、文本和数值脱敏，管理员、用户及角色白名单原值访问。
-- `DataMaskingServiceTest`：字段策略、非法配置、空列定义、空语义集合和空角色集合边界。
+- `DataMaskingServiceTest`：字段策略、非法配置、空角色集合、空结果放行，以及非空结果缺失 Schema/列元数据时 fail-closed。
 - `DataMaskingServiceTest`：SQL 别名、物理源字段和结果键大小写不一致仍按源字段规则脱敏。
 - `DataMaskingIdempotenceTest`：连续脱敏两次后值保持稳定，且缓存响应已有脱敏字段元数据不会丢失。
 - `DefaultQueryCacheTest`：验证鉴权模式缓存隔离，以及结果行、授权信息和脱敏元数据在缓存写入、读取之间互不污染。
-- `S2DataPermissionMaskingTest`：验证 `needAuth=false` 和模型管理员路径均不能绕过动态脱敏，并覆盖空模型范围及行权限注入拒绝。
+- `S2DataPermissionMaskingTest`：验证 `needAuth=false` 和模型管理员路径均不能绕过动态脱敏，并覆盖 Schema 缺失、空模型范围及行权限注入拒绝。
 - `ChatObjectAccessPolicyTest`：所有者、超级管理员和越权访问。
 - `SensitiveLogUtilsTest`：校验日志摘要稳定可关联，且不包含 SQL、证件号等原始内容。
 - `BusinessInsightProcessorTest`：验证脱敏字段不进入数值证据或图表字段，并降级为低置信度表格。

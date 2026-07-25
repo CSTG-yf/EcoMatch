@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.server.security;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -47,12 +48,13 @@ public class DataMaskingService {
     }
 
     public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user) {
-        if (response == null || schema == null || canViewRawData(user)) {
+        if (response == null || canViewRawData(user) || response.getResultList() == null
+                || response.getResultList().isEmpty()) {
             return;
         }
+        requireMaskingMetadata(response, schema);
         Set<String> sensitiveFields = getSensitiveFields(schema);
-        if (sensitiveFields.isEmpty() || response.getResultList() == null
-                || response.getColumns() == null) {
+        if (sensitiveFields.isEmpty()) {
             return;
         }
 
@@ -91,6 +93,15 @@ public class DataMaskingService {
         }
         response.setDataMasked(!maskedColumns.isEmpty());
         response.setMaskedColumns(maskedColumns);
+    }
+
+    private void requireMaskingMetadata(SemanticQueryResp response, SemanticSchemaResp schema) {
+        if (schema == null || schema.getDimensions() == null || schema.getMetrics() == null
+                || (schema.getDimensions().isEmpty() && schema.getMetrics().isEmpty())
+                || response.getColumns() == null || response.getColumns().isEmpty()) {
+            throw new InvalidPermissionException(
+                    "Data masking metadata is unavailable; query result was denied");
+        }
     }
 
     private Map<Map<String, Object>, Map<String, String>> buildResultKeyIndexes(

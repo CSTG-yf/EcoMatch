@@ -56,6 +56,20 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void rejectsEvidenceUsingValuesFromAnotherMetric() {
+        QueryResult result = validResult();
+        result.getQueryColumns().add(column("deposit", "NUMBER"));
+        result.setQueryResults(List.of(Map.of("month", "2026-01", "balance", 100, "deposit", 1),
+                Map.of("month", "2026-02", "balance", 120, "deposit", 2)));
+        result.getBusinessExplanation().setEvidence(List.of("deposit范围为100至120"));
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录，时间范围为2026-01至2026-02。deposit范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
     void rejectsExplanationWithIncorrectTimeRange() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setTimeRange("2025-01至2026-02");
@@ -74,7 +88,7 @@ class BusinessInsightConsistencyValidatorTest {
                 .confidence(0.9).timeRange("2026-01至2026-02").evidence(List.of("balance范围为100至120"))
                 .warnings(List.of("范围限制")).build();
         QueryResult result = new QueryResult();
-        result.setQueryColumns(List.of(month, balance));
+        result.setQueryColumns(new java.util.ArrayList<>(List.of(month, balance)));
         result.setQueryResults(List.of(Map.of("month", "2026-01", "balance", 100),
                 Map.of("month", "2026-02", "balance", 120)));
         result.setRecommendedChart(chart);
