@@ -17,6 +17,18 @@ from typing import Any
 
 
 LOWER_IS_BETTER = {"ZB012", "ZB013", "ZB017"}
+CHINESE_RANK_NUMBERS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
 METRIC_ALIASES = {
     "各项存款余额": "ZB001",
     "存款余额": "ZB001",
@@ -185,32 +197,47 @@ ORDER BY d.metric_code, o.org_code"""
 
 def _rank_direction(record: dict[str, Any], metric_code: str) -> str:
     question = str(record.get("question", ""))
-    if any(token in question for token in ("最后", "后3", "后三", "最高", "最多", "最大", "第一")):
+    if _top_and_bottom_limits(question):
+        return "ASC" if metric_code in LOWER_IS_BETTER else "DESC"
+    if any(token in question for token in ("最高", "最多", "最大", "第一")):
         return "DESC"
-    if any(token in question for token in ("最低", "最少", "最好")):
+    if any(token in question for token in ("最低", "最少", "最小")):
+        return "ASC"
+    if "最好" in question:
         return "ASC" if metric_code in LOWER_IS_BETTER else "DESC"
     return "ASC" if metric_code in LOWER_IS_BETTER else "DESC"
 
 
+def _rank_number(value: str) -> int:
+    return int(value) if value.isascii() else CHINESE_RANK_NUMBERS[value]
+
+
 def _top_and_bottom_limits(question: str) -> tuple[int, int] | None:
-    match = re.search(r"前([1-9]\d*)和后([1-9]\d*)", question)
+    number = r"([1-9]\d*|[一二三四五六七八九十])"
+    match = re.search(rf"前{number}和后{number}", question)
     if not match:
         return None
-    return int(match.group(1)), int(match.group(2))
+    return _rank_number(match.group(1)), _rank_number(match.group(2))
 
 
 def _rank_limit(question: str) -> int:
     match = re.search(r"(?:前|后|最后的?)([1-9]\d*|[一二三四五六七八九十])", question)
     if not match:
         return 1
-    value = match.group(1)
-    if value.isascii():
-        return int(value)
-    return {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}[value]
+    return _rank_number(match.group(1))
+
+
+def _bottom_rank_requested(question: str) -> bool:
+    if _top_and_bottom_limits(question):
+        return False
+    return "最后" in question or re.search(
+        r"(?:排名)?后(?:[1-9]\d*|[一二三四五六七八九十])", question
+    ) is not None
 
 
 def _annual_average_top_bottom_rank_query(
-    record: dict[str, Any], metric_code: str, top_limit: int, bottom_limit: int
+    record: dict[str, Any], metric_code: str, top_limit: int, bottom_limit: int,
+    direction: str,
 ) -> GoldSqlSpec:
     start_date, end_date = _date_range(record)
     sql = f"""WITH averaged AS (
@@ -222,7 +249,7 @@ def _annual_average_top_bottom_rank_query(
   GROUP BY o.org_code, o.org_name, d.metric_code
 ), ranked AS (
   SELECT org_code, org_name, metric_code, metric_value,
-         ROW_NUMBER() OVER (ORDER BY metric_value DESC, org_code) AS rank_position,
+         ROW_NUMBER() OVER (ORDER BY metric_value {direction}, org_code) AS rank_position,
          COUNT(*) OVER () AS total_count
   FROM averaged
 )
@@ -231,6 +258,68 @@ FROM ranked
 WHERE rank_position <= {top_limit} OR rank_position > total_count - {bottom_limit}
 ORDER BY CASE WHEN rank_position <= {top_limit} THEN 0 ELSE 1 END, rank_position"""
     return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK", "DATE_RANGE", "AVERAGE", "TOP_BOTTOM"])
+
+
+def _annual_daily_extrema_query(record: dict[str, Any], metric_code: str) -> GoldSqlSpec:
+    start_date, end_date = _date_range(record)
+    sql = f"""WITH ranked AS (
+  SELECT o.org_code, o.org_name, d.metric_code, d.metric_value,
+         ROW_NUMBER() OVER (
+           ORDER BY d.metric_value DESC, d.data_date, o.org_code
+         ) AS maximum_rank,
+         ROW_NUMBER() OVER (
+           ORDER BY d.metric_value ASC, d.data_date, o.org_code
+         ) AS minimum_rank
+  FROM bank_metric_daily d
+  JOIN bank_organization o ON o.org_code = d.org_code
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+), extrema AS (
+  SELECT org_code, org_name, metric_code, metric_value, 1 AS rank_position,
+         0 AS result_order
+  FROM ranked
+  WHERE maximum_rank = 1
+  UNION ALL
+  SELECT org_code, org_name, metric_code, metric_value, 1 AS rank_position,
+         1 AS result_order
+  FROM ranked
+  WHERE minimum_rank = 1
+)
+SELECT org_code, org_name, metric_code, metric_value, rank_position
+FROM extrema
+ORDER BY result_order"""
+    return GoldSqlSpec(
+        sql, sql, ["RANKING", "WINDOW_RANK", "DATE_RANGE", "EXTREMA", "TOP_BOTTOM"]
+    )
+
+
+def _annual_daily_statistics_query(record: dict[str, Any], metric_code: str) -> GoldSqlSpec:
+    start_date, end_date = _date_range(record)
+    organizations = _organization_codes(record)
+    if len(organizations) != 1:
+        raise GoldSqlError(
+            f"Annual daily statistics require one organization for {record.get('id')}"
+        )
+    sql = f"""SELECT o.org_code, o.org_name, d.metric_code,
+       AVG(d.metric_value) AS aggregate_value,
+       MIN(d.metric_value) AS min_value,
+       MAX(d.metric_value) AS max_value,
+       COUNT(*) AS observation_count
+FROM bank_metric_daily d
+JOIN bank_organization o ON o.org_code = d.org_code
+WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+  AND d.metric_code = {_sql_literal(metric_code)}
+  AND d.org_code = {_sql_literal(organizations[0])}
+GROUP BY o.org_code, o.org_name, d.metric_code"""
+    return GoldSqlSpec(
+        sql, sql, ["AGGREGATION", "DATE_RANGE", "AVERAGE", "EXTREMA"]
+    )
+
+
+def _is_subset_winner(question: str, organizations: list[str]) -> bool:
+    return len(organizations) > 1 and "谁" in question and any(
+        token in question for token in ("最高", "最低", "最多", "最少", "最大", "最小")
+    )
 
 
 def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
@@ -243,27 +332,49 @@ def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
     metric_code = metric_codes[0]
     direction = _rank_direction(record, metric_code)
     question = str(record.get("question", ""))
+    organizations = _organization_codes(record)
+    if (
+        "全年" in question
+        and "日均" in question
+        and "最高日" in question
+        and "最低日" in question
+    ):
+        return _annual_daily_statistics_query(record, metric_code)
+    if (
+        "全年" in question
+        and "单日最高" in question
+        and "单日最低" in question
+    ):
+        return _annual_daily_extrema_query(record, metric_code)
     top_and_bottom = _top_and_bottom_limits(question)
     if top_and_bottom and "全年" in question and any(token in question for token in ("均值", "日均", "平均")):
-        return _annual_average_top_bottom_rank_query(record, metric_code, *top_and_bottom)
+        return _annual_average_top_bottom_rank_query(
+            record, metric_code, *top_and_bottom, direction
+        )
     limit = _rank_limit(question)
-    organizations = _organization_codes(record)
-    if organizations:
+    subset_winner = _is_subset_winner(question, organizations)
+    if subset_winner:
+        result_filter = "rank_position = 1"
+    elif organizations:
         result_filter = "org_code IN (" + ", ".join(_sql_literal(code) for code in organizations) + ")"
+    elif _bottom_rank_requested(question):
+        result_filter = f"rank_position > total_count - {limit}"
     else:
         result_filter = f"rank_position <= {limit}"
+    ranking_organizations = organizations if subset_winner else []
     sql = f"""WITH ranked AS (
   SELECT o.org_code, o.org_name, d.metric_code, d.metric_value,
-         ROW_NUMBER() OVER (ORDER BY metric_value {direction}) AS rank_position
+         ROW_NUMBER() OVER (ORDER BY metric_value {direction}, o.org_code) AS rank_position,
+         COUNT(*) OVER () AS total_count
   FROM bank_metric_daily d
   JOIN bank_organization o ON o.org_code = d.org_code
-  WHERE {_where(_date_from_record(record), metric_code, [])}
+  WHERE {_where(_date_from_record(record), metric_code, ranking_organizations)}
 )
 SELECT org_code, org_name, metric_code, metric_value, rank_position
 FROM ranked
 WHERE {result_filter}
-ORDER BY rank_position"""
-    if not organizations and limit == 1:
+ORDER BY rank_position{" DESC" if _bottom_rank_requested(question) else ""}"""
+    if not organizations and limit == 1 and not _bottom_rank_requested(question):
         sql = sql.replace("rank_position <= 1", "rank_position = 1")
     return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK"])
 

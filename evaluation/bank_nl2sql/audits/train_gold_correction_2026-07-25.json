@@ -1,0 +1,94 @@
+{
+  "auditDate": "2026-07-25",
+  "scope": {
+    "modifiedSplit": "train",
+    "notModifiedSplits": [
+      "dev",
+      "test"
+    ],
+    "baselineReport": ".local-dev/bank-nl2sql/api-train-full-v1.json"
+  },
+  "method": {
+    "sourceCheck": "Compared train question semantics and answerText with deterministic SQL results over the SQLite benchmark.",
+    "database": ".local-dev/bank-nl2sql/bank_benchmark.sqlite",
+    "validation": "Generated and executed all 115 train and 36 dev SQL statements; all returned at least one row."
+  },
+  "correctedResultCount": 26,
+  "correctionGroups": [
+    {
+      "defect": "Annual-average top-and-bottom ranking was materialized as a year-end first-place row.",
+      "ids": [
+        "TRAIN-H-10",
+        "TRAIN-H-11",
+        "TRAIN-H-12"
+      ]
+    },
+    {
+      "defect": "Annual single-day maximum and minimum was materialized as one year-end row.",
+      "ids": [
+        "TRAIN-H-13",
+        "TRAIN-H-14",
+        "TRAIN-H-15"
+      ]
+    },
+    {
+      "defect": "Annual daily average, minimum, and maximum for one institution was materialized as an unrelated ranking row.",
+      "ids": [
+        "TRAIN-H-19",
+        "TRAIN-H-20",
+        "TRAIN-H-21"
+      ]
+    },
+    {
+      "defect": "Month-over-month and year-over-year questions stored only one comparison row.",
+      "ids": [
+        "TRAIN-H-28",
+        "TRAIN-H-29",
+        "TRAIN-H-30"
+      ]
+    },
+    {
+      "defect": "Top-three or bottom-three questions stored only one row.",
+      "ids": [
+        "TRAIN-M-19",
+        "TRAIN-M-20",
+        "TRAIN-M-21",
+        "TRAIN-M-28",
+        "TRAIN-M-29",
+        "TRAIN-M-30"
+      ]
+    },
+    {
+      "defect": "Selected institution ranking stored the global first-place institution or an incorrect rank.",
+      "ids": [
+        "TRAIN-M-22",
+        "TRAIN-M-23",
+        "TRAIN-M-24",
+        "TRAIN-M-55",
+        "TRAIN-M-57"
+      ]
+    },
+    {
+      "defect": "A winner within an explicitly named institution subset was materialized as a global rank result.",
+      "ids": [
+        "TRAIN-S-07",
+        "TRAIN-S-09"
+      ]
+    },
+    {
+      "defect": "The last-place question stored the first-place institution.",
+      "ids": [
+        "TRAIN-S-18"
+      ]
+    }
+  ],
+  "adjudicationNotes": [
+    {
+      "id": "TRAIN-H-14",
+      "status": "REQUIREMENT_MISMATCH",
+      "evidence": "The question asks for the numeric maximum and minimum. The benchmark data maximum is 37.6 for ORG004 and the minimum is 25.51 for ORG010, while answerText labels them in reverse.",
+      "decision": "Gold SQL and structured rows follow the question's numeric maximum/minimum semantics. The source narrative remains an auditable known defect until its upstream workbook is corrected."
+    }
+  ],
+  "heldOutPolicy": "No held-out result was used to choose or validate these train corrections."
+}

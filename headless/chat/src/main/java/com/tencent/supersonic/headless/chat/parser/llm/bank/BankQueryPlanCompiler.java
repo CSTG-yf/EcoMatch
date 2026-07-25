@@ -110,11 +110,24 @@ public class BankQueryPlanCompiler {
                             templateFactory.compileProvinceAverageAggregation(templateContext),
                             List.of(ORGANIZATION_DIMENSION, "aggregate_value", "min_value",
                                     "max_value", "observation_count"),
-                            provinceAverageAggregationResultContract(plan, metrics, index));
+                            aggregationSummaryResultContract(plan, metrics, index));
                 }
                 throw new BankPlanCompilationException(
                         BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                         "province-average benchmarks require a threshold or aggregation intent");
+            }
+            if (requiresAbsoluteThreshold(plan, metrics, dimensions, metricFilters)) {
+                return CompiledQuery.s2sql(
+                        templateFactory.compileAbsoluteThreshold(templateContext),
+                        List.of(ORGANIZATION_DIMENSION, "metric_value", "meets_condition"),
+                        absoluteThresholdResultContract(plan, metrics, index));
+            }
+            if (requiresDailyAggregationSummary(plan, metrics, dimensions, metricFilters)) {
+                return CompiledQuery.s2sql(
+                        templateFactory.compileDailyAggregationSummary(templateContext),
+                        List.of(ORGANIZATION_DIMENSION, "aggregate_value", "min_value",
+                                "max_value", "observation_count"),
+                        aggregationSummaryResultContract(plan, metrics, index));
             }
             if (requiresOrganizationComparisonTemplate(plan, metrics, dimensions, metricFilters)) {
                 return CompiledQuery.s2sql(
@@ -194,6 +207,24 @@ public class BankQueryPlanCompiler {
                         .toList().equals(List.of(ORGANIZATION_DIMENSION));
     }
 
+    private boolean requiresDailyAggregationSummary(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
+            List<Filter> metricFilters) {
+        return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() == 1
+                && metrics.size() == 1
+                && metrics.get(0).planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG
+                && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)
+                        .toList().equals(List.of(ORGANIZATION_DIMENSION));
+    }
+
+    private boolean requiresAbsoluteThreshold(BankQueryPlan plan, List<ResolvedMetric> metrics,
+            List<ResolvedDimension> dimensions, List<Filter> metricFilters) {
+        return plan.getIntent() == BankIntentType.THRESHOLD && plan.getOrganizations().size() == 1
+                && metrics.size() == 1 && metricFilters.size() == 1
+                && dimensions.stream().map(ResolvedDimension::identifier).toList()
+                        .equals(List.of(ORGANIZATION_DIMENSION));
+    }
+
     private List<Filter> executionDimensionFilters(BankQueryPlan plan,
             List<ResolvedDimension> dimensions, List<Filter> dimensionFilters) {
         if (!ranksSelectedOrganization(plan, dimensions)) {
@@ -258,12 +289,20 @@ public class BankQueryPlanCompiler {
                 BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD, List.of());
     }
 
-    private BankResultProjector.Contract provinceAverageAggregationResultContract(
-            BankQueryPlan plan, List<ResolvedMetric> metrics, SchemaIndex index) {
+    private BankResultProjector.Contract absoluteThresholdResultContract(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, SchemaIndex index) {
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.ABSOLUTE_THRESHOLD,
+                List.of(BankResultProjector.MetricBinding.builder().semanticColumn("metric_value")
+                        .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
+    }
+
+    private BankResultProjector.Contract aggregationSummaryResultContract(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, SchemaIndex index) {
         if (metrics.size() != 1) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
-                    "province-average aggregation requires exactly one metric");
+                    "daily aggregation summary requires exactly one metric");
         }
         return provinceAverageContract(plan, index,
                 BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
@@ -315,11 +354,17 @@ public class BankQueryPlanCompiler {
         request.setDateInfo(dateInfo(plan, partitionTime, dimensions));
         request.setOrders(orders(plan, metrics, dimensions));
         request.setLimit(
-                ranksSelectedOrganization(plan, dimensions) ? SemanticIntentHints.DEFAULT_MAX_LIMIT
+                requiresFullRankingInput(plan, dimensions) ? SemanticIntentHints.DEFAULT_MAX_LIMIT
                         : plan.getLimit() == null ? SemanticIntentHints.DEFAULT_MAX_LIMIT
                                 : plan.getLimit());
         return CompiledQuery.struct(request, outputColumns,
                 resultContract(plan, metrics, dimensions, index));
+    }
+
+    private boolean requiresFullRankingInput(BankQueryPlan plan,
+            List<ResolvedDimension> dimensions) {
+        return ranksSelectedOrganization(plan, dimensions)
+                || rankFilterLimit(plan, "rank_from_bottom") != null;
     }
 
     /**

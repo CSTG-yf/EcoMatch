@@ -113,6 +113,31 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldRankWithinMultipleSelectedOrganizations() {
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.RANKED_LONG_FORM)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(
+                                Map.of("ORG001", "A", "ORG002", "B", "ORG003", "C", "ORG004", "D"))
+                        .selectedOrganizationCodes(List.of("ORG001", "ORG003", "ORG004"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("ZB001").metricCode("ZB001").build()))
+                        .topRankLimit(1).build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "ZB001", new BigDecimal("50")),
+                        row("bank_organization", "ORG002", "ZB001", new BigDecimal("100")),
+                        row("bank_organization", "ORG003", "ZB001", new BigDecimal("70")),
+                        row("bank_organization", "ORG004", "ZB001", new BigDecimal("60"))));
+
+        assertEquals(
+                List.of(row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB001",
+                        "metric_value", new BigDecimal("70"), "rank_position", 1)),
+                projection.getRows());
+    }
+
+    @Test
     void shouldProjectRatioValuesToTheStableBankContract() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.RATIO)
@@ -237,6 +262,30 @@ class BankResultProjectorTest {
                         row("org_code", "ORG004", "org_name", "D", "metric_value",
                                 new BigDecimal("54.79"), "provincial_average",
                                 new BigDecimal("72.73307692307692"), "meets_condition", 0)),
+                projection.getRows());
+    }
+
+    @Test
+    void shouldProjectAnAbsoluteThresholdWithItsMetricCode() {
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.ABSOLUTE_THRESHOLD)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG008", "H"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("metric_value").metricCode("ZB016").build()))
+                        .build();
+
+        BankResultProjector.Projection projection =
+                projector.project(contract, List.of(row("bank_organization", "ORG008",
+                        "metric_value", new BigDecimal("11.82"), "meets_condition", 1)));
+
+        assertEquals(
+                List.of("org_code", "org_name", "metric_code", "metric_value", "meets_condition"),
+                projection.getColumns());
+        assertEquals(
+                List.of(row("org_code", "ORG008", "org_name", "H", "metric_code", "ZB016",
+                        "metric_value", new BigDecimal("11.82"), "meets_condition", 1)),
                 projection.getRows());
     }
 

@@ -93,40 +93,45 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.
 
 ## SuperSonic 端到端评测
 
-`run_supersonic_eval.py` 通过真实的 SuperSonic 两步接口进行评测：
+`run_supersonic_eval.py` 直接调用本地开发环境的 `/openapi` 接口，不需要浏览器、Bearer Token 或 Cookie。每道题使用独立会话，按前端真实顺序执行：
 
-1. `POST /api/chat/query/parse`；
-2. `POST /api/chat/query/execute`。
+1. `POST /openapi/chat/manage/save`；
+2. `POST /openapi/chat/query/parse`；
+3. `POST /openapi/chat/query/execute`；
+4. 轮询 `POST /openapi/chat/query/getExecuteSummary`；
+5. 结果匹配时删除临时会话，失败会话保留用于排查。
 
-它只将题目、`agentId`、`chatId` 和运行开关传给服务端；金标 SQL、标准结果、答案文本均只在本地用于评分。默认运行 `dev`，不会读取 `test.jsonl`。本地 HTTP 调用需要提供已登录用户的 Bearer Token（推荐通过环境变量 `SUPSERSONIC_AUTH_TOKEN` 传入），不会尝试读取浏览器 Cookie 或本地存储。
+样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。每完成一条就更新输出 checkpoint，默认可从同一报告续跑。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
 
 ```powershell
-$env:SUPSERSONIC_AUTH_TOKEN = '<已登录用户的访问令牌>'
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
   evaluation/bank_nl2sql `
-  --split dev `
-  --base-url http://127.0.0.1:9000 `
-  --agent-id <绑定银行数据集的助理ID> `
-  --output .local-dev/bank-nl2sql/supersonic-dev-report.json
+  --split train `
+  --base-url http://127.0.0.1:9080 `
+  --agent-id 33 `
+  --concurrency 4 `
+  --max-records 5 `
+  --output .local-dev/bank-nl2sql/api-train-smoke.json
 ```
 
-测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
+smoke 通过后，去掉 `--max-records 5` 即可运行完整训练集。重复相同命令会从输出 checkpoint 续跑；需要从头重跑时显式传入 `--no-resume`。测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
   evaluation/bank_nl2sql `
   --split test --acknowledge-final-test `
-  --base-url http://127.0.0.1:9000 `
+  --base-url http://127.0.0.1:9080 `
   --agent-id <绑定银行数据集的助理ID> `
+  --concurrency 4 `
   --run-registry .local-dev/bank-nl2sql/supersonic-final-test-runs.json `
   --output .local-dev/bank-nl2sql/supersonic-final-report.json
 ```
 
 报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、阶段耗时、标准错误类别、S2SQL 与物理 SQL 摘要；不会写出实际查询行或金标答案。
 
-## 页面问答验收
+## 页面问答诊断（手工备用）
 
-后端接口评测用于定位解析、编译和执行问题；产品效果验收必须经由已登录的“银行问数”页面。页面验收分两步：
+页面采集器保留为手工 UI/渲染诊断工具，不再作为批量效果评测的默认入口。需要排查页面独有问题时分两步：
 
 1. `run_ui_chat_capture.mjs` 连接一个已登录、已打开银行问数页面的 Chromium 调试会话，在 `#chatInput` 输入 dev 问题，并从页面渲染的表格读取表头、所有分页和终态；它不会自行调用 `/api/chat/query/*`。
 2. `evaluate_ui_capture.py` 将页面采集报告与本地 dev 金标比较。展示中的千位分隔符、空值和后续分页会在评分前归一化，输出是有效 JSON，且不包含金标行。

@@ -154,6 +154,15 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
             return normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
         }
+        if (isAnnualDailyExtremaSummary(queryText, hints)) {
+            return normalizeAnnualDailyExtremaSummary(plan, hints);
+        }
+        if (isAbsoluteThreshold(hints)) {
+            return normalizeAbsoluteThreshold(plan, hints);
+        }
+        if (isSingleOrganizationRatio(hints)) {
+            return normalizeSingleOrganizationRatio(plan, hints);
+        }
         if (hints.getExpectedIntent() != BankIntentType.CHANGE || !queryText.contains("环比")
                 || !queryText.contains("同比")) {
             return plan;
@@ -183,6 +192,113 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         plan.setLimit(null);
         plan.setOutput(BankQueryPlan.Output.builder()
                 .columns(plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList())
+                .orderSensitive(true).build());
+        return plan;
+    }
+
+    private boolean isAbsoluteThreshold(SemanticIntentHints hints) {
+        return hints.getExpectedIntent() == BankIntentType.THRESHOLD
+                && hints.getRequiredMetrics().size() == 1
+                && hints.getRequiredOrganizationCodes().size() == 1
+                && hints.getRequiredFilters().size() == 1
+                && "metric_value".equals(hints.getRequiredFilters().get(0).field());
+    }
+
+    private BankQueryPlan normalizeAbsoluteThreshold(BankQueryPlan plan,
+            SemanticIntentHints hints) {
+        String metric = hints.getRequiredMetrics().iterator().next();
+        plan.setIntent(BankIntentType.THRESHOLD);
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setOrganizations(hints.getRequiredOrganizationCodes().stream().sorted()
+                .map(code -> BankQueryPlan.Organization.builder().code(code).build()).toList());
+        plan.setFilters(
+                hints.getRequiredFilters().stream()
+                        .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
+                                .operator(filter.operator()).value(filter.value()).build())
+                        .toList());
+        plan.getTime().setStartDate(hints.getRequiredStartDate());
+        plan.getTime().setEndDate(hints.getRequiredEndDate());
+        plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.NONE);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.DIRECT).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        plan.setOutput(BankQueryPlan.Output.builder().columns(List.of("bank_organization", metric))
+                .orderSensitive(true).build());
+        return plan;
+    }
+
+    private boolean isSingleOrganizationRatio(SemanticIntentHints hints) {
+        return hints.getExpectedIntent() == BankIntentType.RATIO
+                && hints.getRequiredMetrics().size() == 2
+                && hints.getRequiredOrganizationCodes().size() == 1
+                && hints.getRequiredFilters().isEmpty();
+    }
+
+    private BankQueryPlan normalizeSingleOrganizationRatio(BankQueryPlan plan,
+            SemanticIntentHints hints) {
+        List<String> metrics = new ArrayList<>(hints.getRequiredMetrics());
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setMetrics(metrics.stream().map(metric -> BankQueryPlan.Metric.builder()
+                .bizName(metric).aggregation(BankQueryPlan.Aggregation.DEFAULT).build()).toList());
+        plan.setDimensions(List.of());
+        plan.setOrganizations(hints.getRequiredOrganizationCodes().stream().sorted()
+                .map(code -> BankQueryPlan.Organization.builder().code(code).build()).toList());
+        plan.setFilters(List.of());
+        plan.getTime().setStartDate(hints.getRequiredStartDate());
+        plan.getTime().setEndDate(hints.getRequiredEndDate());
+        plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.NONE);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline(metrics.get(1)).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        plan.setOutput(
+                BankQueryPlan.Output.builder().columns(metrics).orderSensitive(true).build());
+        return plan;
+    }
+
+    private boolean isAnnualDailyExtremaSummary(String queryText, SemanticIntentHints hints) {
+        return hints.getExpectedIntent() == BankIntentType.AGGREGATION
+                && hints.getRequiredMetrics().size() == 1
+                && hints.getRequiredOrganizationCodes().size() == 1 && queryText.contains("全年")
+                && (queryText.contains("均值") || queryText.contains("日均")
+                        || queryText.contains("平均"))
+                && queryText.contains("最高日") && queryText.contains("最低日");
+    }
+
+    private BankQueryPlan normalizeAnnualDailyExtremaSummary(BankQueryPlan plan,
+            SemanticIntentHints hints) {
+        String metric = hints.getRequiredMetrics().iterator().next();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                .aggregation(BankQueryPlan.Aggregation.AVG).build()));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setOrganizations(hints.getRequiredOrganizationCodes().stream().sorted()
+                .map(code -> BankQueryPlan.Organization.builder().code(code).build()).toList());
+        plan.setFilters(
+                hints.getRequiredFilters().stream()
+                        .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
+                                .operator(filter.operator()).value(filter.value()).build())
+                        .toList());
+        plan.getTime().setStartDate(hints.getRequiredStartDate());
+        plan.getTime().setEndDate(hints.getRequiredEndDate());
+        plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.NONE);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.DIRECT).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        plan.setOutput(BankQueryPlan.Output.builder().columns(List.of("bank_organization", metric))
                 .orderSensitive(true).build());
         return plan;
     }

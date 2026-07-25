@@ -39,6 +39,7 @@ public class BankResultProjector {
             case COMPARISON -> projectComparison(contract, sourceRows);
             case PROVINCIAL_AVERAGE_THRESHOLD -> projectProvinceAverageThreshold(contract,
                     sourceRows);
+            case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
             case AGGREGATION_SUMMARY -> projectAggregationSummary(contract, sourceRows);
             case TREND -> projectTrend(contract, sourceRows);
             case LONG_FORM -> projectLongForm(contract, sourceRows);
@@ -130,6 +131,9 @@ public class BankResultProjector {
             List<RankedValue> values = new ArrayList<>();
             for (Map<String, Object> sourceRow : inputRows) {
                 String organizationCode = resolveOrganizationCode(contract, sourceRow);
+                if (isOutsideExplicitRankingSubset(contract, organizationCode)) {
+                    continue;
+                }
                 ValueLookup metricValue = value(sourceRow, metric.getSemanticColumn());
                 BigDecimal numericValue = metricValue.found() ? decimal(metricValue.value()) : null;
                 if (StringUtils.isBlank(organizationCode) || numericValue == null) {
@@ -174,6 +178,11 @@ public class BankResultProjector {
             }
         }
         return Projection.applied(columns(contract), rankedRows);
+    }
+
+    private boolean isOutsideExplicitRankingSubset(Contract contract, String organizationCode) {
+        return contract.getSelectedOrganizationCodes().size() > 1
+                && !contract.getSelectedOrganizationCodes().contains(organizationCode);
     }
 
     private boolean isRequestedRankSlice(Contract contract, int rank, int totalCount) {
@@ -395,6 +404,34 @@ public class BankResultProjector {
         return Projection.applied(columns(contract), rows);
     }
 
+    private Projection projectAbsoluteThreshold(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().size() != 1) {
+            return Projection.notApplied();
+        }
+        String metricCode = contract.getMetrics().get(0).getMetricCode();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricValue = value(sourceRow, "metric_value");
+            ValueLookup meetsCondition = value(sourceRow, "meets_condition");
+            if (StringUtils.isBlank(organizationCode) || !metricValue.found()
+                    || !meetsCondition.found()) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_code", metricCode);
+            row.put("metric_value", metricValue.value());
+            row.put("meets_condition", meetsCondition.value());
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
     private Projection projectAggregationSummary(Contract contract,
             List<Map<String, Object>> sourceRows) {
         if (contract.getMetrics().size() != 1) {
@@ -478,6 +515,10 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_value", "provincial_average",
                     "meets_condition");
         }
+        if (contract.getType() == ProjectionType.ABSOLUTE_THRESHOLD) {
+            return List.of("org_code", "org_name", "metric_code", "metric_value",
+                    "meets_condition");
+        }
         if (contract.getType() == ProjectionType.AGGREGATION_SUMMARY) {
             return List.of("org_code", "org_name", "metric_code", "aggregate_value", "min_value",
                     "max_value", "observation_count");
@@ -517,6 +558,7 @@ public class BankResultProjector {
         RATIO,
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
+        ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,
         TREND,
         MOM_YOY_CHANGE,

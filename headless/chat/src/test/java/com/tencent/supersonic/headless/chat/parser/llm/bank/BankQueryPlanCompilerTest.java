@@ -69,6 +69,54 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldRankWithinAnExplicitOrganizationSubset() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setOrganizations(
+                List.of(organization("ORG001"), organization("ORG005"), organization("ORG009")));
+        plan.setFilters(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("1").build()));
+        plan.setLimit(1);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(Set.of("ORG001", "ORG005", "ORG009"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(
+                        List.of(new SemanticIntentHints.RequiredFilter("rank", "LTE", "1")))
+                .requiredLimit(1).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertTrue(compiled.getStructReq().getDimensionFilters().isEmpty());
+        assertEquals(SemanticIntentHints.DEFAULT_MAX_LIMIT, compiled.getStructReq().getLimit());
+        assertEquals(Integer.valueOf(1), compiled.getResultContract().getTopRankLimit());
+    }
+
+    @Test
+    void shouldLoadTheFullRankingInputForABottomRankSlice() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setOrganizations(List.of());
+        plan.setFilters(List.of(BankQueryPlan.Filter.builder().field("rank_from_bottom")
+                .operator("LTE").value("1").build()));
+        plan.setLimit(1);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List
+                        .of(new SemanticIntentHints.RequiredFilter("rank_from_bottom", "LTE", "1")))
+                .requiredLimit(1).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(SemanticIntentHints.DEFAULT_MAX_LIMIT, compiled.getStructReq().getLimit());
+        assertEquals(Integer.valueOf(1), compiled.getResultContract().getBottomRankLimit());
+    }
+
+    @Test
     void shouldCompileAnnualAverageTopAndBottomRankingToAControlledTemplate() {
         BankQueryPlan plan = rankingPlan();
         plan.setOrganizations(List.of());
@@ -428,6 +476,35 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileAnAbsoluteThresholdToAStableConditionContract() {
+        BankQueryPlan plan = thresholdPlan();
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setOrganizations(List.of(organization("ORG004")));
+        plan.setFilters(List.of(BankQueryPlan.Filter.builder().field("metric_value").operator("GTE")
+                .value("10.5%").build()));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001"));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List
+                        .of(new SemanticIntentHints.RequiredFilter("metric_value", "GTE", "10.5%")))
+                .maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertTrue(compiled.getS2sql().contains("SUM(ZB001) AS metric_value"));
+        assertTrue(compiled.getS2sql()
+                .contains("CASE WHEN metric_value >= 10.5 THEN 1 ELSE 0 END AS meets_condition"));
+        assertTrue(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
+        assertEquals(BankResultProjector.ProjectionType.ABSOLUTE_THRESHOLD,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldCompileProvinceAverageAggregationToAStableSummaryContract() {
         BankQueryPlan plan = thresholdPlan();
         plan.setIntent(BankIntentType.AGGREGATION);
@@ -447,6 +524,31 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql().contains("COUNT(metric_value) AS observation_count"));
         assertEquals(List.of("bank_organization", "aggregate_value", "min_value", "max_value",
                 "observation_count"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
+    void shouldCompileAnnualDailyAggregationToAStableSummaryContract() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                .aggregation(BankQueryPlan.Aggregation.AVG).build()));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                .endDate(LocalDate.of(2025, 12, 31)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, annualDailyAggregationHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertTrue(compiled.getS2sql().contains("WITH bank_daily_values AS"));
+        assertTrue(compiled.getS2sql().contains("AVG(metric_value) AS aggregate_value"));
+        assertTrue(compiled.getS2sql().contains("MIN(metric_value) AS min_value"));
+        assertTrue(compiled.getS2sql().contains("MAX(metric_value) AS max_value"));
+        assertTrue(compiled.getS2sql().contains("COUNT(metric_value) AS observation_count"));
         assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
                 compiled.getResultContract().getType());
     }
@@ -594,6 +696,15 @@ class BankQueryPlanCompilerTest {
                 .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
                         "COMPARE", "PROVINCE_AVERAGE")))
                 .maxLimit(100).build();
+    }
+
+    private SemanticIntentHints annualDailyAggregationHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.AGGREGATION)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).maxLimit(100).build();
     }
 
     private BankQueryPlan.Filter provinceAverageBenchmark() {

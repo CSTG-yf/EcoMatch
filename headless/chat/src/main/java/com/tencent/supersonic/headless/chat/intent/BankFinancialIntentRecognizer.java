@@ -43,6 +43,8 @@ public class BankFinancialIntentRecognizer {
     private static final Pattern HALF_YEAR_END = Pattern.compile("(20\\d{2})年([上下])半年末");
     private static final Pattern THRESHOLD =
             Pattern.compile("(不低于|不高于|至少|至多|超过|高于|大于|低于|小于)(\\d+(?:\\.\\d+)?%?)");
+    private static final Pattern REVERSED_THRESHOLD =
+            Pattern.compile("(\\d+(?:\\.\\d+)?%?)的?(最低要求|最低标准|监管要求|最高限额)");
     private static final Pattern PROVINCE_SCOPE = Pattern.compile("全省|13家|十三家|哪家|各家|所有(?:机构|农商行)");
     private static final Pattern BROAD_METRIC = Pattern.compile("(贷款|存款|经营|风险)(?:情况|指标|表现|怎么样|如何)");
 
@@ -190,6 +192,8 @@ public class BankFinancialIntentRecognizer {
 
     private List<IntentCandidate> classify(String text, int organizationCount) {
         boolean explicitQuarterlyTrend = text.contains("\u9010\u5b63");
+        boolean annualDailyExtremaSummary =
+                organizationCount == 1 && isAnnualDailyExtremaSummary(text);
         Map<BankIntentType, ScoredReason> scores = new EnumMap<>(BankIntentType.class);
         if (explicitQuarterlyTrend) {
             score(scores, BankIntentType.TREND, 0.99D, "explicit quarterly trend");
@@ -214,6 +218,9 @@ public class BankFinancialIntentRecognizer {
         }
         if (containsAny(text, "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
             score(scores, BankIntentType.AGGREGATION, 0.91D, "命中聚合统计表达");
+        }
+        if (annualDailyExtremaSummary) {
+            score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构全年日均及极值统计表达");
         }
         if ((organizationCount >= 2 && containsAny(text, "谁", "更", "比", "差"))
                 || containsAny(text, "两家相比", "机构间比较")) {
@@ -320,24 +327,72 @@ public class BankFinancialIntentRecognizer {
         boolean comprehensivePerformanceProfile = isComprehensivePerformanceRanking(text)
                 && containsAny(text, "表现较好") && containsAny(text, "表现较差");
         Matcher threshold = THRESHOLD.matcher(text);
+        boolean thresholdFound = false;
         while (threshold.find()) {
+            thresholdFound = true;
             filters.add(FilterSlot.builder().field("metric_value")
                     .operator(operator(threshold.group(1))).value(threshold.group(2))
                     .sourceText(threshold.group()).build());
+        }
+        if (!thresholdFound) {
+            Matcher reversedThreshold = REVERSED_THRESHOLD.matcher(text);
+            if (reversedThreshold.find()) {
+                String operator = "最高限额".equals(reversedThreshold.group(2)) ? "LTE" : "GTE";
+                filters.add(FilterSlot.builder().field("metric_value").operator(operator)
+                        .value(reversedThreshold.group(1)).sourceText(reversedThreshold.group())
+                        .build());
+            }
         }
         if (containsAny(text, "全省平均", "全省均值", "平均水平")) {
             filters.add(FilterSlot.builder().field("benchmark").operator("COMPARE")
                     .value("PROVINCE_AVERAGE").sourceText("全省均值").build());
         }
-        if (!comprehensivePerformanceProfile && containsAny(text, "前三", "表现较好")) {
-            filters.add(FilterSlot.builder().field("rank").operator("LTE").value("3")
-                    .sourceText("前三").build());
-        }
-        if (!comprehensivePerformanceProfile && containsAny(text, "后四", "表现较差")) {
-            filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE").value("4")
-                    .sourceText("后四").build());
+        if (!comprehensivePerformanceProfile && !isAnnualDailyExtremaSummary(text)
+                && !isTrendExtremaSummary(text) && !isThresholdRequirement(text)) {
+            Matcher topRank = Pattern.compile("(?:排名)?前([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
+            if (topRank.find()) {
+                filters.add(FilterSlot.builder().field("rank").operator("LTE")
+                        .value(rankValue(topRank.group(1))).sourceText(topRank.group()).build());
+            } else if (containsAny(text, "第一", "最高", "最低", "最多", "最少", "表现较好")) {
+                filters.add(FilterSlot.builder().field("rank").operator("LTE")
+                        .value(text.contains("表现较好") ? "3" : "1").sourceText("排名前部").build());
+            }
+
+            Matcher bottomRank =
+                    Pattern.compile("(?:排名)?(?:最后(?:的)?|后)([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
+            if (bottomRank.find()) {
+                filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
+                        .value(rankValue(bottomRank.group(1))).sourceText(bottomRank.group())
+                        .build());
+            } else if (text.contains("表现较差")) {
+                filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
+                        .value("4").sourceText("表现较差").build());
+            }
         }
         return filters;
+    }
+
+    private boolean isAnnualDailyExtremaSummary(String text) {
+        return text.contains("全年") && containsAny(text, "日均", "均值", "平均") && text.contains("最高日")
+                && text.contains("最低日");
+    }
+
+    private boolean isTrendExtremaSummary(String text) {
+        return containsAny(text, "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续", "全年变化")
+                && containsAny(text, "最高", "最低", "最多", "最少");
+    }
+
+    private boolean isThresholdRequirement(String text) {
+        return containsAny(text, "最低要求", "最低标准", "最高限额", "监管要求");
+    }
+
+    private String rankValue(String value) {
+        if (StringUtils.isNumeric(value)) {
+            return value;
+        }
+        return String.valueOf(Map
+                .of("一", 1, "二", 2, "三", 3, "四", 4, "五", 5, "六", 6, "七", 7, "八", 8, "九", 9, "十", 10)
+                .get(value));
     }
 
     private void addClarifications(BankIntentResult result, String text) {

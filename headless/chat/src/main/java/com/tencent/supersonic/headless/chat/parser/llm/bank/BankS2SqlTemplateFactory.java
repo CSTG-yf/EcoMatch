@@ -307,7 +307,39 @@ final class BankS2SqlTemplateFactory {
                 .trim();
     }
 
+    String compileAbsoluteThreshold(TemplateContext context) {
+        if (context.metrics().size() != 1 || context.metricFilters().size() != 1) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "absolute threshold requires exactly one metric and one metric filter");
+        }
+        Filter threshold = context.metricFilters().get(0);
+        Filter organizationFilter = organizationFilter(context);
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String outerWhere =
+                organizationFilter == null ? "" : "\nWHERE " + filter(organizationFilter);
+        return """
+                WITH bank_values AS (
+                  SELECT bank_organization, SUM(%s) AS metric_value
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                )
+                SELECT bank_organization, metric_value,
+                       CASE WHEN metric_value %s %s THEN 1 ELSE 0 END AS meets_condition
+                FROM bank_values%s
+                ORDER BY bank_organization ASC
+                """.formatted(context.metrics().get(0).identifier(), context.dataSetName(), where,
+                threshold.getOperator().getValue(), numericLiteral(threshold.getValue()),
+                outerWhere).trim();
+    }
+
     String compileProvinceAverageAggregation(TemplateContext context) {
+        return compileDailyAggregationSummary(context);
+    }
+
+    String compileDailyAggregationSummary(TemplateContext context) {
         requireSingleMetricWithoutMetricFilters(context, "province-average aggregation");
         Filter organizationFilter = organizationFilter(context);
         String where = where(withoutOrganizationFilter(context), context.dateField(),
@@ -428,6 +460,16 @@ final class BankS2SqlTemplateFactory {
 
     private String literal(String value) {
         return "'" + value.replace("'", "''") + "'";
+    }
+
+    private String numericLiteral(Object value) {
+        String literal = String.valueOf(value).trim().replace("%", "");
+        if (!literal.matches("-?\\d+(?:\\.\\d+)?")) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_FILTER,
+                    "absolute threshold requires a numeric literal");
+        }
+        return literal;
     }
 
     record ResolvedMetric(String identifier) {}

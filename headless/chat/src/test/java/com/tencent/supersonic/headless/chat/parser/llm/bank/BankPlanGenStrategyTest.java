@@ -231,6 +231,60 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldNormalizeAnAnnualDailyExtremaQuestionToAnAggregationSummaryPlan() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validAnnualDailySummaryPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualDailySummaryRequest());
+
+        assertEquals(BankIntentType.AGGREGATION, response.getBankQueryPlan().getIntent());
+        assertEquals(BankQueryPlan.Aggregation.AVG,
+                response.getBankQueryPlan().getMetrics().get(0).getAggregation());
+        assertEquals(List.of("bank_organization"), response.getBankQueryPlan().getDimensions());
+        assertEquals(List.of("bank_organization", "ZB001"),
+                response.getBankQueryPlan().getOutput().getColumns());
+        assertEquals(List.of(), response.getBankQueryPlan().getOrderBy());
+        assertEquals(null, response.getBankQueryPlan().getLimit());
+    }
+
+    @Test
+    void shouldNormalizeAnAbsoluteThresholdToTheStableTemplatePlan() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validThresholdPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(thresholdRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.THRESHOLD, plan.getIntent());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of(BankQueryPlan.Filter.builder().field("metric_value").operator("GTE")
+                .value("10.5%").build()), plan.getFilters());
+        assertEquals(List.of("bank_organization", "ZB016"), plan.getOutput().getColumns());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(null, plan.getLimit());
+    }
+
+    @Test
+    void shouldNormalizeASingleOrganizationRatioToTheStableTemplatePlan() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validRatioPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(ratioRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RATIO, plan.getIntent());
+        assertEquals(List.of("ZB005", "ZB002"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals(List.of(), plan.getDimensions());
+        assertEquals("ZB002", plan.getCalculation().getBaseline());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(null, plan.getLimit());
+    }
+
+    @Test
     void shouldProvideTheDateDimensionAndQuarterGranularityForTrendPlans() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validTrendPlanJson());
@@ -384,6 +438,65 @@ class BankPlanGenStrategyTest {
                 "filters":[],"calculation":{"type":"DIRECT"},
                 "orderBy":[{"field":"ZB002","direction":"DESC"}],"limit":6,
                 "output":{"columns":["bank_organization","ZB002"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq annualDailySummaryRequest() {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省J市农商行2025年全年的各项存款余额日均值是多少？最高日和最低日分别出现在什么水平？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG010"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private String validAnnualDailySummaryPlanJson() {
+        return """
+                {"version":"1.0","intent":"AGGREGATION",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT"}],
+                "dimensions":[],"organizations":[{"code":"ORG010"}],
+                "time":{"startDate":"2025-01-01","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"DIRECT"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq thresholdRequest() {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText("capital adequacy ratio meets the minimum requirement");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD).allowedMetrics(Set.of("ZB016"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB016")).requiredOrganizationCodes(Set.of("ORG008"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List
+                        .of(new SemanticIntentHints.RequiredFilter("metric_value", "GTE", "10.5%")))
+                .build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private String validThresholdPlanJson() {
+        return """
+                {"version":"1.0","intent":"THRESHOLD",
+                "metrics":[{"bizName":"ZB016","aggregation":"DEFAULT"}],
+                "dimensions":["bank_data_date","bank_organization"],"organizations":[{"code":"ORG008"}],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE"},
+                "filters":[{"field":"metric_value","operator":"GTE","value":"10.5%"}],"calculation":{"type":"DIRECT"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["bank_data_date","bank_organization","ZB016"],"orderSensitive":true}}
                 """;
     }
 
