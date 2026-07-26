@@ -65,8 +65,7 @@ public class ChatController {
     public Boolean updateChatIsTop(@RequestParam(value = "chatId") Long chatId,
             @RequestParam(value = "isTop") int isTop, HttpServletRequest request,
             HttpServletResponse response) {
-        return chatService.updateChatIsTop(chatId, isTop,
-                UserHolder.findUser(request, response));
+        return chatService.updateChatIsTop(chatId, isTop, UserHolder.findUser(request, response));
     }
 
     @PostMapping("/pageQueryInfo")

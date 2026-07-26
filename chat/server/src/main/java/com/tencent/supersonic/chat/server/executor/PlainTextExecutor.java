@@ -83,9 +83,9 @@ public class PlainTextExecutor implements ChatQueryExecutor {
         ChatManageService chatManageService = ContextUtils.getBean(ChatManageService.class);
         List<QueryResp> contextualParseInfoList =
                 chatManageService.getChatQueries(chatId, user).stream()
-                .filter(q -> Objects.nonNull(q.getQueryResult())
-                        && q.getQueryResult().getQueryState() == QueryState.SUCCESS)
-                .collect(Collectors.toList());
+                        .filter(q -> Objects.nonNull(q.getQueryResult())
+                                && q.getQueryResult().getQueryState() == QueryState.SUCCESS)
+                        .collect(Collectors.toList());
 
         List<QueryResp> contextualList = contextualParseInfoList.subList(0,
                 Math.min(multiNum, contextualParseInfoList.size()));

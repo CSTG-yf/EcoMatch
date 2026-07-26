@@ -55,10 +55,8 @@ class ConfigServiceAccessTest {
         ChatConfigResp stored = config(9L, 2L);
         when(repository.getChatConfig(any(ChatConfigFilter.class))).thenReturn(List.of(stored));
 
-        assertThrows(InvalidPermissionException.class,
-                () -> service.addConfig(create, alice));
-        assertThrows(InvalidPermissionException.class,
-                () -> service.editConfig(edit, alice));
+        assertThrows(InvalidPermissionException.class, () -> service.addConfig(create, alice));
+        assertThrows(InvalidPermissionException.class, () -> service.editConfig(edit, alice));
 
         verify(repository, never()).createConfig(any());
         verify(repository, never()).updateConfig(any());
@@ -80,8 +78,7 @@ class ConfigServiceAccessTest {
         when(semanticLayerService.getDataSetSchema(1L)).thenReturn(schema);
 
         assertSame(schema, service.getDataSetSchema(1L, alice));
-        assertThrows(InvalidPermissionException.class,
-                () -> service.getDataSetSchema(2L, alice));
+        assertThrows(InvalidPermissionException.class, () -> service.getDataSetSchema(2L, alice));
         verify(semanticLayerService, never()).getDataSetSchema(2L);
     }
 

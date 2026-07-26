@@ -96,8 +96,8 @@ public class WebServiceQuery extends PluginSemanticQuery {
             Map<String, Object> response = JSON.parseObject(objectResponse.toString());
             webServiceResponse.setResult(response);
         } catch (Exception e) {
-            log.warn("WebService request failed: type={}, error=[{}]",
-                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            log.warn("WebService request failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return webServiceResponse;
     }

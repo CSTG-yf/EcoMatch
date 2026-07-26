@@ -1,6 +1,7 @@
 package com.tencent.supersonic.chat.server.processor.execute;
 
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
 import com.tencent.supersonic.chat.server.util.ResultFormatter;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.JsonUtil;
@@ -10,9 +11,21 @@ import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 import java.util.List;
 
 /** Applies a bank-specific presentation contract after semantic execution has completed. */
-public class BankResultProjectionHandler {
+public class BankResultProjectionHandler implements ExecuteResultProcessor {
 
     private final BankResultProjector projector = new BankResultProjector();
+
+    @Override
+    public boolean accept(ExecuteContext executeContext) {
+        return executeContext != null && executeContext.getResponse() != null
+                && executeContext.getResponse().getChatContext() != null
+                && contract(executeContext.getResponse().getChatContext()) != null;
+    }
+
+    @Override
+    public void process(ExecuteContext executeContext) {
+        apply(executeContext.getResponse());
+    }
 
     public boolean apply(QueryResult queryResult) {
         if (queryResult == null || queryResult.getChatContext() == null) {

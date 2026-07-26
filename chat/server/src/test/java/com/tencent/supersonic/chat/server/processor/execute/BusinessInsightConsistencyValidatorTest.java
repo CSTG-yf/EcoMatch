@@ -131,13 +131,11 @@ class BusinessInsightConsistencyValidatorTest {
         result.getRecommendedChart().setChartType("BAR");
         result.getRecommendedChart().setDimensionFields(List.of("branch"));
         result.getBusinessExplanation().setTimeRange(null);
-        setEvidence(result, "B的balance贡献度最高，为70%",
-                "查询返回2条记录。B的balance贡献度最高，为70%。提示：范围限制。");
+        setEvidence(result, "B的balance贡献度最高，为70%", "查询返回2条记录。B的balance贡献度最高，为70%。提示：范围限制。");
 
         assertDoesNotThrow(() -> validator.validate(result));
 
-        setEvidence(result, "A的balance贡献度最高，为70%",
-                "查询返回2条记录。A的balance贡献度最高，为70%。提示：范围限制。");
+        setEvidence(result, "A的balance贡献度最高，为70%", "查询返回2条记录。A的balance贡献度最高，为70%。提示：范围限制。");
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
     }
 
@@ -149,14 +147,12 @@ class BusinessInsightConsistencyValidatorTest {
                 Map.of("month", "2026-01", "balance", 300)));
         result.getBusinessExplanation().setTimeRange("2025-01至2026-01");
         setEvidence(result, "balance同比变化200%（2026-01较2025-01）",
-                "查询返回3条记录，时间范围为2025-01至2026-01。"
-                        + "balance同比变化200%（2026-01较2025-01）。提示：范围限制。");
+                "查询返回3条记录，时间范围为2025-01至2026-01。" + "balance同比变化200%（2026-01较2025-01）。提示：范围限制。");
 
         assertDoesNotThrow(() -> validator.validate(result));
 
         setEvidence(result, "balance同比变化50%（2026-01较2025-12）",
-                "查询返回3条记录，时间范围为2025-01至2026-01。"
-                        + "balance同比变化50%（2026-01较2025-12）。提示：范围限制。");
+                "查询返回3条记录，时间范围为2025-01至2026-01。" + "balance同比变化50%（2026-01较2025-12）。提示：范围限制。");
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
     }
 

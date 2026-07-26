@@ -10,10 +10,10 @@ import com.tencent.supersonic.chat.api.pojo.request.ChatMemoryDeleteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatMemoryFilter;
 import com.tencent.supersonic.chat.api.pojo.request.ChatMemoryUpdateReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageMemoryReq;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatMemoryDO;
 import com.tencent.supersonic.chat.server.persistence.mapper.ChatMemoryMapper;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatMemoryRepository;
-import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.pojo.ChatMemory;
 import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.MemoryService;
@@ -132,9 +132,8 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
 
     @Override
     public void batchDelete(ChatMemoryDeleteReq chatMemoryDeleteReq, User user) {
-        if (chatMemoryDeleteReq == null
-                || (CollectionUtils.isEmpty(chatMemoryDeleteReq.getIds())
-                        && chatMemoryDeleteReq.getAgentId() == null)) {
+        if (chatMemoryDeleteReq == null || (CollectionUtils.isEmpty(chatMemoryDeleteReq.getIds())
+                && chatMemoryDeleteReq.getAgentId() == null)) {
             throw new InvalidArgumentException("Memory ids or agent id are required");
         }
         Set<Integer> manageableAgentIds = manageableAgentIds(user);
@@ -149,8 +148,7 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
             queryWrapper.lambda().eq(ChatMemoryDO::getAgentId, chatMemoryDeleteReq.getAgentId());
         }
         List<ChatMemoryDO> chatMemoryDOS = chatMemoryRepository.getMemories(queryWrapper);
-        chatMemoryDOS.forEach(
-                memory -> checkManageAccess(memory.getAgentId(), manageableAgentIds));
+        chatMemoryDOS.forEach(memory -> checkManageAccess(memory.getAgentId(), manageableAgentIds));
         List<Long> ids = new ArrayList<>();
         chatMemoryDOS.forEach(chatMemoryDO -> {
             if (MemoryStatus.ENABLED.toString().equals(chatMemoryDO.getStatus().trim())) {

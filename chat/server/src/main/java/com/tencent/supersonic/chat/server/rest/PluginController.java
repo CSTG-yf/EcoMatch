@@ -44,8 +44,8 @@ public class PluginController {
     }
 
     @DeleteMapping("/{id}")
-    public boolean deletePlugin(@PathVariable("id") Long id,
-            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+    public boolean deletePlugin(@PathVariable("id") Long id, HttpServletRequest httpServletRequest,
+            HttpServletResponse httpServletResponse) {
         User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
         pluginService.deletePlugin(id, user);
         return true;

@@ -42,8 +42,7 @@ public class QueryExecutionGateway {
         this.maxConcurrency = Math.max(1, maxConcurrency);
         this.permits = new Semaphore(this.maxConcurrency, true);
         this.acquireTimeoutMs = Math.max(1, acquireTimeoutMs);
-        this.safetyPolicy =
-                new SqlSafetyPolicy(Math.max(1, maxSqlLength), deniedFunctions);
+        this.safetyPolicy = new SqlSafetyPolicy(Math.max(1, maxSqlLength), deniedFunctions);
     }
 
     public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength) {
