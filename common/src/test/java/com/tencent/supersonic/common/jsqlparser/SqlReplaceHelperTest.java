@@ -7,10 +7,24 @@ import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 /**
  * SqlParserReplaceHelperTest
  */
 class SqlReplaceHelperTest {
+
+    @Test
+    void shouldReplaceDimensionExpressionInsideInFilter() {
+        String sql = "SELECT bank_data_date FROM t_33 "
+                + "WHERE bank_data_date IN ('2025-03-31', '2025-06-30')";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                Collections.singletonMap("bank_data_date", "data_date"));
+
+        assertTrue(rewritten.contains("SELECT data_date AS bank_data_date"));
+        assertTrue(rewritten.contains("WHERE data_date IN ('2025-03-31', '2025-06-30')"));
+    }
 
     @Test
     void testReplaceAggField() {

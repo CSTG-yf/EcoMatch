@@ -7,6 +7,7 @@ import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
+import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import com.tencent.supersonic.headless.chat.utils.ComponentFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -22,6 +24,9 @@ import static com.tencent.supersonic.headless.chat.parser.ParserConfig.*;
 @Slf4j
 @Service
 public class LLMRequestService {
+
+    private static final String BANK_ORGANIZATION_DIMENSION = "bank_organization";
+    private static final String BANK_DATA_DATE_DIMENSION = "bank_data_date";
 
     @Autowired
     private ParserConfig parserConfig;
@@ -34,6 +39,8 @@ public class LLMRequestService {
     public LLMReq getLlmReq(ChatQueryContext queryCtx, Long dataSetId) {
         Map<Long, String> dataSetIdToName = queryCtx.getSemanticSchema().getDataSetIdToName();
         String queryText = queryCtx.getRequest().getQueryText();
+        LLMReq.SqlGenType configuredSqlGenType =
+                LLMReq.SqlGenType.valueOf(parserConfig.getParameterValue(PARSER_STRATEGY_TYPE));
 
         LLMReq.LLMSchema llmSchema = new LLMReq.LLMSchema();
         int fieldCntThreshold =
@@ -44,6 +51,13 @@ public class LLMRequestService {
         } else {
             llmSchema.setMetrics(getMappedMetrics(queryCtx, dataSetId));
             llmSchema.setDimensions(getMappedDimensions(queryCtx, dataSetId));
+        }
+        LLMReq.SqlGenType sqlGenType = selectSqlGenType(configuredSqlGenType,
+                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
+                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
+        if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
+            llmSchema.setDimensions(ensureBankOrganizationDimension(llmSchema.getDimensions(),
+                    queryCtx.getSemanticSchema().getDimensions(), dataSetId));
         }
 
         LLMReq llmReq = new LLMReq();
@@ -65,12 +79,51 @@ public class LLMRequestService {
 
         llmReq.setCurrentDate(DateUtils.getBeforeDate(0));
         llmReq.setTerms(getMappedTerms(queryCtx, dataSetId));
-        llmReq.setSqlGenType(
-                LLMReq.SqlGenType.valueOf(parserConfig.getParameterValue(PARSER_STRATEGY_TYPE)));
+        llmReq.setSqlGenType(sqlGenType);
+        if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
+            llmReq.setBankMaxCandidates(bankMaxCandidates());
+        }
         llmReq.setChatAppConfig(queryCtx.getRequest().getChatAppConfig());
         llmReq.setDynamicExemplars(queryCtx.getRequest().getDynamicExemplars());
+        llmReq.setSemanticIntentHints(SemanticIntentHints.fromQuery(queryText,
+                queryCtx.getBankIntentResult(), llmSchema, LocalDate.now()));
 
         return llmReq;
+    }
+
+    static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,
+            List<SchemaElement> availableDimensions, Long dataSetId,
+            boolean bankConstrainedPlanEnabled) {
+        if (bankConstrainedPlanEnabled && isBankDataset(availableDimensions, dataSetId)) {
+            return LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN;
+        }
+        return configuredSqlGenType;
+    }
+
+    private static boolean isBankDataset(List<SchemaElement> availableDimensions, Long dataSetId) {
+        if (availableDimensions == null) {
+            return false;
+        }
+        Set<String> businessDimensions = availableDimensions.stream().filter(Objects::nonNull)
+                .filter(dimension -> belongsToDataSet(dimension, dataSetId))
+                .map(SchemaElement::getBizName).filter(Objects::nonNull).map(String::toLowerCase)
+                .collect(Collectors.toSet());
+        return businessDimensions.contains(BANK_ORGANIZATION_DIMENSION)
+                && businessDimensions.contains(BANK_DATA_DATE_DIMENSION);
+    }
+
+    private static boolean belongsToDataSet(SchemaElement dimension, Long dataSetId) {
+        return dataSetId == null || dimension.getDataSetId() == null
+                || Objects.equals(dataSetId, dimension.getDataSetId());
+    }
+
+    private int bankMaxCandidates() {
+        try {
+            return Math.max(1, Math.min(3,
+                    Integer.parseInt(parserConfig.getParameterValue(PARSER_BANK_MAX_CANDIDATES))));
+        } catch (RuntimeException ignored) {
+            return 1;
+        }
     }
 
     public LLMResp runText2SQL(LLMReq llmReq) {
@@ -144,6 +197,23 @@ public class LLMRequestService {
                 .map(SchemaElementMatch::getElement).collect(Collectors.toList());
 
         return new ArrayList<>(dimensionElements);
+    }
+
+    static List<SchemaElement> ensureBankOrganizationDimension(List<SchemaElement> selected,
+            List<SchemaElement> available, Long dataSetId) {
+        List<SchemaElement> dimensions =
+                selected == null ? new ArrayList<>() : new ArrayList<>(selected);
+        boolean present = dimensions.stream().filter(Objects::nonNull).anyMatch(
+                dimension -> BANK_ORGANIZATION_DIMENSION.equalsIgnoreCase(dimension.getBizName()));
+        if (present || available == null) {
+            return dimensions;
+        }
+        available.stream().filter(Objects::nonNull)
+                .filter(dimension -> Objects.equals(dataSetId, dimension.getDataSetId()))
+                .filter(dimension -> BANK_ORGANIZATION_DIMENSION
+                        .equalsIgnoreCase(dimension.getBizName()))
+                .findFirst().ifPresent(dimensions::add);
+        return dimensions;
     }
 
     protected SchemaElement getPartitionTime(@NotNull ChatQueryContext queryCtx, Long dataSetId) {

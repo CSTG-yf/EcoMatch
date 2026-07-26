@@ -661,6 +661,13 @@ export function deleteView(viewId: number): Promise<any> {
   });
 }
 
+export function importBankSemanticResources(formData: FormData): Promise<any> {
+  return request(`${process.env.API_BASE_URL}bank/resources/import`, {
+    method: 'POST',
+    data: formData,
+  });
+}
+
 export function getTagList(data: any): Promise<any> {
   return request(`${process.env.API_BASE_URL}tag/queryTag/market`, {
     method: 'POST',

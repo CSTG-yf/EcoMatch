@@ -1,4 +1,4 @@
-import { Dropdown, Input, Menu } from 'antd';
+import { Dropdown, Input, Menu, message } from 'antd';
 import classNames from 'classnames';
 import {
   useEffect,
@@ -43,7 +43,12 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   }));
 
   const updateData = async (agentId?: number) => {
-    const { data } = await getAllConversations(agentId || currentAgent!.id);
+    const resolvedAgentId = agentId || currentAgent?.id;
+    if (!resolvedAgentId) {
+      setConversations([]);
+      return [];
+    }
+    const { data } = await getAllConversations(resolvedAgentId);
     const conversationList = data || [];
     setConversations(conversationList.slice(0, 200));
     return conversationList;
@@ -69,7 +74,11 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   }, [currentAgent]);
 
   const addConversation = async (sendMsgParams?: any) => {
-    const agentId = sendMsgParams?.agentId || currentAgent!.id;
+    const agentId = sendMsgParams?.agentId || currentAgent?.id;
+    if (!agentId) {
+      message.warning('请先选择一个智能助理');
+      return [];
+    }
     await saveConversation(DEFAULT_CONVERSATION_NAME, agentId);
     return updateData(agentId);
   };
@@ -127,7 +136,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
             <div
               className={styles.newConversation}
               onClick={() => {
-                addConversation();
+                onAddConversation();
               }}
             >
               新对话

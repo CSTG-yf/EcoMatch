@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS `s2_dimension` (
     `semantic_type` varchar(20)  NOT NULL,  -- semantic type: DATE, ID, CATEGORY
     `alias` varchar(500) DEFAULT NULL,
     `default_values` varchar(500) DEFAULT NULL,
-    `dim_value_maps` varchar(500) DEFAULT NULL,
+    `dim_value_maps` varchar(5000) DEFAULT NULL,
     `is_tag` INT DEFAULT NULL,
     `ext` varchar(1000) DEFAULT NULL,
     PRIMARY KEY (`id`)

@@ -1,0 +1,1219 @@
+{
+  "run": {
+    "split": "dev",
+    "agentId": 33,
+    "baseUrl": "http://127.0.0.1:9000",
+    "captureMethod": "authenticated-ui",
+    "note": "Captured through the signed-in browser session; terminal credentials were not accessed."
+  },
+  "recordCount": 36,
+  "paginationSupplements": {
+    "VAL-M-19": [
+      ["ORG011", "江苏省K市农商行", "46.22", "72.73307692307692", "0"],
+      ["ORG012", "江苏省L市农商行", "88.33", "72.73307692307692", "1"],
+      ["ORG013", "江苏省M市农商行", "73.66", "72.73307692307692", "1"]
+    ],
+    "VAL-S-08": [
+      ["ORG011", "江苏省K市农商行", "1449", "1472.6153846153845", "0"],
+      ["ORG012", "江苏省L市农商行", "1609", "1472.6153846153845", "1"],
+      ["ORG013", "江苏省M市农商行", "1674", "1472.6153846153845", "1"]
+    ]
+  },
+  "items": [
+    {
+      "id": "VAL-H-01",
+      "state": "done",
+      "headers": [
+        "data_date",
+        "metric_value",
+        "quarter_change"
+      ],
+      "rows": [
+        [
+          "2025-03-31",
+          "55",
+          ""
+        ],
+        [
+          "2025-06-30",
+          "54.27",
+          "-0.73"
+        ],
+        [
+          "2025-09-30",
+          "54.79",
+          "0.52"
+        ],
+        [
+          "2025-12-31",
+          "54.62",
+          "-0.17"
+        ],
+        [
+          "2026-03-31",
+          "55.18",
+          "0.56"
+        ]
+      ]
+    },
+    {
+      "headers": [
+        "data_date",
+        "metric_value",
+        "quarter_change"
+      ],
+      "rows": [
+        [
+          "2025-03-31",
+          "1.04",
+          ""
+        ],
+        [
+          "2025-06-30",
+          "1.08",
+          "0.04"
+        ],
+        [
+          "2025-09-30",
+          "1",
+          "-0.08"
+        ],
+        [
+          "2025-12-31",
+          "1.02",
+          "0.02"
+        ],
+        [
+          "2026-03-31",
+          "1.02",
+          "0"
+        ]
+      ],
+      "state": "done",
+      "text": "分析江苏省E市农商行的不良贷款率从2025Q1末到2026Q1末的逐季变化。\n7月24日 17:50\n意图解析(耗时: 7877ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 28ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 40ms)\n分析江苏省E市农商行的不良贷款率从2025Q1末到2026Q1末的逐季变化。\ndata_date\tmetric_value\tquarter_change\n2025-03-31\t1.04\t\n2025-06-30\t1.08\t0.04\n2025-09-30\t1\t-0.08\n2025-12-31\t1.02\t0.02\n2026-03-31\t1.02\t0\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-02"
+    },
+    {
+      "headers": [
+        "metric_code",
+        "org_code",
+        "org_name",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ZB001",
+          "ORG006",
+          "江苏省F市农商行",
+          "103.87",
+          "3"
+        ],
+        [
+          "ZB002",
+          "ORG006",
+          "江苏省F市农商行",
+          "84.8",
+          "3"
+        ],
+        [
+          "ZB011",
+          "ORG006",
+          "江苏省F市农商行",
+          "216.39",
+          "3"
+        ],
+        [
+          "ZB012",
+          "ORG006",
+          "江苏省F市农商行",
+          "33.47",
+          "9"
+        ],
+        [
+          "ZB013",
+          "ORG006",
+          "江苏省F市农商行",
+          "1.28",
+          "9"
+        ],
+        [
+          "ZB015",
+          "ORG006",
+          "江苏省F市农商行",
+          "164.87",
+          "10"
+        ],
+        [
+          "ZB016",
+          "ORG006",
+          "江苏省F市农商行",
+          "12.04",
+          "3"
+        ],
+        [
+          "ZB017",
+          "ORG006",
+          "江苏省F市农商行",
+          "1.08",
+          "9"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省F市农商行在2025-11-30的指标中哪些表现较好？哪些表现较差？\n7月24日 17:51\n意图解析(耗时: 10517ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 54ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 52ms)\n江苏省F市农商行在2025-11-30的指标中哪些表现较好？哪些表现较差？\nmetric_code\torg_code\torg_name\tmetric_value\trank_position\nZB001\tORG006\t江苏省F市农商行\t103.87\t3\nZB002\tORG006\t江苏省F市农商行\t84.8\t3\nZB011\tORG006\t江苏省F市农商行\t216.39\t3\nZB012\tORG006\t江苏省F市农商行\t33.47\t9\nZB013\tORG006\t江苏省F市农商行\t1.28\t9\nZB015\tORG006\t江苏省F市农商行\t164.87\t10\nZB016\tORG006\t江苏省F市农商行\t12.04\t3\nZB017\tORG006\t江苏省F市农商行\t1.08\t9\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-03"
+    },
+    {
+      "headers": [
+        "metric_code",
+        "org_code",
+        "org_name",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ZB001",
+          "ORG007",
+          "江苏省G市农商行",
+          "110.82",
+          "2"
+        ],
+        [
+          "ZB002",
+          "ORG007",
+          "江苏省G市农商行",
+          "90.29",
+          "2"
+        ],
+        [
+          "ZB011",
+          "ORG007",
+          "江苏省G市农商行",
+          "270.13",
+          "2"
+        ],
+        [
+          "ZB012",
+          "ORG007",
+          "江苏省G市农商行",
+          "30.72",
+          "6"
+        ],
+        [
+          "ZB013",
+          "ORG007",
+          "江苏省G市农商行",
+          "0.95",
+          "4"
+        ],
+        [
+          "ZB015",
+          "ORG007",
+          "江苏省G市农商行",
+          "187.62",
+          "5"
+        ],
+        [
+          "ZB016",
+          "ORG007",
+          "江苏省G市农商行",
+          "12.01",
+          "6"
+        ],
+        [
+          "ZB017",
+          "ORG007",
+          "江苏省G市农商行",
+          "0.82",
+          "5"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省G市农商行在2025-12-31的指标中哪些表现较好？哪些表现较差？\n7月24日 17:51\n意图解析(耗时: 10661ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 37ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 50ms)\n江苏省G市农商行在2025-12-31的指标中哪些表现较好？哪些表现较差？\nmetric_code\torg_code\torg_name\tmetric_value\trank_position\nZB001\tORG007\t江苏省G市农商行\t110.82\t2\nZB002\tORG007\t江苏省G市农商行\t90.29\t2\nZB011\tORG007\t江苏省G市农商行\t270.13\t2\nZB012\tORG007\t江苏省G市农商行\t30.72\t6\nZB013\tORG007\t江苏省G市农商行\t0.95\t4\nZB015\tORG007\t江苏省G市农商行\t187.62\t5\nZB016\tORG007\t江苏省G市农商行\t12.01\t6\nZB017\tORG007\t江苏省G市农商行\t0.82\t5\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-04"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG003",
+          "江苏省C市农商行",
+          "ZB002",
+          "94.30471232876712",
+          "1"
+        ],
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "ZB002",
+          "89.73484931506849",
+          "2"
+        ],
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "ZB002",
+          "84.59882191780822",
+          "3"
+        ],
+        [
+          "ORG011",
+          "江苏省K市农商行",
+          "ZB002",
+          "37.78931506849315",
+          "11"
+        ],
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "ZB002",
+          "33.88183561643836",
+          "12"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB002",
+          "31.26268493150685",
+          "13"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年全年各项贷款余额均值排名前3和后3的农商行？\n7月24日 17:52\n意图解析(耗时: 13654ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 25ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 413ms)\n2025年全年各项贷款余额均值排名前3和后3的农商行？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG003\t江苏省C市农商行\tZB002\t94.30471232876712\t1\nORG007\t江苏省G市农商行\tZB002\t89.73484931506849\t2\nORG006\t江苏省F市农商行\tZB002\t84.59882191780822\t3\nORG011\t江苏省K市农商行\tZB002\t37.78931506849315\t11\nORG001\t江苏省A市农商行\tZB002\t33.88183561643836\t12\nORG008\t江苏省H市农商行\tZB002\t31.26268493150685\t13\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-05"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG003",
+          "江苏省C市农商行",
+          "ZB011",
+          "267.7598904109589",
+          "1"
+        ],
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "ZB011",
+          "253.47175342465752",
+          "2"
+        ],
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "ZB011",
+          "226.82224657534246",
+          "3"
+        ],
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "ZB011",
+          "99.55961643835616",
+          "11"
+        ],
+        [
+          "ORG011",
+          "江苏省K市农商行",
+          "ZB011",
+          "98.18712328767123",
+          "12"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB011",
+          "78.68287671232876",
+          "13"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年全年净利润均值排名前3和后3的农商行？\n7月24日 17:53\n意图解析(耗时: 12945ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 18ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 247ms)\n2025年全年净利润均值排名前3和后3的农商行？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG003\t江苏省C市农商行\tZB011\t267.7598904109589\t1\nORG007\t江苏省G市农商行\tZB011\t253.47175342465752\t2\nORG006\t江苏省F市农商行\tZB011\t226.82224657534246\t3\nORG001\t江苏省A市农商行\tZB011\t99.55961643835616\t11\nORG011\t江苏省K市农商行\tZB011\t98.18712328767123\t12\nORG008\t江苏省H市农商行\tZB011\t78.68287671232876\t13\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-06"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value"
+      ],
+      "rows": [
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB013",
+          "1.37"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB015",
+          "161.29"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB016",
+          "11.82"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB017",
+          "1.14"
+        ]
+      ],
+      "state": "done",
+      "text": "列出江苏省H市农商行在2026-03-31的风险指标，含不良率、拨备、逾期率和资本充足率。\n7月24日 17:54\n意图解析(耗时: 9639ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 27ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 35ms)\n列出江苏省H市农商行在2026-03-31的风险指标，含不良率、拨备、逾期率和资本充足率。\norg_code\torg_name\tmetric_code\tmetric_value\nORG008\t江苏省H市农商行\tZB013\t1.37\nORG008\t江苏省H市农商行\tZB015\t161.29\nORG008\t江苏省H市农商行\tZB016\t11.82\nORG008\t江苏省H市农商行\tZB017\t1.14\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-07"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value"
+      ],
+      "rows": [
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "ZB013",
+          "1.49"
+        ],
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "ZB015",
+          "155.94"
+        ],
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "ZB016",
+          "12.15"
+        ],
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "ZB017",
+          "1.24"
+        ]
+      ],
+      "state": "done",
+      "text": "列出江苏省I市农商行在2026-04-30的风险指标，含不良率、拨备、逾期率和资本充足率。\n7月24日 17:54\n意图解析(耗时: 9609ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 25ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 30ms)\n列出江苏省I市农商行在2026-04-30的风险指标，含不良率、拨备、逾期率和资本充足率。\norg_code\torg_name\tmetric_code\tmetric_value\nORG009\t江苏省I市农商行\tZB013\t1.49\nORG009\t江苏省I市农商行\tZB015\t155.94\nORG009\t江苏省I市农商行\tZB016\t12.15\nORG009\t江苏省I市农商行\tZB017\t1.24\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-08"
+    },
+    {
+      "headers": [
+        "current_value",
+        "baseline_value",
+        "absolute_change",
+        "percent_change"
+      ],
+      "rows": [
+        [
+          "156.54",
+          "163.19",
+          "-6.65",
+          "-4.075004595869845"
+        ],
+        [
+          "156.54",
+          "116.14",
+          "40.4",
+          "34.78560358188393"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省J市农商行在2026-04-30的净利润环比和同比分别变动了多少？\n7月24日 17:54\n意图解析(耗时: 13869ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 31ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 34ms)\n江苏省J市农商行在2026-04-30的净利润环比和同比分别变动了多少？\ncurrent_value\tbaseline_value\tabsolute_change\tpercent_change\n156.54\t163.19\t-6.65\t-4.075004595869845\n156.54\t116.14\t40.4\t34.78560358188393\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-09"
+    },
+    {
+      "headers": [
+        "current_value",
+        "baseline_value",
+        "absolute_change",
+        "percent_change"
+      ],
+      "rows": [
+        [
+          "122.43",
+          "101.49",
+          "20.94",
+          "20.63257463789536"
+        ],
+        [
+          "122.43",
+          "98.33",
+          "24.1",
+          "24.509305400183056"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省K市农商行在2026-04-30的净利润环比和同比分别变动了多少？\n7月24日 17:55\n意图解析(耗时: 8687ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 27ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 28ms)\n江苏省K市农商行在2026-04-30的净利润环比和同比分别变动了多少？\ncurrent_value\tbaseline_value\tabsolute_change\tpercent_change\n122.43\t101.49\t20.94\t20.63257463789536\n122.43\t98.33\t24.1\t24.509305400183056\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-10"
+    },
+    {
+      "headers": [
+        "metric_code",
+        "org_code",
+        "org_name",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ZB002",
+          "ORG012",
+          "江苏省L市农商行",
+          "71.37",
+          "4"
+        ],
+        [
+          "ZB011",
+          "ORG012",
+          "江苏省L市农商行",
+          "214.63",
+          "3"
+        ],
+        [
+          "ZB013",
+          "ORG012",
+          "江苏省L市农商行",
+          "0.89",
+          "3"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年底，江苏省L市农商行在规模（贷款）、质量（不良率）、效益（净利润）三方面排名各是多少？\n7月24日 17:55\n意图解析(耗时: 10488ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 31ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 48ms)\n2025年底，江苏省L市农商行在规模（贷款）、质量（不良率）、效益（净利润）三方面排名各是多少？\nmetric_code\torg_code\torg_name\tmetric_value\trank_position\nZB002\tORG012\t江苏省L市农商行\t71.37\t4\nZB011\tORG012\t江苏省L市农商行\t214.63\t3\nZB013\tORG012\t江苏省L市农商行\t0.89\t3\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-11"
+    },
+    {
+      "headers": [
+        "metric_code",
+        "org_code",
+        "org_name",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ZB002",
+          "ORG013",
+          "江苏省M市农商行",
+          "59.94",
+          "7"
+        ],
+        [
+          "ZB011",
+          "ORG013",
+          "江苏省M市农商行",
+          "183.02",
+          "6"
+        ],
+        [
+          "ZB013",
+          "ORG013",
+          "江苏省M市农商行",
+          "1.21",
+          "8"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年底，江苏省M市农商行在规模（贷款）、质量（不良率）、效益（净利润）三方面排名各是多少？\n7月24日 17:55\n意图解析(耗时: 10547ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 26ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 20ms)\n2025年底，江苏省M市农商行在规模（贷款）、质量（不良率）、效益（净利润）三方面排名各是多少？\nmetric_code\torg_code\torg_name\tmetric_value\trank_position\nZB002\tORG013\t江苏省M市农商行\t59.94\t7\nZB011\tORG013\t江苏省M市农商行\t183.02\t6\nZB013\tORG013\t江苏省M市农商行\t1.21\t8\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-H-12"
+    },
+    {
+      "headers": [
+        "current_value",
+        "baseline_value",
+        "absolute_change",
+        "percent_change"
+      ],
+      "rows": [
+        [
+          "116.37",
+          "115.82",
+          "0.55",
+          "0.47487480573303403"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省C市农商行的各项存款余额从年初到2025-04-30变化了多少？\n7月24日 17:55\n意图解析(耗时: 8461ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 44ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 44ms)\n江苏省C市农商行的各项存款余额从年初到2025-04-30变化了多少？\ncurrent_value\n\t\nbaseline_value\n\t\nabsolute_change\n\t\npercent_change\n\n\n116.37\n\t\n115.82\n\t\n0.55\n\t\n0.47487480573303403\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-01"
+    },
+    {
+      "headers": [
+        "current_value",
+        "baseline_value",
+        "absolute_change",
+        "percent_change"
+      ],
+      "rows": [
+        [
+          "44.2",
+          "44.15",
+          "0.05",
+          "0.11325028312570781"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省D市农商行的各项贷款余额从年初到2025-05-31变化了多少？\n7月24日 17:56\n意图解析(耗时: 8530ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 31ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 33ms)\n江苏省D市农商行的各项贷款余额从年初到2025-05-31变化了多少？\ncurrent_value\n\t\nbaseline_value\n\t\nabsolute_change\n\t\npercent_change\n\n\n44.2\n\t\n44.15\n\t\n0.05\n\t\n0.11325028312570781\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-02"
+    },
+    {
+      "headers": [
+        "current_value",
+        "baseline_value",
+        "absolute_change",
+        "percent_change"
+      ],
+      "rows": [
+        [
+          "162.1",
+          "168.74",
+          "-6.64",
+          "-3.935048002844613"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省E市农商行的净利润从年初到2025-06-30变化了多少？\n7月24日 17:56\n意图解析(耗时: 8120ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 24ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 25ms)\n江苏省E市农商行的净利润从年初到2025-06-30变化了多少？\ncurrent_value\n\t\nbaseline_value\n\t\nabsolute_change\n\t\npercent_change\n\n\n162.1\n\t\n168.74\n\t\n-6.64\n\t\n-3.935048002844613\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-03"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "ZB013",
+          "0.76",
+          "1"
+        ],
+        [
+          "ORG012",
+          "江苏省L市农商行",
+          "ZB013",
+          "0.86",
+          "2"
+        ],
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "ZB013",
+          "0.95",
+          "3"
+        ]
+      ],
+      "state": "done",
+      "text": "2025-09-30，不良贷款率排名前三的是哪些？\n7月24日 17:57\n意图解析(耗时: 8502ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 25ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 19ms)\n2025-09-30，不良贷款率排名前三的是哪些？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG010\t江苏省J市农商行\tZB013\t0.76\t1\nORG012\t江苏省L市农商行\tZB013\t0.86\t2\nORG001\t江苏省A市农商行\tZB013\t0.95\t3\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-07"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG003",
+          "江苏省C市农商行",
+          "ZB011",
+          "281.8",
+          "1"
+        ],
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "ZB011",
+          "246.59",
+          "2"
+        ],
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "ZB011",
+          "214.9",
+          "3"
+        ]
+      ],
+      "state": "done",
+      "text": "2025-10-31，净利润排名前三的是哪些？\n7月24日 17:57\n意图解析(耗时: 8503ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 20ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 24ms)\n2025-10-31，净利润排名前三的是哪些？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG003\t江苏省C市农商行\tZB011\t281.8\t1\nORG007\t江苏省G市农商行\tZB011\t246.59\t2\nORG006\t江苏省F市农商行\tZB011\t214.9\t3\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-08"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "ZB015",
+          "205.01",
+          "1"
+        ],
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "ZB015",
+          "202.6",
+          "2"
+        ],
+        [
+          "ORG012",
+          "江苏省L市农商行",
+          "ZB015",
+          "199.03",
+          "3"
+        ]
+      ],
+      "state": "done",
+      "text": "2025-11-30，拨备覆盖率排名前三的是哪些？\n7月24日 17:57\n意图解析(耗时: 8664ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 27ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 22ms)\n2025-11-30，拨备覆盖率排名前三的是哪些？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG010\t江苏省J市农商行\tZB015\t205.01\t1\nORG001\t江苏省A市农商行\tZB015\t202.6\t2\nORG012\t江苏省L市农商行\tZB015\t199.03\t3\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-09"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "ZB012",
+          "31.92",
+          "7"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省G市农商行的成本收入比在2025-11-30排第几？\n7月24日 17:58\n意图解析(耗时: 8221ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 21ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 21ms)\n江苏省G市农商行的成本收入比在2025-11-30排第几？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG007\t江苏省G市农商行\tZB012\t31.92\t7\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-10"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB013",
+          "1.43",
+          "11"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省H市农商行的不良贷款率在2025-12-31排第几？\n7月24日 17:58\n意图解析(耗时: 8207ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 27ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 27ms)\n江苏省H市农商行的不良贷款率在2025-12-31排第几？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG008\t江苏省H市农商行\tZB013\t1.43\t11\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-11"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "ZB017",
+          "1.31",
+          "12"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省I市农商行的逾期贷款率在2026-01-31排第几？\n7月24日 17:59\n意图解析(耗时: 8412ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 20ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 23ms)\n江苏省I市农商行的逾期贷款率在2026-01-31排第几？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG009\t江苏省I市农商行\tZB017\t1.31\t12\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-12"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "numerator_value",
+        "denominator_value",
+        "ratio_percent"
+      ],
+      "rows": [
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "68.65",
+          "83.93",
+          "81.79435243655428"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省I市农商行在2026-01-31的存贷比？\n7月24日 17:59\n意图解析(耗时: 8290ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 23ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 20ms)\n江苏省I市农商行在2026-01-31的存贷比？\norg_code\torg_name\tnumerator_value\tdenominator_value\tratio_percent\nORG009\t江苏省I市农商行\t68.65\t83.93\t81.79435243655428\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-13"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "numerator_value",
+        "denominator_value",
+        "ratio_percent"
+      ],
+      "rows": [
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "46.98",
+          "58.47",
+          "80.34889687018985"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省J市农商行在2026-02-28的存贷比？\n7月24日 18:00\n意图解析(耗时: 8232ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 33ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 28ms)\n江苏省J市农商行在2026-02-28的存贷比？\norg_code\torg_name\tnumerator_value\tdenominator_value\tratio_percent\nORG010\t江苏省J市农商行\t46.98\t58.47\t80.34889687018985\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-14"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "numerator_value",
+        "denominator_value",
+        "ratio_percent"
+      ],
+      "rows": [
+        [
+          "ORG011",
+          "江苏省K市农商行",
+          "38.29",
+          "46.45",
+          "82.43272335844995"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省K市农商行在2026-03-31的存贷比？\n7月24日 18:00\n意图解析(耗时: 8225ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 26ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 23ms)\n江苏省K市农商行在2026-03-31的存贷比？\norg_code\torg_name\tnumerator_value\tdenominator_value\tratio_percent\nORG011\t江苏省K市农商行\t38.29\t46.45\t82.43272335844995\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-15"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "aggregate_value",
+        "min_value",
+        "max_value",
+        "observation_count"
+      ],
+      "rows": [
+        [
+          "ORG011",
+          "江苏省K市农商行",
+          "ZB013",
+          "1.27",
+          "1.27",
+          "1.27",
+          "1"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省K市农商行在2026-03-31的不良率和全省均值比怎么样？\n7月24日 18:00\n意图解析(耗时: 13873ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 25ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 23ms)\n江苏省K市农商行在2026-03-31的不良率和全省均值比怎么样？\norg_code\torg_name\tmetric_code\taggregate_value\tmin_value\tmax_value\tobservation_count\nORG011\t江苏省K市农商行\tZB013\t1.27\t1.27\t1.27\t1\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-16"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "aggregate_value",
+        "min_value",
+        "max_value",
+        "observation_count"
+      ],
+      "rows": [
+        [
+          "ORG012",
+          "江苏省L市农商行",
+          "ZB013",
+          "0.85",
+          "0.85",
+          "0.85",
+          "1"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省L市农商行在2026-04-30的不良率和全省均值比怎么样？\n7月24日 18:01\n意图解析(耗时: 13510ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 21ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 20ms)\n江苏省L市农商行在2026-04-30的不良率和全省均值比怎么样？\norg_code\torg_name\tmetric_code\taggregate_value\tmin_value\tmax_value\tobservation_count\nORG012\t江苏省L市农商行\tZB013\t0.85\t0.85\t0.85\t1\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-17"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "aggregate_value",
+        "min_value",
+        "max_value",
+        "observation_count"
+      ],
+      "rows": [
+        [
+          "ORG013",
+          "江苏省M市农商行",
+          "ZB013",
+          "1.14",
+          "1.14",
+          "1.14",
+          "1"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省M市农商行在2026-04-30的不良率和全省均值比怎么样？\n7月24日 18:01\n意图解析(耗时: 13537ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 26ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 17ms)\n江苏省M市农商行在2026-04-30的不良率和全省均值比怎么样？\norg_code\torg_name\tmetric_code\taggregate_value\tmin_value\tmax_value\tobservation_count\nORG013\t江苏省M市农商行\tZB013\t1.14\t1.14\t1.14\t1\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-18"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_value",
+        "provincial_average",
+        "meets_condition"
+      ],
+      "rows": [
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "41.35",
+          "72.73307692307692",
+          "0"
+        ],
+        [
+          "ORG002",
+          "江苏省B市农商行",
+          "51.44",
+          "72.73307692307692",
+          "0"
+        ],
+        [
+          "ORG003",
+          "江苏省C市农商行",
+          "116.02",
+          "72.73307692307692",
+          "1"
+        ],
+        [
+          "ORG004",
+          "江苏省D市农商行",
+          "54.79",
+          "72.73307692307692",
+          "0"
+        ],
+        [
+          "ORG005",
+          "江苏省E市农商行",
+          "78.67",
+          "72.73307692307692",
+          "1"
+        ],
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "103.88",
+          "72.73307692307692",
+          "1"
+        ],
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "110.79",
+          "72.73307692307692",
+          "1"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "38.39",
+          "72.73307692307692",
+          "0"
+        ],
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "83.72",
+          "72.73307692307692",
+          "1"
+        ],
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "58.27",
+          "72.73307692307692",
+          "0"
+        ]
+      ],
+      "state": "done",
+      "text": "在2025年9月末，存款规模超过全省均值的有几家？\n7月24日 18:02\n意图解析(耗时: 8204ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 27ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 23ms)\n在2025年9月末，存款规模超过全省均值的有几家？\norg_code\torg_name\tmetric_value\tprovincial_average\tmeets_condition\nORG001\t江苏省A市农商行\t41.35\t72.73307692307692\t0\nORG002\t江苏省B市农商行\t51.44\t72.73307692307692\t0\nORG003\t江苏省C市农商行\t116.02\t72.73307692307692\t1\nORG004\t江苏省D市农商行\t54.79\t72.73307692307692\t0\nORG005\t江苏省E市农商行\t78.67\t72.73307692307692\t1\nORG006\t江苏省F市农商行\t103.88\t72.73307692307692\t1\nORG007\t江苏省G市农商行\t110.79\t72.73307692307692\t1\nORG008\t江苏省H市农商行\t38.39\t72.73307692307692\t0\nORG009\t江苏省I市农商行\t83.72\t72.73307692307692\t1\nORG010\t江苏省J市农商行\t58.27\t72.73307692307692\t0\n1\n2\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-19"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value"
+      ],
+      "rows": [
+        [
+          "ORG013",
+          "江苏省M市农商行",
+          "ZB011",
+          "183.02"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省M市农商行2025年12月末的人均利润是多少？\n7月24日 18:02\n意图解析(耗时: 7700ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 22ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 22ms)\n江苏省M市农商行2025年12月末的人均利润是多少？\norg_code\torg_name\tmetric_code\tmetric_value\nORG013\t江苏省M市农商行\tZB011\t183.02\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-M-20"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value"
+      ],
+      "rows": [
+        [
+          "ORG002",
+          "江苏省B市农商行",
+          "ZB003",
+          "20.97"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省B市农商行在2025年3月末的对公存款余额是多少？\n7月24日 18:02\n意图解析(耗时: 7554ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 15ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 15ms)\n江苏省B市农商行在2025年3月末的对公存款余额是多少？\norg_code\torg_name\tmetric_code\tmetric_value\nORG002\t江苏省B市农商行\tZB003\t20.97\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-01"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value"
+      ],
+      "rows": [
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "ZB010",
+          "60.28"
+        ]
+      ],
+      "state": "done",
+      "text": "查一下江苏省H市农商行2026年1月10日的营业支出。\n7月24日 18:03\n意图解析(耗时: 7475ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 18ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 16ms)\n查一下江苏省H市农商行2026年1月10日的营业支出。\norg_code\torg_name\tmetric_code\tmetric_value\nORG008\t江苏省H市农商行\tZB010\t60.28\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-02"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "numerator_value",
+        "denominator_value",
+        "ratio_percent"
+      ],
+      "rows": [
+        [
+          "ORG004",
+          "江苏省D市农商行",
+          "23.78",
+          "44.16",
+          "53.84963768115942"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省D市农商行2025年8月15日，对公贷款占各项贷款的比例？\n7月24日 18:03\n意图解析(耗时: 8483ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 22ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 24ms)\n江苏省D市农商行2025年8月15日，对公贷款占各项贷款的比例？\norg_code\torg_name\tnumerator_value\tdenominator_value\tratio_percent\nORG004\t江苏省D市农商行\t23.78\t44.16\t53.84963768115942\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-03"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "numerator_value",
+        "denominator_value",
+        "ratio_percent"
+      ],
+      "rows": [
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "239.82",
+          "482.6",
+          "49.69332780770825"
+        ]
+      ],
+      "state": "done",
+      "text": "江苏省F市农商行2025年11月20日，净利润率多少？\n7月24日 18:03\n意图解析(耗时: 8288ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 22ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 22ms)\n江苏省F市农商行2025年11月20日，净利润率多少？\norg_code\torg_name\tnumerator_value\tdenominator_value\tratio_percent\nORG006\t江苏省F市农商行\t239.82\t482.6\t49.69332780770825\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-04"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_value",
+        "value_difference"
+      ],
+      "rows": [
+        [
+          "ORG012",
+          "江苏省L市农商行",
+          "0.89",
+          "0.12"
+        ],
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "0.77",
+          "0.12"
+        ]
+      ],
+      "state": "done",
+      "text": "2026年2月底，江苏省J市农商行和江苏省L市农商行谁的不良率更低？\n7月24日 18:04\n意图解析(耗时: 8481ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 26ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 21ms)\n2026年2月底，江苏省J市农商行和江苏省L市农商行谁的不良率更低？\norg_code\torg_name\tmetric_value\tvalue_difference\nORG012\t江苏省L市农商行\t0.89\t0.12\nORG010\t江苏省J市农商行\t0.77\t0.12\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-05"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_code",
+        "metric_value",
+        "rank_position"
+      ],
+      "rows": [
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "ZB004",
+          "71.02",
+          "1"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年6月底，13家农商行中个人存款余额最高的是哪家？\n7月24日 18:04\n意图解析(耗时: 13962ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 22ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 31ms)\n2025年6月底，13家农商行中个人存款余额最高的是哪家？\norg_code\torg_name\tmetric_code\tmetric_value\trank_position\nORG007\t江苏省G市农商行\tZB004\t71.02\t1\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-07"
+    },
+    {
+      "headers": [
+        "org_code",
+        "org_name",
+        "metric_value",
+        "provincial_average",
+        "meets_condition"
+      ],
+      "rows": [
+        [
+          "ORG001",
+          "江苏省A市农商行",
+          "2046",
+          "1472.6153846153845",
+          "1"
+        ],
+        [
+          "ORG002",
+          "江苏省B市农商行",
+          "1844",
+          "1472.6153846153845",
+          "1"
+        ],
+        [
+          "ORG003",
+          "江苏省C市农商行",
+          "1112",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG004",
+          "江苏省D市农商行",
+          "1113",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG005",
+          "江苏省E市农商行",
+          "1461",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG006",
+          "江苏省F市农商行",
+          "1013",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG007",
+          "江苏省G市农商行",
+          "1132",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG008",
+          "江苏省H市农商行",
+          "1247",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG009",
+          "江苏省I市农商行",
+          "1401",
+          "1472.6153846153845",
+          "0"
+        ],
+        [
+          "ORG010",
+          "江苏省J市农商行",
+          "2043",
+          "1472.6153846153845",
+          "1"
+        ]
+      ],
+      "state": "done",
+      "text": "2025年底，对公客户数超过全省均值的有几家？\n7月24日 18:05\n意图解析(耗时: 8185ms)\n数据集：\n银行日指标数据集\n查询模式：\n聚合模式\n筛选条件：\n数据时间：\n重新查询\nSQL生成(耗时: 23ms)：\nSchema映射\nLLM解析S2SQL\n修正S2SQL\n最终执行SQL\n导出日志\n数据查询(耗时: 20ms)\n2025年底，对公客户数超过全省均值的有几家？\norg_code\torg_name\tmetric_value\tprovincial_average\tmeets_condition\nORG001\t江苏省A市农商行\t2046\t1472.6153846153845\t1\nORG002\t江苏省B市农商行\t1844\t1472.6153846153845\t1\nORG003\t江苏省C市农商行\t1112\t1472.6153846153845\t0\nORG004\t江苏省D市农商行\t1113\t1472.6153846153845\t0\nORG005\t江苏省E市农商行\t1461\t1472.6153846153845\t0\nORG006\t江苏省F市农商行\t1013\t1472.6153846153845\t0\nORG007\t江苏省G市农商行\t1132\t1472.6153846153845\t0\nORG008\t江苏省H市农商行\t1247\t1472.6153846153845\t0\nORG009\t江苏省I市农商行\t1401\t1472.6153846153845\t0\nORG010\t江苏省J市农商行\t2043\t1472.6153846153845\t1\n1\n2\n推荐相似问题\n导出数据\n导出图片\n再试一次",
+      "id": "VAL-S-08"
+    }
+  ]
+}

@@ -15,7 +15,7 @@ public class ParserConfig extends ParameterConfig {
     public static final Parameter PARSER_STRATEGY_TYPE =
             new Parameter("s2.parser.s2sql.strategy", "ONE_PASS_SELF_CONSISTENCY", "LLM解析生成S2SQL策略",
                     "ONE_PASS_SELF_CONSISTENCY: 通过投票方式一步生成sql", "list", "语义解析配置",
-                    Lists.newArrayList("ONE_PASS_SELF_CONSISTENCY"));
+                    Lists.newArrayList("ONE_PASS_SELF_CONSISTENCY", "BANK_CONSTRAINED_PLAN"));
 
     public static final Parameter PARSER_RULE_CORRECTOR_ENABLE =
             new Parameter("s2.parser.rule.corrector.enable", "false", "是否开启规则修正器",
@@ -50,6 +50,14 @@ public class ParserConfig extends ParameterConfig {
             new Parameter("s2.parser.self-consistency.number", "1", "self-consistency执行个数",
                     "执行越多效果可能越好，但token消耗越大", "number", "语义解析配置");
 
+    public static final Parameter PARSER_BANK_MAX_CANDIDATES =
+            new Parameter("s2.parser.bank.max-candidates", "1", "银行受约束计划候选数",
+                    "默认单候选；仅在已验证的失败模式下可提高至 2 或 3", "number", "语义解析配置");
+
+    public static final Parameter PARSER_BANK_CONSTRAINED_PLAN_ENABLE = new Parameter(
+            "s2.parser.bank.constrained-plan.enable", "false", "是否对银行语义数据集启用受约束计划",
+            "仅对同时具备 bank_organization 和 bank_data_date 维度的数据集生效；关闭即可回退原有策略", "bool", "语义解析配置");
+
     public static final Parameter PARSER_SHOW_COUNT =
             new Parameter("s2.parser.show.count", "3", "解析结果展示个数", "前端展示的解析个数", "number", "语义解析配置");
 
@@ -63,8 +71,10 @@ public class ParserConfig extends ParameterConfig {
 
     @Override
     public List<Parameter> getSysParameters() {
-        return Lists.newArrayList(PARSER_LINKING_VALUE_ENABLE, PARSER_RULE_CORRECTOR_ENABLE,
-                PARSER_FEW_SHOT_NUMBER, PARSER_SELF_CONSISTENCY_NUMBER, PARSER_SHOW_COUNT,
+        return Lists.newArrayList(PARSER_STRATEGY_TYPE, PARSER_LINKING_VALUE_ENABLE,
+                PARSER_RULE_CORRECTOR_ENABLE, PARSER_FEW_SHOT_NUMBER,
+                PARSER_SELF_CONSISTENCY_NUMBER, PARSER_BANK_MAX_CANDIDATES,
+                PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_SHOW_COUNT,
                 PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

@@ -77,8 +77,8 @@ public class ChatConfigController {
     }
 
     @GetMapping("/getDataSetSchema/{id}")
-    public DataSetSchema getDataSetSchema(@PathVariable("id") Long id,
-            HttpServletRequest request, HttpServletResponse response) {
+    public DataSetSchema getDataSetSchema(@PathVariable("id") Long id, HttpServletRequest request,
+            HttpServletResponse response) {
         User user = UserHolder.findUser(request, response);
         return configService.getDataSetSchema(id, user);
     }

@@ -5,12 +5,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 @Data
-public class BankIntentResult {
+public class BankIntentResult implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private String originalText;
     private String normalizedText;
@@ -30,7 +33,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class IntentCandidate {
+    public static class IntentCandidate implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private BankIntentType intent;
         private double confidence;
         private String reason;
@@ -40,7 +45,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class MetricCandidate {
+    public static class MetricCandidate implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private String code;
         private String name;
         private String matchedText;
@@ -52,7 +59,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class OrganizationSlot {
+    public static class OrganizationSlot implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private String code;
         private String name;
         private String matchedText;
@@ -63,7 +72,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class TimeSlot {
+    public static class TimeSlot implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private String expression;
         private LocalDate startDate;
         private LocalDate endDate;
@@ -75,7 +86,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class FilterSlot {
+    public static class FilterSlot implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private String field;
         private String operator;
         private String value;
@@ -86,7 +99,9 @@ public class BankIntentResult {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class Clarification {
+    public static class Clarification implements Serializable {
+        private static final long serialVersionUID = 1L;
+
         private String type;
         private String question;
         private List<String> options;

@@ -83,6 +83,29 @@ class SchemaCorrectorTest {
                 parseInfo.getSqlInfo().getCorrectedS2SQL());
     }
 
+    @Test
+    void shouldResolveMetricAliasToItsSemanticField() {
+        Long dataSetId = 101L;
+        DataSetSchema dataSetSchema = new DataSetSchema();
+        dataSetSchema.setDataSet(
+                SchemaElement.builder().dataSetId(dataSetId).name("bank_daily_metrics").build());
+        dataSetSchema.setMetrics(Set.of(SchemaElement.builder().dataSetId(dataSetId)
+                .name("all_deposits").alias(List.of("ZB001")).build()));
+
+        ChatQueryContext context = new ChatQueryContext();
+        context.setSemanticSchema(new SemanticSchema(List.of(dataSetSchema)));
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.setDataSet(dataSetSchema.getDataSet());
+        parseInfo.setSqlInfo(new SqlInfo());
+        parseInfo.getSqlInfo().setParsedS2SQL("SELECT ZB001 FROM bank_daily_metrics");
+        parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT ZB001 FROM bank_daily_metrics");
+
+        new SchemaCorrector().correct(context, parseInfo);
+
+        Assert.assertEquals("SELECT all_deposits FROM bank_daily_metrics",
+                parseInfo.getSqlInfo().getCorrectedS2SQL());
+    }
+
     private ChatQueryContext buildQueryContext(String sql) {
         Long dataSetId = 1L;
 

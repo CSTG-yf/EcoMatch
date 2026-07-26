@@ -61,8 +61,7 @@ class MemoryServiceAccessTest {
         ChatMemoryDO stored = memory(9L, 2);
         when(repository.getMemory(9L)).thenReturn(stored);
 
-        assertThrows(InvalidPermissionException.class,
-                () -> service.createMemory(memory, alice));
+        assertThrows(InvalidPermissionException.class, () -> service.createMemory(memory, alice));
         assertThrows(InvalidPermissionException.class,
                 () -> service.updateMemory(ChatMemoryUpdateReq.builder().id(9L).build(), alice));
 
@@ -74,11 +73,9 @@ class MemoryServiceAccessTest {
     void mixedAgentBatchDeleteFailsBeforeAnySideEffect() {
         when(repository.getMemories(any(QueryWrapper.class)))
                 .thenReturn(List.of(memory(1L, 1), memory(2L, 2)));
-        ChatMemoryDeleteReq request =
-                ChatMemoryDeleteReq.builder().ids(List.of(1L, 2L)).build();
+        ChatMemoryDeleteReq request = ChatMemoryDeleteReq.builder().ids(List.of(1L, 2L)).build();
 
-        assertThrows(InvalidPermissionException.class,
-                () -> service.batchDelete(request, alice));
+        assertThrows(InvalidPermissionException.class, () -> service.batchDelete(request, alice));
 
         verify(repository, never()).batchDelete(any());
     }

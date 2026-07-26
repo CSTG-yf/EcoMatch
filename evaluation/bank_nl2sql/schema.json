@@ -1,55 +1,79 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Bank NL2SQL positive sample",
-  "type": "object",
+  "properties": {
+    "expected": {
+      "required": [
+        "answerText",
+        "columns",
+        "rows",
+        "unit",
+        "numericTolerance",
+        "orderSensitive"
+      ],
+      "type": "object"
+    },
+    "expectedAction": {
+      "enum": [
+        "EXECUTE",
+        "CLARIFY",
+        "REFUSE"
+      ],
+      "type": "string"
+    },
+    "id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "s2sql": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sourceSplit": {
+      "enum": [
+        "train",
+        "dev",
+        "test",
+        null
+      ],
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "split": {
+      "enum": [
+        "train",
+        "dev",
+        "test"
+      ],
+      "type": "string"
+    },
+    "sql": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
   "required": [
     "id",
     "source",
+    "sourceSplit",
     "split",
-    "templateGroup",
+    "splitReason",
     "difficulty",
     "question",
     "normalizedIntent",
+    "templateGroup",
+    "expectedAction",
     "s2sql",
-    "physicalSql",
-    "sqlDialect",
-    "complexity",
-    "expectedResultSummary",
-    "expectedResult"
+    "sql",
+    "sqlFeatures",
+    "expected",
+    "errorCategory"
   ],
-  "properties": {
-    "id": {"type": "string"},
-    "source": {"const": "competition_workbook"},
-    "split": {"enum": ["train", "dev", "test"]},
-    "templateGroup": {"type": "string"},
-    "difficulty": {"enum": ["简单", "普通", "复杂"]},
-    "question": {"type": "string", "minLength": 1},
-    "normalizedIntent": {"type": "object"},
-    "s2sql": {"type": "string", "minLength": 1},
-    "physicalSql": {"type": "string", "minLength": 1},
-    "sqlDialect": {"const": "sqlite"},
-    "complexity": {
-      "type": "array",
-      "items": {
-        "enum": [
-          "SINGLE_TABLE",
-          "MULTI_TABLE",
-          "NESTED_QUERY",
-          "AGGREGATION",
-          "YOY",
-          "MOM",
-          "TOP_N",
-          "CROSS_ORGANIZATION"
-        ]
-      },
-      "minItems": 1,
-      "uniqueItems": true
-    },
-    "expectedResultSummary": {"type": "string", "minLength": 1},
-    "expectedResult": {
-      "type": "object",
-      "required": ["columns", "rowCount", "rows", "sha256"]
-    }
-  },
-  "additionalProperties": false
+  "title": "EcoMatch bank NL2SQL annotated sample",
+  "type": "object"
 }

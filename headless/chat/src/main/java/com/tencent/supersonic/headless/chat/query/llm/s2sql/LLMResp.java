@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.query.llm.s2sql;
 
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankQueryPlan;
 import lombok.Data;
 
 import java.util.List;
@@ -17,6 +18,10 @@ public class LLMResp {
     private String schema;
 
     private String sqlOutput;
+
+    private BankQueryPlan bankQueryPlan;
+
+    private Map<String, Object> bankCandidateDiagnostics;
 
     private List<String> fields;
 

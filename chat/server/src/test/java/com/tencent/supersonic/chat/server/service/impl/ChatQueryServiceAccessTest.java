@@ -26,8 +26,7 @@ class ChatQueryServiceAccessTest {
         ChatQueryServiceImpl service = new ChatQueryServiceImpl();
         ReflectionTestUtils.setField(service, "chatManageService", chatManageService);
         User user = User.get(2L, "analyst");
-        ChatExecuteReq request =
-                ChatExecuteReq.builder().queryId(987654321L).user(user).build();
+        ChatExecuteReq request = ChatExecuteReq.builder().queryId(987654321L).user(user).build();
         doThrow(new InvalidPermissionException("Query access denied")).when(chatManageService)
                 .checkQueryAccess(request.getQueryId(), user);
 

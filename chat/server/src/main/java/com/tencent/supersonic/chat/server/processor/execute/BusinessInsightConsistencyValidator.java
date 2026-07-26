@@ -36,10 +36,10 @@ final class BusinessInsightConsistencyValidator {
             Pattern.compile("首条记录为(-?[0-9]+(?:\\.[0-9]+)?)，" + "末条记录为(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern LATEST = Pattern.compile("最新记录为(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern PERCENT = Pattern.compile("(?:变化|最高，为)(-?[0-9]+(?:\\.[0-9]+)?)%");
-    private static final Pattern CONTRIBUTION = Pattern
-            .compile("^(.+)贡献度最高，为(-?[0-9]+(?:\\.[0-9]+)?)%$");
-    private static final Pattern TEMPORAL = Pattern.compile(
-            "^(.+?)(环比|同比)变化(-?[0-9]+(?:\\.[0-9]+)?)%（(\\d{4}-\\d{2})较(\\d{4}-\\d{2})）$");
+    private static final Pattern CONTRIBUTION =
+            Pattern.compile("^(.+)贡献度最高，为(-?[0-9]+(?:\\.[0-9]+)?)%$");
+    private static final Pattern TEMPORAL = Pattern
+            .compile("^(.+?)(环比|同比)变化(-?[0-9]+(?:\\.[0-9]+)?)%（(\\d{4}-\\d{2})较(\\d{4}-\\d{2})）$");
 
     void validate(QueryResult result) {
         validate(result, Map.of());
@@ -120,16 +120,15 @@ final class BusinessInsightConsistencyValidator {
 
     private void validateChartContract(QueryResult result, ChartRecommendation chart,
             String location) {
-        Set<String> numericFields = result.getQueryColumns().stream()
-                .filter(column -> isNumericColumn(result, column)).map(this::fieldName)
-                .collect(Collectors.toSet());
+        Set<String> numericFields =
+                result.getQueryColumns().stream().filter(column -> isNumericColumn(result, column))
+                        .map(this::fieldName).collect(Collectors.toSet());
         Set<String> dateFields = result.getQueryColumns().stream().filter(this::isDateColumn)
                 .map(this::fieldName).collect(Collectors.toSet());
-        List<String> invalidDimensions = chart.getDimensionFields().stream()
-                .filter(numericFields::contains).toList();
-        List<String> invalidMetrics =
-                chart.getMetricFields().stream().filter(field -> !numericFields.contains(field))
-                        .toList();
+        List<String> invalidDimensions =
+                chart.getDimensionFields().stream().filter(numericFields::contains).toList();
+        List<String> invalidMetrics = chart.getMetricFields().stream()
+                .filter(field -> !numericFields.contains(field)).toList();
         if (!invalidDimensions.isEmpty() || !invalidMetrics.isEmpty()) {
             throw inconsistent(location + " field roles do not match query column types");
         }
@@ -138,21 +137,24 @@ final class BusinessInsightConsistencyValidator {
             throw inconsistent(location + " has no usable metric values");
         }
         switch (chart.getChartType()) {
-            case "KPI_CARD" -> requireChartShape(result.getQueryResults().size() == 1
-                    && chart.getDimensionFields().isEmpty(), location, "KPI card");
-            case "LINE" -> requireChartShape(chart.getDimensionFields().size() == 1
-                    && dateFields.contains(chart.getDimensionFields().get(0)), location,
-                    "line chart");
+            case "KPI_CARD" -> requireChartShape(
+                    result.getQueryResults().size() == 1 && chart.getDimensionFields().isEmpty(),
+                    location, "KPI card");
+            case "LINE" -> requireChartShape(
+                    chart.getDimensionFields().size() == 1
+                            && dateFields.contains(chart.getDimensionFields().get(0)),
+                    location, "line chart");
             case "BAR" -> requireChartShape(chart.getDimensionFields().size() == 1, location,
                     "bar chart");
-            case "PIE" -> requireChartShape(result.getQueryResults().size() >= 2
-                    && chart.getDimensionFields().size() == 1
-                    && !dateFields.contains(chart.getDimensionFields().get(0))
-                    && chart.getMetricFields().size() == 1
-                    && !hasNegativeMetricValue(result, chart.getMetricFields().get(0)), location,
-                    "pie chart");
-            case "COMBO" -> requireChartShape(chart.getDimensionFields().size() == 1
-                    && chart.getMetricFields().size() >= 2, location, "combo chart");
+            case "PIE" -> requireChartShape(
+                    result.getQueryResults().size() >= 2 && chart.getDimensionFields().size() == 1
+                            && !dateFields.contains(chart.getDimensionFields().get(0))
+                            && chart.getMetricFields().size() == 1
+                            && !hasNegativeMetricValue(result, chart.getMetricFields().get(0)),
+                    location, "pie chart");
+            case "COMBO" -> requireChartShape(
+                    chart.getDimensionFields().size() == 1 && chart.getMetricFields().size() >= 2,
+                    location, "combo chart");
             case "TABLE" -> {
                 // Tables may display any non-sensitive subset of the query fields.
             }
@@ -285,18 +287,18 @@ final class BusinessInsightConsistencyValidator {
         if (values.size() < 2) {
             throw inconsistent("contribution requires at least two categories");
         }
-        BigDecimal total = values.stream().map(CategoryValue::value)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total =
+                values.stream().map(CategoryValue::value).reduce(BigDecimal.ZERO, BigDecimal::add);
         if (total.signum() <= 0) {
             throw inconsistent("contribution total is not positive");
         }
         BigDecimal maximum = values.stream().map(CategoryValue::value)
                 .max(Comparator.naturalOrder()).orElseThrow();
-        boolean categoryMatches = values.stream()
-                .anyMatch(value -> value.category.equals(reference.category)
+        boolean categoryMatches =
+                values.stream().anyMatch(value -> value.category.equals(reference.category)
                         && value.value.compareTo(maximum) == 0);
-        BigDecimal expected = maximum.divide(total, 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100));
+        BigDecimal expected =
+                maximum.divide(total, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
         if (!categoryMatches || !equal(expected, decimal(matcher.group(2)))) {
             throw inconsistent("contribution evidence is not grounded in query results");
         }
@@ -307,15 +309,14 @@ final class BusinessInsightConsistencyValidator {
         List<FieldAlias> aliases = metricAliases(result, metricLabels)
                 .filter(candidate -> subject.length() > candidate.alias.length()
                         && subject.charAt(subject.length() - candidate.alias.length() - 1) == '的'
-                        && subject.regionMatches(true,
-                                subject.length() - candidate.alias.length(), candidate.alias, 0,
-                                candidate.alias.length()))
+                        && subject.regionMatches(true, subject.length() - candidate.alias.length(),
+                                candidate.alias, 0, candidate.alias.length()))
                 .toList();
         if (aliases.isEmpty()) {
             throw inconsistent("contribution metric is unknown");
         }
-        int aliasLength =
-                aliases.stream().mapToInt(candidate -> candidate.alias.length()).max().orElseThrow();
+        int aliasLength = aliases.stream().mapToInt(candidate -> candidate.alias.length()).max()
+                .orElseThrow();
         List<FieldAlias> longestAliases = aliases.stream()
                 .filter(candidate -> candidate.alias.length() == aliasLength).toList();
         Set<String> metricFields = longestAliases.stream().map(FieldAlias::field)
@@ -323,8 +324,7 @@ final class BusinessInsightConsistencyValidator {
         if (metricFields.size() != 1) {
             throw inconsistent("contribution metric is ambiguous");
         }
-        String category =
-                subject.substring(0, subject.length() - aliasLength - 1);
+        String category = subject.substring(0, subject.length() - aliasLength - 1);
         if (StringUtils.isBlank(category)) {
             throw inconsistent("contribution category is missing");
         }
@@ -335,8 +335,8 @@ final class BusinessInsightConsistencyValidator {
             Map<String, String> metricLabels) {
         String metric = resolveMetricField(result, matcher.group(1), metricLabels);
         List<String> dateFields = result.getQueryColumns().stream()
-                .filter(column -> !isMasked(result, fieldName(column)))
-                .filter(this::isDateColumn).map(this::fieldName).toList();
+                .filter(column -> !isMasked(result, fieldName(column))).filter(this::isDateColumn)
+                .map(this::fieldName).toList();
         if (dateFields.size() != 1) {
             throw inconsistent("temporal evidence date field is ambiguous");
         }
@@ -380,13 +380,12 @@ final class BusinessInsightConsistencyValidator {
         return fields.iterator().next();
     }
 
-    private Stream<FieldAlias> metricAliases(QueryResult result,
-            Map<String, String> metricLabels) {
+    private Stream<FieldAlias> metricAliases(QueryResult result, Map<String, String> metricLabels) {
         List<QueryColumn> metricColumns = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
                 .filter(column -> isNumericColumn(result, column)).toList();
-        Set<String> metricFields = metricColumns.stream().map(this::fieldName)
-                .collect(Collectors.toSet());
+        Set<String> metricFields =
+                metricColumns.stream().map(this::fieldName).collect(Collectors.toSet());
         Stream<FieldAlias> columnAliases = metricColumns.stream()
                 .flatMap(column -> Stream
                         .of(column.getBizName(), column.getNameEn(), column.getName())

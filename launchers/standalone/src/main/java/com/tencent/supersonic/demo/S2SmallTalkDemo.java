@@ -28,6 +28,7 @@ public class S2SmallTalkDemo extends S2BaseDemo {
         agent.setName("闲聊助手");
         agent.setDescription("直接与大模型对话，验证连通性");
         agent.setStatus(1);
+        agent.setIsOpen(1);
         agent.setEnableSearch(0);
         ToolConfig toolConfig = new ToolConfig();
         agent.setToolConfig(JSONObject.toJSONString(toolConfig));

@@ -36,9 +36,11 @@ public class JdbcExecutor implements QueryExecutor {
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         try {
             QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
-            SemanticQueryResp result = gateway.execute(queryStatement.getSql(),
-                    () -> enforceResultLimit(
-                            executeInternal(queryStatement, queryResultWithColumns), resultLimit));
+            SemanticQueryResp result =
+                    gateway.execute(queryStatement.getSql(),
+                            () -> enforceResultLimit(
+                                    executeInternal(queryStatement, queryResultWithColumns),
+                                    resultLimit));
             result.setSql(sql);
             return result;
         } catch (Exception e) {
@@ -60,8 +62,7 @@ public class JdbcExecutor implements QueryExecutor {
     static SemanticQueryResp enforceResultLimit(SemanticQueryResp response, int resultLimit) {
         if (response != null && response.getResultList() != null && resultLimit > 0
                 && response.getResultList().size() > resultLimit) {
-            throw new QueryRejectedException(
-                    "Query result row limit exceeded: " + resultLimit);
+            throw new QueryRejectedException("Query result row limit exceeded: " + resultLimit);
         }
         return response;
     }

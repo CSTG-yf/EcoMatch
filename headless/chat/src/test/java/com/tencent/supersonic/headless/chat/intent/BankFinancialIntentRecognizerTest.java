@@ -60,6 +60,113 @@ class BankFinancialIntentRecognizerTest {
         assertEquals(Set.of("ZB016"), metricCodes(result));
     }
 
+    @Test
+    void shouldRecognizeIsoQuarterRangeAsTrend() {
+        BankIntentResult result = recognizer.recognize(
+                "\u5206\u6790\u6c5f\u82cf\u7701D\u5e02\u519c\u5546\u884c\u5404\u9879\u5b58\u6b3e\u4f59\u989d\u4ece2025Q1\u672b\u52302026Q1\u672b\u7684\u9010\u5b63\u53d8\u5316",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+        assertEquals("ORG004", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 3, 31), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2026, 3, 31), result.getTime().getEndDate());
+    }
+
+    @Test
+    void shouldResolveAnUnqualifiedYearEndAgainstTheExplicitHalfYear() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行从2025年上半年末到年末，存款、贷款、不良率和净利润的变动方向分别是什么？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+        assertEquals(LocalDate.of(2025, 6, 30), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+    }
+
+    @Test
+    void shouldExpandComprehensivePerformanceRankingToTheBankProfile() {
+        BankIntentResult result = recognizer.recognize(
+                "\u6c5f\u82cf\u7701F\u5e02\u519c\u5546\u884c\u57282025-11-30\u7684\u6307\u6807\u4e2d\u54ea\u4e9b\u8868\u73b0\u8f83\u597d\uff1f\u54ea\u4e9b\u8868\u73b0\u8f83\u5dee\uff1f",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
+                metricCodes(result));
+        assertTrue(result.getFilters().isEmpty());
+        assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
+    void shouldKeepTheTopThreeFilterForGoodPerformanceOnly() {
+        BankIntentResult result =
+                recognizer.recognize("江苏省F市农商行在2025-11-30的指标中哪些表现较好？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank", result.getFilters().get(0).getField());
+        assertEquals("3", result.getFilters().get(0).getValue());
+    }
+
+    @Test
+    void shouldRecognizeTheWinnerWithinAnExplicitOrganizationSubset() {
+        BankIntentResult result = recognizer.recognize("2025年底，江苏省A市农商行、江苏省E市农商行、江苏省I市农商行三家谁存款最多？",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ORG001", "ORG005", "ORG009"), result.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode).collect(Collectors.toSet()));
+        assertTrue(result.getFilters().stream().anyMatch(
+                filter -> "rank".equals(filter.getField()) && "1".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldRecognizeTheLastPlaceAsABottomRankSlice() {
+        BankIntentResult result =
+                recognizer.recognize("2025年8月末，全省净利润排最后一名的是哪家？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertTrue(result.getFilters().stream()
+                .anyMatch(filter -> "rank_from_bottom".equals(filter.getField())
+                        && "1".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldRecognizeAnAnnualDailyExtremaSummaryAsAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年的各项存款余额日均值是多少？最高日和最低日分别出现在什么水平？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.AGGREGATION, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+        assertEquals("ORG010", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 1, 1), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+        assertTrue(result.getFilters().isEmpty());
+    }
+
+    @Test
+    void shouldNotTreatTheHighestQuarterInATrendAsARankingFilter() {
+        BankIntentResult result = recognizer.recognize(
+                "请分析江苏省A市农商行的各项存款余额从2025年一季度末到2026年一季度末的逐季变化，各季度末数值是多少？哪个季度数值最高？",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+        assertTrue(result.getFilters().stream().noneMatch(filter -> "rank".equals(filter.getField())
+                || "rank_from_bottom".equals(filter.getField())));
+    }
+
+    @Test
+    void shouldNotTreatAMinimumRegulatoryRequirementAsARankingFilter() {
+        BankIntentResult result = recognizer.recognize("2026年一季度末，江苏省H市农商行的资本充足率满足10.5%的最低要求吗？",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.THRESHOLD, result.getIntent());
+        assertTrue(result.getFilters().stream().noneMatch(filter -> "rank".equals(filter.getField())
+                || "rank_from_bottom".equals(filter.getField())));
+        assertTrue(result.getFilters().stream()
+                .anyMatch(filter -> "metric_value".equals(filter.getField())
+                        && "GTE".equals(filter.getOperator())
+                        && "10.5%".equals(filter.getValue())));
+    }
+
     private Set<String> metricCodes(BankIntentResult result) {
         return result.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
                 .collect(Collectors.toSet());

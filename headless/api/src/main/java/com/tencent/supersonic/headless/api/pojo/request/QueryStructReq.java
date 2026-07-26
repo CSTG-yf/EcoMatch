@@ -37,7 +37,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -188,7 +188,7 @@ public class QueryStructReq extends SemanticQueryReq {
 
     private List<SelectItem<?>> buildSelectItems(QueryStructReq queryStructReq) {
         List<SelectItem<?>> selectItems = new ArrayList<>();
-        Set<String> groups = new HashSet<>(queryStructReq.getGroups());
+        Set<String> groups = new LinkedHashSet<>(queryStructReq.getGroups());
 
         if (!CollectionUtils.isEmpty(groups)) {
             for (String group : groups) {
@@ -248,7 +248,7 @@ public class QueryStructReq extends SemanticQueryReq {
     }
 
     private GroupByElement buildGroupByElement(QueryStructReq queryStructReq) {
-        Set<String> groups = new HashSet<>(queryStructReq.getGroups());
+        Set<String> groups = new LinkedHashSet<>(queryStructReq.getGroups());
         if ((!CollectionUtils.isEmpty(groups) && !queryStructReq.getAggregators().isEmpty())
                 || !queryStructReq.getMetricFilters().isEmpty()) {
             GroupByElement groupByElement = new GroupByElement();

@@ -82,13 +82,11 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     private void validateInputSize(QueryResult result, BusinessInsightConfig rules) {
         if (result.getQueryResults().size() > rules.getMaxInputRows()) {
             throw new IllegalStateException(
-                    "Business insight input exceeds maximum row count: "
-                            + rules.getMaxInputRows());
+                    "Business insight input exceeds maximum row count: " + rules.getMaxInputRows());
         }
         if (result.getQueryColumns().size() > rules.getMaxInputColumns()) {
-            throw new IllegalStateException(
-                    "Business insight input exceeds maximum column count: "
-                            + rules.getMaxInputColumns());
+            throw new IllegalStateException("Business insight input exceeds maximum column count: "
+                    + rules.getMaxInputColumns());
         }
     }
 
@@ -107,8 +105,8 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
                 throw new IllegalStateException(
                         "Business insight input contains duplicate column: " + field);
             }
-            if (!result.getQueryResults().isEmpty() && result.getQueryResults().stream()
-                    .noneMatch(row -> row.containsKey(field))) {
+            if (!result.getQueryResults().isEmpty()
+                    && result.getQueryResults().stream().noneMatch(row -> row.containsKey(field))) {
                 throw new IllegalStateException(
                         "Business insight input does not contain declared field: " + field);
             }
@@ -237,8 +235,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         }
         List<String> firstDimension = firstDimension(profile);
         if (profile.metrics.size() > 1 && !firstDimension.isEmpty() && types.add("COMBO")) {
-            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension,
-                    profile.metrics));
+            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension, profile.metrics));
         }
         if (types.add("TABLE")) {
             charts.add(chart("TABLE", 0.75, "表格可用于核对原始查询结果", profile.categories, profile.metrics));

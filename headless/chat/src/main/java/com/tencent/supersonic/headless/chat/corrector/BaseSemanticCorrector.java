@@ -62,8 +62,9 @@ public abstract class BaseSemanticCorrector implements SemanticCorrector {
                     if (!CollectionUtils.isEmpty(schemaElement.getAlias())) {
                         elements.addAll(schemaElement.getAlias());
                     }
-                    return elements.stream();
-                }).collect(Collectors.toMap(a -> a, a -> a, (k1, k2) -> k1));
+                    return elements.stream()
+                            .map(element -> Pair.of(element, schemaElement.getName()));
+                }).collect(Collectors.toMap(Pair::getLeft, Pair::getRight, (k1, k2) -> k1));
     }
 
     protected void addAggregateToMetric(ChatQueryContext chatQueryContext,

@@ -22,6 +22,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -38,6 +39,11 @@ public class LLMResponseService {
 
     public void addParseInfo(ChatQueryContext queryCtx, ParseResult parseResult, String s2SQL,
             Double weight) {
+        addParseInfo(queryCtx, parseResult, s2SQL, weight, Collections.emptyMap());
+    }
+
+    public void addParseInfo(ChatQueryContext queryCtx, ParseResult parseResult, String s2SQL,
+            Double weight, Map<String, Object> diagnostics) {
         if (Objects.isNull(weight)) {
             weight = 0D;
         }
@@ -58,8 +64,11 @@ public class LLMResponseService {
                         .dbSchema(parseResult.getLlmResp().getSchema())
                         .sql(parseResult.getLlmResp().getSqlOutput()).build();
         properties.put(Text2SQLExemplar.PROPERTY_KEY, exemplar);
+        if (diagnostics != null) {
+            properties.putAll(diagnostics);
+        }
         parseInfo.setProperties(properties);
-        parseInfo.setScore(queryCtx.getRequest().getQueryText().length() * (1 + weight));
+        parseInfo.setScore(parseScore(queryCtx.getRequest().getQueryText(), weight, diagnostics));
         parseInfo.setQueryMode(semanticQuery.getQueryMode());
         parseInfo.getSqlInfo().setParsedS2SQL(s2SQL);
         parseInfo.getSqlInfo().setCorrectedS2SQL(s2SQL);
@@ -142,6 +151,16 @@ public class LLMResponseService {
             return StringUtils.normalizeSpace(left)
                     .equalsIgnoreCase(StringUtils.normalizeSpace(right));
         }
+    }
+
+    static double parseScore(String queryText, Double weight, Map<String, ?> diagnostics) {
+        Object semanticScore =
+                diagnostics == null ? null : diagnostics.get("bank.nl2sql.semanticScore");
+        if (semanticScore instanceof Number number && Double.isFinite(number.doubleValue())
+                && number.doubleValue() >= 0D) {
+            return number.doubleValue();
+        }
+        return (queryText == null ? 0 : queryText.length()) * (1 + (weight == null ? 0D : weight));
     }
 
     private record RankedCandidate(String sql, LLMSqlResp response, double score) {}

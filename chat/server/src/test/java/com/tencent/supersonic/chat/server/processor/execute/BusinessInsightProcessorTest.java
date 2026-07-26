@@ -70,8 +70,7 @@ class BusinessInsightProcessorTest {
     void rejectsOversizedMainQueryResultBeforeProfiling() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
-        result.setQueryColumns(List.of(column("branch", "CATEGORY"),
-                column("amount", "NUMBER")));
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
         result.setQueryResults(List.of(row("A", 10), row("B", 20), row("C", 30)));
         ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
         context.setResponse(result);
@@ -197,8 +196,7 @@ class BusinessInsightProcessorTest {
     void doesNotRecommendComboChartWithoutDimension() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
-        result.setQueryColumns(
-                List.of(column("balance", "NUMBER"), column("deposit", "NUMBER")));
+        result.setQueryColumns(List.of(column("balance", "NUMBER"), column("deposit", "NUMBER")));
         result.setQueryResults(List.of(Map.of("balance", 100, "deposit", 80),
                 Map.of("balance", 120, "deposit", 90)));
         ExecuteContext context = new ExecuteContext(new ChatExecuteReq());

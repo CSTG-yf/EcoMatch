@@ -18,6 +18,7 @@ assembly/runtime/*
 **/.flattened-pom.xml
 chm_db/
 __pycache__/
+evaluation/.venv/
 /dict
 assembly/build/*-SNAPSHOT
 **/node_modules/

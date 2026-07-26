@@ -1,15 +1,20 @@
 package com.tencent.supersonic.headless.chat.parser.llm;
 
+import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionCoordinator;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.MapUtils;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -40,9 +45,21 @@ public class LLMSqlParser implements SemanticParser {
 
             // 3.invoke LLM service to do parsing.
             tryParse(queryCtx, dataSetId);
+        } catch (BankNl2SqlError e) {
+            failConstrainedPlan(queryCtx, e);
+            log.error("failed to parse constrained bank query", e);
         } catch (Exception e) {
             log.error("failed to parse query:", e);
         }
+    }
+
+    private void failConstrainedPlan(ChatQueryContext queryCtx, BankNl2SqlError error) {
+        ParseResp parseResp = queryCtx.getParseResp();
+        if (parseResp == null) {
+            return;
+        }
+        parseResp.setState(ParseResp.ParseState.FAILED);
+        parseResp.setErrorMsg(error.toParserErrorMessage());
     }
 
     private void tryParse(ChatQueryContext queryCtx, Long dataSetId) {
@@ -54,30 +71,58 @@ public class LLMSqlParser implements SemanticParser {
 
         int currentRetry = 1;
         Map<String, LLMSqlResp> sqlRespMap = new HashMap<>();
+        Map<String, Object> selectedDiagnostics = Collections.emptyMap();
         ParseResult parseResult = null;
         while (currentRetry <= maxRetries) {
             log.info("currentRetryRound:{}, start runText2SQL", currentRetry);
             try {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
+                    Map<String, Object> attemptDiagnostics = Collections.emptyMap();
+                    if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
+                            && Objects.nonNull(llmResp.getBankQueryPlan())) {
+                        BankNl2SqlExecutionCoordinator.ExecutionCandidate candidate =
+                                ContextUtils.getBean(BankNl2SqlExecutionCoordinator.class)
+                                        .coordinate(llmReq, llmResp);
+                        llmResp.setSqlOutput(candidate.getS2sql());
+                        llmResp.setSqlRespMap(Map.of(candidate.getS2sql(),
+                                LLMSqlResp.builder().sqlWeight(1D).build()));
+                        attemptDiagnostics = new HashMap<>();
+                        if (llmResp.getBankCandidateDiagnostics() != null) {
+                            attemptDiagnostics.putAll(llmResp.getBankCandidateDiagnostics());
+                        }
+                        candidate.diagnostics().forEach(attemptDiagnostics::putIfAbsent);
+                    }
                     // deduplicate the S2SQL result list and build parserInfo
                     sqlRespMap =
                             responseService.getDeduplicationSqlResp(currentRetry, llmResp, llmReq);
                     if (MapUtils.isNotEmpty(sqlRespMap)) {
                         parseResult = ParseResult.builder().dataSetId(dataSetId).llmReq(llmReq)
                                 .llmResp(llmResp).build();
+                        selectedDiagnostics = attemptDiagnostics;
                         break;
                     }
                 }
             } catch (Exception e) {
                 log.error("currentRetryRound:{}, runText2SQL failed", currentRetry, e);
+                if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
+                        && !BankNl2SqlError.allowsParserRetry(e)) {
+                    if (e instanceof BankNl2SqlError bankError) {
+                        throw bankError;
+                    }
+                    throw e;
+                }
             }
-            ChatModelConfig chatModelConfig = llmReq.getChatAppConfig()
-                    .get(OnePassSCSqlGenStrategy.APP_KEY).getChatModelConfig();
-            Double temperature = chatModelConfig.getTemperature();
-            if (temperature == 0) {
-                // 报错时增加随机性，减少无效重试
-                chatModelConfig.setTemperature(0.5);
+            SqlGenStrategy strategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
+            ChatApp chatApp =
+                    strategy == null ? null : llmReq.getChatAppConfig().get(strategy.getAppKey());
+            if (chatApp != null && chatApp.getChatModelConfig() != null) {
+                ChatModelConfig chatModelConfig = chatApp.getChatModelConfig();
+                Double temperature = chatModelConfig.getTemperature();
+                if (temperature == 0) {
+                    // 报错时增加随机性，减少无效重试
+                    chatModelConfig.setTemperature(0.5);
+                }
             }
             currentRetry++;
         }
@@ -87,7 +132,8 @@ public class LLMSqlParser implements SemanticParser {
         for (Entry<String, LLMSqlResp> entry : sqlRespMap.entrySet()) {
             String sql = entry.getKey();
             double sqlWeight = entry.getValue().getSqlWeight();
-            responseService.addParseInfo(queryCtx, parseResult, sql, sqlWeight);
+            responseService.addParseInfo(queryCtx, parseResult, sql, sqlWeight,
+                    selectedDiagnostics);
         }
     }
 }

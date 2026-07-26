@@ -1,4 +1,6 @@
-pysqlite3==0.5.2
+# Windows ships SQLite with CPython. pysqlite3 requires a local C compiler there,
+# so only install it on platforms where it is needed as a replacement module.
+pysqlite3==0.5.2; platform_system != "Windows"
 PyJWT==2.8.0
 PyYAML==6.0.1
 sqlparse==0.4.4

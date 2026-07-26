@@ -162,8 +162,7 @@ public class SqlUtils {
         List<Map<String, Object>> data = new ArrayList<>();
         while (rs.next()) {
             if (resultLimit > 0 && data.size() >= resultLimit) {
-                throw new QueryRejectedException(
-                        "Query result row limit exceeded: " + resultLimit);
+                throw new QueryRejectedException("Query result row limit exceeded: " + resultLimit);
             }
             data.add(getLineData(rs, queryColumns));
         }

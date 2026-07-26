@@ -24,6 +24,11 @@ const Table: React.FC<Props> = ({ data, size, loading, question, onApplyAuth }) 
         dataIndex: bizName,
         key: bizName,
         title: name || bizName,
+        onHeaderCell: () => ({
+          'data-biz-name': bizName,
+          'data-format-type': dataFormatType || '',
+          'data-need-multiply-100': String(Boolean(dataFormat?.needMultiply100)),
+        }),
         sorter:
           showType === 'NUMBER'
             ? (a, b) => {
@@ -78,7 +83,7 @@ const Table: React.FC<Props> = ({ data, size, loading, question, onApplyAuth }) 
     : queryResults;
 
   return (
-    <div className={prefixCls}>
+    <div className={prefixCls} data-testid="ui-chat-result-table">
       {question && (
         <div className={`${prefixCls}-top-bar`}>
           <div className={`${prefixCls}-indicator-name`}>{question}</div>
