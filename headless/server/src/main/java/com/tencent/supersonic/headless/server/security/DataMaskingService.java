@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.server.security;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -47,28 +48,40 @@ public class DataMaskingService {
     }
 
     public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user) {
-        if (response == null || schema == null || canViewRawData(user)) {
+        if (response == null || canViewRawData(user) || response.getResultList() == null
+                || response.getResultList().isEmpty()) {
             return;
         }
+        requireMaskingMetadata(response, schema);
         Set<String> sensitiveFields = getSensitiveFields(schema);
-        if (sensitiveFields.isEmpty() || response.getResultList() == null
-                || response.getColumns() == null) {
+        if (sensitiveFields.isEmpty()) {
             return;
         }
+        Set<String> schemaFields = getSchemaFields(schema);
 
         Set<String> maskedColumns =
                 Stream.ofNullable(response.getMaskedColumns()).flatMap(java.util.Collection::stream)
                         .collect(Collectors.toCollection(LinkedHashSet::new));
         Map<Map<String, Object>, Map<String, String>> resultKeyIndexes =
                 buildResultKeyIndexes(response);
+        Set<String> declaredResultKeys = new HashSet<>();
         for (QueryColumn column : response.getColumns()) {
-            if (!isSensitive(column, sensitiveFields)) {
-                continue;
+            if (column == null) {
+                throw new InvalidPermissionException(
+                        "Data masking column lineage is unavailable; query result was denied");
             }
             Set<String> resultKeys =
                     Stream.of(column.getBizName(), column.getNameEn(), column.getName())
                             .filter(StringUtils::isNotBlank)
                             .collect(Collectors.toCollection(LinkedHashSet::new));
+            Set<String> normalizedResultKeys = resultKeys.stream()
+                    .map(key -> key.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
+            declaredResultKeys.addAll(normalizedResultKeys);
+            boolean sensitive = isSensitive(column, sensitiveFields);
+            boolean unknownLineage = Collections.disjoint(normalizedResultKeys, schemaFields);
+            if (!sensitive && !unknownLineage) {
+                continue;
+            }
             String sensitiveField = resultKeys.stream()
                     .filter(key -> sensitiveFields.contains(key.toLowerCase(Locale.ROOT)))
                     .findFirst().orElse(column.getBizName());
@@ -77,20 +90,48 @@ public class DataMaskingService {
                     continue;
                 }
                 Map<String, String> keyIndex = resultKeyIndexes.get(row);
-                Set<String> matchingKeys =
-                        resultKeys.stream().map(key -> key.toLowerCase(Locale.ROOT))
-                                .map(keyIndex::get).filter(StringUtils::isNotBlank)
-                                .collect(Collectors.toCollection(LinkedHashSet::new));
+                Set<String> matchingKeys = normalizedResultKeys.stream().map(keyIndex::get)
+                        .filter(StringUtils::isNotBlank)
+                        .collect(Collectors.toCollection(LinkedHashSet::new));
                 for (String key : matchingKeys) {
+                    maskedColumns.add(key);
                     if (row.get(key) != null) {
-                        row.put(key, maskValue(key, sensitiveField, row.get(key)));
-                        maskedColumns.add(key);
+                        row.put(key, unknownLineage ? "****"
+                                : maskValue(key, sensitiveField, row.get(key)));
                     }
                 }
             }
         }
+        maskUndeclaredResultKeys(response, declaredResultKeys, maskedColumns);
         response.setDataMasked(!maskedColumns.isEmpty());
         response.setMaskedColumns(maskedColumns);
+    }
+
+    private void maskUndeclaredResultKeys(SemanticQueryResp response,
+            Set<String> declaredResultKeys, Set<String> maskedColumns) {
+        for (Map<String, Object> row : response.getResultList()) {
+            if (row == null) {
+                continue;
+            }
+            for (String key : new HashSet<>(row.keySet())) {
+                if (StringUtils.isNotBlank(key)
+                        && !declaredResultKeys.contains(key.toLowerCase(Locale.ROOT))) {
+                    maskedColumns.add(key);
+                    if (row.get(key) != null) {
+                        row.put(key, "****");
+                    }
+                }
+            }
+        }
+    }
+
+    private void requireMaskingMetadata(SemanticQueryResp response, SemanticSchemaResp schema) {
+        if (schema == null || schema.getDimensions() == null || schema.getMetrics() == null
+                || (schema.getDimensions().isEmpty() && schema.getMetrics().isEmpty())
+                || response.getColumns() == null || response.getColumns().isEmpty()) {
+            throw new InvalidPermissionException(
+                    "Data masking metadata is unavailable; query result was denied");
+        }
     }
 
     private Map<Map<String, Object>, Map<String, String>> buildResultKeyIndexes(
@@ -129,6 +170,16 @@ public class DataMaskingService {
                 Stream.ofNullable(schema.getMetrics()).flatMap(java.util.Collection::stream))
                 .filter(item -> item.getSensitiveLevel() != null
                         && item.getSensitiveLevel() >= SensitiveLevelEnum.MID.getCode())
+                .forEach(item -> {
+                    addIfPresent(fields, item.getBizName());
+                    addIfPresent(fields, item.getName());
+                });
+        return fields;
+    }
+
+    private Set<String> getSchemaFields(SemanticSchemaResp schema) {
+        Set<String> fields = new HashSet<>();
+        Stream.<SchemaItem>concat(schema.getDimensions().stream(), schema.getMetrics().stream())
                 .forEach(item -> {
                     addIfPresent(fields, item.getBizName());
                     addIfPresent(fields, item.getName());

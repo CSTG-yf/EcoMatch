@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BusinessInsightProcessorTest {
@@ -62,6 +64,45 @@ class BusinessInsightProcessorTest {
                 .anyMatch(warning -> warning.contains("少于3条")));
         assertFalse(result.getBusinessExplanation().getEvidence().stream()
                 .anyMatch(evidence -> evidence.contains("变化") || evidence.contains("异常")));
+    }
+
+    @Test
+    void rejectsOversizedMainQueryResultBeforeProfiling() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"),
+                column("amount", "NUMBER")));
+        result.setQueryResults(List.of(row("A", 10), row("B", 20), row("C", 30)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+        BusinessInsightConfig config =
+                new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95, 2, 100);
+
+        assertThrows(IllegalStateException.class,
+                () -> new BusinessInsightProcessor(config).process(context));
+    }
+
+    @Test
+    void rejectsMalformedMainQueryResultBeforeProfiling() {
+        QueryResult nullRowResult = new QueryResult();
+        nullRowResult.setQueryState(QueryState.SUCCESS);
+        nullRowResult.setQueryColumns(List.of(column("amount", "NUMBER")));
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.add(null);
+        nullRowResult.setQueryResults(rows);
+        ExecuteContext nullRowContext = new ExecuteContext(new ChatExecuteReq());
+        nullRowContext.setResponse(nullRowResult);
+
+        QueryResult missingFieldResult = new QueryResult();
+        missingFieldResult.setQueryState(QueryState.SUCCESS);
+        missingFieldResult.setQueryColumns(List.of(column("amount", "NUMBER")));
+        missingFieldResult.setQueryResults(List.of(Map.of("other", 10)));
+        ExecuteContext missingFieldContext = new ExecuteContext(new ChatExecuteReq());
+        missingFieldContext.setResponse(missingFieldResult);
+
+        BusinessInsightProcessor processor = new BusinessInsightProcessor();
+        assertThrows(IllegalStateException.class, () -> processor.process(nullRowContext));
+        assertThrows(IllegalStateException.class, () -> processor.process(missingFieldContext));
     }
 
     @Test
@@ -150,6 +191,23 @@ class BusinessInsightProcessorTest {
                         column("metric_code", "CATEGORY"), column("metric_name", "CATEGORY"),
                         column("metric_unit", "CATEGORY"), column("metric_value", "NUMBER")),
                         List.of(detailRow("A", 10), detailRow("B", 20), detailRow("C", 30))));
+    }
+
+    @Test
+    void doesNotRecommendComboChartWithoutDimension() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(
+                List.of(column("balance", "NUMBER"), column("deposit", "NUMBER")));
+        result.setQueryResults(List.of(Map.of("balance", 100, "deposit", 80),
+                Map.of("balance", 120, "deposit", 90)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertTrue(result.getCandidateCharts().stream()
+                .noneMatch(chart -> "COMBO".equals(chart.getChartType())));
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.server.security;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -15,6 +16,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DataMaskingServiceTest {
@@ -92,7 +94,7 @@ class DataMaskingServiceTest {
     }
 
     @Test
-    void toleratesMissingColumnsAndSchemaCollections() {
+    void deniesNonEmptyResultWhenMaskingMetadataIsUnavailable() {
         DataMaskingService service = new DataMaskingService("", "");
         SemanticQueryResp response = response("mobile", "13812345678");
         response.setColumns(null);
@@ -100,9 +102,21 @@ class DataMaskingServiceTest {
         schema.setDimensions(null);
         schema.setMetrics(null);
 
-        service.mask(response, schema, User.get(2L, "analyst"));
+        assertThrows(InvalidPermissionException.class,
+                () -> service.mask(response, schema, User.get(2L, "analyst")));
 
         assertEquals("13812345678", response.getResultList().get(0).get("mobile"));
+        assertFalse(response.isDataMasked());
+    }
+
+    @Test
+    void allowsEmptyResultWithoutMaskingMetadata() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = new SemanticQueryResp();
+        response.setResultList(List.of());
+
+        service.mask(response, null, User.get(2L, "analyst"));
+
         assertFalse(response.isDataMasked());
     }
 
@@ -121,6 +135,42 @@ class DataMaskingServiceTest {
 
         assertEquals("138****5678", row.get("CONTACT"));
         assertTrue(response.getMaskedColumns().contains("CONTACT"));
+    }
+
+    @Test
+    void fullyMasksColumnsAndRowKeysWithoutSchemaLineage() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("derived_value", "13812345678");
+        response.getResultList().get(0).put("undeclared_value", "622200001234");
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertEquals("****", response.getResultList().get(0).get("derived_value"));
+        assertEquals("****", response.getResultList().get(0).get("undeclared_value"));
+        assertEquals(Set.of("derived_value", "undeclared_value"), response.getMaskedColumns());
+    }
+
+    @Test
+    void preservesMaskingMetadataWhenSensitiveValueIsNull() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("mobile", null);
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertTrue(response.isDataMasked());
+        assertEquals(Set.of("mobile"), response.getMaskedColumns());
+    }
+
+    @Test
+    void preservesMaskingMetadataWhenUndeclaredValueIsNull() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("mobile", "13800138000");
+        response.getResultList().get(0).put("derived_value", null);
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertTrue(response.isDataMasked());
+        assertEquals(Set.of("mobile", "derived_value"), response.getMaskedColumns());
     }
 
     private SemanticQueryResp response(String field, Object value) {

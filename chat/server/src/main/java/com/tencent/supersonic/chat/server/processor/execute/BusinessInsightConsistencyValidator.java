@@ -28,33 +28,48 @@ import java.util.stream.Stream;
 /** Independently verifies that generated charts and explanations are grounded in query results. */
 final class BusinessInsightConsistencyValidator {
 
+    private static final Set<String> SUPPORTED_CHART_TYPES =
+            Set.of("KPI_CARD", "LINE", "BAR", "PIE", "COMBO", "TABLE");
     private static final Pattern RANGE =
             Pattern.compile("范围为(-?[0-9]+(?:\\.[0-9]+)?)至" + "(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern FIRST_LAST =
             Pattern.compile("首条记录为(-?[0-9]+(?:\\.[0-9]+)?)，" + "末条记录为(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern LATEST = Pattern.compile("最新记录为(-?[0-9]+(?:\\.[0-9]+)?)$");
     private static final Pattern PERCENT = Pattern.compile("(?:变化|最高，为)(-?[0-9]+(?:\\.[0-9]+)?)%");
+    private static final Pattern CONTRIBUTION = Pattern
+            .compile("^(.+)贡献度最高，为(-?[0-9]+(?:\\.[0-9]+)?)%$");
+    private static final Pattern TEMPORAL = Pattern.compile(
+            "^(.+?)(环比|同比)变化(-?[0-9]+(?:\\.[0-9]+)?)%（(\\d{4}-\\d{2})较(\\d{4}-\\d{2})）$");
 
     void validate(QueryResult result) {
+        validate(result, Map.of());
+    }
+
+    void validate(QueryResult result, Map<String, String> metricLabels) {
         if (result == null || result.getQueryColumns() == null
                 || result.getQueryResults() == null) {
             throw inconsistent("query result structure is incomplete");
+        }
+        if (result.isDataMasked()
+                && (result.getMaskedColumns() == null || result.getMaskedColumns().isEmpty())) {
+            throw inconsistent("masked result is missing masked field metadata");
         }
         Set<String> fields = result.getQueryColumns().stream().map(this::fieldName)
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> maskedFields = normalizedMaskedFields(result);
-        validateChart(result.getRecommendedChart(), fields, maskedFields, "recommended chart");
+        validateChart(result, result.getRecommendedChart(), fields, maskedFields,
+                "recommended chart");
         if (result.getCandidateCharts() == null) {
             throw inconsistent("candidate charts are missing");
         }
         for (ChartRecommendation candidate : result.getCandidateCharts()) {
-            validateChart(candidate, fields, maskedFields, "candidate chart");
+            validateChart(result, candidate, fields, maskedFields, "candidate chart");
         }
-        validateExplanation(result);
+        validateExplanation(result, metricLabels == null ? Map.of() : metricLabels);
     }
 
-    private void validateChart(ChartRecommendation chart, Set<String> fields,
+    private void validateChart(QueryResult result, ChartRecommendation chart, Set<String> fields,
             Set<String> maskedFields, String location) {
         if (chart == null || StringUtils.isBlank(chart.getChartType())
                 || StringUtils.isBlank(chart.getReason())) {
@@ -64,6 +79,10 @@ final class BusinessInsightConsistencyValidator {
         if (chart.getDimensionFields() == null || chart.getMetricFields() == null) {
             throw inconsistent(location + " field lists are missing");
         }
+        if (!SUPPORTED_CHART_TYPES.contains(chart.getChartType())) {
+            throw inconsistent(location + " type is unsupported: " + chart.getChartType());
+        }
+        validateChartFieldLists(chart, location);
         Set<String> referenced = new LinkedHashSet<>(chart.getDimensionFields());
         referenced.addAll(chart.getMetricFields());
         referenced.removeAll(fields);
@@ -76,9 +95,90 @@ final class BusinessInsightConsistencyValidator {
         if (!maskedReferences.isEmpty()) {
             throw inconsistent(location + " references masked fields: " + maskedReferences);
         }
+        validateChartContract(result, chart, location);
     }
 
-    private void validateExplanation(QueryResult result) {
+    private void validateChartFieldLists(ChartRecommendation chart, String location) {
+        List<String> dimensions = chart.getDimensionFields();
+        List<String> metrics = chart.getMetricFields();
+        if (Stream.concat(dimensions.stream(), metrics.stream()).anyMatch(StringUtils::isBlank)) {
+            throw inconsistent(location + " contains blank fields");
+        }
+        Set<String> normalizedDimensions =
+                dimensions.stream().map(this::normalize).collect(Collectors.toSet());
+        Set<String> normalizedMetrics =
+                metrics.stream().map(this::normalize).collect(Collectors.toSet());
+        if (normalizedDimensions.size() != dimensions.size()
+                || normalizedMetrics.size() != metrics.size()) {
+            throw inconsistent(location + " contains duplicate fields");
+        }
+        normalizedDimensions.retainAll(normalizedMetrics);
+        if (!normalizedDimensions.isEmpty()) {
+            throw inconsistent(location + " uses fields as both dimensions and metrics");
+        }
+    }
+
+    private void validateChartContract(QueryResult result, ChartRecommendation chart,
+            String location) {
+        Set<String> numericFields = result.getQueryColumns().stream()
+                .filter(column -> isNumericColumn(result, column)).map(this::fieldName)
+                .collect(Collectors.toSet());
+        Set<String> dateFields = result.getQueryColumns().stream().filter(this::isDateColumn)
+                .map(this::fieldName).collect(Collectors.toSet());
+        List<String> invalidDimensions = chart.getDimensionFields().stream()
+                .filter(numericFields::contains).toList();
+        List<String> invalidMetrics =
+                chart.getMetricFields().stream().filter(field -> !numericFields.contains(field))
+                        .toList();
+        if (!invalidDimensions.isEmpty() || !invalidMetrics.isEmpty()) {
+            throw inconsistent(location + " field roles do not match query column types");
+        }
+        if (!"TABLE".equals(chart.getChartType()) && (chart.getMetricFields().isEmpty()
+                || !hasUsableMetricValue(result, chart.getMetricFields()))) {
+            throw inconsistent(location + " has no usable metric values");
+        }
+        switch (chart.getChartType()) {
+            case "KPI_CARD" -> requireChartShape(result.getQueryResults().size() == 1
+                    && chart.getDimensionFields().isEmpty(), location, "KPI card");
+            case "LINE" -> requireChartShape(chart.getDimensionFields().size() == 1
+                    && dateFields.contains(chart.getDimensionFields().get(0)), location,
+                    "line chart");
+            case "BAR" -> requireChartShape(chart.getDimensionFields().size() == 1, location,
+                    "bar chart");
+            case "PIE" -> requireChartShape(result.getQueryResults().size() >= 2
+                    && chart.getDimensionFields().size() == 1
+                    && !dateFields.contains(chart.getDimensionFields().get(0))
+                    && chart.getMetricFields().size() == 1
+                    && !hasNegativeMetricValue(result, chart.getMetricFields().get(0)), location,
+                    "pie chart");
+            case "COMBO" -> requireChartShape(chart.getDimensionFields().size() == 1
+                    && chart.getMetricFields().size() >= 2, location, "combo chart");
+            case "TABLE" -> {
+                // Tables may display any non-sensitive subset of the query fields.
+            }
+            default -> throw inconsistent(location + " type is unsupported");
+        }
+    }
+
+    private void requireChartShape(boolean valid, String location, String chartType) {
+        if (!valid) {
+            throw inconsistent(location + " does not satisfy " + chartType + " field contract");
+        }
+    }
+
+    private boolean hasUsableMetricValue(QueryResult result, List<String> metricFields) {
+        return result.getQueryResults().stream().filter(Objects::nonNull)
+                .flatMap(row -> metricFields.stream().map(row::get)).map(this::decimalOrNull)
+                .anyMatch(Objects::nonNull);
+    }
+
+    private boolean hasNegativeMetricValue(QueryResult result, String metricField) {
+        return result.getQueryResults().stream().filter(Objects::nonNull)
+                .map(row -> decimalOrNull(row.get(metricField))).filter(Objects::nonNull)
+                .anyMatch(value -> value.signum() < 0);
+    }
+
+    private void validateExplanation(QueryResult result, Map<String, String> metricLabels) {
         BusinessExplanation explanation = result.getBusinessExplanation();
         if (explanation == null || StringUtils.isBlank(explanation.getSummary())) {
             throw inconsistent("business explanation is missing");
@@ -104,7 +204,7 @@ final class BusinessInsightConsistencyValidator {
         if (!Objects.equals(expectedTimeRange, explanation.getTimeRange())) {
             throw inconsistent("time range is not grounded in query results");
         }
-        validateEvidence(result, explanation.getEvidence());
+        validateEvidence(result, explanation.getEvidence(), metricLabels);
     }
 
     private void requireSummaryContains(String summary, List<String> statements, String type) {
@@ -116,14 +216,28 @@ final class BusinessInsightConsistencyValidator {
         }
     }
 
-    private void validateEvidence(QueryResult result, List<String> evidence) {
-        NumericFacts facts = numericFacts(result);
+    private void validateEvidence(QueryResult result, List<String> evidence,
+            Map<String, String> metricLabels) {
+        NumericFacts allFacts = numericFacts(result);
         for (String statement : evidence) {
+            NumericFacts facts = factsForEvidence(result, statement, allFacts, metricLabels);
             Matcher range = RANGE.matcher(statement);
             Matcher firstLast = FIRST_LAST.matcher(statement);
             Matcher latest = LATEST.matcher(statement);
             Matcher percent = PERCENT.matcher(statement);
-            if (range.find()) {
+            Matcher contribution = CONTRIBUTION.matcher(statement);
+            Matcher temporal = TEMPORAL.matcher(statement);
+            if (statement.contains("贡献度最高")) {
+                if (!contribution.matches()) {
+                    throw inconsistent("unsupported contribution evidence statement: " + statement);
+                }
+                validateContributionEvidence(result, contribution, metricLabels);
+            } else if (statement.contains("环比变化") || statement.contains("同比变化")) {
+                if (!temporal.matches()) {
+                    throw inconsistent("unsupported temporal evidence statement: " + statement);
+                }
+                validateTemporalEvidence(result, temporal, metricLabels);
+            } else if (range.find()) {
                 requirePair(facts.ranges, decimal(range.group(1)), decimal(range.group(2)),
                         "range");
             } else if (firstLast.find()) {
@@ -137,11 +251,177 @@ final class BusinessInsightConsistencyValidator {
                     requireValue(facts.rawValues, decimal(value), "anomaly value");
                 }
             } else if (percent.find()) {
-                requireValue(facts.percentages, decimal(percent.group(1)), "percentage");
+                requireValue(percentagesForStatement(facts, statement), decimal(percent.group(1)),
+                        "percentage");
             } else {
                 throw inconsistent("unsupported evidence statement: " + statement);
             }
         }
+    }
+
+    private void validateContributionEvidence(QueryResult result, Matcher matcher,
+            Map<String, String> metricLabels) {
+        ContributionReference reference =
+                resolveContributionReference(result, matcher.group(1), metricLabels);
+        List<String> categoryFields = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(column -> !isNumericColumn(result, column) && !isDateColumn(column))
+                .map(this::fieldName).toList();
+        if (categoryFields.size() != 1) {
+            throw inconsistent("contribution category is ambiguous");
+        }
+        String categoryField = categoryFields.get(0);
+        List<CategoryValue> values = new ArrayList<>();
+        for (Map<String, Object> row : result.getQueryResults()) {
+            if (row == null || row.get(categoryField) == null) {
+                throw inconsistent("contribution category is not grounded in query results");
+            }
+            BigDecimal value = decimalOrNull(row.get(reference.metricField));
+            if (value == null || value.signum() < 0) {
+                throw inconsistent("contribution metric is not grounded in query results");
+            }
+            values.add(new CategoryValue(String.valueOf(row.get(categoryField)), value));
+        }
+        if (values.size() < 2) {
+            throw inconsistent("contribution requires at least two categories");
+        }
+        BigDecimal total = values.stream().map(CategoryValue::value)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (total.signum() <= 0) {
+            throw inconsistent("contribution total is not positive");
+        }
+        BigDecimal maximum = values.stream().map(CategoryValue::value)
+                .max(Comparator.naturalOrder()).orElseThrow();
+        boolean categoryMatches = values.stream()
+                .anyMatch(value -> value.category.equals(reference.category)
+                        && value.value.compareTo(maximum) == 0);
+        BigDecimal expected = maximum.divide(total, 4, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100));
+        if (!categoryMatches || !equal(expected, decimal(matcher.group(2)))) {
+            throw inconsistent("contribution evidence is not grounded in query results");
+        }
+    }
+
+    private ContributionReference resolveContributionReference(QueryResult result, String subject,
+            Map<String, String> metricLabels) {
+        List<FieldAlias> aliases = metricAliases(result, metricLabels)
+                .filter(candidate -> subject.length() > candidate.alias.length()
+                        && subject.charAt(subject.length() - candidate.alias.length() - 1) == '的'
+                        && subject.regionMatches(true,
+                                subject.length() - candidate.alias.length(), candidate.alias, 0,
+                                candidate.alias.length()))
+                .toList();
+        if (aliases.isEmpty()) {
+            throw inconsistent("contribution metric is unknown");
+        }
+        int aliasLength =
+                aliases.stream().mapToInt(candidate -> candidate.alias.length()).max().orElseThrow();
+        List<FieldAlias> longestAliases = aliases.stream()
+                .filter(candidate -> candidate.alias.length() == aliasLength).toList();
+        Set<String> metricFields = longestAliases.stream().map(FieldAlias::field)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (metricFields.size() != 1) {
+            throw inconsistent("contribution metric is ambiguous");
+        }
+        String category =
+                subject.substring(0, subject.length() - aliasLength - 1);
+        if (StringUtils.isBlank(category)) {
+            throw inconsistent("contribution category is missing");
+        }
+        return new ContributionReference(category, metricFields.iterator().next());
+    }
+
+    private void validateTemporalEvidence(QueryResult result, Matcher matcher,
+            Map<String, String> metricLabels) {
+        String metric = resolveMetricField(result, matcher.group(1), metricLabels);
+        List<String> dateFields = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(this::isDateColumn).map(this::fieldName).toList();
+        if (dateFields.size() != 1) {
+            throw inconsistent("temporal evidence date field is ambiguous");
+        }
+        TreeMap<YearMonth, BigDecimal> values = new TreeMap<>();
+        for (Map<String, Object> row : result.getQueryResults()) {
+            if (row == null) {
+                throw inconsistent("temporal evidence row is missing");
+            }
+            YearMonth month = yearMonth(row.get(dateFields.get(0)));
+            BigDecimal value = decimalOrNull(row.get(metric));
+            if (month == null || value == null || values.put(month, value) != null) {
+                throw inconsistent("temporal evidence is not grounded in unique monthly values");
+            }
+        }
+        YearMonth current = yearMonth(matcher.group(4));
+        YearMonth baseline = yearMonth(matcher.group(5));
+        if (current == null || baseline == null) {
+            throw inconsistent("temporal comparison period is invalid");
+        }
+        YearMonth expectedBaseline =
+                "环比".equals(matcher.group(2)) ? current.minusMonths(1) : current.minusYears(1);
+        if (values.isEmpty() || !current.equals(values.lastKey())
+                || !baseline.equals(expectedBaseline) || !values.containsKey(baseline)
+                || values.get(baseline).signum() == 0) {
+            throw inconsistent("temporal comparison period is not grounded in query results");
+        }
+        BigDecimal expected = percentageChange(values.get(baseline), values.get(current));
+        if (!equal(expected, decimal(matcher.group(3)))) {
+            throw inconsistent("temporal percentage is not grounded in query results");
+        }
+    }
+
+    private String resolveMetricField(QueryResult result, String label,
+            Map<String, String> metricLabels) {
+        Set<String> fields = metricAliases(result, metricLabels)
+                .filter(alias -> alias.alias.equalsIgnoreCase(label)).map(FieldAlias::field)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (fields.size() != 1) {
+            throw inconsistent("evidence metric is unknown or ambiguous: " + label);
+        }
+        return fields.iterator().next();
+    }
+
+    private Stream<FieldAlias> metricAliases(QueryResult result,
+            Map<String, String> metricLabels) {
+        List<QueryColumn> metricColumns = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(column -> isNumericColumn(result, column)).toList();
+        Set<String> metricFields = metricColumns.stream().map(this::fieldName)
+                .collect(Collectors.toSet());
+        Stream<FieldAlias> columnAliases = metricColumns.stream()
+                .flatMap(column -> Stream
+                        .of(column.getBizName(), column.getNameEn(), column.getName())
+                        .filter(StringUtils::isNotBlank)
+                        .map(alias -> new FieldAlias(fieldName(column), alias)));
+        Stream<FieldAlias> businessAliases = metricLabels.entrySet().stream()
+                .filter(entry -> metricFields.contains(entry.getKey()))
+                .filter(entry -> StringUtils.isNotBlank(entry.getValue()))
+                .map(entry -> new FieldAlias(entry.getKey(), entry.getValue()));
+        return Stream.concat(columnAliases, businessAliases);
+    }
+
+    private boolean isNumericColumn(QueryResult result, QueryColumn column) {
+        String field = fieldName(column);
+        return SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
+                || result.getQueryResults().stream().filter(Objects::nonNull)
+                        .map(row -> row.get(field)).anyMatch(Number.class::isInstance);
+    }
+
+    private boolean isDateColumn(QueryColumn column) {
+        return SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
+                || looksLikeDateField(fieldName(column));
+    }
+
+    private List<BigDecimal> percentagesForStatement(NumericFacts facts, String statement) {
+        if (statement.contains("贡献度最高")) {
+            return facts.contributionPercentages;
+        }
+        if (statement.contains("环比变化") || statement.contains("同比变化")) {
+            return facts.temporalPercentages;
+        }
+        if (statement.contains("首末记录变化")) {
+            return facts.firstLastPercentages;
+        }
+        return List.of();
     }
 
     private NumericFacts numericFacts(QueryResult result) {
@@ -151,11 +431,50 @@ final class BusinessInsightConsistencyValidator {
                         || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
                                 .anyMatch(Number.class::isInstance))
                 .map(this::fieldName).toList();
+        return numericFacts(result, metrics);
+    }
+
+    private NumericFacts factsForEvidence(QueryResult result, String statement,
+            NumericFacts allFacts, Map<String, String> metricLabels) {
+        Stream<FieldAlias> columnAliases = result.getQueryColumns().stream()
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(column -> SemanticType.NUMBER.name().equalsIgnoreCase(column.getShowType())
+                        || result.getQueryResults().stream().map(row -> row.get(fieldName(column)))
+                                .anyMatch(Number.class::isInstance))
+                .flatMap(column -> Stream
+                        .of(column.getBizName(), column.getNameEn(), column.getName())
+                        .filter(StringUtils::isNotBlank)
+                        .map(alias -> new FieldAlias(fieldName(column), alias)));
+        Set<String> metricFields = result.getQueryColumns().stream().map(this::fieldName)
+                .filter(StringUtils::isNotBlank).collect(Collectors.toSet());
+        Stream<FieldAlias> businessAliases = metricLabels.entrySet().stream()
+                .filter(entry -> metricFields.contains(entry.getKey()))
+                .filter(entry -> StringUtils.isNotBlank(entry.getValue()))
+                .map(entry -> new FieldAlias(entry.getKey(), entry.getValue()));
+        String metric = Stream.concat(columnAliases, businessAliases)
+                .filter(alias -> startsWithMetricLabel(statement, alias.alias()))
+                .max(Comparator.comparingInt(alias -> alias.alias().length()))
+                .map(FieldAlias::field).orElse(null);
+        return metric == null ? allFacts : numericFacts(result, List.of(metric));
+    }
+
+    private boolean startsWithMetricLabel(String statement, String alias) {
+        if (!statement.regionMatches(true, 0, alias, 0, alias.length())) {
+            return false;
+        }
+        String suffix = statement.substring(alias.length());
+        return Stream.of("范围为", "首条记录为", "最新记录为", "首末记录变化", "存在统计异常候选值", "环比变化", "同比变化")
+                .anyMatch(suffix::startsWith);
+    }
+
+    private NumericFacts numericFacts(QueryResult result, List<String> metrics) {
         List<BigDecimal> rawValues = new ArrayList<>();
         List<ValuePair> ranges = new ArrayList<>();
         List<ValuePair> firstLast = new ArrayList<>();
         List<BigDecimal> latest = new ArrayList<>();
-        List<BigDecimal> percentages = new ArrayList<>();
+        List<BigDecimal> firstLastPercentages = new ArrayList<>();
+        List<BigDecimal> contributionPercentages = new ArrayList<>();
+        List<BigDecimal> temporalPercentages = new ArrayList<>();
         for (String metric : metrics) {
             List<BigDecimal> values = result.getQueryResults().stream().map(row -> row.get(metric))
                     .map(this::decimalOrNull).filter(Objects::nonNull).toList();
@@ -171,19 +490,20 @@ final class BusinessInsightConsistencyValidator {
             firstLast.add(new ValuePair(first, last));
             latest.add(last);
             if (first.signum() != 0) {
-                percentages.add(percentageChange(first, last));
+                firstLastPercentages.add(percentageChange(first, last));
             }
             BigDecimal total = values.stream().filter(value -> value.signum() >= 0)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             if (values.stream().allMatch(value -> value.signum() >= 0) && total.signum() > 0) {
                 for (BigDecimal value : values) {
-                    percentages.add(value.divide(total, 4, RoundingMode.HALF_UP)
+                    contributionPercentages.add(value.divide(total, 4, RoundingMode.HALF_UP)
                             .multiply(BigDecimal.valueOf(100)));
                 }
             }
         }
-        appendTemporalPercentages(result, metrics, percentages);
-        return new NumericFacts(rawValues, ranges, firstLast, latest, percentages);
+        appendTemporalPercentages(result, metrics, temporalPercentages);
+        return new NumericFacts(rawValues, ranges, firstLast, latest, firstLastPercentages,
+                contributionPercentages, temporalPercentages);
     }
 
     private void appendTemporalPercentages(QueryResult result, List<String> metrics,
@@ -330,6 +650,14 @@ final class BusinessInsightConsistencyValidator {
 
     private record ValuePair(BigDecimal first, BigDecimal second) {}
 
+    private record FieldAlias(String field, String alias) {}
+
+    private record CategoryValue(String category, BigDecimal value) {}
+
+    private record ContributionReference(String category, String metricField) {}
+
     private record NumericFacts(List<BigDecimal> rawValues, List<ValuePair> ranges,
-            List<ValuePair> firstLast, List<BigDecimal> latest, List<BigDecimal> percentages) {}
+            List<ValuePair> firstLast, List<BigDecimal> latest,
+            List<BigDecimal> firstLastPercentages, List<BigDecimal> contributionPercentages,
+            List<BigDecimal> temporalPercentages) {}
 }

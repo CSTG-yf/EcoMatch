@@ -85,6 +85,17 @@ class S2DataPermissionMaskingTest {
     }
 
     @Test
+    void deniesResultWhenSemanticSchemaIsUnavailable() throws Throwable {
+        QueryStructReq request = new QueryStructReq();
+        request.setNeedAuth(false);
+        when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
+        when(joinPoint.proceed()).thenReturn(response());
+        when(schemaService.fetchSemanticSchema(any())).thenReturn(null);
+
+        assertThrows(InvalidPermissionException.class, () -> aspect.doAround(joinPoint));
+    }
+
+    @Test
     void masksModelAdministratorWithoutRawDataRole() throws Throwable {
         QueryStructReq request = new QueryStructReq();
         request.setNeedAuth(true);

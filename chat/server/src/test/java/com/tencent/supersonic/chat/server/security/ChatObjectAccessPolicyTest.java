@@ -15,6 +15,7 @@ class ChatObjectAccessPolicyTest {
     void allowsOwnerAndSuperAdmin() {
         assertDoesNotThrow(() -> policy.checkQueryAccess(1L, "alice", User.get(2L, "alice")));
         assertDoesNotThrow(() -> policy.checkQueryAccess(1L, "alice", User.getDefaultUser()));
+        assertDoesNotThrow(() -> policy.checkChatAccess(2L, "alice", User.get(2L, "alice")));
     }
 
     @Test
@@ -23,5 +24,7 @@ class ChatObjectAccessPolicyTest {
                 () -> policy.checkQueryAccess(1L, "alice", User.get(3L, "bob")));
         assertThrows(InvalidPermissionException.class,
                 () -> policy.checkQueryAccess(1L, "alice", null));
+        assertThrows(InvalidPermissionException.class,
+                () -> policy.checkChatAccess(2L, "alice", User.get(3L, "bob")));
     }
 }

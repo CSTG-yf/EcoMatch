@@ -58,6 +58,8 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         try {
             BusinessInsightConfig rules = rules();
             QueryResult result = executeContext.getResponse();
+            validateInputSize(result, rules);
+            validateInputShape(result);
             FieldProfile profile = profile(result);
             enrichMetricDefinitions(executeContext, profile);
             List<ChartRecommendation> charts = recommendCharts(profile,
@@ -70,10 +72,46 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             BusinessExplanation explanation = explain(executeContext, result, profile, rules);
             result.setBusinessExplanation(explanation);
             result.setTextSummary(explanation.getSummary());
-            consistencyValidator.validate(result);
+            consistencyValidator.validate(result, profile.metricLabels);
         } finally {
             QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXPLAIN,
                     System.nanoTime() - explainStart);
+        }
+    }
+
+    private void validateInputSize(QueryResult result, BusinessInsightConfig rules) {
+        if (result.getQueryResults().size() > rules.getMaxInputRows()) {
+            throw new IllegalStateException(
+                    "Business insight input exceeds maximum row count: "
+                            + rules.getMaxInputRows());
+        }
+        if (result.getQueryColumns().size() > rules.getMaxInputColumns()) {
+            throw new IllegalStateException(
+                    "Business insight input exceeds maximum column count: "
+                            + rules.getMaxInputColumns());
+        }
+    }
+
+    private void validateInputShape(QueryResult result) {
+        if (result.getQueryResults().stream().anyMatch(Objects::isNull)) {
+            throw new IllegalStateException("Business insight input contains a null row");
+        }
+        Set<String> fields = new LinkedHashSet<>();
+        for (QueryColumn column : result.getQueryColumns()) {
+            String field = column == null ? null : fieldName(column);
+            if (StringUtils.isBlank(field)) {
+                throw new IllegalStateException(
+                        "Business insight input contains an unnamed column");
+            }
+            if (!fields.add(field)) {
+                throw new IllegalStateException(
+                        "Business insight input contains duplicate column: " + field);
+            }
+            if (!result.getQueryResults().isEmpty() && result.getQueryResults().stream()
+                    .noneMatch(row -> row.containsKey(field))) {
+                throw new IllegalStateException(
+                        "Business insight input does not contain declared field: " + field);
+            }
         }
     }
 
@@ -197,8 +235,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             charts.add(chart("PIE", 0.82, "分类数量较少，可用于展示构成占比", List.of(profile.categories.get(0)),
                     profile.metrics));
         }
-        if (profile.metrics.size() > 1 && types.add("COMBO")) {
-            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension(profile),
+        List<String> firstDimension = firstDimension(profile);
+        if (profile.metrics.size() > 1 && !firstDimension.isEmpty() && types.add("COMBO")) {
+            charts.add(chart("COMBO", 0.80, "多个数值指标可使用组合图进行对比", firstDimension,
                     profile.metrics));
         }
         if (types.add("TABLE")) {

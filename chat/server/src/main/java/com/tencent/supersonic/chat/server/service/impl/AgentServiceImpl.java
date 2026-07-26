@@ -16,9 +16,12 @@ import com.tencent.supersonic.common.config.ChatModel;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ChatModelService;
 import com.tencent.supersonic.common.util.JsonUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -60,13 +63,15 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
     }
 
     private boolean filterByAuth(Agent agent, User user, AuthType authType) {
-        Set<String> orgIds = userService.getUserAllOrgId(user.getName());
-
-        if (user.isSuperAdmin() || agent.openToAll()
-                || user.getName().equals(agent.getCreatedBy())) {
+        validateUser(user);
+        if (user.isSuperAdmin() || user.getName().equals(agent.getCreatedBy())) {
             return true;
         }
         authType = authType == null ? AuthType.VIEWER : authType;
+        if (AuthType.VIEWER.equals(authType) && agent.openToAll()) {
+            return true;
+        }
+        Set<String> orgIds = userService.getUserAllOrgId(user.getName());
         switch (authType) {
             case ADMIN:
                 return checkAdminPermission(orgIds, user, agent);
@@ -83,6 +88,7 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
 
     @Override
     public Agent createAgent(Agent agent, User user) {
+        validateUser(user);
         agent.createdBy(user.getName());
         AgentDO agentDO = convert(agent);
         save(agentDO);
@@ -93,10 +99,16 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
 
     @Override
     public Agent updateAgent(Agent agent, User user) {
+        Agent stored = getManageableAgent(agent == null ? null : agent.getId(), user);
+        agent.setId(stored.getId());
+        agent.setCreatedBy(stored.getCreatedBy());
+        agent.setCreatedAt(stored.getCreatedAt());
         agent.updatedBy(user.getName());
-        updateById(convert(agent));
-        executeAgentExamplesAsync(agent);
-        return agent;
+        AgentDO agentDO = convert(agent);
+        updateById(agentDO);
+        Agent updated = convert(agentDO);
+        executeAgentExamplesAsync(updated);
+        return updated;
     }
 
     @Override
@@ -108,8 +120,34 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
     }
 
     @Override
-    public void deleteAgent(Integer id) {
+    public void deleteAgent(Integer id, User user) {
+        getManageableAgent(id, user);
         removeById(id);
+    }
+
+    private Agent getManageableAgent(Integer id, User user) {
+        validateUser(user);
+        if (id == null) {
+            throw new InvalidArgumentException("Agent id is required");
+        }
+        Agent agent = getAgent(id);
+        if (agent == null) {
+            throw new InvalidArgumentException("Agent does not exist");
+        }
+        if (user.isSuperAdmin() || user.getName().equals(agent.getCreatedBy())) {
+            return agent;
+        }
+        Set<String> orgIds = userService.getUserAllOrgId(user.getName());
+        if (!checkAdminPermission(orgIds, user, agent)) {
+            throw new InvalidPermissionException("No permission to manage agent " + id);
+        }
+        return agent;
+    }
+
+    private void validateUser(User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
     }
 
     /**

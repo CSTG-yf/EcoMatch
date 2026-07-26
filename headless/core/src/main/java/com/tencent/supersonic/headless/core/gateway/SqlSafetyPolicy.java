@@ -1,6 +1,13 @@
 package com.tencent.supersonic.headless.core.gateway;
 
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
+import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.WindowDefinition;
+import net.sf.jsqlparser.expression.WindowElement;
+import net.sf.jsqlparser.expression.WindowOffset;
+import net.sf.jsqlparser.expression.WindowRange;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -12,28 +19,57 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.TableFunction;
 
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
 
-    private static final Set<String> DANGEROUS_FUNCTIONS = Set.of("benchmark", "dblink_exec",
-            "get_lock", "load_file", "lo_export", "lo_import", "nextval", "pg_advisory_lock",
-            "pg_advisory_unlock", "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
-            "pg_sleep", "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file",
-            "release_lock", "set_config", "setval", "sleep", "sys_eval", "sys_exec");
+    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "csv_scan",
+            "dblink_exec", "get_lock", "glob", "json_scan", "load_file", "lo_export", "lo_import",
+            "nextval", "parquet_scan", "pg_advisory_lock", "pg_advisory_unlock",
+            "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_read_file",
+            "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "pg_stat_file",
+            "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file", "read_blob",
+            "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_ndjson",
+            "read_ndjson_auto", "read_parquet", "read_text", "release_lock", "set_config", "setval",
+            "sleep", "sys_eval", "sys_exec");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
+    private static final Pattern FUNCTION_IDENTIFIER =
+            Pattern.compile("[A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)*");
 
     private final int maxSqlLength;
+    private final Set<String> dangerousFunctions;
 
     public SqlSafetyPolicy(int maxSqlLength) {
+        this(maxSqlLength, "");
+    }
+
+    public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions) {
         this.maxSqlLength = maxSqlLength;
+        Set<String> configured = new LinkedHashSet<>(DEFAULT_DANGEROUS_FUNCTIONS);
+        String additions =
+                additionalDangerousFunctions == null ? "" : additionalDangerousFunctions;
+        for (String rawFunction : additions.split(",")) {
+            String function = rawFunction.trim();
+            if (function.isEmpty()) {
+                continue;
+            }
+            if (!FUNCTION_IDENTIFIER.matcher(function).matches()) {
+                throw new IllegalArgumentException(
+                        "Invalid denied SQL function identifier: " + function);
+            }
+            configured.add(normalizeFunctionIdentifier(function));
+        }
+        this.dangerousFunctions = Collections.unmodifiableSet(configured);
     }
 
     public void validate(String sql) {
@@ -63,7 +99,7 @@ public class SqlSafetyPolicy {
         if (LOCK_OR_FILE_WRITE.matcher(normalized).find()) {
             throw new SqlPolicyViolationException("Locking and file-writing clauses are forbidden");
         }
-        for (String function : DANGEROUS_FUNCTIONS) {
+        for (String function : dangerousFunctions) {
             if (Pattern.compile("(?is)\\b" + Pattern.quote(function) + "\\s*\\(")
                     .matcher(normalized).find()) {
                 throw new SqlPolicyViolationException(
@@ -85,6 +121,7 @@ public class SqlSafetyPolicy {
             }
             PlainSelect plainSelect = (PlainSelect) select;
             validateReadOnlySelectFeatures(plainSelect);
+            validateDangerousFunctions(plainSelect);
             boolean selectsAll =
                     plainSelect.getSelectItems().stream().map(item -> item.getExpression())
                             .anyMatch(expression -> expression instanceof AllColumns
@@ -96,6 +133,131 @@ public class SqlSafetyPolicy {
                         "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
             }
         }
+    }
+
+    private void validateDangerousFunctions(PlainSelect select) {
+        ExpressionVisitorAdapter visitor = new ExpressionVisitorAdapter() {
+            @Override
+            public void visit(Function function) {
+                String functionName = normalizeFunctionName(function);
+                if (dangerousFunctions.contains(functionName)) {
+                    throw new SqlPolicyViolationException(
+                            "Dangerous SQL function is forbidden: " + functionName);
+                }
+                super.visit(function);
+            }
+        };
+        select.getSelectItems().forEach(item -> visit(item.getExpression(), visitor));
+        visit(select.getWhere(), visitor);
+        visit(select.getHaving(), visitor);
+        visit(select.getQualify(), visitor);
+        if (select.getJoins() != null) {
+            select.getJoins().stream()
+                    .flatMap(join -> Stream.ofNullable(join.getOnExpressions())
+                            .flatMap(java.util.Collection::stream))
+                    .forEach(expression -> visit(expression, visitor));
+        }
+        if (select.getGroupBy() != null && select.getGroupBy().getGroupByExpressions() != null) {
+            select.getGroupBy().getGroupByExpressions()
+                    .forEach(expression -> visitIfExpression(expression, visitor));
+        }
+        if (select.getOrderByElements() != null) {
+            select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
+        }
+        if (select.getDistinct() != null && select.getDistinct().getOnSelectItems() != null) {
+            select.getDistinct().getOnSelectItems()
+                    .forEach(item -> visit(item.getExpression(), visitor));
+        }
+        if (select.getTop() != null) {
+            visit(select.getTop().getExpression(), visitor);
+        }
+        if (select.getLimit() != null) {
+            visit(select.getLimit().getOffset(), visitor);
+            visit(select.getLimit().getRowCount(), visitor);
+            if (select.getLimit().getByExpressions() != null) {
+                select.getLimit().getByExpressions()
+                        .forEach(expression -> visitIfExpression(expression, visitor));
+            }
+        }
+        if (select.getLimitBy() != null) {
+            visit(select.getLimitBy().getOffset(), visitor);
+            visit(select.getLimitBy().getRowCount(), visitor);
+        }
+        if (select.getOffset() != null) {
+            visit(select.getOffset().getOffset(), visitor);
+        }
+        if (select.getFetch() != null) {
+            visit(select.getFetch().getExpression(), visitor);
+        }
+        if (select.getOracleHierarchical() != null) {
+            visit(select.getOracleHierarchical().getStartExpression(), visitor);
+            visit(select.getOracleHierarchical().getConnectExpression(), visitor);
+        }
+        if (select.getWindowDefinitions() != null) {
+            select.getWindowDefinitions().forEach(window -> visitWindowDefinition(window, visitor));
+        }
+        visitTableFunction(select.getFromItem(), visitor);
+        if (select.getJoins() != null) {
+            select.getJoins().forEach(join -> visitTableFunction(join.getRightItem(), visitor));
+        }
+    }
+
+    private void visitWindowDefinition(WindowDefinition window, ExpressionVisitorAdapter visitor) {
+        visit(window.getPartitionExpressionList(), visitor);
+        if (window.getOrderByElements() != null) {
+            window.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
+        }
+        WindowElement element = window.getWindowElement();
+        if (element == null) {
+            return;
+        }
+        visitWindowOffset(element.getOffset(), visitor);
+        WindowRange range = element.getRange();
+        if (range != null) {
+            visitWindowOffset(range.getStart(), visitor);
+            visitWindowOffset(range.getEnd(), visitor);
+        }
+    }
+
+    private void visitWindowOffset(WindowOffset offset, ExpressionVisitorAdapter visitor) {
+        if (offset != null) {
+            visit(offset.getExpression(), visitor);
+        }
+    }
+
+    private void visit(Expression expression, ExpressionVisitorAdapter visitor) {
+        if (expression != null) {
+            expression.accept(visitor);
+        }
+    }
+
+    private void visitIfExpression(Object value, ExpressionVisitorAdapter visitor) {
+        if (value instanceof Expression expression) {
+            visit(expression, visitor);
+        }
+    }
+
+    private void visitTableFunction(FromItem fromItem, ExpressionVisitorAdapter visitor) {
+        if (fromItem instanceof TableFunction tableFunction) {
+            tableFunction.getFunction().accept(visitor);
+        }
+    }
+
+    private String normalizeFunctionName(Function function) {
+        String name = function.getMultipartName() == null || function.getMultipartName().isEmpty()
+                ? function.getName()
+                : function.getMultipartName().get(function.getMultipartName().size() - 1);
+        String normalized = name == null ? ""
+                : name.replace("\"", "").replace("`", "").replace("[", "").replace("]", "")
+                        .toLowerCase(Locale.ROOT);
+        int qualifier = normalized.lastIndexOf('.');
+        return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
+    }
+
+    private String normalizeFunctionIdentifier(String function) {
+        String normalized = function.toLowerCase(Locale.ROOT);
+        int qualifier = normalized.lastIndexOf('.');
+        return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
     }
 
     private void validateReadOnlySelectFeatures(PlainSelect select) {

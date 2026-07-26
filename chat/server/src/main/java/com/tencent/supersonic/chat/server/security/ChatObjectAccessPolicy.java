@@ -9,12 +9,20 @@ import java.util.Objects;
 public class ChatObjectAccessPolicy {
 
     public void checkQueryAccess(Long queryId, String owner, User user) {
+        checkOwnerAccess("query", queryId, owner, user);
+    }
+
+    public void checkChatAccess(Long chatId, String owner, User user) {
+        checkOwnerAccess("chat", chatId, owner, user);
+    }
+
+    private void checkOwnerAccess(String objectType, Long objectId, String owner, User user) {
         if (user == null || user.getName() == null) {
             throw new InvalidPermissionException("User identity is required");
         }
         if (!user.isSuperAdmin() && !Objects.equals(owner, user.getName())) {
             throw new InvalidPermissionException(
-                    String.format("No permission to access query %s", queryId));
+                    String.format("No permission to access %s %s", objectType, objectId));
         }
     }
 }

@@ -61,15 +61,14 @@
             from (
                select *
                from s2_chat_query
-               where query_state = 1 and agent_id = ${agentId} and score = 5
-               <if test="userName != null and userName != ''">
-                     and user_name = #{userName}
-               </if>
+               where query_state = 1 and agent_id = #{agentId} and score = 5
+                 and user_name = #{userName}
                order by chat_id desc
             ) a
             limit #{start}, #{limit}
         ) q2 on q1.chat_id = q2.chat_id
-        where agent_id = ${agentId} and score = 5
+        where q1.agent_id = #{agentId} and q1.score = 5
+          and q1.user_name = #{userName}
     </select>
 
 </mapper>

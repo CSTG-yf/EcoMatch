@@ -44,14 +44,18 @@ public class PluginController {
     }
 
     @DeleteMapping("/{id}")
-    public boolean deletePlugin(@PathVariable("id") Long id) {
-        pluginService.deletePlugin(id);
+    public boolean deletePlugin(@PathVariable("id") Long id,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        pluginService.deletePlugin(id, user);
         return true;
     }
 
     @RequestMapping("/getPluginList")
-    public List<ChatPlugin> getPluginList() {
-        return pluginService.getPluginList();
+    public List<ChatPlugin> getPluginList(HttpServletRequest httpServletRequest,
+            HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        return pluginService.queryWithAuthCheck(new PluginQueryReq(), user);
     }
 
     @PostMapping("/query")

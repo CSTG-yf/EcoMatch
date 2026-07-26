@@ -12,6 +12,7 @@ import com.tencent.supersonic.headless.core.utils.ComponentFactory;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -19,6 +20,10 @@ import java.util.Objects;
 @Component("JdbcExecutor")
 @Slf4j
 public class JdbcExecutor implements QueryExecutor {
+
+    @Value("${s2.source.result-limit:1000000}")
+    private int resultLimit = 1_000_000;
+
     @Override
     public boolean accept(QueryStatement queryStatement) {
         return true;
@@ -32,7 +37,8 @@ public class JdbcExecutor implements QueryExecutor {
         try {
             QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
             SemanticQueryResp result = gateway.execute(queryStatement.getSql(),
-                    () -> executeInternal(queryStatement, queryResultWithColumns));
+                    () -> enforceResultLimit(
+                            executeInternal(queryStatement, queryResultWithColumns), resultLimit));
             result.setSql(sql);
             return result;
         } catch (Exception e) {
@@ -49,6 +55,15 @@ public class JdbcExecutor implements QueryExecutor {
             return exception.getMessage();
         }
         return "Query execution failed";
+    }
+
+    static SemanticQueryResp enforceResultLimit(SemanticQueryResp response, int resultLimit) {
+        if (response != null && response.getResultList() != null && resultLimit > 0
+                && response.getResultList().size() > resultLimit) {
+            throw new QueryRejectedException(
+                    "Query result row limit exceeded: " + resultLimit);
+        }
+        return response;
     }
 
     private SemanticQueryResp executeInternal(QueryStatement queryStatement,

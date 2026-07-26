@@ -21,23 +21,31 @@ import com.tencent.supersonic.chat.server.persistence.repository.ChatConfigRepos
 import com.tencent.supersonic.chat.server.service.ConfigService;
 import com.tencent.supersonic.chat.server.util.ChatConfigHelper;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.response.DimensionResp;
 import com.tencent.supersonic.headless.api.pojo.response.MetricResp;
+import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
+import com.tencent.supersonic.headless.server.service.ModelService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -48,17 +56,22 @@ public class ConfigServiceImpl implements ConfigService {
     private final ChatConfigRepository chatConfigRepository;
     private final ChatConfigHelper chatConfigHelper;
     private final SemanticLayerService semanticLayerService;
+    private final ModelService modelService;
 
     public ConfigServiceImpl(ChatConfigRepository chatConfigRepository,
-            ChatConfigHelper chatConfigHelper, SemanticLayerService semanticLayerService) {
+            ChatConfigHelper chatConfigHelper, SemanticLayerService semanticLayerService,
+            ModelService modelService) {
         this.chatConfigRepository = chatConfigRepository;
         this.chatConfigHelper = chatConfigHelper;
         this.semanticLayerService = semanticLayerService;
+        this.modelService = modelService;
     }
 
     @Override
     public Long addConfig(ChatConfigBaseReq configBaseCmd, User user) {
-        log.info("[create model extend] object:{}", JsonUtil.toString(configBaseCmd, true));
+        requireModelAccess(configBaseCmd == null ? null : configBaseCmd.getModelId(), user,
+                AuthType.ADMIN);
+        log.info("[create model extend] request=[{}]", SensitiveLogUtils.summarize(configBaseCmd));
         duplicateCheck(configBaseCmd.getModelId());
         ChatConfig chaConfig = chatConfigHelper.newChatConfig(configBaseCmd, user);
         return chatConfigRepository.createConfig(chaConfig);
@@ -75,12 +88,15 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public Long editConfig(ChatConfigEditReqReq configEditCmd, User user) {
-        log.info("[edit model extend] object:{}", JsonUtil.toString(configEditCmd, true));
+        log.info("[edit model extend] request=[{}]", SensitiveLogUtils.summarize(configEditCmd));
         if (Objects.isNull(configEditCmd) || Objects.isNull(configEditCmd.getId())
                 && Objects.isNull(configEditCmd.getModelId())) {
-            throw new RuntimeException(
+            throw new InvalidArgumentException(
                     "editConfig, id and modelId are not allowed to be empty at the same time");
         }
+        Long modelId = resolveEditModelId(configEditCmd);
+        requireModelAccess(modelId, user, AuthType.ADMIN);
+        configEditCmd.setModelId(modelId);
         ChatConfig chaConfig = chatConfigHelper.editChatConfig(configEditCmd, user);
         chatConfigRepository.updateConfig(chaConfig);
         return configEditCmd.getId();
@@ -140,9 +156,11 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public List<ChatConfigResp> search(ChatConfigFilter filter, User user) {
-        log.info("[search model extend] object:{}", JsonUtil.toString(filter, true));
+        log.info("[search model extend] request=[{}]", SensitiveLogUtils.summarize(filter));
+        Set<Long> manageableModelIds = authorizedModelIds(user, AuthType.ADMIN);
         List<ChatConfigResp> chaConfigDescList = chatConfigRepository.getChatConfig(filter);
-        return chaConfigDescList;
+        return chaConfigDescList.stream()
+                .filter(config -> manageableModelIds.contains(config.getModelId())).toList();
     }
 
     @Override
@@ -185,7 +203,8 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     @Override
-    public ChatConfigRichResp getConfigRichInfo(Long modelId) {
+    public ChatConfigRichResp getConfigRichInfo(Long modelId, User user) {
+        requireModelAccess(modelId, user, AuthType.ADMIN);
         ChatConfigRichResp chatConfigRich = new ChatConfigRichResp();
         ChatConfigResp chatConfigResp = chatConfigRepository.getConfigByModelId(modelId);
         if (Objects.isNull(chatConfigResp)) {
@@ -206,6 +225,12 @@ public class ConfigServiceImpl implements ConfigService {
                 fillChatDetailRichConfig(dataSetSchema, chatConfigRich, chatConfigResp));
 
         return chatConfigRich;
+    }
+
+    @Override
+    public DataSetSchema getDataSetSchema(Long modelId, User user) {
+        requireModelAccess(modelId, user, AuthType.VIEWER);
+        return semanticLayerService.getDataSetSchema(modelId);
     }
 
     private ChatDetailRichConfigResp fillChatDetailRichConfig(DataSetSchema modelSchema,
@@ -314,7 +339,43 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     @Override
-    public List<ChatConfigRichResp> getAllChatRichConfig() {
-        return new ArrayList<>();
+    public List<ChatConfigRichResp> getAllChatRichConfig(User user) {
+        return authorizedModelIds(user, AuthType.ADMIN).stream()
+                .map(modelId -> getConfigRichInfo(modelId, user))
+                .filter(config -> config.getModelId() != null).toList();
+    }
+
+    private Long resolveEditModelId(ChatConfigEditReqReq request) {
+        if (request.getId() == null) {
+            return request.getModelId();
+        }
+        ChatConfigFilter filter = new ChatConfigFilter();
+        filter.setId(request.getId());
+        List<ChatConfigResp> storedConfigs = chatConfigRepository.getChatConfig(filter);
+        if (CollectionUtils.isEmpty(storedConfigs)) {
+            throw new InvalidArgumentException("Chat config does not exist");
+        }
+        Long storedModelId = storedConfigs.get(0).getModelId();
+        if (request.getModelId() != null && !Objects.equals(request.getModelId(), storedModelId)) {
+            throw new InvalidArgumentException("Chat config model binding cannot be changed");
+        }
+        return storedModelId;
+    }
+
+    private void requireModelAccess(Long modelId, User user, AuthType authType) {
+        if (modelId == null) {
+            throw new InvalidArgumentException("Model id is required");
+        }
+        if (!authorizedModelIds(user, authType).contains(modelId)) {
+            throw new InvalidPermissionException("No permission to access model " + modelId);
+        }
+    }
+
+    private Set<Long> authorizedModelIds(User user, AuthType authType) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        return modelService.getModelListWithAuth(user, null, authType).stream()
+                .map(ModelResp::getId).collect(Collectors.toSet());
     }
 }
