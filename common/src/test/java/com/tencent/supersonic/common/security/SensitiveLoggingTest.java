@@ -8,6 +8,10 @@ import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.service.impl.EmbeddingServiceImpl;
+import com.tencent.supersonic.common.util.DifyClient;
+import com.tencent.supersonic.common.util.DifyRequest;
+import com.tencent.supersonic.common.util.DifyResult;
+import com.tencent.supersonic.common.util.HttpUtils;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.provider.ModelProvider;
@@ -20,6 +24,7 @@ import org.mockito.MockedStatic;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,12 +32,43 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class SensitiveLoggingTest {
+
+    @Test
+    void difyRequestLogsDoNotExposeCredentialsOrPrompt() {
+        String apiKey = "TOP_SECRET_DIFY_KEY_90";
+        String prompt = "TOP_SECRET_DIFY_PROMPT_90";
+        String user = "TOP_SECRET_DIFY_USER_90";
+        DifyRequest request = new DifyRequest();
+        request.setQuery(prompt);
+        request.setUser(user);
+        ListAppender<ILoggingEvent> appender = attach(DifyClient.class, Level.DEBUG);
+        try (MockedStatic<HttpUtils> httpUtils = mockStatic(HttpUtils.class)) {
+            httpUtils.when(
+                    () -> HttpUtils.post(anyString(), anyString(), anyMap(), eq(DifyResult.class)))
+                    .thenReturn(new DifyResult());
+
+            new DifyClient("https://dify.example/v1", apiKey).sendRequest(request,
+                    Map.of("Authorization", "Bearer " + apiKey));
+
+            String logs = messages(appender);
+            assertFalse(logs.contains(apiKey));
+            assertFalse(logs.contains(prompt));
+            assertFalse(logs.contains(user));
+            assertTrue(logs.contains("Dify request headers [sha256="));
+            assertTrue(logs.contains("Dify request payload [sha256="));
+        } finally {
+            detach(DifyClient.class, appender);
+        }
+    }
 
     @Test
     void sqlParseFailureLogsOnlyDigestAndExceptionType() {

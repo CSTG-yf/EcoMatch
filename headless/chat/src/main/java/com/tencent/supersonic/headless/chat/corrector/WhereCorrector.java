@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.corrector;
 
 import com.tencent.supersonic.common.jsqlparser.SqlAddHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlReplaceHelper;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
@@ -37,13 +38,15 @@ public class WhereCorrector extends BaseSemanticCorrector {
         String correctS2SQL = semanticParseInfo.getSqlInfo().getCorrectedS2SQL();
 
         if (StringUtils.isNotEmpty(queryFilter)) {
-            log.info("add queryFilter to correctS2SQL :{}", queryFilter);
+            log.info("Add query filter to corrected S2SQL [{}]",
+                    SensitiveLogUtils.summarize(queryFilter));
             try {
                 Expression expression = CCJSqlParserUtil.parseCondExpression(queryFilter);
                 correctS2SQL = SqlAddHelper.addWhere(correctS2SQL, expression);
                 semanticParseInfo.getSqlInfo().setCorrectedS2SQL(correctS2SQL);
             } catch (JSQLParserException e) {
-                log.error("parseCondExpression", e);
+                log.error("Failed to parse query filter: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             }
         }
     }

@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.core.translator.parser.calcite;
 import com.google.common.collect.Sets;
 import com.tencent.supersonic.common.calcite.Configuration;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.Identify;
 import com.tencent.supersonic.headless.api.pojo.enums.IdentifyType;
@@ -74,7 +75,8 @@ public class SqlBuilder {
         } catch (Exception e) {
             // failure in optimization phase doesn't affect the query result,
             // just ignore it
-            log.error("optimizeParseNode error", e);
+            log.error("Parse node optimization failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
         return SemanticNode.getSql(parserNode, engineType);
     }

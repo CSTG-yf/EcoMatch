@@ -6,6 +6,7 @@ import com.tencent.supersonic.common.pojo.ItemDateResp;
 import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
 import com.tencent.supersonic.common.util.DateModeUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
@@ -59,7 +60,7 @@ public class SqlGenerateUtils {
             sb.append(agg.getColumn()).append(" as ").append("value").append(locate).append(",");
         }
         String selectSql = sb.substring(0, sb.length() - 1);
-        log.debug("union select sql {}", selectSql);
+        log.debug("Union select SQL [{}]", SensitiveLogUtils.summarize(selectSql));
         return selectSql;
     }
 

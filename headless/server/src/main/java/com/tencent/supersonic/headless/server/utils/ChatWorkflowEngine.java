@@ -162,8 +162,7 @@ public class ChatWorkflowEngine {
             } catch (Exception e) {
                 log.warn("SQL translation failed: type={}, error=[{}]",
                         e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-                errorMsg.add(String.format("S2SQL:%s %s", parseInfo.getSqlInfo().getParsedS2SQL(),
-                        e.getMessage()));
+                errorMsg.add("Semantic query translation failed");
             }
         });
         if (!errorMsg.isEmpty()) {

@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.server.service.impl;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.util.BeanMapper;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.QueryRuleFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QueryRuleReq;
 import com.tencent.supersonic.headless.api.pojo.response.DataSetResp;
@@ -90,7 +91,9 @@ public class QueryRuleServiceImpl implements QueryRuleService {
             DataSetResp dataSet = dataSetService.getDataSet(queryRuleReq.getDataSetId());
             if (dataSet.getAdmins().contains(userName)
                     || dataSet.getCreatedBy().equalsIgnoreCase(userName)) {
-                log.debug(String.format("user:%s, queryRuleReq:%s", userName, queryRuleReq));
+                log.debug("Query rule access granted: user=[{}], rule=[{}]",
+                        SensitiveLogUtils.summarize(userName),
+                        SensitiveLogUtils.summarize(queryRuleReq));
                 return;
             }
             throw new RuntimeException("用户暂无权限变更数据集的规则, 请确认");
@@ -103,7 +106,9 @@ public class QueryRuleServiceImpl implements QueryRuleService {
             DataSetResp dataSet = dataSetService.getDataSet(queryRuleDO.getDataSetId());
             if (dataSet.getAdmins().contains(userName)
                     || dataSet.getCreatedBy().equalsIgnoreCase(userName)) {
-                log.debug(String.format("user:%s, queryRuleDO:%s", userName, queryRuleDO));
+                log.debug("Query rule access granted: user=[{}], rule=[{}]",
+                        SensitiveLogUtils.summarize(userName),
+                        SensitiveLogUtils.summarize(queryRuleDO));
                 return;
             }
             throw new RuntimeException("用户暂无权限变更数据集的规则, 请确认");

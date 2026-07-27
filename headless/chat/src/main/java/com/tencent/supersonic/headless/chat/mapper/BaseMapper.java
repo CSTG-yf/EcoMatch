@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.mapper;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementMatch;
@@ -40,7 +41,8 @@ public abstract class BaseMapper implements SchemaMapper {
             doMap(chatQueryContext);
             MapFilter.filter(chatQueryContext);
         } catch (Exception e) {
-            log.error("work error", e);
+            log.error("Schema mapping failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
 
         long cost = System.currentTimeMillis() - startTime;

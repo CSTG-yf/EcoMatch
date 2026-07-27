@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.parser.llm;
 
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
@@ -26,7 +27,8 @@ public class ResponseHelper {
                 return matcher.group(1);
             }
         } catch (Exception e) {
-            log.error("", e);
+            log.error("LLM response parsing failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
         return sql;
     }

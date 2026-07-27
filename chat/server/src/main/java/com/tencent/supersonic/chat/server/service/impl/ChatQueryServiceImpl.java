@@ -469,7 +469,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 .collect(Collectors.toList());
         String correctorSql = parseInfo.getSqlInfo().getCorrectedS2SQL();
         log.debug("Metric replacement input SQL [{}]", SensitiveLogUtils.summarize(correctorSql));
-        log.info("filteredMetrics:{},metrics:{}", oriMetrics, metric);
+        log.info("Filtered metrics [{}], replacement metric [{}]",
+                SensitiveLogUtils.summarize(oriMetrics), SensitiveLogUtils.summarize(metric));
         Map<String, Pair<String, String>> fieldMap = new HashMap<>();
         if (!CollectionUtils.isEmpty(oriMetrics) && !oriMetrics.contains(metric.getName())) {
             fieldMap.put(oriMetrics.get(0), Pair.of(metric.getName(), metric.getDefaultAgg()));

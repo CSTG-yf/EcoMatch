@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.corrector;
 import com.tencent.supersonic.common.jsqlparser.SqlAddHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlRemoveHelper;
 import com.tencent.supersonic.common.pojo.enums.AggregateTypeEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -30,10 +31,12 @@ public abstract class BaseSemanticCorrector implements SemanticCorrector {
                         .setCorrectedS2SQL(semanticParseInfo.getSqlInfo().getParsedS2SQL());
             }
             doCorrect(chatQueryContext, semanticParseInfo);
-            log.debug("sqlCorrection:{} sql:{}", this.getClass().getSimpleName(),
-                    semanticParseInfo.getSqlInfo());
+            log.debug("sqlCorrection:{} sql:[{}]", this.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(semanticParseInfo.getSqlInfo()));
         } catch (Exception e) {
-            log.error(String.format("correct error,sqlInfo:%s", semanticParseInfo.getSqlInfo()), e);
+            log.error("SQL correction failed: sqlInfo=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(semanticParseInfo.getSqlInfo()),
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
     }
 

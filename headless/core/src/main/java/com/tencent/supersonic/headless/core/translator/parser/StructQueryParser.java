@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.core.translator.parser;
 
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import com.tencent.supersonic.headless.core.pojo.SqlQuery;
 import com.tencent.supersonic.headless.core.pojo.StructQuery;
@@ -52,7 +53,8 @@ public class StructQueryParser implements QueryParser {
         queryStatement.setSqlQuery(sqlQuery);
         queryStatement.setIsS2SQL(true);
 
-        log.info("parse structQuery [{}] ", queryStatement.getSqlQuery());
+        log.info("Parse structured query [{}]",
+                SensitiveLogUtils.summarize(queryStatement.getSqlQuery()));
     }
 
 }

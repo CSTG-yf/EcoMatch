@@ -5,13 +5,17 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
 import com.tencent.supersonic.headless.api.pojo.request.QueryMultiStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
+import com.tencent.supersonic.headless.chat.ChatQueryContext;
+import com.tencent.supersonic.headless.chat.corrector.BaseSemanticCorrector;
 import com.tencent.supersonic.headless.chat.corrector.SemanticCorrector;
 import com.tencent.supersonic.headless.chat.utils.ComponentFactory;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
+import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
 import com.tencent.supersonic.headless.core.utils.SqlGenerateUtils;
 import com.tencent.supersonic.headless.server.facade.service.impl.S2ChatLayerService;
 import com.tencent.supersonic.headless.server.service.DataSetService;
@@ -27,6 +31,8 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -34,6 +40,71 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class SensitiveQueryLoggingTest {
+
+    @Test
+    void jdbcDriverFailureDoesNotExposeUrlOrStackTrace() {
+        String secretUrl = "jdbc:unknown://TOP_SECRET_HOST_99/database";
+        ListAppender<ILoggingEvent> appender = attach(JdbcDataSourceUtils.class, Level.ERROR);
+        try {
+            RuntimeException error = assertThrows(RuntimeException.class,
+                    () -> JdbcDataSourceUtils.getDriverClassName(secretUrl));
+
+            String logs = messages(appender);
+            assertFalse(error.getMessage().contains(secretUrl));
+            assertFalse(logs.contains(secretUrl));
+            assertFalse(logs.contains("TOP_SECRET_HOST_99"));
+            assertTrue(logs.contains("type=SQLException"));
+            assertTrue(logs.contains("error=[sha256="));
+            assertNull(appender.list.get(0).getThrowableProxy());
+        } finally {
+            detach(JdbcDataSourceUtils.class, appender);
+        }
+    }
+
+    @Test
+    void correctionFailureLogsOnlyDigestsAndExceptionType() {
+        String secretSql = "SELECT account_no FROM customer_secret_100";
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getSqlInfo().setParsedS2SQL(secretSql);
+        BaseSemanticCorrector corrector = new BaseSemanticCorrector() {
+            @Override
+            public void doCorrect(ChatQueryContext context, SemanticParseInfo semanticParseInfo) {
+                throw new IllegalStateException("failure contains " + secretSql);
+            }
+        };
+        ListAppender<ILoggingEvent> appender = attach(BaseSemanticCorrector.class, Level.ERROR);
+        try {
+            corrector.correct(null, parseInfo);
+
+            String logs = messages(appender);
+            assertFalse(logs.contains(secretSql));
+            assertFalse(logs.contains("failure contains"));
+            assertTrue(logs.contains("sqlInfo=[sha256="));
+            assertTrue(logs.contains("type=IllegalStateException"));
+            assertNull(appender.list.get(0).getThrowableProxy());
+        } finally {
+            detach(BaseSemanticCorrector.class, appender);
+        }
+    }
+
+    @Test
+    void unionSelectLogContainsOnlyDigestWhileResultIsUnchanged() {
+        String secretGroup = "TOP_SECRET_GROUP_100";
+        QueryStructReq query = new QueryStructReq();
+        query.setGroups(List.of(secretGroup));
+        query.setAggregators(List.of());
+        ListAppender<ILoggingEvent> appender = attach(SqlGenerateUtils.class, Level.DEBUG);
+        try {
+            String select = SqlGenerateUtils.getUnionSelect(query);
+
+            assertEquals(secretGroup, select);
+            String logs = messages(appender);
+            assertFalse(logs.contains(secretGroup));
+            assertTrue(logs.contains("Union select SQL [sha256="));
+        } finally {
+            detach(SqlGenerateUtils.class, appender);
+        }
+    }
 
     @Test
     void correctedSqlLogContainsOnlyDigest() {

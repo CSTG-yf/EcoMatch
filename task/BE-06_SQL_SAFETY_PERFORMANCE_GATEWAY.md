@@ -29,6 +29,8 @@
 - 策略拒绝保留可操作的安全原因，其他 JDBC/驱动异常统一返回通用查询失败信息，避免把物理 SQL、库表结构或连接细节暴露给调用方。
 - JDBC、查询加速器和数据库管理 SQL 均在实际执行前进入统一网关，避免加速器命中或管理接口绕过只读策略、限流和性能监控。
 - 数据库管理 SQL 的非策略异常统一转换为通用查询失败信息，日志仅保留异常类型和不可逆摘要；策略拒绝原因仍原样保留。
+- JDBC 驱动解析、连接测试、重试和资源关闭日志不再记录完整 URL、驱动异常正文或堆栈；不支持的数据源类型和连接失败响应统一使用通用消息。
+- 语义查询解析、改写、纠错和翻译日志统一记录不可逆摘要；翻译失败响应不再回显 S2SQL 或底层异常消息。
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度、鉴权开关和内部原生执行模式，避免权限结果跨用户或跨安全模式复用。
 - 结果缓存写入和读取均使用响应快照，隔离结果行、列定义、授权信息和脱敏元数据，防止调用方修改共享缓存对象。
 
@@ -54,6 +56,7 @@
 - `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/advisory lock 状态函数绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist 及非法配置拒绝，以及受限派生查询兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
+- `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。
 - `DatabaseServicePermissionTest`：校验普通用户不能测试或变更数据库连接，VIEWER 读取数据源详情时不返回密码，数据源管理员仍可读取受控凭据。
 - `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建均按模型权限或超级管理员身份 fail-closed。
 - `SqlFilterUtilsSecurityTest`：校验比较、IN、LIKE 和普通含撇号值均被规范化到单一字符串字面量，不能通过预加引号逃逸过滤条件。

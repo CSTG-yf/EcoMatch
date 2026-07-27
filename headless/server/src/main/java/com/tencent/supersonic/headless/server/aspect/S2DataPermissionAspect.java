@@ -291,7 +291,7 @@ public class S2DataPermissionAspect {
         if (queryReq instanceof QueryStructReq) {
             return queryStructUtils.getBizNameFromStruct((QueryStructReq) queryReq);
         }
-        throw new InvalidArgumentException("queryReq is not Invalid:" + queryReq);
+        throw new InvalidArgumentException("Unsupported semantic query request");
     }
 
     private SemanticSchemaResp getSemanticSchemaResp(SemanticQueryReq semanticQueryReq) {

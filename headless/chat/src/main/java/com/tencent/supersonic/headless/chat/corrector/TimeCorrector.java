@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlAddHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlDateSelectHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.QueryConfig;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -96,7 +97,8 @@ public class TimeCorrector extends BaseSemanticCorrector {
             Expression expression = CCJSqlParserUtil.parseCondExpression(condition);
             return SqlAddHelper.addWhere(sql, expression);
         } catch (JSQLParserException e) {
-            log.error("addConditionToSQL:{}", e);
+            log.error("Time condition correction failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             return sql;
         }
     }

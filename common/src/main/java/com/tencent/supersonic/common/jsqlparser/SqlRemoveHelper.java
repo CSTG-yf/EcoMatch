@@ -1,5 +1,6 @@
 package com.tencent.supersonic.common.jsqlparser;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.BinaryExpression;
@@ -52,7 +53,8 @@ public class SqlRemoveHelper {
 
             return result.toString();
         } catch (Exception e) {
-            log.error("removeUnderscores error", e);
+            log.error("removeUnderscores failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
         return sql;
     }
@@ -129,7 +131,8 @@ public class SqlRemoveHelper {
             ((PlainSelect) selectStatement)
                     .setHaving(filteredExpression(having, SqlEditEnum.NUMBER_FILTER));
         } catch (Exception e) {
-            log.info("replaceFunction has an exception:{}", e.toString());
+            log.info("replaceFunction failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
         return selectStatement.toString();
     }
@@ -178,7 +181,8 @@ public class SqlRemoveHelper {
                 handleBetweenExpression((Between) expression, removeFieldNames);
             }
         } catch (JSQLParserException e) {
-            log.error("JSQLParserException", e);
+            log.error("SQL parse failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
     }
 
@@ -330,7 +334,9 @@ public class SqlRemoveHelper {
                             CCJSqlParserUtil.parseExpression("(" + expression + ")");
                     return parseExpression;
                 } catch (JSQLParserException jsqlParserException) {
-                    log.info("jsqlParser has an exception:{}", jsqlParserException.toString());
+                    log.info("Expression parse failed: type={}, error=[{}]",
+                            jsqlParserException.getClass().getSimpleName(),
+                            SensitiveLogUtils.summarize(jsqlParserException.getMessage()));
                 }
             } else {
                 return expression;
@@ -448,7 +454,9 @@ public class SqlRemoveHelper {
             Expression newWhere = CCJSqlParserUtil.parseCondExpression(buffer.toString());
             plainSelect.setWhere(newWhere);
         } catch (Exception e) {
-            log.error("parseCondExpression error:{}", buffer, e);
+            log.error("Condition parse failed: condition=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(buffer), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
         return selectStatement.toString();
     }

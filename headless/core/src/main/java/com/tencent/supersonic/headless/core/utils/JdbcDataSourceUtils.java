@@ -4,6 +4,7 @@ import javax.sql.DataSource;
 
 import com.alibaba.druid.util.StringUtils;
 import com.tencent.supersonic.common.util.MD5Util;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.core.pojo.JdbcDataSource;
@@ -37,7 +38,8 @@ public class JdbcDataSourceUtils {
         try {
             Class.forName(getDriverClassName(database.getUrl()));
         } catch (ClassNotFoundException e) {
-            log.error(e.toString(), e);
+            log.error("JDBC driver lookup failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             return false;
         }
         // presto/trino ssl=false connection need password
@@ -48,7 +50,9 @@ public class JdbcDataSourceUtils {
                         database.getUsername(), null)) {
                     return con != null;
                 } catch (SQLException e) {
-                    log.error(e.toString(), e);
+                    log.error("JDBC connection test failed: type={}, error=[{}]",
+                            e.getClass().getSimpleName(),
+                            SensitiveLogUtils.summarize(e.getMessage()));
                 }
             }
         } else {
@@ -56,7 +60,8 @@ public class JdbcDataSourceUtils {
                     database.getUsername(), database.passwordDecrypt())) {
                 return con != null;
             } catch (SQLException e) {
-                log.error(e.toString(), e);
+                log.error("JDBC connection test failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             }
         }
 
@@ -68,7 +73,8 @@ public class JdbcDataSourceUtils {
             try {
                 connection.close();
             } catch (Exception e) {
-                log.error("Connection release error", e);
+                log.error("Connection release failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             }
         }
     }
@@ -78,7 +84,8 @@ public class JdbcDataSourceUtils {
             try {
                 rs.close();
             } catch (Exception e) {
-                log.error("ResultSet close error", e);
+                log.error("ResultSet close failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             }
         }
     }
@@ -86,11 +93,11 @@ public class JdbcDataSourceUtils {
     public static String isSupportedDatasource(String jdbcUrl) {
         String dataSourceName = getDataSourceName(jdbcUrl);
         if (StringUtils.isEmpty(dataSourceName)) {
-            throw new RuntimeException("Not supported dataSource: jdbcUrl=" + jdbcUrl);
+            throw new RuntimeException("Unsupported JDBC datasource URL");
         }
 
         if (!DataType.getAllSupportedDatasourceNameSet().contains(dataSourceName)) {
-            throw new RuntimeException("Not supported dataSource: jdbcUrl=" + jdbcUrl);
+            throw new RuntimeException("Unsupported JDBC datasource URL");
         }
 
         String urlPrefix = String.format(JDBC_PREFIX_FORMATTER, dataSourceName);
@@ -119,7 +126,8 @@ public class JdbcDataSourceUtils {
         try {
             className = DriverManager.getDriver(jdbcUrl.trim()).getClass().getName();
         } catch (SQLException e) {
-            log.error("e", e);
+            log.error("JDBC driver resolution failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
 
         if (!StringUtils.isEmpty(className) && !className.contains("com.sun.proxy")
@@ -131,7 +139,7 @@ public class JdbcDataSourceUtils {
         if (dataTypeEnum != null) {
             return dataTypeEnum.getDriver();
         }
-        throw new RuntimeException("Not supported data type: jdbcUrl=" + jdbcUrl);
+        throw new RuntimeException("Unsupported JDBC data type");
     }
 
     public static String getKey(String name, String jdbcUrl, String username, String password,
@@ -164,9 +172,11 @@ public class JdbcDataSourceUtils {
                 DataSource dataSource = getDataSource(database);
                 return dataSource.getConnection();
             } catch (Exception e) {
-                log.error("Get connection error, jdbcUrl:{}, e:{}", database.getUrl(), e);
-                throw new RuntimeException("Get connection error, jdbcUrl:" + database.getUrl()
-                        + " you can try again later or reset datasource");
+                log.error("Get connection failed: jdbcUrl=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(database.getUrl()),
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
+                throw new RuntimeException(
+                        "Get connection error; try again later or reset datasource", e);
             }
         }
         return conn;
@@ -186,13 +196,17 @@ public class JdbcDataSourceUtils {
                     return connection;
                 }
             } catch (Exception e) {
-                log.error("e", e);
+                log.error("Get connection retry failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             }
 
             try {
                 Thread.sleep((long) Math.pow(2, rc) * 1000);
             } catch (InterruptedException e) {
-                log.error("e", e);
+                Thread.currentThread().interrupt();
+                log.error("Get connection retry interrupted: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
+                throw new RuntimeException("JDBC connection retry interrupted", e);
             }
 
             rc++;

@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlValidHelper;
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.DateConf;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -116,7 +117,8 @@ public class LLMResponseService {
                         + validation.getEvaluation().getValidateMsg();
                 validationFailures.add(failure);
                 log.warn("currentRetry:{}, rejected S2SQL candidate, reason:{}, sql:{}",
-                        currentRetry, failure, entry.getKey());
+                        currentRetry, SensitiveLogUtils.summarize(failure),
+                        SensitiveLogUtils.summarize(entry.getKey()));
                 continue;
             }
             double modelWeight = response.getSqlWeight();
@@ -147,7 +149,8 @@ public class LLMResponseService {
         try {
             return SqlValidHelper.equals(left, right);
         } catch (RuntimeException e) {
-            log.debug("fallback to normalized SQL comparison for complex candidate", e);
+            log.debug("Fallback to normalized SQL comparison: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
             return StringUtils.normalizeSpace(left)
                     .equalsIgnoreCase(StringUtils.normalizeSpace(right));
         }

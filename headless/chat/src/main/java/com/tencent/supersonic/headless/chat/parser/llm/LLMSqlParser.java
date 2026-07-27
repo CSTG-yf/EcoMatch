@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.parser.llm;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
@@ -41,15 +42,17 @@ public class LLMSqlParser implements SemanticParser {
                 return;
             }
             log.info("try generating query statement for query:{}, dataSetId:{}",
-                    queryCtx.getRequest().getQueryText(), dataSetId);
+                    SensitiveLogUtils.summarize(queryCtx.getRequest().getQueryText()), dataSetId);
 
             // 3.invoke LLM service to do parsing.
             tryParse(queryCtx, dataSetId);
         } catch (BankNl2SqlError e) {
             failConstrainedPlan(queryCtx, e);
-            log.error("failed to parse constrained bank query", e);
+            log.error("Failed to parse constrained bank query: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         } catch (Exception e) {
-            log.error("failed to parse query:", e);
+            log.error("Failed to parse query: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
         }
     }
 
@@ -104,7 +107,9 @@ public class LLMSqlParser implements SemanticParser {
                     }
                 }
             } catch (Exception e) {
-                log.error("currentRetryRound:{}, runText2SQL failed", currentRetry, e);
+                log.error("currentRetryRound:{}, runText2SQL failed: type={}, error=[{}]",
+                        currentRetry, e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e.getMessage()));
                 if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
                         && !BankNl2SqlError.allowsParserRetry(e)) {
                     if (e instanceof BankNl2SqlError bankError) {

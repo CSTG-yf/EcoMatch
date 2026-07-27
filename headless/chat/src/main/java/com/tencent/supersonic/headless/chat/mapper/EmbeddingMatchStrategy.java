@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.google.common.collect.Lists;
 import com.hankcs.hanlp.seg.common.Term;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.knowledge.EmbeddingResult;
@@ -64,8 +65,8 @@ public class EmbeddingMatchStrategy extends BatchMatchStrategy<EmbeddingResult> 
     public List<EmbeddingResult> detect(ChatQueryContext chatQueryContext, List<S2Term> terms,
             Set<Long> detectDataSetIds) {
         if (chatQueryContext == null || CollectionUtils.isEmpty(detectDataSetIds)) {
-            log.warn("Invalid input parameters: context={}, dataSetIds={}", chatQueryContext,
-                    detectDataSetIds);
+            log.warn("Invalid input parameters: context=[{}], dataSetIds={}",
+                    SensitiveLogUtils.summarize(chatQueryContext), detectDataSetIds);
             return Collections.emptyList();
         }
 
@@ -101,13 +102,16 @@ public class EmbeddingMatchStrategy extends BatchMatchStrategy<EmbeddingResult> 
             // Get segmentation results
             Set<String> detectSegments = extractValidSegments(queryText);
             if (CollectionUtils.isEmpty(detectSegments)) {
-                log.info("No valid segments found for text: {}", queryText);
+                log.info("No valid segments found for text [{}]",
+                        SensitiveLogUtils.summarize(queryText));
                 return Collections.emptyList();
             }
 
             return detectByBatch(chatQueryContext, detectDataSetIds, detectSegments, true);
         } catch (Exception e) {
-            log.error("Error in LLM detection for context: {}", chatQueryContext, e);
+            log.error("Error in LLM detection: context=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(chatQueryContext), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
             return Collections.emptyList();
         }
     }

@@ -39,6 +39,7 @@
 - SQL 与结构化查询共用行权限表达式校验，拦截多语句、注释、子查询和 DML/DDL 关键字；表达式解析失败时 fail-closed，不执行未过滤查询。
 - 缓存写入和命中日志只记录键与命中状态，不输出查询请求或结果对象；用户、角色和属性作用域经 SHA-256 后进入缓存键，避免身份属性和敏感结果进入日志。
 - SQL、自然语言问题、语义解析上下文、行权限表达式、授权请求、WebService 结果及所有模型提示词/响应在日志中统一记录 SHA-256 指纹与长度，不记录客户条件、过滤值、生成 SQL 或结果明文；指纹保留跨阶段关联排障能力。
+- Dify 请求头、API Key、提示词和用户标识，以及 NL2SQL 候选、语义纠错、查询规则和指标替换信息均只记录不可逆摘要，不记录原始对象或异常堆栈。
 - WebService 插件使用结构化 URI 参数编码，响应和异常只记录不可逆摘要，不再输出远端响应正文或异常消息。
 - 查询异常日志只记录异常类型和异常指纹，不输出可能回显物理 SQL 的 JDBC 异常消息或堆栈。
 - 动态脱敏支持重复执行，缓存命中或多层切面再次处理时保持结果幂等，并合并保留已有脱敏字段元数据。
@@ -79,6 +80,7 @@
 - `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建的对象级权限。
 - `DatabaseServicePermissionTest`：校验数据源连接管理权限和 VIEWER 密码脱敏。
 - `SensitiveLogUtilsTest`：校验日志摘要稳定可关联，且不包含 SQL、证件号等原始内容。
+- `SensitiveLoggingTest`、`SensitiveQueryLoggingTest`：校验 Dify 凭证/提示词、JDBC URL、问题文本、过滤值、候选 SQL、语义纠错和查询规则不进入日志明文。
 - `RestExceptionHandlerTest`：校验未知异常消息不回显，参数错误仍保留受控的可操作提示。
 - `BusinessInsightProcessorTest`：验证脱敏字段不进入数值证据或图表字段，并降级为低置信度表格。
 - `MetricRatioCalcProcessorTest`：验证脱敏指标不会进入同比环比补查和格式化计算。

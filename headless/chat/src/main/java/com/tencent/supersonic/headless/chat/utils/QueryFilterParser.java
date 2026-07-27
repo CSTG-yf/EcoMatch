@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.utils;
 
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilters;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,8 @@ public class QueryFilterParser {
                     .map(QueryFilterParser::parseFilter).collect(Collectors.toList());
             return String.join(" AND ", conditions);
         } catch (Exception e) {
-            log.error("", e);
+            log.error("Query filter parsing failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
         return null;
     }

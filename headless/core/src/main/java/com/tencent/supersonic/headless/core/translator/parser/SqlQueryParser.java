@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.enums.AggOption;
 import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
@@ -96,7 +97,7 @@ public class SqlQueryParser implements QueryParser {
             sqlQuery.setWithAlias(false);
         }
 
-        log.info("parse sqlQuery [{}] ", sqlQuery);
+        log.info("Parse SQL query [{}]", SensitiveLogUtils.summarize(sqlQuery));
     }
 
     private boolean allFieldMatched(Set<String> queryFields,
@@ -180,13 +181,13 @@ public class SqlQueryParser implements QueryParser {
                 getNameToBizNameMap(queryStatement.getOntologyQuery());
         String sql = queryStatement.getSqlQuery().getSql();
         log.debug("dataSetId:{},convert name to bizName before:{}", queryStatement.getDataSetId(),
-                sql);
+                SensitiveLogUtils.summarize(sql));
         sql = SqlReplaceHelper.replaceFields(sql, fieldNameToBizNameMap, true);
         log.debug("dataSetId:{},convert name to bizName after:{}", queryStatement.getDataSetId(),
-                sql);
+                SensitiveLogUtils.summarize(sql));
         sql = SqlReplaceHelper.replaceTable(sql,
                 Constants.TABLE_PREFIX + queryStatement.getDataSetId());
-        log.debug("replaceTableName after:{}", sql);
+        log.debug("replaceTableName after:[{}]", SensitiveLogUtils.summarize(sql));
         queryStatement.getSqlQuery().setSql(sql);
     }
 
@@ -194,7 +195,8 @@ public class SqlQueryParser implements QueryParser {
         // replace order by field with the select sequence number
         String sql = queryStatement.getSqlQuery().getSql();
         String newSql = SqlReplaceHelper.replaceAggAliasOrderbyField(sql);
-        log.debug("replaceOrderAggSameAlias {} -> {}", sql, newSql);
+        log.debug("replaceOrderAggSameAlias [{}] -> [{}]", SensitiveLogUtils.summarize(sql),
+                SensitiveLogUtils.summarize(newSql));
         queryStatement.getSqlQuery().setSql(newSql);
     }
 

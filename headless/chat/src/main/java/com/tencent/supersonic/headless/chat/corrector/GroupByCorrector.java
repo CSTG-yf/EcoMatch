@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlValidHelper;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
 import com.tencent.supersonic.headless.api.pojo.SqlInfo;
@@ -53,7 +54,8 @@ public class GroupByCorrector extends BaseSemanticCorrector {
             return false;
         }
         if (SqlSelectHelper.hasGroupBy(correctS2SQL)) {
-            log.debug("No need to add 'group by', existed 'group by' in s2sql:{}", correctS2SQL);
+            log.debug("No need to add 'group by', S2SQL already grouped [{}]",
+                    SensitiveLogUtils.summarize(correctS2SQL));
             return false;
         }
         Environment environment = ContextUtils.getBean(Environment.class);

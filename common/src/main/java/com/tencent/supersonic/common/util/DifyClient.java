@@ -51,12 +51,13 @@ public class DifyClient {
 
     public DifyResult sendRequest(DifyRequest request, Map<String, String> headers) {
         try {
-            log.debug("请求dify- header--->" + JsonUtil.toString(headers));
-            log.debug("请求dify- conversionId--->" + JsonUtil.toString(request));
+            log.debug("Dify request headers [{}]", SensitiveLogUtils.summarize(headers));
+            log.debug("Dify request payload [{}]", SensitiveLogUtils.summarize(request));
             return HttpUtils.post(difyURL, JsonUtil.toString(request), headers, DifyResult.class);
         } catch (Exception e) {
-            log.error("请求dify失败---->" + e.getMessage());
-            throw new RuntimeException(e);
+            log.error("Dify request failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e.getMessage()));
+            throw new RuntimeException("Dify request failed", e);
         }
     }
 

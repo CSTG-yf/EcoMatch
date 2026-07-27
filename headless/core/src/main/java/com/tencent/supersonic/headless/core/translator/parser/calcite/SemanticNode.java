@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.calcite.Configuration;
 import com.tencent.supersonic.common.calcite.SemanticSqlDialect;
 import com.tencent.supersonic.common.calcite.SqlDialectFactory;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.core.translator.parser.Constants;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -421,7 +422,8 @@ public abstract class SemanticNode {
             RelNode relNode = relOptPlanner.findBestExp();
             return converter.visitRoot(relNode).asStatement();
         } catch (Exception e) {
-            log.error("optimize error {}", e);
+            log.error("Semantic node optimization failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
         }
         return null;
     }
