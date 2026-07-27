@@ -25,6 +25,11 @@ public abstract class SemanticQueryReq {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     protected boolean needAuth = true;
 
+    /**
+     * Native-layer execution mode is reserved for trusted server-side dataset expansion. External
+     * JSON must not select a different execution or cache security domain.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     protected boolean innerLayerNative = false;
 
     protected Long dataSetId;

@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.facade.rest;
 
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import com.tencent.supersonic.common.util.ThreadMdcUtil;
@@ -15,6 +16,7 @@ import com.tencent.supersonic.headless.server.facade.service.SemanticLayerServic
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.MDC;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,12 +29,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/semantic/query")
 @Slf4j
 public class SqlQueryApiController {
+
+    private static final int MAX_BATCH_QUERIES = 100;
+    private static final String BATCH_QUERY_FAILURE = "Batch query execution failed";
 
     @Autowired
     private SemanticLayerService semanticLayerService;
@@ -54,6 +60,7 @@ public class SqlQueryApiController {
     @PostMapping("/sqls")
     public Object queryBySqls(@RequestBody QuerySqlsReq querySqlsReq, HttpServletRequest request,
             HttpServletResponse response) throws Exception {
+        validateBatchRequest(querySqlsReq);
         User user = UserHolder.findUser(request, response);
         querySqlsReq.setNeedAuth(true);
         List<SemanticQueryReq> semanticQueryReqs = querySqlsReq.getSqls().stream().map(sql -> {
@@ -73,15 +80,20 @@ public class SqlQueryApiController {
                         log.error("SQL batch query failed [{}]: type={}, error=[{}]",
                                 SensitiveLogUtils.summarize(querySqlReq),
                                 e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-                        return new SemanticQueryResp();
+                        throw new CompletionException(e);
                     }
                 }, mdcContext))).collect(Collectors.toList());
-        return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+        try {
+            return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+        } catch (CompletionException e) {
+            throw new InvalidArgumentException(BATCH_QUERY_FAILURE);
+        }
     }
 
     @PostMapping("/sqlsWithException")
     public Object queryBySqlsWithException(@RequestBody QuerySqlsReq querySqlsReq,
             HttpServletRequest request, HttpServletResponse response) throws Exception {
+        validateBatchRequest(querySqlsReq);
         User user = UserHolder.findUser(request, response);
         querySqlsReq.setNeedAuth(true);
         List<SemanticQueryReq> semanticQueryReqs = querySqlsReq.getSqls().stream().map(sql -> {
@@ -99,7 +111,9 @@ public class SqlQueryApiController {
                 semanticQueryRespList.add(semanticQueryResp);
             }
         } catch (Exception e) {
-            throw new Exception(e.getCause().getMessage());
+            log.error("Strict SQL batch query failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw new InvalidArgumentException(BATCH_QUERY_FAILURE);
         }
         return semanticQueryRespList;
     }
@@ -117,6 +131,7 @@ public class SqlQueryApiController {
     @PostMapping("/validateAndQuery")
     public Object validateAndQuery(@RequestBody QuerySqlsReq querySqlsReq,
             HttpServletRequest request, HttpServletResponse response) throws Exception {
+        validateBatchRequest(querySqlsReq);
         User user = UserHolder.findUser(request, response);
         querySqlsReq.setNeedAuth(true);
         List<QuerySqlReq> convert = convert(querySqlsReq);
@@ -136,6 +151,21 @@ public class SqlQueryApiController {
             querySqlReq.setSql(StringUtil.replaceBackticks(sql));
             return querySqlReq;
         }).collect(Collectors.toList());
+    }
+
+    private void validateBatchRequest(QuerySqlsReq querySqlsReq) {
+        if (querySqlsReq == null || querySqlsReq.getSqls() == null
+                || querySqlsReq.getSqls().isEmpty()) {
+            throw new InvalidArgumentException(
+                    "Batch query must contain at least one SQL statement");
+        }
+        if (querySqlsReq.getSqls().size() > MAX_BATCH_QUERIES) {
+            throw new InvalidArgumentException(
+                    "Batch query exceeds the maximum of " + MAX_BATCH_QUERIES + " statements");
+        }
+        if (querySqlsReq.getSqls().stream().anyMatch(StringUtils::isBlank)) {
+            throw new InvalidArgumentException("Batch query contains an empty SQL statement");
+        }
     }
 
 }

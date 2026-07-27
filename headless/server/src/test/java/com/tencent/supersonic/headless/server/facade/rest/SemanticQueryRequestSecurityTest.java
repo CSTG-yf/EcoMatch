@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.facade.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.headless.api.pojo.request.QueryDataSetReq;
+import com.tencent.supersonic.headless.api.pojo.request.QueryMetricReq;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlsReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
@@ -53,5 +54,31 @@ class SemanticQueryRequestSecurityTest {
         request.setNeedAuth(false);
 
         assertFalse(request.isNeedAuth());
+    }
+
+    @Test
+    void externalJsonCannotEnableNativeLayerMode() throws Exception {
+        QuerySqlReq sqlRequest = objectMapper
+                .readValue("{\"sql\":\"select 1\",\"innerLayerNative\":true}", QuerySqlReq.class);
+        QueryDataSetReq dataSetRequest = objectMapper
+                .readValue("{\"dataSetId\":1,\"innerLayerNative\":true}", QueryDataSetReq.class);
+        QueryStructReq structRequest = objectMapper
+                .readValue("{\"groups\":[],\"innerLayerNative\":true}", QueryStructReq.class);
+        QueryMetricReq metricRequest = objectMapper
+                .readValue("{\"metricIds\":[1],\"innerLayerNative\":true}", QueryMetricReq.class);
+
+        assertFalse(sqlRequest.isInnerLayerNative());
+        assertFalse(dataSetRequest.isInnerLayerNative());
+        assertFalse(structRequest.isInnerLayerNative());
+        assertFalse(metricRequest.isInnerLayerNative());
+    }
+
+    @Test
+    void trustedServerCodeCanEnableNativeLayerMode() {
+        QuerySqlReq request = new QuerySqlReq();
+
+        request.setInnerLayerNative(true);
+
+        assertTrue(request.isInnerLayerNative());
     }
 }

@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.DateConf;
@@ -29,5 +30,6 @@ public class QueryMetricReq {
 
     private long limit = Constants.DEFAULT_METRIC_LIMIT;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean innerLayerNative = false;
 }

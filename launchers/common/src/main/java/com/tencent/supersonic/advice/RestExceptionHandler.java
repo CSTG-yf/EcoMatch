@@ -6,6 +6,7 @@ import com.tencent.supersonic.common.pojo.exception.AccessException;
 import com.tencent.supersonic.common.pojo.exception.CommonException;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,8 +21,10 @@ public class RestExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.OK)
     public ResultData<String> exception(Exception e) {
-        log.error("default global exception", e);
-        return ResultData.fail(ReturnCode.SYSTEM_ERROR.getCode(), e.getMessage());
+        log.error("Unhandled request exception: type={}, error=[{}]", e.getClass().getSimpleName(),
+                SensitiveLogUtils.summarize(e.getMessage()));
+        return ResultData.fail(ReturnCode.SYSTEM_ERROR.getCode(),
+                ReturnCode.SYSTEM_ERROR.getMessage());
     }
 
     @ExceptionHandler(AccessException.class)
@@ -33,21 +36,24 @@ public class RestExceptionHandler {
     @ExceptionHandler(InvalidPermissionException.class)
     @ResponseStatus(HttpStatus.OK)
     public ResultData<String> invalidPermissionException(Exception e) {
-        log.error("default global exception", e);
+        log.warn("Request permission denied: type={}, error=[{}]", e.getClass().getSimpleName(),
+                SensitiveLogUtils.summarize(e.getMessage()));
         return ResultData.fail(ReturnCode.INVALID_PERMISSION.getCode(), e.getMessage());
     }
 
     @ExceptionHandler(InvalidArgumentException.class)
     @ResponseStatus(HttpStatus.OK)
     public ResultData<String> invalidArgumentException(Exception e) {
-        log.error("default global exception", e);
+        log.warn("Invalid request: type={}, error=[{}]", e.getClass().getSimpleName(),
+                SensitiveLogUtils.summarize(e.getMessage()));
         return ResultData.fail(ReturnCode.INVALID_REQUEST.getCode(), e.getMessage());
     }
 
     @ExceptionHandler(CommonException.class)
     @ResponseStatus(HttpStatus.OK)
     public ResultData<String> commonException(CommonException e) {
-        log.error("default global exception", e);
+        log.warn("Request failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                SensitiveLogUtils.summarize(e.getMessage()));
         return ResultData.fail(e.getCode(), e.getMessage());
     }
 }

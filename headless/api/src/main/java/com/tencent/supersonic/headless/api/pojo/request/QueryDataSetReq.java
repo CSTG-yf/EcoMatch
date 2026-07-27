@@ -34,5 +34,6 @@ public class QueryDataSetReq {
     private Long limit = 2000L;
     private Long offset = 0L;
     private QueryType queryType = QueryType.DETAIL;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean innerLayerNative = false;
 }
