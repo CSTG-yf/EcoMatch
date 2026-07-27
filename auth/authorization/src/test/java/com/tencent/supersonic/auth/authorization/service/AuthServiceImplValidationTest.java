@@ -74,6 +74,41 @@ class AuthServiceImplValidationTest {
     }
 
     @Test
+    void rejectsOversizedPermissionCollectionsAndText() {
+        AuthGroup tooManyRules = validGroup();
+        tooManyRules.setAuthRules(
+                java.util.Collections.nCopies(1_001, tooManyRules.getAuthRules().get(0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> authService.addOrUpdateAuthGroup(tooManyRules));
+
+        AuthGroup oversizedIdentifier = validGroup();
+        oversizedIdentifier.setAuthorizedUsers(List.of("u".repeat(4_097)));
+        assertThrows(IllegalArgumentException.class,
+                () -> authService.addOrUpdateAuthGroup(oversizedIdentifier));
+
+        verifyNoInteractions(jdbcTemplate);
+    }
+
+    @Test
+    void rejectsOversizedAuthorizationRequestsBeforeLookup() {
+        QueryAuthResReq request = new QueryAuthResReq();
+        request.setModelIds(java.util.stream.LongStream.rangeClosed(1, 1_001).boxed().toList());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> authService.queryAuthorizedResources(request, User.get(2L, "analyst")));
+
+        verifyNoInteractions(userService, jdbcTemplate);
+    }
+
+    @Test
+    void failsClosedWhenStoredGroupCountExceedsMaximum() {
+        when(jdbcTemplate.queryForList(anyString(), eq(String.class)))
+                .thenReturn(java.util.Collections.nCopies(10_001, "{}"));
+
+        assertThrows(IllegalStateException.class, () -> authService.queryAuthGroups("1", null));
+    }
+
+    @Test
     void isolatesMalformedStoredGroupsWithoutDroppingValidAuthorization() {
         String valid = """
                 {"modelId":1,"name":"valid","groupId":1,

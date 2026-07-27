@@ -21,6 +21,7 @@
 - 内置危险函数集合不可被配置移除，并支持通过 `s2.query-gateway.denied-functions` 追加目标数据库的有副作用 UDF；非法函数标识在启动时直接拒绝。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 对 SELECT、CTE、集合分支和派生子查询执行 AST 层级计数，默认超过 16 层即拒绝，避免深层查询在安全遍历、改写或数据库规划阶段形成栈和 CPU 资源耗尽。
+- SQL 解析复用 JSqlParser 可取消超时机制并开放独立解析预算，超时后中断解析任务并按策略拒绝处理，避免复杂 SQL 长时间占用网关线程。
 - 执行前运行 `EXPLAIN`，递归兼容结构化、嵌套 JSON 和文本计划中的估算行数，超过阈值时拒绝查询；支持在目标数据库确认格式后开启“缺失估算即拒绝”。
 - EXPLAIN 已识别估算字段中的负数、`NaN`、无穷值和非数字内容统一拒绝；估算阈值、并发数、许可等待、SQL 长度、查询超时和结果行数上限必须为正数，错误配置不再被静默修正或退化为无限制执行。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
@@ -48,6 +49,7 @@
 | `s2.query-gateway.acquire-timeout-ms` | `1000` | 获取执行许可的最长等待时间 |
 | `s2.query-gateway.max-sql-length` | `100000` | SQL 最大字符数 |
 | `s2.query-gateway.max-select-depth` | `16` | SELECT、CTE、集合分支和派生子查询最大嵌套深度 |
+| `s2.query-gateway.max-parse-time-ms` | `5000` | SQL 解析最大耗时，超时后取消解析任务 |
 | `s2.query-gateway.denied-functions` | 空 | 追加禁止执行的数据库函数，使用逗号分隔，可配置 schema 限定名 |
 | `s2.source.query-timeout-seconds` | `30` | JDBC 查询超时 |
 | `s2.source.result-limit` | `1000000` | 最大返回行数 |
@@ -80,7 +82,7 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 530 项测试（3 项按环境条件跳过），无失败或错误。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 538 项测试（3 项按环境条件跳过），无失败或错误。
 
 ## 本地性能基线
 

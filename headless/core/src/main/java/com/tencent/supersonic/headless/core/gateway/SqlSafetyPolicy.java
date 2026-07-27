@@ -9,6 +9,7 @@ import net.sf.jsqlparser.expression.WindowElement;
 import net.sf.jsqlparser.expression.WindowOffset;
 import net.sf.jsqlparser.expression.WindowRange;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.parser.feature.Feature;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
@@ -39,6 +40,7 @@ import java.util.stream.Stream;
 public class SqlSafetyPolicy {
 
     private static final int DEFAULT_MAX_SELECT_DEPTH = 16;
+    private static final int DEFAULT_MAX_PARSE_TIME_MS = 5_000;
     private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "csv_scan",
             "csvread", "csvwrite", "dblink", "dblink_connect", "dblink_exec", "file_read",
             "file_write", "get_lock", "glob", "json_scan", "load_file", "lo_export", "lo_get",
@@ -56,24 +58,36 @@ public class SqlSafetyPolicy {
 
     private final int maxSqlLength;
     private final int maxSelectDepth;
+    private final int maxParseTimeMs;
     private final Set<String> dangerousFunctions;
 
     public SqlSafetyPolicy(int maxSqlLength) {
-        this(maxSqlLength, "", DEFAULT_MAX_SELECT_DEPTH);
+        this(maxSqlLength, "", DEFAULT_MAX_SELECT_DEPTH, DEFAULT_MAX_PARSE_TIME_MS);
     }
 
     public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions) {
-        this(maxSqlLength, additionalDangerousFunctions, DEFAULT_MAX_SELECT_DEPTH);
+        this(maxSqlLength, additionalDangerousFunctions, DEFAULT_MAX_SELECT_DEPTH,
+                DEFAULT_MAX_PARSE_TIME_MS);
     }
 
     public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions,
             int maxSelectDepth) {
+        this(maxSqlLength, additionalDangerousFunctions, maxSelectDepth, DEFAULT_MAX_PARSE_TIME_MS);
+    }
+
+    public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions,
+            int maxSelectDepth, int maxParseTimeMs) {
         if (maxSelectDepth <= 0) {
             throw new IllegalArgumentException(
                     "s2.query-gateway.max-select-depth must be greater than zero");
         }
+        if (maxParseTimeMs <= 0) {
+            throw new IllegalArgumentException(
+                    "s2.query-gateway.max-parse-time-ms must be greater than zero");
+        }
         this.maxSqlLength = maxSqlLength;
         this.maxSelectDepth = maxSelectDepth;
+        this.maxParseTimeMs = maxParseTimeMs;
         Set<String> configured = new LinkedHashSet<>(DEFAULT_DANGEROUS_FUNCTIONS);
         String additions = additionalDangerousFunctions == null ? "" : additionalDangerousFunctions;
         for (String rawFunction : additions.split(",")) {
@@ -101,7 +115,8 @@ public class SqlSafetyPolicy {
 
         Statements statements;
         try {
-            statements = CCJSqlParserUtil.parseStatements(sql);
+            statements = CCJSqlParserUtil.parseStatements(sql,
+                    parser -> parser.getConfiguration().setValue(Feature.timeOut, maxParseTimeMs));
         } catch (Exception e) {
             throw new SqlPolicyViolationException("SQL syntax validation failed", e);
         }

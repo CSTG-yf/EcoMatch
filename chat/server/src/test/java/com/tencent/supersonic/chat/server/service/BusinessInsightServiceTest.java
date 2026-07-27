@@ -180,6 +180,49 @@ class BusinessInsightServiceTest {
         assertThrows(RuntimeException.class, () -> service.explain(emptyRow));
     }
 
+    @Test
+    void rejectsOversizedQuestionMetadataAndCellValues() {
+        BusinessInsightReq oversizedQuestion = request();
+        oversizedQuestion.setQueryText("12345");
+        assertThrows(RuntimeException.class,
+                () -> boundedService(4, 100, 100, 10_000).explain(oversizedQuestion));
+
+        BusinessInsightReq oversizedMetadata = request();
+        oversizedMetadata.getQueryColumns().get(0).setComment("12345");
+        assertThrows(RuntimeException.class,
+                () -> boundedService(100, 4, 100, 10_000).explain(oversizedMetadata));
+
+        BusinessInsightReq oversizedCell = request();
+        oversizedCell
+                .setQueryResults(List.of(Map.of("category_name", "12345", "metric_value", 10)));
+        assertThrows(RuntimeException.class,
+                () -> boundedService(100, 100, 4, 10_000).explain(oversizedCell));
+    }
+
+    @Test
+    void rejectsNestedAndCumulativelyOversizedCellValues() {
+        BusinessInsightReq nestedCell = request();
+        nestedCell.setQueryResults(
+                List.of(Map.of("category_name", List.of("A"), "metric_value", 10)));
+        assertThrows(RuntimeException.class,
+                () -> boundedService(100, 100, 100, 10_000).explain(nestedCell));
+
+        BusinessInsightReq oversizedTotal = request();
+        oversizedTotal.setQueryResults(
+                List.of(Map.of("category_name", "A".repeat(40), "metric_value", 10),
+                        Map.of("category_name", "B".repeat(40), "metric_value", 20)));
+        assertThrows(RuntimeException.class,
+                () -> boundedService(100, 100, 100, 100).explain(oversizedTotal));
+    }
+
+    private BusinessInsightService boundedService(int maxQueryTextLength, int maxMetadataTextLength,
+            int maxCellTextLength, int maxTotalInputCharacters) {
+        BusinessInsightConfig config = new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95,
+                10_000, 100, maxQueryTextLength, maxMetadataTextLength, maxCellTextLength,
+                maxTotalInputCharacters);
+        return new BusinessInsightService(config);
+    }
+
     private BusinessInsightReq request() {
         BusinessInsightReq request = new BusinessInsightReq();
         request.setQueryText("各机构贷款余额");

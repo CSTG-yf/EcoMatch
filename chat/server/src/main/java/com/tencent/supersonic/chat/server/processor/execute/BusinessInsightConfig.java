@@ -17,6 +17,10 @@ public class BusinessInsightConfig {
     private final double highConfidence;
     private final int maxInputRows;
     private final int maxInputColumns;
+    private final int maxQueryTextLength;
+    private final int maxMetadataTextLength;
+    private final int maxCellTextLength;
+    private final int maxTotalInputCharacters;
 
     @Autowired
     public BusinessInsightConfig(
@@ -27,7 +31,11 @@ public class BusinessInsightConfig {
             @Value("${s2.business-insight.evidence-confidence:0.82}") double evidenceConfidence,
             @Value("${s2.business-insight.high-confidence:0.95}") double highConfidence,
             @Value("${s2.business-insight.max-input-rows:10000}") int maxInputRows,
-            @Value("${s2.business-insight.max-input-columns:100}") int maxInputColumns) {
+            @Value("${s2.business-insight.max-input-columns:100}") int maxInputColumns,
+            @Value("${s2.business-insight.max-query-text-length:4096}") int maxQueryTextLength,
+            @Value("${s2.business-insight.max-metadata-text-length:4096}") int maxMetadataTextLength,
+            @Value("${s2.business-insight.max-cell-text-length:16384}") int maxCellTextLength,
+            @Value("${s2.business-insight.max-total-input-characters:2000000}") int maxTotalInputCharacters) {
         requireAtLeast(smallSampleThreshold, 1, "small-sample-threshold");
         requireAtLeast(pieMaxCategories, 2, "pie-max-categories");
         requirePositiveFinite(anomalyZScore, "anomaly-z-score");
@@ -40,6 +48,10 @@ public class BusinessInsightConfig {
         }
         requireAtLeast(maxInputRows, 1, "max-input-rows");
         requireAtLeast(maxInputColumns, 1, "max-input-columns");
+        requireAtLeast(maxQueryTextLength, 1, "max-query-text-length");
+        requireAtLeast(maxMetadataTextLength, 1, "max-metadata-text-length");
+        requireAtLeast(maxCellTextLength, 1, "max-cell-text-length");
+        requireAtLeast(maxTotalInputCharacters, 1, "max-total-input-characters");
         this.smallSampleThreshold = smallSampleThreshold;
         this.pieMaxCategories = pieMaxCategories;
         this.anomalyZScore = anomalyZScore;
@@ -48,6 +60,18 @@ public class BusinessInsightConfig {
         this.highConfidence = highConfidence;
         this.maxInputRows = maxInputRows;
         this.maxInputColumns = maxInputColumns;
+        this.maxQueryTextLength = maxQueryTextLength;
+        this.maxMetadataTextLength = maxMetadataTextLength;
+        this.maxCellTextLength = maxCellTextLength;
+        this.maxTotalInputCharacters = maxTotalInputCharacters;
+    }
+
+    public BusinessInsightConfig(int smallSampleThreshold, int pieMaxCategories,
+            double anomalyZScore, double lowConfidence, double evidenceConfidence,
+            double highConfidence, int maxInputRows, int maxInputColumns) {
+        this(smallSampleThreshold, pieMaxCategories, anomalyZScore, lowConfidence,
+                evidenceConfidence, highConfidence, maxInputRows, maxInputColumns, 4096, 4096,
+                16_384, 2_000_000);
     }
 
     public BusinessInsightConfig(int smallSampleThreshold, int pieMaxCategories,

@@ -16,6 +16,10 @@ class BusinessInsightConfigTest {
                 () -> config(3, 6, 2.0, 0.65, 0.82, 0.95, 0, 100));
         assertThrows(IllegalArgumentException.class,
                 () -> config(3, 6, 2.0, 0.65, 0.82, 0.95, 10_000, 0));
+        assertThrows(IllegalArgumentException.class, () -> new BusinessInsightConfig(3, 6, 2.0,
+                0.65, 0.82, 0.95, 10_000, 100, 0, 4096, 16_384, 2_000_000));
+        assertThrows(IllegalArgumentException.class, () -> new BusinessInsightConfig(3, 6, 2.0,
+                0.65, 0.82, 0.95, 10_000, 100, 4096, 4096, 16_384, 0));
     }
 
     @Test

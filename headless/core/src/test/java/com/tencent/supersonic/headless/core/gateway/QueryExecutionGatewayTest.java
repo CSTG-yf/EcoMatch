@@ -65,6 +65,8 @@ class QueryExecutionGatewayTest {
         assertThrows(IllegalArgumentException.class, () -> new QueryExecutionGateway(1, 20, 0));
         assertThrows(IllegalArgumentException.class,
                 () -> new QueryExecutionGateway(1, 20, 1000, "", 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new QueryExecutionGateway(1, 20, 1000, "", 16, 0));
     }
 
     private void await(CountDownLatch latch) {

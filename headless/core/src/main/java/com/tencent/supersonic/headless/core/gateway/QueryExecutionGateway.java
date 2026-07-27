@@ -39,24 +39,33 @@ public class QueryExecutionGateway {
             @Value("${s2.query-gateway.acquire-timeout-ms:1000}") long acquireTimeoutMs,
             @Value("${s2.query-gateway.max-sql-length:100000}") int maxSqlLength,
             @Value("${s2.query-gateway.denied-functions:}") String deniedFunctions,
-            @Value("${s2.query-gateway.max-select-depth:16}") int maxSelectDepth) {
+            @Value("${s2.query-gateway.max-select-depth:16}") int maxSelectDepth,
+            @Value("${s2.query-gateway.max-parse-time-ms:5000}") int maxParseTimeMs) {
         requirePositive(maxConcurrency, "max-concurrency");
         requirePositive(acquireTimeoutMs, "acquire-timeout-ms");
         requirePositive(maxSqlLength, "max-sql-length");
         requirePositive(maxSelectDepth, "max-select-depth");
+        requirePositive(maxParseTimeMs, "max-parse-time-ms");
         this.maxConcurrency = maxConcurrency;
         this.permits = new Semaphore(this.maxConcurrency, true);
         this.acquireTimeoutMs = acquireTimeoutMs;
-        this.safetyPolicy = new SqlSafetyPolicy(maxSqlLength, deniedFunctions, maxSelectDepth);
+        this.safetyPolicy =
+                new SqlSafetyPolicy(maxSqlLength, deniedFunctions, maxSelectDepth, maxParseTimeMs);
     }
 
     public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength) {
-        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, "", 16);
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, "", 16, 5_000);
     }
 
     public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength,
             String deniedFunctions) {
-        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, deniedFunctions, 16);
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, deniedFunctions, 16, 5_000);
+    }
+
+    public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength,
+            String deniedFunctions, int maxSelectDepth) {
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, deniedFunctions, maxSelectDepth,
+                5_000);
     }
 
     public <T> T execute(String sql, Supplier<T> action) {

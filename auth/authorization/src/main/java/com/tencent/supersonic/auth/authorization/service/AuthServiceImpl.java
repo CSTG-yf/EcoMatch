@@ -18,6 +18,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -28,6 +29,15 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class AuthServiceImpl implements AuthService {
+
+    private static final int MAX_STORED_GROUPS = 10_000;
+    private static final int MAX_CONFIG_LENGTH = 262_144;
+    private static final int MAX_TOTAL_CONFIG_LENGTH = 33_554_432;
+    private static final int MAX_MODEL_IDS = 1_000;
+    private static final int MAX_RULES_PER_GROUP = 1_000;
+    private static final int MAX_IDENTIFIERS_PER_FIELD = 1_000;
+    private static final int MAX_ATTRIBUTES_PER_GROUP = 100;
+    private static final int MAX_AUTH_TEXT_LENGTH = 4_096;
 
     private JdbcTemplate jdbcTemplate;
 
@@ -43,15 +53,29 @@ public class AuthServiceImpl implements AuthService {
     private List<AuthGroup> load() {
         List<String> rows =
                 jdbcTemplate.queryForList("select config from s2_auth_groups", String.class);
+        if (rows.size() > MAX_STORED_GROUPS) {
+            throw new IllegalStateException(
+                    "Authorization group count exceeds maximum: " + MAX_STORED_GROUPS);
+        }
+        long totalConfigLength =
+                rows.stream().filter(Objects::nonNull).mapToLong(String::length).sum();
+        if (totalConfigLength > MAX_TOTAL_CONFIG_LENGTH) {
+            throw new IllegalStateException("Authorization config text exceeds maximum total "
+                    + "length: " + MAX_TOTAL_CONFIG_LENGTH);
+        }
         Gson g = new Gson();
         List<AuthGroup> groups = new ArrayList<>();
         for (String row : rows) {
             try {
+                if (row == null || row.length() > MAX_CONFIG_LENGTH) {
+                    throw new IllegalArgumentException(
+                            "Authorization group config exceeds maximum length");
+                }
                 AuthGroup group = g.fromJson(row, AuthGroup.class);
                 validateAuthGroup(group);
                 groups.add(group);
             } catch (RuntimeException e) {
-                String configMetadata = SensitiveLogUtils.summarize(row);
+                String configMetadata = configMetadata(row);
                 if (invalidConfigWarnings.add(configMetadata)) {
                     log.warn("Ignoring invalid authorization group: config=[{}], errorType={}",
                             configMetadata, e.getClass().getSimpleName());
@@ -99,8 +123,18 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public AuthorizedResourceResp queryAuthorizedResources(QueryAuthResReq req, User user) {
+        if (req == null) {
+            throw new IllegalArgumentException("Authorization resource request is required");
+        }
         if (CollectionUtils.isEmpty(req.getModelIds())) {
             return new AuthorizedResourceResp();
+        }
+        if (req.getModelIds().size() > MAX_MODEL_IDS) {
+            throw new IllegalArgumentException(
+                    "Authorization model id count exceeds maximum: " + MAX_MODEL_IDS);
+        }
+        if (req.getModelIds().stream().anyMatch(modelId -> modelId == null || modelId <= 0)) {
+            throw new IllegalArgumentException("Authorization model ids must be positive");
         }
         Set<String> userOrgIds = userService.getUserAllOrgId(user.getName());
         List<AuthGroup> groups =
@@ -136,8 +170,9 @@ public class AuthServiceImpl implements AuthService {
 
     private List<AuthGroup> getAuthGroups(List<Long> modelIds, User user,
             List<String> departmentIds) {
+        Set<Long> requestedModelIds = new HashSet<>(modelIds);
         List<AuthGroup> groups = load().stream().filter(group -> {
-            if (!modelIds.contains(group.getModelId())) {
+            if (!requestedModelIds.contains(group.getModelId())) {
                 return false;
             }
             return authGroupMatcher.matches(group, user, departmentIds);
@@ -160,6 +195,8 @@ public class AuthServiceImpl implements AuthService {
         if (!StringUtils.hasText(group.getName())) {
             throw new IllegalArgumentException("Authorization group name is required");
         }
+        validateText(group.getName(), "group name");
+        validateText(group.getDimensionFilterDescription(), "dimension filter description");
         if (group.getGroupId() != null && group.getGroupId() <= 0) {
             throw new IllegalArgumentException("Authorization group id must be positive");
         }
@@ -168,11 +205,18 @@ public class AuthServiceImpl implements AuthService {
                 | validateIdentifiers(group.getAuthorizedDepartmentIds(), "department")
                 | validateIdentifiers(group.getAuthorizedRoles(), "role");
         if (!CollectionUtils.isEmpty(group.getAttributeConditions())) {
+            if (group.getAttributeConditions().size() > MAX_ATTRIBUTES_PER_GROUP) {
+                throw new IllegalArgumentException(
+                        "Authorization attribute condition count exceeds " + "maximum: "
+                                + MAX_ATTRIBUTES_PER_GROUP);
+            }
             group.getAttributeConditions().forEach((key, value) -> {
                 if (!StringUtils.hasText(key) || !StringUtils.hasText(value)) {
                     throw new IllegalArgumentException(
                             "Authorization attribute keys and values must not be blank");
                 }
+                validateText(key, "attribute key");
+                validateText(value, "attribute value");
             });
             hasSubject = true;
         }
@@ -185,10 +229,16 @@ public class AuthServiceImpl implements AuthService {
             throw new IllegalArgumentException(
                     "Authorization group must define at least one resource rule");
         }
+        if (group.getAuthRules().size() > MAX_RULES_PER_GROUP) {
+            throw new IllegalArgumentException(
+                    "Authorization resource rule count exceeds maximum: " + MAX_RULES_PER_GROUP);
+        }
         group.getAuthRules().forEach(rule -> {
             if (rule == null) {
                 throw new IllegalArgumentException("Authorization resource rule must not be null");
             }
+            validateText(rule.getName(), "resource rule name");
+            validateText(rule.getDescription(), "resource rule description");
             boolean hasResource = validateIdentifiers(rule.getMetrics(), "metric")
                     | validateIdentifiers(rule.getDimensions(), "dimension");
             if (!hasResource) {
@@ -207,6 +257,28 @@ public class AuthServiceImpl implements AuthService {
             throw new IllegalArgumentException(
                     "Authorization " + type + " values must not be blank");
         }
+        if (values.size() > MAX_IDENTIFIERS_PER_FIELD) {
+            throw new IllegalArgumentException("Authorization " + type
+                    + " value count exceeds maximum: " + MAX_IDENTIFIERS_PER_FIELD);
+        }
+        values.forEach(value -> validateText(value, type));
         return true;
+    }
+
+    private void validateText(String value, String type) {
+        if (value != null && value.length() > MAX_AUTH_TEXT_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Authorization " + type + " exceeds maximum length: " + MAX_AUTH_TEXT_LENGTH);
+        }
+    }
+
+    private String configMetadata(String row) {
+        if (row == null) {
+            return "null";
+        }
+        if (row.length() > MAX_CONFIG_LENGTH) {
+            return "oversized,chars=" + row.length();
+        }
+        return SensitiveLogUtils.summarize(row);
     }
 }

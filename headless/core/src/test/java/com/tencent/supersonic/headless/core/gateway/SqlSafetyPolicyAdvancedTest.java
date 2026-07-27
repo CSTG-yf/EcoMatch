@@ -185,6 +185,11 @@ class SqlSafetyPolicyAdvancedTest {
         assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));
     }
 
+    @Test
+    void rejectsInvalidParserTimeBudget() {
+        assertThrows(IllegalArgumentException.class, () -> new SqlSafetyPolicy(10_000, "", 16, 0));
+    }
+
     private void assertDangerousFunctionRejected(String sql) {
         SqlPolicyViolationException violation =
                 assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));
