@@ -41,6 +41,7 @@ import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
+import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SearchResult;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
@@ -51,6 +52,10 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
@@ -91,6 +96,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     @Autowired
     @Lazy
     private AgentService agentService;
+    @Autowired
+    private AuditEventPublisher auditEventPublisher;
 
     private final List<ChatQueryParser> chatQueryParsers = ComponentFactory.getChatParsers();
     private final List<ChatQueryExecutor> chatQueryExecutors = ComponentFactory.getChatExecutors();
@@ -113,6 +120,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     @Override
     public ChatParseResp parse(ChatParseReq chatParseReq) {
         long start = System.nanoTime();
+        ChatQueryDO storedQuery = null;
         try {
             Long queryId = chatParseReq.getQueryId();
             Agent agent;
@@ -120,10 +128,12 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 agent = getAuthorizedAgent(chatParseReq.getAgentId(), chatParseReq.getUser());
                 queryId = chatManageService.createChatQuery(chatParseReq);
                 chatParseReq.setQueryId(queryId);
+                storedQuery = requireStoredQuery(queryId);
+                bindStoredQuery(chatParseReq, storedQuery);
             } else {
                 chatManageService.checkQueryAccess(queryId, chatParseReq.getUser());
-                ChatQueryDO storedQuery = chatManageService.getChatQueryDO(queryId);
-                chatParseReq.setAgentId(storedQuery.getAgentId());
+                storedQuery = requireAuthorizedStoredQuery(queryId, chatParseReq.getUser());
+                bindStoredQuery(chatParseReq, storedQuery);
                 agent = getAuthorizedAgent(storedQuery.getAgentId(), chatParseReq.getUser());
             }
 
@@ -149,7 +159,22 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 chatManageService.updateParseCostTime(parseContext.getResponse());
             }
 
-            return parseContext.getResponse();
+            ChatParseResp response = parseContext.getResponse();
+            boolean succeeded = isParseSuccessful(response);
+            publishChatAudit(chatParseReq.getUser(), storedQuery.getChatId(),
+                    storedQuery.getQuestionId(), storedQuery.getQueryText(),
+                    succeeded ? AuditEventType.CHAT_PARSE_SUCCEEDED
+                            : AuditEventType.CHAT_PARSE_FAILED,
+                    succeeded ? AuditOutcome.SUCCESS : AuditOutcome.FAILURE,
+                    succeeded ? "CHAT_PARSE_COMPLETED" : parseFailureReason(response));
+            return response;
+        } catch (RuntimeException e) {
+            publishChatAudit(chatParseReq.getUser(),
+                    storedQuery == null ? null : storedQuery.getChatId(),
+                    storedQuery == null ? chatParseReq.getQueryId() : storedQuery.getQuestionId(),
+                    storedQuery == null ? null : storedQuery.getQueryText(),
+                    AuditEventType.CHAT_PARSE_FAILED, AuditOutcome.FAILURE, "CHAT_PARSE_FAILED");
+            throw e;
         } finally {
             QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.PARSE,
                     System.nanoTime() - start);
@@ -158,29 +183,50 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     @Override
     public QueryResult execute(ChatExecuteReq chatExecuteReq) {
-        chatManageService.checkQueryAccess(chatExecuteReq.getQueryId(), chatExecuteReq.getUser());
-        QueryResult queryResult = new QueryResult();
-        ExecuteContext executeContext = buildExecuteContext(chatExecuteReq);
-        for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
-            if (chatQueryExecutor.accept(executeContext)) {
-                queryResult = chatQueryExecutor.execute(executeContext);
-                if (queryResult != null) {
-                    break;
+        ChatQueryDO storedQuery = null;
+        try {
+            chatManageService.checkQueryAccess(chatExecuteReq.getQueryId(),
+                    chatExecuteReq.getUser());
+            storedQuery = requireAuthorizedStoredQuery(chatExecuteReq.getQueryId(),
+                    chatExecuteReq.getUser());
+            bindStoredQuery(chatExecuteReq, storedQuery);
+            QueryResult queryResult = new QueryResult();
+            ExecuteContext executeContext = buildExecuteContext(chatExecuteReq, storedQuery);
+            for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
+                if (chatQueryExecutor.accept(executeContext)) {
+                    queryResult = chatQueryExecutor.execute(executeContext);
+                    if (queryResult != null) {
+                        break;
+                    }
                 }
             }
-        }
 
-        executeContext.setResponse(queryResult);
-        if (queryResult != null) {
-            for (ExecuteResultProcessor processor : executeResultProcessors) {
-                if (processor.accept(executeContext)) {
-                    processor.process(executeContext);
+            executeContext.setResponse(queryResult);
+            if (queryResult != null) {
+                for (ExecuteResultProcessor processor : executeResultProcessors) {
+                    if (processor.accept(executeContext)) {
+                        processor.process(executeContext);
+                    }
                 }
+                saveQueryResult(chatExecuteReq, queryResult);
             }
-            saveQueryResult(chatExecuteReq, queryResult);
+            boolean succeeded = isExecutionSuccessful(queryResult);
+            publishChatAudit(chatExecuteReq.getUser(), storedQuery.getChatId(),
+                    storedQuery.getQuestionId(), storedQuery.getQueryText(),
+                    succeeded ? AuditEventType.CHAT_EXECUTE_SUCCEEDED
+                            : AuditEventType.CHAT_EXECUTE_FAILED,
+                    succeeded ? AuditOutcome.SUCCESS : AuditOutcome.FAILURE,
+                    succeeded ? "CHAT_EXECUTE_COMPLETED" : executionFailureReason(queryResult));
+            return queryResult;
+        } catch (RuntimeException e) {
+            publishChatAudit(chatExecuteReq.getUser(),
+                    storedQuery == null ? null : storedQuery.getChatId(),
+                    storedQuery == null ? chatExecuteReq.getQueryId() : storedQuery.getQuestionId(),
+                    storedQuery == null ? null : storedQuery.getQueryText(),
+                    AuditEventType.CHAT_EXECUTE_FAILED, AuditOutcome.FAILURE,
+                    "CHAT_EXECUTE_FAILED");
+            throw e;
         }
-
-        return queryResult;
     }
 
     @Override
@@ -213,7 +259,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         executeReq.setParseId(parseResp.getSelectedParses().get(0).getId());
         executeReq.setQueryText(chatParseReq.getQueryText());
         executeReq.setChatId(chatParseReq.getChatId());
-        executeReq.setUser(User.getDefaultUser());
+        executeReq.setUser(chatParseReq.getUser());
         executeReq.setAgentId(chatParseReq.getAgentId());
         executeReq.setSaveAnswer(true);
         return execute(executeReq);
@@ -226,16 +272,47 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         return parseContext;
     }
 
-    private ExecuteContext buildExecuteContext(ChatExecuteReq chatExecuteReq) {
+    private ExecuteContext buildExecuteContext(ChatExecuteReq chatExecuteReq,
+            ChatQueryDO storedQuery) {
         ExecuteContext executeContext = new ExecuteContext(chatExecuteReq);
         SemanticParseInfo parseInfo = chatManageService.getParseInfo(chatExecuteReq.getQueryId(),
                 chatExecuteReq.getParseId());
-        ChatQueryDO storedQuery = chatManageService.getChatQueryDO(chatExecuteReq.getQueryId());
-        chatExecuteReq.setAgentId(storedQuery.getAgentId());
         Agent agent = getAuthorizedAgent(storedQuery.getAgentId(), chatExecuteReq.getUser());
         executeContext.setAgent(agent);
         executeContext.setParseInfo(parseInfo);
         return executeContext;
+    }
+
+    private ChatQueryDO requireStoredQuery(Long queryId) {
+        ChatQueryDO storedQuery = chatManageService.getChatQueryDO(queryId);
+        if (storedQuery == null) {
+            throw new IllegalStateException("Authorized query no longer exists: " + queryId);
+        }
+        return storedQuery;
+    }
+
+    ChatQueryDO requireAuthorizedStoredQuery(Long queryId, User user) {
+        ChatQueryDO storedQuery = requireStoredQuery(queryId);
+        chatManageService.checkChatAccess(storedQuery.getChatId(), user);
+        return storedQuery;
+    }
+
+    void bindStoredQuery(ChatExecuteReq request, ChatQueryDO storedQuery) {
+        request.setQueryId(storedQuery.getQuestionId());
+        request.setChatId(toRequestChatId(storedQuery.getChatId()));
+        request.setAgentId(storedQuery.getAgentId());
+        request.setQueryText(storedQuery.getQueryText());
+    }
+
+    void bindStoredQuery(ChatParseReq request, ChatQueryDO storedQuery) {
+        request.setQueryId(storedQuery.getQuestionId());
+        request.setChatId(toRequestChatId(storedQuery.getChatId()));
+        request.setAgentId(storedQuery.getAgentId());
+        request.setQueryText(storedQuery.getQueryText());
+    }
+
+    private Integer toRequestChatId(Long chatId) {
+        return chatId == null ? null : Math.toIntExact(chatId);
     }
 
     @Override
@@ -258,6 +335,37 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         }
 
         return executeQuery(semanticQuery, user);
+    }
+
+    private void publishChatAudit(User user, Long chatId, Long queryId, String question,
+            AuditEventType eventType, AuditOutcome outcome, String reasonCode) {
+        auditEventPublisher.publishBestEffort(
+                AuditEvent.builder().eventType(eventType).outcome(outcome).reasonCode(reasonCode)
+                        .chatId(chatId).queryId(queryId).resourceType("CHAT_QUERY")
+                        .resourceId(queryId == null ? null : String.valueOf(queryId))
+                        .rawQuestion(question).metadata(Map.of("stage", "CHAT")).build(),
+                user);
+    }
+
+    static boolean isParseSuccessful(ChatParseResp response) {
+        return response != null && ParseResp.ParseState.COMPLETED.equals(response.getState());
+    }
+
+    static boolean isExecutionSuccessful(QueryResult result) {
+        return result != null && QueryState.SUCCESS.equals(result.getQueryState());
+    }
+
+    private String parseFailureReason(ChatParseResp response) {
+        return "PARSE_STATE_" + (response == null || response.getState() == null ? "UNKNOWN"
+                : response.getState().name());
+    }
+
+    private String executionFailureReason(QueryResult result) {
+        if (result == null) {
+            return "NO_EXECUTOR_RESULT";
+        }
+        return "QUERY_STATE_"
+                + (result.getQueryState() == null ? "UNKNOWN" : result.getQueryState().name());
     }
 
     private List<String> getFieldsFromSql(SemanticParseInfo parseInfo) {

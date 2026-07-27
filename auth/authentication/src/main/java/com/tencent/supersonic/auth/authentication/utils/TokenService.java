@@ -109,8 +109,11 @@ public class TokenService {
                             .build().parseClaimsJws(getTokenString(token)).getBody();
             return Optional.of(claims);
         } catch (Exception e) {
-            log.info("can not getClaims from appKey:[{}] token:[{}], please login",
-                    SensitiveLogUtils.summarize(appKey), SensitiveLogUtils.summarize(token));
+            log.info(
+                    "can not getClaims from appKey:[{}] tokenMetadata:[{}], failureType:{}, "
+                            + "please login",
+                    SensitiveLogUtils.summarize(appKey), SensitiveLogUtils.summarize(token),
+                    e.getClass().getSimpleName());
         }
         return Optional.empty();
     }

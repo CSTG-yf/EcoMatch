@@ -23,6 +23,10 @@ import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +48,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     private ChatQueryRepository chatQueryRepository;
     @Autowired
     private MemoryService memoryService;
+    @Autowired
+    private AuditEventPublisher auditEventPublisher;
     private final ChatObjectAccessPolicy objectAccessPolicy = new ChatObjectAccessPolicy();
 
     @Override
@@ -241,28 +247,97 @@ public class ChatManageServiceImpl implements ChatManageService {
     public void checkQueryAccess(Long queryId, User user) {
         ChatQueryDO query = chatQueryRepository.getChatQueryDO(queryId);
         if (query == null) {
-            throw new IllegalArgumentException("Query does not exist: " + queryId);
+            IllegalArgumentException failure =
+                    new IllegalArgumentException("Query does not exist: " + queryId);
+            publishObjectDecision(queryId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    "QUERY_NOT_FOUND", failure);
+            throw failure;
         }
-        objectAccessPolicy.checkQueryAccess(queryId, query.getUserName(), user);
+        try {
+            objectAccessPolicy.checkQueryAccess(queryId, query.getUserName(), user);
+        } catch (RuntimeException failure) {
+            publishObjectDecision(queryId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    "QUERY_OWNERSHIP_DENIED", failure);
+            throw failure;
+        }
+        auditEventPublisher.publishBestEffort(objectAccessEvent(queryId,
+                AuditEventType.OBJECT_ACCESS_ALLOWED, AuditOutcome.SUCCESS, "QUERY_ACCESS_ALLOWED"),
+                user);
+    }
+
+    private void publishObjectDecision(Long queryId, User user, AuditEventType eventType,
+            String reasonCode, RuntimeException originalFailure) {
+        try {
+            auditEventPublisher.publishRequired(
+                    objectAccessEvent(queryId, eventType, AuditOutcome.DENIED, reasonCode), user);
+        } catch (RuntimeException auditFailure) {
+            originalFailure.addSuppressed(auditFailure);
+        }
+    }
+
+    private AuditEvent objectAccessEvent(Long queryId, AuditEventType eventType,
+            AuditOutcome outcome, String reasonCode) {
+        return AuditEvent.builder().eventType(eventType).outcome(outcome).reasonCode(reasonCode)
+                .queryId(queryId).resourceType("CHAT_QUERY")
+                .resourceId(queryId == null ? null : String.valueOf(queryId)).build();
     }
 
     @Override
     public void checkChatAccess(Long chatId, User user) {
         if (chatId == null) {
-            throw new IllegalArgumentException("Chat id is required");
+            IllegalArgumentException failure = new IllegalArgumentException("Chat id is required");
+            publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    AuditOutcome.DENIED, "CHAT_ID_REQUIRED", failure);
+            throw failure;
         }
         if (chatId <= 0) {
             if (user == null || !user.isSuperAdmin()) {
-                throw new InvalidPermissionException(
+                InvalidPermissionException failure = new InvalidPermissionException(
                         "System chat access requires a super administrator");
+                publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                        AuditOutcome.DENIED, "SYSTEM_CHAT_ACCESS_DENIED", failure);
+                throw failure;
             }
+            auditEventPublisher
+                    .publishBestEffort(chatAccessEvent(chatId, AuditEventType.OBJECT_ACCESS_ALLOWED,
+                            AuditOutcome.SUCCESS, "SYSTEM_CHAT_ACCESS_ALLOWED"), user);
             return;
         }
         ChatDO chat = chatRepository.getChat(chatId);
         if (chat == null) {
-            throw new IllegalArgumentException("Chat does not exist: " + chatId);
+            IllegalArgumentException failure =
+                    new IllegalArgumentException("Chat does not exist: " + chatId);
+            publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    AuditOutcome.DENIED, "CHAT_NOT_FOUND", failure);
+            throw failure;
         }
-        objectAccessPolicy.checkChatAccess(chatId, chat.getCreator(), user);
+        try {
+            objectAccessPolicy.checkChatAccess(chatId, chat.getCreator(), user);
+        } catch (RuntimeException failure) {
+            publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    AuditOutcome.DENIED, "CHAT_OWNERSHIP_DENIED", failure);
+            throw failure;
+        }
+        auditEventPublisher.publishBestEffort(chatAccessEvent(chatId,
+                AuditEventType.OBJECT_ACCESS_ALLOWED, AuditOutcome.SUCCESS, "CHAT_ACCESS_ALLOWED"),
+                user);
+    }
+
+    private void publishChatDecision(Long chatId, User user, AuditEventType eventType,
+            AuditOutcome outcome, String reasonCode, RuntimeException originalFailure) {
+        try {
+            auditEventPublisher
+                    .publishRequired(chatAccessEvent(chatId, eventType, outcome, reasonCode), user);
+        } catch (RuntimeException auditFailure) {
+            originalFailure.addSuppressed(auditFailure);
+        }
+    }
+
+    private AuditEvent chatAccessEvent(Long chatId, AuditEventType eventType, AuditOutcome outcome,
+            String reasonCode) {
+        return AuditEvent.builder().eventType(eventType).outcome(outcome).reasonCode(reasonCode)
+                .chatId(chatId).resourceType("CHAT")
+                .resourceId(chatId == null ? null : String.valueOf(chatId)).build();
     }
 
     @Override

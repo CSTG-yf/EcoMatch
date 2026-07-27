@@ -201,7 +201,7 @@ public abstract class S2BaseDemo implements CommandLineRunner {
     }
 
     protected void updateQueryScore(Long queryId) {
-        chatManageService.updateFeedback(queryId, 5, "");
+        chatManageService.updateFeedback(queryId, 5, "", defaultUser);
     }
 
     protected void enableDimensionValue(DimensionResp dimension) {

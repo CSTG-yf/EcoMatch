@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.tencent.supersonic.common.pojo.Aggregator;
 import com.tencent.supersonic.common.pojo.DateConf;
 import com.tencent.supersonic.common.pojo.Filter;
@@ -20,6 +21,7 @@ public class QueryDataSetReq {
     private Long dataSetId;
     private String dataSetName;
     private String sql;
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private boolean needAuth = true;
     private List<Param> params = new ArrayList<>();
     private Cache cacheInfo = new Cache();

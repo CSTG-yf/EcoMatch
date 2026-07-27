@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.headless.api.pojo.Cache;
 import com.tencent.supersonic.headless.api.pojo.Param;
@@ -17,6 +18,11 @@ import java.util.Set;
 @Slf4j
 public abstract class SemanticQueryReq {
 
+    /**
+     * Authorization bypass is reserved for trusted server-side maintenance queries. External JSON
+     * must never be able to turn it off.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     protected boolean needAuth = true;
 
     protected boolean innerLayerNative = false;

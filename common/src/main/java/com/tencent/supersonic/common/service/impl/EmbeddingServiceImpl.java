@@ -3,6 +3,7 @@ package com.tencent.supersonic.common.service.impl;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.tencent.supersonic.common.service.EmbeddingService;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -56,8 +57,11 @@ public class EmbeddingServiceImpl implements EmbeddingService {
                 embeddingStore.add(embedding, query);
                 cache.put(TextSegmentConvert.getQueryId(query), true);
             } catch (Exception e) {
-                log.error("embeddingModel embed error question: {}, embeddingStore: {}", question,
-                        embeddingStore.getClass().getSimpleName(), e);
+                log.error(
+                        "embeddingModel embed error questionMetadata:[{}], embeddingStore:{}, "
+                                + "errorType:{}",
+                        SensitiveLogUtils.summarize(question),
+                        embeddingStore.getClass().getSimpleName(), e.getClass().getSimpleName());
             }
         }
     }
@@ -104,7 +108,11 @@ public class EmbeddingServiceImpl implements EmbeddingService {
             }
 
         } catch (Exception e) {
-            log.error("deleteQuery error,collectionName:{},queries:{}", collectionName, queries);
+            log.error(
+                    "deleteQuery error, collectionMetadata:[{}], queriesMetadata:[{}], "
+                            + "errorType:{}",
+                    SensitiveLogUtils.summarize(collectionName),
+                    SensitiveLogUtils.summarize(queries), e.getClass().getSimpleName());
         }
     }
 

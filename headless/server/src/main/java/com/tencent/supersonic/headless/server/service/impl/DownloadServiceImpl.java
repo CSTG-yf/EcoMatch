@@ -21,6 +21,10 @@ import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.utils.DataTransformUtils;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import com.tencent.supersonic.headless.server.pojo.DataDownload;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import com.tencent.supersonic.headless.server.service.DimensionService;
 import com.tencent.supersonic.headless.server.service.DownloadService;
 import com.tencent.supersonic.headless.server.service.MetricService;
@@ -31,8 +35,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.*;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -45,58 +51,96 @@ public class DownloadServiceImpl implements DownloadService {
 
     private static final String dateFormat = "yyyyMMddHHmmss";
 
-    private MetricService metricService;
+    private final MetricService metricService;
 
-    private DimensionService dimensionService;
+    private final DimensionService dimensionService;
 
-    private SemanticLayerService queryService;
+    private final SemanticLayerService queryService;
+
+    private final AuditEventPublisher auditEventPublisher;
 
     public DownloadServiceImpl(MetricService metricService, DimensionService dimensionService,
-            SemanticLayerService queryService) {
+            SemanticLayerService queryService, AuditEventPublisher auditEventPublisher) {
         this.metricService = metricService;
         this.dimensionService = dimensionService;
         this.queryService = queryService;
+        this.auditEventPublisher = auditEventPublisher;
     }
 
     @Override
     public void downloadByStruct(DownloadMetricReq downloadMetricReq, User user,
             HttpServletResponse response) throws Exception {
+        long exportStart = System.nanoTime();
+        Collection<String> metricCodes =
+                metricCodes(downloadMetricReq.getMetricNames(), downloadMetricReq.getMetricIds());
+        String resourceId = resourceId(downloadMetricReq.getDomainId());
+        publishExportStarted(user, "METRIC", resourceId, metricCodes, 1);
         String fileName =
                 String.format("%s_%s.xlsx", "supersonic", DateUtils.format(new Date(), dateFormat));
-        File file = FileUtils.createTmpFile(fileName);
+        File file = null;
+        ExportSummary summary = ExportSummary.empty();
         try {
+            file = FileUtils.createTmpFile(fileName);
             QueryStructReq queryStructReq = metricService.convert(downloadMetricReq);
             SemanticQueryResp queryResult =
                     queryService.queryByReq(queryStructReq.convert(true), user);
             DataDownload dataDownload =
                     buildDataDownload(queryResult, queryStructReq, downloadMetricReq.isTransform());
+            summary = ExportSummary.from(queryResult, dataDownload.getData().size(), 1);
             EasyExcel.write(file).sheet("Sheet1").head(dataDownload.getHeaders())
                     .doWrite(dataDownload.getData());
-        } catch (RuntimeException e) {
-            EasyExcel.write(file).sheet("Sheet1").head(buildErrMessageHead())
-                    .doWrite(buildErrMessageData(e.getMessage()));
-            return;
+            downloadFile(response, file, fileName);
+            publishExportSucceeded(user, "METRIC", resourceId, metricCodes, summary, file.length(),
+                    exportStart, 1);
+        } catch (Exception e) {
+            publishExportFailed(user, "METRIC", resourceId, metricCodes, summary, file, exportStart,
+                    e, 1);
+            throw e;
+        } finally {
+            deleteTemporaryFile(file);
         }
-        downloadFile(response, file, fileName);
     }
 
     @Override
     public void batchDownload(BatchDownloadReq batchDownloadReq, User user,
             HttpServletResponse response) throws Exception {
+        long exportStart = System.nanoTime();
+        Collection<String> metricCodes = metricCodes(List.of(), batchDownloadReq.getMetricIds());
+        int batchSize = safeSize(batchDownloadReq.getMetricIds());
+        publishExportStarted(user, "BATCH_METRIC", "batch", metricCodes, batchSize);
         String fileName =
                 String.format("%s_%s.xlsx", "supersonic", DateUtils.format(new Date(), dateFormat));
-        File file = FileUtils.createTmpFile(fileName);
-        List<Long> metricIds = batchDownloadReq.getMetricIds();
-        if (CollectionUtils.isEmpty(metricIds)) {
-            return;
+        File file = null;
+        ExportSummary summary = ExportSummary.empty();
+        try {
+            if (CollectionUtils.isEmpty(batchDownloadReq.getMetricIds())) {
+                throw new IllegalArgumentException("At least one metric is required for export");
+            }
+            file = FileUtils.createTmpFile(fileName);
+            summary = writeBatchDownload(batchDownloadReq, user, file);
+            downloadFile(response, file, fileName);
+            publishExportSucceeded(user, "BATCH_METRIC", "batch", metricCodes, summary,
+                    file.length(), exportStart, batchSize);
+        } catch (Exception e) {
+            publishExportFailed(user, "BATCH_METRIC", "batch", metricCodes, summary, file,
+                    exportStart, e, batchSize);
+            throw e;
+        } finally {
+            deleteTemporaryFile(file);
         }
-        batchDownload(batchDownloadReq, user, file);
-        downloadFile(response, file, fileName);
     }
 
     public void batchDownload(BatchDownloadReq batchDownloadReq, User user, File file)
             throws Exception {
+        writeBatchDownload(batchDownloadReq, user, file);
+    }
+
+    private ExportSummary writeBatchDownload(BatchDownloadReq batchDownloadReq, User user,
+            File file) throws Exception {
         List<Long> metricIds = batchDownloadReq.getMetricIds();
+        if (CollectionUtils.isEmpty(metricIds)) {
+            throw new IllegalArgumentException("At least one metric is required for export");
+        }
         MetaFilter metaFilter = new MetaFilter();
         metaFilter.setIds(metricIds);
         List<MetricResp> metricResps = metricService.getMetrics(metaFilter);
@@ -110,14 +154,18 @@ public class DownloadServiceImpl implements DownloadService {
                 .stream().collect(Collectors.toMap(DimensionResp::getId, d -> d));
         ExcelWriter excelWriter = EasyExcel.write(file).build();
         int sheetCount = 1;
-        for (List<MetricResp> metrics : metricMap.values()) {
-            if (CollectionUtils.isEmpty(metrics)) {
-                continue;
-            }
-            MetricResp metricResp = metrics.get(0);
-            List<DimensionResp> dimensions = getMetricRelaDimensions(metricResp, dimensionRespMap);
-            for (MetricResp metric : metrics) {
-                try {
+        long rowCount = 0;
+        boolean dataMasked = false;
+        Set<String> maskedFields = new LinkedHashSet<>();
+        try {
+            for (List<MetricResp> metrics : metricMap.values()) {
+                if (CollectionUtils.isEmpty(metrics)) {
+                    continue;
+                }
+                MetricResp metricResp = metrics.get(0);
+                List<DimensionResp> dimensions =
+                        getMetricRelaDimensions(metricResp, dimensionRespMap);
+                for (MetricResp metric : metrics) {
                     QueryStructReq queryStructReq =
                             buildDownloadReq(dimensions, metric, batchDownloadReq);
                     QuerySqlReq querySqlReq = queryStructReq.convert();
@@ -128,27 +176,18 @@ public class DownloadServiceImpl implements DownloadService {
                     WriteSheet writeSheet = EasyExcel.writerSheet("Sheet" + sheetCount)
                             .head(dataDownload.getHeaders()).build();
                     excelWriter.write(dataDownload.getData(), writeSheet);
-                } catch (RuntimeException e) {
-                    EasyExcel.write(file).sheet("Sheet1").head(buildErrMessageHead())
-                            .doWrite(buildErrMessageData(e.getMessage()));
-                    return;
+                    rowCount += dataDownload.getData().size();
+                    dataMasked = dataMasked || queryResult.isDataMasked();
+                    if (queryResult.getMaskedColumns() != null) {
+                        maskedFields.addAll(queryResult.getMaskedColumns());
+                    }
                 }
+                sheetCount++;
             }
-            sheetCount++;
+        } finally {
+            excelWriter.finish();
         }
-        excelWriter.finish();
-    }
-
-    private List<List<String>> buildErrMessageHead() {
-        List<List<String>> headers = Lists.newArrayList();
-        headers.add(Lists.newArrayList("异常提示"));
-        return headers;
-    }
-
-    private List<List<String>> buildErrMessageData(String errMsg) {
-        List<List<String>> data = Lists.newArrayList();
-        data.add(Lists.newArrayList(errMsg));
-        return data;
+        return new ExportSummary(rowCount, Math.max(0, sheetCount - 1), dataMasked, maskedFields);
     }
 
     private List<List<String>> buildHeader(SemanticQueryResp semanticQueryResp) {
@@ -278,29 +317,131 @@ public class DownloadServiceImpl implements DownloadService {
                 .filter(Objects::nonNull).collect(Collectors.toList());
     }
 
-    private void downloadFile(HttpServletResponse response, File file, String filename) {
-        try {
-            byte[] buffer = readFileToByteArray(file);
-            response.reset();
-            response.setCharacterEncoding("UTF-8");
-            response.addHeader("Content-Disposition",
-                    "attachment;filename=" + URLEncoder.encode(filename, "UTF-8"));
-            response.addHeader("Content-Length", "" + file.length());
-            try (OutputStream outputStream = new BufferedOutputStream(response.getOutputStream())) {
-                response.setContentType("application/octet-stream");
-                outputStream.write(buffer);
-                outputStream.flush();
-            }
-        } catch (Exception e) {
-            log.error("failed to download file", e);
+    private void downloadFile(HttpServletResponse response, File file, String filename)
+            throws IOException {
+        response.reset();
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.addHeader("Content-Disposition",
+                "attachment;filename=" + URLEncoder.encode(filename, StandardCharsets.UTF_8));
+        response.addHeader("Content-Length", String.valueOf(file.length()));
+        response.setContentType("application/octet-stream");
+        try (OutputStream outputStream = new BufferedOutputStream(response.getOutputStream())) {
+            Files.copy(file.toPath(), outputStream);
+            outputStream.flush();
         }
     }
 
-    private byte[] readFileToByteArray(File file) throws IOException {
-        try (InputStream fis = new BufferedInputStream(Files.newInputStream(file.toPath()))) {
-            byte[] buffer = new byte[fis.available()];
-            fis.read(buffer);
-            return buffer;
+    private void publishExportStarted(User user, String resourceType, String resourceId,
+            Collection<String> metricCodes, int batchSize) {
+        auditEventPublisher.publishRequired(AuditEvent.builder()
+                .eventType(AuditEventType.EXPORT_STARTED).outcome(AuditOutcome.UNKNOWN)
+                .resourceType(resourceType).resourceId(resourceId).metricCodes(metricCodes)
+                .fileType("XLSX")
+                .metadata(exportMetadata("STARTED", batchSize, 0, 0, Set.of(), null)).build(),
+                user);
+    }
+
+    private void publishExportSucceeded(User user, String resourceType, String resourceId,
+            Collection<String> metricCodes, ExportSummary summary, long fileSize, long exportStart,
+            int batchSize) {
+        auditEventPublisher.publishRequired(AuditEvent.builder()
+                .eventType(AuditEventType.EXPORT_SUCCEEDED).outcome(AuditOutcome.SUCCESS)
+                .resourceType(resourceType).resourceId(resourceId).metricCodes(metricCodes)
+                .maskingSummary(summary.maskingSummary()).exportRowCount(summary.rowCount())
+                .fileType("XLSX").fileSize(fileSize).durationMs(elapsedMillis(exportStart))
+                .metadata(exportMetadata("SUCCEEDED", batchSize, summary.sheetCount(),
+                        summary.rowCount(), summary.maskedFields(), null))
+                .build(), user);
+    }
+
+    private void publishExportFailed(User user, String resourceType, String resourceId,
+            Collection<String> metricCodes, ExportSummary summary, File file, long exportStart,
+            Exception failure, int batchSize) {
+        try {
+            auditEventPublisher.publishRequired(AuditEvent.builder()
+                    .eventType(AuditEventType.EXPORT_FAILED).outcome(AuditOutcome.FAILURE)
+                    .resourceType(resourceType).resourceId(resourceId)
+                    .reasonCode("EXPORT_EXCEPTION").metricCodes(metricCodes)
+                    .maskingSummary(summary.maskingSummary()).exportRowCount(summary.rowCount())
+                    .fileType("XLSX").fileSize(file == null ? null : file.length())
+                    .durationMs(elapsedMillis(exportStart))
+                    .metadata(exportMetadata("FAILED", batchSize, summary.sheetCount(),
+                            summary.rowCount(), summary.maskedFields(),
+                            failure.getClass().getSimpleName()))
+                    .build(), user);
+        } catch (RuntimeException auditFailure) {
+            failure.addSuppressed(auditFailure);
+        }
+    }
+
+    private Map<String, Object> exportMetadata(String stage, int batchSize, int sheetCount,
+            long rowCount, Collection<String> maskedFields, String exceptionType) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("stage", stage);
+        metadata.put("entryPoint", "download");
+        metadata.put("batchSize", batchSize);
+        metadata.put("sheetCount", sheetCount);
+        metadata.put("rowCount", rowCount);
+        metadata.put("maskedFields", maskedFields);
+        if (exceptionType != null) {
+            metadata.put("exceptionType", exceptionType);
+        }
+        return metadata;
+    }
+
+    private Collection<String> metricCodes(Collection<String> metricNames,
+            Collection<Long> metricIds) {
+        Set<String> metricCodes = new LinkedHashSet<>();
+        if (metricNames != null) {
+            metricCodes.addAll(metricNames);
+        }
+        if (metricIds != null) {
+            metricIds.stream().filter(Objects::nonNull).map(String::valueOf)
+                    .forEach(metricCodes::add);
+        }
+        return metricCodes;
+    }
+
+    private String resourceId(Long id) {
+        return id == null ? null : String.valueOf(id);
+    }
+
+    private int safeSize(Collection<?> values) {
+        return values == null ? 0 : values.size();
+    }
+
+    private long elapsedMillis(long start) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+    }
+
+    private void deleteTemporaryFile(File file) {
+        if (file == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(file.toPath());
+        } catch (IOException e) {
+            log.warn("Failed to delete export temporary file: errorType={}",
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    private record ExportSummary(long rowCount, int sheetCount, boolean dataMasked,
+            Set<String> maskedFields) {
+
+        private static ExportSummary empty() {
+            return new ExportSummary(0, 0, false, Set.of());
+        }
+
+        private static ExportSummary from(SemanticQueryResp response, long rowCount,
+                int sheetCount) {
+            Set<String> maskedFields = response.getMaskedColumns() == null ? Set.of()
+                    : new LinkedHashSet<>(response.getMaskedColumns());
+            return new ExportSummary(rowCount, sheetCount, response.isDataMasked(), maskedFields);
+        }
+
+        private String maskingSummary() {
+            return dataMasked ? "MASKED_FIELDS:" + maskedFields.size() : "NONE";
         }
     }
 }

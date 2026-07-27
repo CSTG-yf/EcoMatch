@@ -29,6 +29,7 @@ public class DataSetQueryApiController {
     public Object queryByDataSet(@RequestBody QueryDataSetReq queryDataSetReq,
             HttpServletRequest request, HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        queryDataSetReq.setNeedAuth(true);
         SemanticQueryReq queryReq = dataSetService.convert(queryDataSetReq);
         return semanticLayerService.queryByReq(queryReq, user);
     }

@@ -7,6 +7,7 @@ import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
+import com.tencent.supersonic.common.util.TraceIdUtil;
 import com.tencent.supersonic.headless.api.pojo.QueryStat;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.enums.QueryMethod;
@@ -63,8 +64,13 @@ public class StatUtils {
 
     public void statInfo2DbAsync(TaskStatusEnum state) {
         QueryStat queryStatInfo = get();
+        if (queryStatInfo == null) {
+            log.warn("Skip query statistics persistence because statistics were not initialized");
+            return;
+        }
         queryStatInfo.setElapsedMs(System.currentTimeMillis() - queryStatInfo.getStartTime());
         queryStatInfo.setQueryState(state.getStatus());
+        removeSensitivePayload(queryStatInfo);
         CompletableFuture.runAsync(() -> {
             statRepository.createRecord(queryStatInfo);
         }).exceptionally(exception -> {
@@ -99,7 +105,6 @@ public class StatUtils {
 
     public void initTagStatInfo(QueryTagReq queryTagReq, User facadeUser) {
         QueryStat queryStatInfo = new QueryStat();
-        String traceId = "";
         List<String> dimensions = queryTagReq.getGroups();
 
         List<String> metrics = new ArrayList<>();
@@ -108,11 +113,10 @@ public class StatUtils {
         String user = getUserName(facadeUser);
 
         try {
-            queryStatInfo.setTraceId(traceId).setDataSetId(queryTagReq.getDataSetId()).setUser(user)
-                    .setQueryType(QueryMethod.STRUCT.getValue())
+            queryStatInfo.setTraceId(currentTraceId()).setDataSetId(queryTagReq.getDataSetId())
+                    .setUser(user).setQueryType(QueryMethod.STRUCT.getValue())
                     .setQueryTypeBack(QueryTypeBack.NORMAL.getState())
-                    .setQueryStructCmd(queryTagReq.toString())
-                    .setQueryStructCmdMd5(DigestUtils.md5Hex(queryTagReq.toString()))
+                    .setQueryStructCmdMd5(digest(queryTagReq.toCustomizedString()))
                     .setStartTime(System.currentTimeMillis())
                     .setNativeQuery(CollectionUtils.isEmpty(queryTagReq.getAggregators()))
                     .setGroupByCols(objectMapper.writeValueAsString(queryTagReq.getGroups()))
@@ -142,11 +146,12 @@ public class StatUtils {
 
         String userName = getUserName(facadeUser);
         try {
-            queryStatInfo.setTraceId("").setUser(userName).setDataSetId(querySqlReq.getDataSetId())
+            queryStatInfo.setTraceId(currentTraceId()).setUser(userName)
+                    .setDataSetId(querySqlReq.getDataSetId())
                     .setQueryType(QueryMethod.SQL.getValue())
                     .setQueryTypeBack(QueryTypeBack.NORMAL.getState())
-                    .setQuerySqlCmd(querySqlReq.toString())
-                    .setQuerySqlCmdMd5(DigestUtils.md5Hex(querySqlReq.toString()))
+                    .setQuerySqlCmdMd5(digest(querySqlReq.toCustomizedString()))
+                    .setSqlMd5(digest(querySqlReq.getSql()))
                     .setStartTime(System.currentTimeMillis()).setUseResultCache(true)
                     .setUseSqlCache(true).setMetrics(objectMapper.writeValueAsString(aggFields))
                     .setDimensions(objectMapper.writeValueAsString(dimensions));
@@ -161,7 +166,6 @@ public class StatUtils {
 
     public void initStructStatInfo(QueryStructReq queryStructReq, User facadeUser) {
         QueryStat queryStatInfo = new QueryStat();
-        String traceId = "";
         List<String> dimensions = queryStructReq.getGroups();
 
         List<String> metrics = new ArrayList<>();
@@ -170,11 +174,10 @@ public class StatUtils {
         String user = getUserName(facadeUser);
 
         try {
-            queryStatInfo.setTraceId(traceId).setDataSetId(queryStructReq.getDataSetId())
+            queryStatInfo.setTraceId(currentTraceId()).setDataSetId(queryStructReq.getDataSetId())
                     .setUser(user).setQueryType(QueryMethod.STRUCT.getValue())
                     .setQueryTypeBack(QueryTypeBack.NORMAL.getState())
-                    .setQueryStructCmd(queryStructReq.toString())
-                    .setQueryStructCmdMd5(DigestUtils.md5Hex(queryStructReq.toString()))
+                    .setQueryStructCmdMd5(digest(queryStructReq.toCustomizedString()))
                     .setStartTime(System.currentTimeMillis())
                     .setNativeQuery(queryStructReq.getQueryType().isNativeAggQuery())
                     .setGroupByCols(objectMapper.writeValueAsString(queryStructReq.getGroups()))
@@ -210,6 +213,25 @@ public class StatUtils {
         return (Objects.nonNull(facadeUser) && StringUtils.isNotEmpty(facadeUser.getName()))
                 ? facadeUser.getName()
                 : "Admin";
+    }
+
+    private String currentTraceId() {
+        String traceId = TraceIdUtil.getTraceId();
+        return StringUtils.isBlank(traceId) ? TraceIdUtil.generateTraceId() : traceId;
+    }
+
+    private String digest(String value) {
+        return StringUtils.isBlank(value) ? null : DigestUtils.sha256Hex(value);
+    }
+
+    /**
+     * Query statistics are operational aggregates, not an audit payload store. Keep only digests
+     * for requests/SQL so a future caller cannot accidentally persist sensitive literals here.
+     */
+    private void removeSensitivePayload(QueryStat queryStatInfo) {
+        queryStatInfo.setQuerySqlCmd(null);
+        queryStatInfo.setQueryStructCmd(null);
+        queryStatInfo.setSql(null);
     }
 
     public List<ItemUseResp> getStatInfo(ItemUseReq itemUseCommend) {

@@ -10,9 +10,15 @@ import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryReposi
 import com.tencent.supersonic.chat.server.persistence.repository.ChatRepository;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
+import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -86,11 +92,59 @@ class ChatManageServiceAccessTest {
                 () -> service.queryShowCase(new PageQueryInfoReq(), 7, null));
     }
 
+    @Test
+    void auditsDeniedChatAccessAsRequired() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AuditEventPublisher publisher = mock(AuditEventPublisher.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, publisher);
+        User user = User.get(3L, "bob");
+        when(chatRepository.getChat(10L)).thenReturn(chat(10L, "alice"));
+
+        assertThrows(InvalidPermissionException.class, () -> service.checkChatAccess(10L, user));
+
+        ArgumentCaptor<AuditEvent> eventCaptor = ArgumentCaptor.forClass(AuditEvent.class);
+        verify(publisher).publishRequired(eventCaptor.capture(), eq(user));
+        AuditEvent event = eventCaptor.getValue();
+        assertEquals(AuditEventType.OBJECT_ACCESS_DENIED, event.getEventType());
+        assertEquals(AuditOutcome.DENIED, event.getOutcome());
+        assertEquals("CHAT_OWNERSHIP_DENIED", event.getReasonCode());
+        assertEquals(10L, event.getChatId());
+        assertEquals("CHAT", event.getResourceType());
+    }
+
+    @Test
+    void auditsAllowedChatAccessAsBestEffort() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AuditEventPublisher publisher = mock(AuditEventPublisher.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, publisher);
+        User user = User.get(2L, "alice");
+        when(chatRepository.getChat(10L)).thenReturn(chat(10L, "alice"));
+
+        service.checkChatAccess(10L, user);
+
+        ArgumentCaptor<AuditEvent> eventCaptor = ArgumentCaptor.forClass(AuditEvent.class);
+        verify(publisher).publishBestEffort(eventCaptor.capture(), eq(user));
+        AuditEvent event = eventCaptor.getValue();
+        assertEquals(AuditEventType.OBJECT_ACCESS_ALLOWED, event.getEventType());
+        assertEquals(AuditOutcome.SUCCESS, event.getOutcome());
+        assertEquals("CHAT_ACCESS_ALLOWED", event.getReasonCode());
+        assertEquals(10L, event.getChatId());
+        verify(publisher, never()).publishRequired(any(), eq(user));
+    }
+
     private ChatManageServiceImpl service(ChatRepository chatRepository,
             ChatQueryRepository queryRepository) {
+        return service(chatRepository, queryRepository, mock(AuditEventPublisher.class));
+    }
+
+    private ChatManageServiceImpl service(ChatRepository chatRepository,
+            ChatQueryRepository queryRepository, AuditEventPublisher publisher) {
         ChatManageServiceImpl service = new ChatManageServiceImpl();
         ReflectionTestUtils.setField(service, "chatRepository", chatRepository);
         ReflectionTestUtils.setField(service, "chatQueryRepository", queryRepository);
+        ReflectionTestUtils.setField(service, "auditEventPublisher", publisher);
         return service;
     }
 

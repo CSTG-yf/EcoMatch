@@ -4,6 +4,7 @@ import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
+import com.tencent.supersonic.common.util.ThreadMdcUtil;
 import com.tencent.supersonic.headless.api.pojo.SqlEvaluation;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlsReq;
@@ -14,6 +15,7 @@ import com.tencent.supersonic.headless.server.facade.service.SemanticLayerServic
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -41,6 +44,7 @@ public class SqlQueryApiController {
     public Object queryBySql(@RequestBody QuerySqlReq querySqlReq, HttpServletRequest request,
             HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        querySqlReq.setNeedAuth(true);
         String sql = querySqlReq.getSql();
         querySqlReq.setSql(StringUtil.replaceBackticks(sql));
         chatLayerService.correct(querySqlReq, user);
@@ -51,6 +55,7 @@ public class SqlQueryApiController {
     public Object queryBySqls(@RequestBody QuerySqlsReq querySqlsReq, HttpServletRequest request,
             HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        querySqlsReq.setNeedAuth(true);
         List<SemanticQueryReq> semanticQueryReqs = querySqlsReq.getSqls().stream().map(sql -> {
             QuerySqlReq querySqlReq = new QuerySqlReq();
             BeanUtils.copyProperties(querySqlsReq, querySqlReq);
@@ -59,8 +64,9 @@ public class SqlQueryApiController {
             return querySqlReq;
         }).collect(Collectors.toList());
 
-        List<CompletableFuture<SemanticQueryResp>> futures =
-                semanticQueryReqs.stream().map(querySqlReq -> CompletableFuture.supplyAsync(() -> {
+        Map<String, String> mdcContext = MDC.getCopyOfContextMap();
+        List<CompletableFuture<SemanticQueryResp>> futures = semanticQueryReqs.stream()
+                .map(querySqlReq -> CompletableFuture.supplyAsync(ThreadMdcUtil.wrapSupplier(() -> {
                     try {
                         return semanticLayerService.queryByReq(querySqlReq, user);
                     } catch (Exception e) {
@@ -69,7 +75,7 @@ public class SqlQueryApiController {
                                 e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                         return new SemanticQueryResp();
                     }
-                })).collect(Collectors.toList());
+                }, mdcContext))).collect(Collectors.toList());
         return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
     }
 
@@ -77,6 +83,7 @@ public class SqlQueryApiController {
     public Object queryBySqlsWithException(@RequestBody QuerySqlsReq querySqlsReq,
             HttpServletRequest request, HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        querySqlsReq.setNeedAuth(true);
         List<SemanticQueryReq> semanticQueryReqs = querySqlsReq.getSqls().stream().map(sql -> {
             QuerySqlReq querySqlReq = new QuerySqlReq();
             BeanUtils.copyProperties(querySqlsReq, querySqlReq);
@@ -101,6 +108,7 @@ public class SqlQueryApiController {
     public Object validate(@RequestBody QuerySqlReq querySqlReq, HttpServletRequest request,
             HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        querySqlReq.setNeedAuth(true);
         String sql = querySqlReq.getSql();
         querySqlReq.setSql(StringUtil.replaceBackticks(sql));
         return chatLayerService.validate(querySqlReq, user);
@@ -110,6 +118,7 @@ public class SqlQueryApiController {
     public Object validateAndQuery(@RequestBody QuerySqlsReq querySqlsReq,
             HttpServletRequest request, HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        querySqlsReq.setNeedAuth(true);
         List<QuerySqlReq> convert = convert(querySqlsReq);
         for (QuerySqlReq querySqlReq : convert) {
             SqlEvaluation validate = chatLayerService.validate(querySqlReq, user);

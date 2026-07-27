@@ -3,15 +3,24 @@ package com.tencent.supersonic.chat.server.service.impl;
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatQueryDataReq;
+import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
+import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -67,5 +76,80 @@ class ChatQueryServiceAccessTest {
         assertThrows(InvalidPermissionException.class, () -> service.search(request));
 
         verify(agentService).getAgents(user, AuthType.VIEWER);
+    }
+
+    @Test
+    void bindsExecuteRequestToPersistedQuery() {
+        ChatQueryServiceImpl service = new ChatQueryServiceImpl();
+        ChatQueryDO storedQuery = storedQuery();
+        ChatExecuteReq request = ChatExecuteReq.builder().queryId(99L).chatId(99).agentId(99)
+                .queryText("untrusted question").build();
+
+        service.bindStoredQuery(request, storedQuery);
+
+        assertAll(() -> assertEquals(20L, request.getQueryId()),
+                () -> assertEquals(10, request.getChatId()),
+                () -> assertEquals(7, request.getAgentId()),
+                () -> assertEquals("trusted question", request.getQueryText()));
+    }
+
+    @Test
+    void bindsReparseRequestToPersistedQuery() {
+        ChatQueryServiceImpl service = new ChatQueryServiceImpl();
+        ChatQueryDO storedQuery = storedQuery();
+        ChatParseReq request = ChatParseReq.builder().queryId(99L).chatId(99).agentId(99)
+                .queryText("untrusted question").build();
+
+        service.bindStoredQuery(request, storedQuery);
+
+        assertAll(() -> assertEquals(20L, request.getQueryId()),
+                () -> assertEquals(10, request.getChatId()),
+                () -> assertEquals(7, request.getAgentId()),
+                () -> assertEquals("trusted question", request.getQueryText()));
+    }
+
+    @Test
+    void rejectsPersistedQueryWhoseChatIsNotAccessible() {
+        ChatManageService chatManageService = mock(ChatManageService.class);
+        ChatQueryServiceImpl service = new ChatQueryServiceImpl();
+        ReflectionTestUtils.setField(service, "chatManageService", chatManageService);
+        ChatQueryDO storedQuery = storedQuery();
+        User user = User.get(2L, "alice");
+        when(chatManageService.getChatQueryDO(storedQuery.getQuestionId())).thenReturn(storedQuery);
+        doThrow(new InvalidPermissionException("Chat access denied")).when(chatManageService)
+                .checkChatAccess(storedQuery.getChatId(), user);
+
+        assertThrows(InvalidPermissionException.class,
+                () -> service.requireAuthorizedStoredQuery(storedQuery.getQuestionId(), user));
+
+        verify(chatManageService).getChatQueryDO(storedQuery.getQuestionId());
+        verify(chatManageService).checkChatAccess(storedQuery.getChatId(), user);
+    }
+
+    @Test
+    void classifiesParseAndExecutionStatesForAudit() {
+        ChatParseResp parseResponse = new ChatParseResp(20L);
+        parseResponse.setState(ParseResp.ParseState.FAILED);
+        assertFalse(ChatQueryServiceImpl.isParseSuccessful(parseResponse));
+        parseResponse.setState(ParseResp.ParseState.COMPLETED);
+        assertTrue(ChatQueryServiceImpl.isParseSuccessful(parseResponse));
+
+        QueryResult queryResult = new QueryResult();
+        queryResult.setQueryState(QueryState.SEARCH_EXCEPTION);
+        assertFalse(ChatQueryServiceImpl.isExecutionSuccessful(queryResult));
+        queryResult.setQueryState(QueryState.INVALID);
+        assertFalse(ChatQueryServiceImpl.isExecutionSuccessful(queryResult));
+        queryResult.setQueryState(QueryState.SUCCESS);
+        assertTrue(ChatQueryServiceImpl.isExecutionSuccessful(queryResult));
+        assertFalse(ChatQueryServiceImpl.isExecutionSuccessful(null));
+    }
+
+    private ChatQueryDO storedQuery() {
+        ChatQueryDO storedQuery = new ChatQueryDO();
+        storedQuery.setQuestionId(20L);
+        storedQuery.setChatId(10L);
+        storedQuery.setAgentId(7);
+        storedQuery.setQueryText("trusted question");
+        return storedQuery;
     }
 }
