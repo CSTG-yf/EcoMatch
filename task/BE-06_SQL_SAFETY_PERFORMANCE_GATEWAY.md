@@ -21,6 +21,7 @@
 - 内置危险函数集合不可被配置移除，并支持通过 `s2.query-gateway.denied-functions` 追加目标数据库的有副作用 UDF；非法函数标识在启动时直接拒绝。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 执行前运行 `EXPLAIN`，递归兼容结构化、嵌套 JSON 和文本计划中的估算行数，超过阈值时拒绝查询；支持在目标数据库确认格式后开启“缺失估算即拒绝”。
+- EXPLAIN 已识别估算字段中的负数、`NaN`、无穷值和非数字内容统一拒绝；估算阈值、并发数、许可等待、SQL 长度、查询超时和结果行数上限必须为正数，错误配置不再被静默修正或退化为无限制执行。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
 - 提供网关运行快照，包含最大并发、可用许可、活动查询、接收、拒绝、成功、失败和平均执行耗时。
 - 统一采集解析、模型、翻译、执行和解释五个阶段的调用次数、累计耗时、平均耗时、最大耗时及最近 2,048 次样本的 P50/P95/P99。
@@ -67,9 +68,9 @@
 - `QueryStructReqSecurityTest`：校验 WHERE/HAVING 的语法与词法解析失败均转换为通用参数错误并 fail-closed。
 - `SemanticQueryRequestSecurityTest`：校验外部 JSON 不能关闭鉴权或开启原生层模式，可信服务端代码仍可显式设置内部模式。
 - `SqlQueryApiControllerSecurityTest`：校验批量数量、空语句、普通批量及严格批量失败均 fail-closed，并仅返回通用错误。
-- `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果；目标驱动忽略最大行数时仍由应用层拒绝超限结果。
-- `ExplainCostPolicyTest`：结构化、嵌套 JSON、文本执行计划、数字字符串、超阈值拒绝及缺失估算 fail-closed。
-- `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，并校验接收和拒绝计数。
+- `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果；目标驱动忽略最大行数时仍由应用层拒绝超限结果；禁止通过零值或负值配置取消超时、结果和成本边界。
+- `ExplainCostPolicyTest`：结构化、嵌套 JSON、文本执行计划、数字字符串、超阈值拒绝、异常估算值拒绝及缺失估算 fail-closed。
+- `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，非法并发/等待/SQL 长度配置 fail-fast，并校验接收和拒绝计数。
 - `QueryExecutionGatewayTest`：校验策略拒绝、执行失败、活动查询和平均耗时快照。
 - `QueryPerformanceMonitorTest`：校验五阶段耗时聚合、平均值、最大值、P50/P95/P99 和缓存命中率。
 - `DefaultQueryCacheTest`：校验结构化指标查询和聚合 SQL 的热点识别、鉴权模式键隔离及缓存响应快照隔离。
@@ -77,7 +78,7 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 520 项测试（3 项按环境条件跳过），无失败或错误。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 526 项测试（3 项按环境条件跳过），无失败或错误。
 
 ## 本地性能基线
 

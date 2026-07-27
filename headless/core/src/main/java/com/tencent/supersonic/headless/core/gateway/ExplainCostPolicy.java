@@ -26,6 +26,10 @@ public class ExplainCostPolicy {
     }
 
     public ExplainCostPolicy(long maxEstimatedRows, boolean requireEstimate) {
+        if (maxEstimatedRows <= 0) {
+            throw new IllegalArgumentException(
+                    "s2.source.explain-max-estimated-rows must be greater than zero");
+        }
         this.maxEstimatedRows = maxEstimatedRows;
         this.requireEstimate = requireEstimate;
     }
@@ -119,18 +123,22 @@ public class ExplainCostPolicy {
 
     private Estimate estimateKnownRowValue(Object value) {
         if (!(value instanceof Number) && !(value instanceof CharSequence)) {
-            return Estimate.missing();
+            throw malformedEstimate();
         }
         try {
             double rows = Double.parseDouble(String.valueOf(value).trim());
             if (!Double.isFinite(rows) || rows < 0) {
-                return Estimate.missing();
+                throw malformedEstimate();
             }
             return new Estimate(true,
                     rows >= Long.MAX_VALUE ? Long.MAX_VALUE : (long) Math.ceil(rows));
         } catch (NumberFormatException e) {
-            return Estimate.missing();
+            throw malformedEstimate();
         }
+    }
+
+    private QueryRejectedException malformedEstimate() {
+        return new QueryRejectedException("EXPLAIN returned an invalid estimated row count");
     }
 
     private record Estimate(boolean found, long rows) {

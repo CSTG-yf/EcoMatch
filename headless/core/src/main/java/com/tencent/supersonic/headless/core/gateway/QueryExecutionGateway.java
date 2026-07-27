@@ -39,10 +39,13 @@ public class QueryExecutionGateway {
             @Value("${s2.query-gateway.acquire-timeout-ms:1000}") long acquireTimeoutMs,
             @Value("${s2.query-gateway.max-sql-length:100000}") int maxSqlLength,
             @Value("${s2.query-gateway.denied-functions:}") String deniedFunctions) {
-        this.maxConcurrency = Math.max(1, maxConcurrency);
+        requirePositive(maxConcurrency, "max-concurrency");
+        requirePositive(acquireTimeoutMs, "acquire-timeout-ms");
+        requirePositive(maxSqlLength, "max-sql-length");
+        this.maxConcurrency = maxConcurrency;
         this.permits = new Semaphore(this.maxConcurrency, true);
-        this.acquireTimeoutMs = Math.max(1, acquireTimeoutMs);
-        this.safetyPolicy = new SqlSafetyPolicy(Math.max(1, maxSqlLength), deniedFunctions);
+        this.acquireTimeoutMs = acquireTimeoutMs;
+        this.safetyPolicy = new SqlSafetyPolicy(maxSqlLength, deniedFunctions);
     }
 
     public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength) {
@@ -98,6 +101,13 @@ public class QueryExecutionGateway {
         return new QueryGatewayStats(maxConcurrency, permits.availablePermits(),
                 activeQueries.get(), acceptedQueries.get(), rejectedQueries.get(),
                 completedQueries.get(), failedQueries.get(), averageExecutionTimeMs);
+    }
+
+    private static void requirePositive(long value, String property) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    "s2.query-gateway." + property + " must be greater than zero");
+        }
     }
 
     public record QueryGatewayStats(int maxConcurrency, int availablePermits, long activeQueries,

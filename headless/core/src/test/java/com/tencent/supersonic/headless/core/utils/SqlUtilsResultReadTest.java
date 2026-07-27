@@ -53,4 +53,18 @@ class SqlUtilsResultReadTest {
         assertThrows(QueryRejectedException.class, () -> sqlUtils.getAllData(resultSet,
                 List.of(new QueryColumn("account_no", "VARCHAR"))));
     }
+
+    @Test
+    void rejectsConfigurationThatWouldDisableExecutionBounds() {
+        assertThrows(IllegalArgumentException.class,
+                () -> SqlUtils.SqlUtilsBuilder.getBuilder().withResultLimit(0).build());
+        assertThrows(IllegalArgumentException.class, () -> SqlUtils.SqlUtilsBuilder.getBuilder()
+                .withResultLimit(1).withQueryTimeoutSeconds(0).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> SqlUtils.SqlUtilsBuilder.getBuilder().withResultLimit(1)
+                        .withQueryTimeoutSeconds(1).withExplainCostCheck(true, 0, false).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> SqlUtils.SqlUtilsBuilder.getBuilder().withResultLimit(1)
+                        .withQueryTimeoutSeconds(1).withExplainCostCheck(false, 0, false).build());
+    }
 }

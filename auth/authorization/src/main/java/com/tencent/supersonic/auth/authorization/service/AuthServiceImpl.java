@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +56,7 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void addOrUpdateAuthGroup(AuthGroup group) {
+        validateAuthGroup(group);
         Gson g = new Gson();
         if (group.getGroupId() == null) {
             int nextGroupId = 1;
@@ -74,6 +76,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void removeAuthGroup(AuthGroup group) {
+        if (group == null || group.getGroupId() == null || group.getGroupId() <= 0) {
+            throw new IllegalArgumentException("Authorization group id must be positive");
+        }
         jdbcTemplate.update("delete from s2_auth_groups where group_id = ?", group.getGroupId());
     }
 
@@ -128,5 +133,65 @@ public class AuthServiceImpl implements AuthService {
                 SensitiveLogUtils.summarize(departmentIds),
                 SensitiveLogUtils.summarize(user.getRoles()), groups.size());
         return groups;
+    }
+
+    private void validateAuthGroup(AuthGroup group) {
+        if (group == null) {
+            throw new IllegalArgumentException("Authorization group is required");
+        }
+        if (group.getModelId() == null || group.getModelId() <= 0) {
+            throw new IllegalArgumentException("Authorization group modelId must be positive");
+        }
+        if (!StringUtils.hasText(group.getName())) {
+            throw new IllegalArgumentException("Authorization group name is required");
+        }
+        if (group.getGroupId() != null && group.getGroupId() <= 0) {
+            throw new IllegalArgumentException("Authorization group id must be positive");
+        }
+
+        boolean hasSubject = validateIdentifiers(group.getAuthorizedUsers(), "user")
+                | validateIdentifiers(group.getAuthorizedDepartmentIds(), "department")
+                | validateIdentifiers(group.getAuthorizedRoles(), "role");
+        if (!CollectionUtils.isEmpty(group.getAttributeConditions())) {
+            group.getAttributeConditions().forEach((key, value) -> {
+                if (!StringUtils.hasText(key) || !StringUtils.hasText(value)) {
+                    throw new IllegalArgumentException(
+                            "Authorization attribute keys and values must not be blank");
+                }
+            });
+            hasSubject = true;
+        }
+        if (!hasSubject) {
+            throw new IllegalArgumentException(
+                    "Authorization group must define at least one effective subject");
+        }
+
+        if (CollectionUtils.isEmpty(group.getAuthRules())) {
+            throw new IllegalArgumentException(
+                    "Authorization group must define at least one resource rule");
+        }
+        group.getAuthRules().forEach(rule -> {
+            if (rule == null) {
+                throw new IllegalArgumentException("Authorization resource rule must not be null");
+            }
+            boolean hasResource = validateIdentifiers(rule.getMetrics(), "metric")
+                    | validateIdentifiers(rule.getDimensions(), "dimension");
+            if (!hasResource) {
+                throw new IllegalArgumentException(
+                        "Authorization resource rule must contain a metric or dimension");
+            }
+        });
+        validateIdentifiers(group.getDimensionFilters(), "dimension filter");
+    }
+
+    private boolean validateIdentifiers(List<String> values, String type) {
+        if (CollectionUtils.isEmpty(values)) {
+            return false;
+        }
+        if (values.stream().anyMatch(value -> !StringUtils.hasText(value))) {
+            throw new IllegalArgumentException(
+                    "Authorization " + type + " values must not be blank");
+        }
+        return true;
     }
 }

@@ -58,6 +58,13 @@ class QueryExecutionGatewayTest {
         assertEquals(2, stats.availablePermits());
     }
 
+    @Test
+    void rejectsInvalidGatewayLimitsInsteadOfSilentlyDisablingProtection() {
+        assertThrows(IllegalArgumentException.class, () -> new QueryExecutionGateway(0, 20, 1000));
+        assertThrows(IllegalArgumentException.class, () -> new QueryExecutionGateway(1, 0, 1000));
+        assertThrows(IllegalArgumentException.class, () -> new QueryExecutionGateway(1, 20, 0));
+    }
+
     private void await(CountDownLatch latch) {
         try {
             latch.await(1, TimeUnit.SECONDS);

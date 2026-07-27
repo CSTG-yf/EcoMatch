@@ -271,6 +271,7 @@ public class SqlUtils {
         }
 
         public SqlUtils build() {
+            validateExecutionBounds();
             DatabaseResp database = DatabaseResp.builder().name(this.name)
                     .type(this.type.toUpperCase()).url(this.jdbcUrl).username(this.username)
                     .password(this.password).build();
@@ -286,6 +287,21 @@ public class SqlUtils {
             sqlUtils.jdbcDataSourceUtils = new JdbcDataSourceUtils(this.jdbcDataSource);
 
             return sqlUtils;
+        }
+
+        private void validateExecutionBounds() {
+            if (resultLimit <= 0) {
+                throw new IllegalArgumentException(
+                        "s2.source.result-limit must be greater than zero");
+            }
+            if (queryTimeoutSeconds <= 0) {
+                throw new IllegalArgumentException(
+                        "s2.source.query-timeout-seconds must be greater than zero");
+            }
+            if (explainMaxEstimatedRows <= 0) {
+                throw new IllegalArgumentException(
+                        "s2.source.explain-max-estimated-rows must be greater than zero");
+            }
         }
     }
 }

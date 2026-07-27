@@ -47,4 +47,17 @@ class ExplainCostPolicyTest {
                 () -> policy.validate(List.of(Map.of("QUERY PLAN", "constant result"))));
         assertEquals(0, policy.validate(List.of(Map.of("Plan Rows", 0))));
     }
+
+    @Test
+    void rejectsInvalidThresholdAndMalformedRecognizedEstimates() {
+        assertThrows(IllegalArgumentException.class, () -> new ExplainCostPolicy(0));
+
+        ExplainCostPolicy policy = new ExplainCostPolicy(100_000);
+        assertThrows(QueryRejectedException.class,
+                () -> policy.validate(List.of(Map.of("Plan Rows", Double.NaN))));
+        assertThrows(QueryRejectedException.class,
+                () -> policy.validate(List.of(Map.of("estimated_rows", -1))));
+        assertThrows(QueryRejectedException.class,
+                () -> policy.validate(List.of(Map.of("rows", "not-a-number"))));
+    }
 }

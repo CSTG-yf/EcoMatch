@@ -180,7 +180,7 @@
 
 ### BE-06 SQL 安全与性能网关
 
-- 状态：开发、本地性能、超时取消、结果集读取异常及驱动/加速器超大结果 fail-closed、`SELECT INTO`/行锁/状态变更函数及 PostgreSQL/DuckDB 文件读取封堵（含 `VALUES`/PIVOT/LATERAL VIEW、括号 FromItem/嵌套 JOIN、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口 AST 检查）、目标数据库危险函数追加 denylist、五阶段分位数、结果缓存、独立热点指标缓存、JDBC/语义查询诊断防泄露及全部物理执行入口收口验收完成（2026-07-27），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
+- 状态：开发、本地性能、超时取消、结果集读取异常及驱动/加速器超大结果 fail-closed、`SELECT INTO`/行锁/状态变更函数及 PostgreSQL/DuckDB 文件读取封堵（含 `VALUES`/PIVOT/LATERAL VIEW、括号 FromItem/嵌套 JOIN、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口 AST 检查）、目标数据库危险函数追加 denylist、异常 EXPLAIN 估算与非正数执行边界配置 fail-fast、五阶段分位数、结果缓存、独立热点指标缓存、JDBC/语义查询诊断防泄露及全部物理执行入口收口验收完成（2026-07-27），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-05；下游被 QA-03、OPS-01 和最终性能验收依赖。
 - 工作内容：
@@ -206,7 +206,7 @@
 
 ### BE-08 金融级权限和动态脱敏
 
-- 状态：已完成（2026-07-27），包含字段级策略、异常属性策略 fail-closed、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、SQL 别名和结果键大小写脱敏、同一结果行大小写碰撞防护、重复脱敏幂等、空敏感值及未声明空值元数据保留、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置对象鉴权，以及 Dify、NL2SQL、语义纠错、查询规则和 JDBC 查询链路日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
+- 状态：已完成（2026-07-27），包含字段级策略、异常属性策略及权限组写入结构 fail-closed、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、SQL 别名和结果键大小写脱敏、同一结果行大小写碰撞防护、重复脱敏幂等、空敏感值及未声明空值元数据保留、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置对象鉴权，以及 Dify、NL2SQL、语义纠错、查询规则和 JDBC 查询链路日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
 - 优先级：P0
 - 依赖关系：上游依赖机构、岗位和数据敏感等级规则；下游被 BE-09、FE-06、FE-08 和 QA-02 依赖。
 - 工作内容：
