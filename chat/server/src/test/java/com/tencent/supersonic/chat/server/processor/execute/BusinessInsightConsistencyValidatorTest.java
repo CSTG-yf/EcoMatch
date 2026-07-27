@@ -71,6 +71,15 @@ class BusinessInsightConsistencyValidatorTest {
     }
 
     @Test
+    void rejectsMaskedResultWithUnknownFieldMetadata() {
+        QueryResult result = validResult();
+        result.setDataMasked(true);
+        result.setMaskedColumns(Set.of("not_a_result_field"));
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
     void rejectsExplanationWithFabricatedNumericEvidence() {
         QueryResult result = validResult();
         result.getBusinessExplanation().setEvidence(List.of("balance范围为100至999"));

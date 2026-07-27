@@ -118,6 +118,41 @@ class BusinessInsightServiceTest {
                 explanation.getWarnings().stream().anyMatch(warning -> warning.contains("脱敏字段")));
     }
 
+    @Test
+    void rejectsUnknownMaskedColumnMetadata() {
+        BusinessInsightReq request = request();
+        request.setDataMasked(true);
+        request.setMaskedColumns(Set.of("not_a_result_field"));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .recommend(request));
+    }
+
+    @Test
+    void rejectsUndeclaredResultFields() {
+        BusinessInsightReq request = request();
+        request.setQueryResults(
+                List.of(Map.of("category_name", "A", "metric_value", 10, "hidden_value", 99)));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .explain(request));
+    }
+
+    @Test
+    void rejectsCaseInsensitiveColumnAliasCollisions() {
+        BusinessInsightReq request = request();
+        QueryColumn duplicateAlias = column("another_metric", "NUMBER");
+        duplicateAlias.setName("METRIC_VALUE");
+        request.setQueryColumns(List.of(column("category_name", "CATEGORY"),
+                column("metric_value", "NUMBER"), duplicateAlias));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .recommend(request));
+    }
+
     private BusinessInsightReq request() {
         BusinessInsightReq request = new BusinessInsightReq();
         request.setQueryText("各机构贷款余额");

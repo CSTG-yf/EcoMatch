@@ -78,9 +78,9 @@
 | [x] | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
 | [x] | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | [x] | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，执行入口、驱动与加速器结果行数兜底、缓存安全模式隔离、响应快照、危险函数 AST 校验（含 PostgreSQL/DuckDB/H2/SQLite/SQL Server 外部数据读取、分页、DISTINCT ON、TOP、层级查询和命名窗口）、目标数据库追加 denylist 及只读 SELECT 状态变更绕过均已收口；2026-07-27 完成跨方言外部数据函数补强，待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
-| [x] | BE-08 金融级权限和动态脱敏 | 已完成；2026-07-27 补齐签名令牌中的角色/属性传播及认证、授权日志防泄露（含字段策略、脱敏旁路、行权限 fail-open、SQL 别名/大小写绕过、重复脱敏幂等、缓存前脱敏、元数据缺失 fail-closed、未知血缘全量掩码、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置鉴权） | 2026-07-27 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
-| [x] | BE-10 业务化解释与图表推荐服务 | 已完成；2026-07-27 补齐独立接口脱敏元数据传播并修复 DATA-03 校验入口（含独立接口、同比环比、空结果、小样本策略、图表字段契约与一致性校验、字段/业务标签跨指标证据归因、贡献分类与同比环比月份对复算、主查询及独立接口资源与结构保护、构成意图识别） | 2026-07-27 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
+| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，执行入口、驱动与加速器结果行数兜底、缓存安全模式隔离、响应快照、危险函数 AST 校验（含 PostgreSQL/DuckDB/H2/SQLite/SQL Server 外部数据读取、分页、DISTINCT ON、TOP、层级查询和命名窗口）、目标数据库追加 denylist 及只读 SELECT 状态变更绕过均已收口；2026-07-27 完成跨方言外部数据函数、数据源元数据鉴权和标识符注入防护，待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| [x] | BE-08 金融级权限和动态脱敏 | 已完成；2026-07-27 补齐签名令牌中的角色/属性传播、认证授权日志防泄露、权限组管理鉴权、用户令牌所有权及数据源元数据鉴权（含字段策略、脱敏旁路、行权限 fail-open、SQL 别名/大小写绕过、重复脱敏幂等、缓存前脱敏、元数据缺失 fail-closed、未知血缘全量掩码、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置鉴权） | 2026-07-27 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
+| [x] | BE-10 业务化解释与图表推荐服务 | 已完成；2026-07-27 补齐独立接口脱敏元数据传播、字段归属 fail-closed 校验并修复 DATA-03 校验入口（含独立接口、同比环比、空结果、小样本策略、图表字段契约与一致性校验、字段/业务标签跨指标证据归因、贡献分类与同比环比月份对复算、主查询及独立接口资源与结构保护、构成意图识别） | 2026-07-27 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
 | [x] | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | [x] | DATA-02 NL2SQL 标注数据集 | 已完成 | 2026-07-23 | `task/DATA-02_NL2SQL_DATASET.md` |
 | [x] | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |

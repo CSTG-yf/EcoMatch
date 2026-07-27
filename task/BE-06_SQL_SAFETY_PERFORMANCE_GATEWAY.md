@@ -3,6 +3,7 @@
 ## 已实现
 
 - 默认危险函数集合补充 H2、SQLite、PostgreSQL、SQL Server 和 DuckDB 的跨库/外部文件入口，包括 `CSVREAD`、`readfile`、`dblink`、`OPENROWSET`、`read_xlsx` 等，避免只读 `SELECT` 绕过数据边界。
+- 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符仅接受安全字符，阻断通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
 - 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、`SELECT INTO`、`FOR SHARE/UPDATE` 行锁、状态变更函数、危险函数和文件写入，避免注释分隔绕过。
 - 拦截 PostgreSQL `pg_read_file`、`pg_read_binary_file`、`pg_ls_dir` 和 `pg_stat_file` 等服务端文件读取/探测函数，避免只读 SQL 被用于读取数据库主机文件系统。
 - 默认拦截 DuckDB `read_parquet`、`read_csv_auto`、`read_text`、`glob` 等文件读取及扫描函数，覆盖投影和表函数位置，避免只读 SELECT 读取数据库主机文件。

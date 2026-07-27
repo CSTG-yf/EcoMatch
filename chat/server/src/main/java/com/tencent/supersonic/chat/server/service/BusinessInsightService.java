@@ -18,8 +18,10 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Stream;
 
 @Service
 public class BusinessInsightService {
@@ -59,7 +61,8 @@ public class BusinessInsightService {
         if (request.getQueryResults().stream().anyMatch(Objects::isNull)) {
             throw new InvalidArgumentException("queryResults contains a null row");
         }
-        validateColumns(request);
+        Set<String> declaredFields = validateColumns(request);
+        validateMaskedColumns(request, declaredFields);
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
         result.setQueryColumns(request.getQueryColumns());
@@ -79,8 +82,9 @@ public class BusinessInsightService {
         return result;
     }
 
-    private void validateColumns(BusinessInsightReq request) {
+    private Set<String> validateColumns(BusinessInsightReq request) {
         Set<String> fields = new HashSet<>();
+        Set<String> declaredFields = new HashSet<>();
         for (QueryColumn column : request.getQueryColumns()) {
             String field = column == null ? null
                     : StringUtils.firstNonBlank(column.getBizName(), column.getNameEn(),
@@ -88,15 +92,41 @@ public class BusinessInsightService {
             if (StringUtils.isBlank(field)) {
                 throw new InvalidArgumentException("queryColumns contains an unnamed field");
             }
-            if (!fields.add(field)) {
+            if (!fields.add(field.toLowerCase(Locale.ROOT))) {
                 throw new InvalidArgumentException(
                         "queryColumns contains duplicate field: " + field);
             }
+            Set<String> aliases = Stream
+                    .of(column.getBizName(), column.getNameEn(), column.getName())
+                    .filter(StringUtils::isNotBlank).map(value -> value.toLowerCase(Locale.ROOT))
+                    .collect(java.util.stream.Collectors.toSet());
+            if (aliases.stream().anyMatch(declaredFields::contains)) {
+                throw new InvalidArgumentException(
+                        "queryColumns contains a duplicate field alias: " + field);
+            }
+            declaredFields.addAll(aliases);
             if (!request.getQueryResults().isEmpty() && request.getQueryResults().stream()
                     .noneMatch(row -> row != null && row.containsKey(field))) {
                 throw new InvalidArgumentException(
                         "queryResults does not contain declared field: " + field);
             }
+        }
+        boolean hasUndeclaredField = request.getQueryResults().stream()
+                .flatMap(row -> row.keySet().stream()).anyMatch(field -> field == null
+                        || !declaredFields.contains(field.toLowerCase(Locale.ROOT)));
+        if (hasUndeclaredField) {
+            throw new InvalidArgumentException("queryResults contains an undeclared field");
+        }
+        return declaredFields;
+    }
+
+    private void validateMaskedColumns(BusinessInsightReq request, Set<String> declaredFields) {
+        Set<String> maskedColumns = request.getMaskedColumns() == null ? Collections.emptySet()
+                : request.getMaskedColumns();
+        if (maskedColumns.stream().anyMatch(StringUtils::isBlank)
+                || maskedColumns.stream().map(value -> value.toLowerCase(Locale.ROOT))
+                        .anyMatch(value -> !declaredFields.contains(value))) {
+            throw new InvalidArgumentException("maskedColumns contains an unknown or blank field");
         }
     }
 }

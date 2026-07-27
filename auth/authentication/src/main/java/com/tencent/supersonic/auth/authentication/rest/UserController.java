@@ -6,12 +6,14 @@ import com.tencent.supersonic.auth.api.authentication.request.UserReq;
 import com.tencent.supersonic.auth.api.authentication.request.UserTokenReq;
 import com.tencent.supersonic.auth.api.authentication.service.UserService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 @RestController
@@ -98,12 +100,29 @@ public class UserController {
     }
 
     @GetMapping("/getUserToken")
-    public UserToken getUserToken(@RequestParam(name = "tokenId") Long tokenId) {
-        return userService.getUserToken(tokenId);
+    public UserToken getUserToken(@RequestParam(name = "tokenId") Long tokenId,
+            HttpServletRequest request, HttpServletResponse response) {
+        return requireTokenAccess(tokenId, request, response);
     }
 
     @PostMapping("/deleteUserToken")
-    public void deleteUserToken(@RequestParam(name = "tokenId") Long tokenId) {
+    public void deleteUserToken(@RequestParam(name = "tokenId") Long tokenId,
+            HttpServletRequest request, HttpServletResponse response) {
+        requireTokenAccess(tokenId, request, response);
         userService.deleteUserToken(tokenId);
+    }
+
+    private UserToken requireTokenAccess(Long tokenId, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = userService.getCurrentUser(request, response);
+        if (user == null) {
+            throw new InvalidPermissionException("User token access denied");
+        }
+        UserToken token = userService.getUserToken(tokenId);
+        if (token == null
+                || (!user.isSuperAdmin() && !Objects.equals(user.getName(), token.getUserName()))) {
+            throw new InvalidPermissionException("User token access denied");
+        }
+        return token;
     }
 }

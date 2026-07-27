@@ -58,6 +58,13 @@ final class BusinessInsightConsistencyValidator {
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         Set<String> maskedFields = normalizedMaskedFields(result);
+        Set<String> declaredFields = result.getQueryColumns().stream().filter(Objects::nonNull)
+                .flatMap(column -> Stream.of(column.getBizName(), column.getNameEn(),
+                        column.getName()))
+                .filter(StringUtils::isNotBlank).map(this::normalize).collect(Collectors.toSet());
+        if (!declaredFields.containsAll(maskedFields)) {
+            throw inconsistent("masked result references unknown fields");
+        }
         validateChart(result, result.getRecommendedChart(), fields, maskedFields,
                 "recommended chart");
         if (result.getCandidateCharts() == null) {

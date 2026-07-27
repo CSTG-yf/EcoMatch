@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.server.rest;
 
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
 import com.tencent.supersonic.headless.api.pojo.request.DatabaseReq;
 import com.tencent.supersonic.headless.api.pojo.request.ModelBuildReq;
@@ -24,10 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/semantic/database")
 public class DatabaseController {
+
+    private static final Pattern SAFE_METADATA_IDENTIFIER =
+            Pattern.compile("^[\\p{L}\\p{N}_$.-]+$");
 
     private DatabaseService databaseService;
 
@@ -79,34 +84,48 @@ public class DatabaseController {
     }
 
     @RequestMapping("/getCatalogs")
-    public List<String> getCatalogs(@RequestParam("id") Long databaseId) throws SQLException {
+    public List<String> getCatalogs(@RequestParam("id") Long databaseId, HttpServletRequest request,
+            HttpServletResponse response) throws SQLException {
+        requireDatabaseAccess(databaseId, request, response);
         return databaseService.getCatalogs(databaseId);
     }
 
     @RequestMapping("/getDbNames")
     public List<String> getDbNames(@RequestParam("id") Long databaseId,
-            @RequestParam(value = "catalog", required = false) String catalog) throws SQLException {
+            @RequestParam(value = "catalog", required = false) String catalog,
+            HttpServletRequest request, HttpServletResponse response) throws SQLException {
+        requireDatabaseAccess(databaseId, request, response);
+        validateMetadataIdentifier(catalog, false);
         return databaseService.getDbNames(databaseId, catalog);
     }
 
     @RequestMapping("/getTables")
     public List<String> getTables(@RequestParam("databaseId") Long databaseId,
             @RequestParam(value = "catalog", required = false) String catalog,
-            @RequestParam("db") String db) throws SQLException {
+            @RequestParam("db") String db, HttpServletRequest request, HttpServletResponse response)
+            throws SQLException {
+        requireDatabaseAccess(databaseId, request, response);
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(db, true);
         return databaseService.getTables(databaseId, catalog, db);
     }
 
     @RequestMapping("/getColumnsByName")
     public List<DBColumn> getColumnsByName(@RequestParam("databaseId") Long databaseId,
             @RequestParam(name = "catalog", required = false) String catalog,
-            @RequestParam("db") String db, @RequestParam("table") String table)
-            throws SQLException {
+            @RequestParam("db") String db, @RequestParam("table") String table,
+            HttpServletRequest request, HttpServletResponse response) throws SQLException {
+        requireDatabaseAccess(databaseId, request, response);
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(db, true);
+        validateMetadataIdentifier(table, true);
         return databaseService.getColumns(databaseId, catalog, db, table);
     }
 
     @PostMapping("/listColumnsBySql")
-    public List<DBColumn> listColumnsBySql(@RequestBody ModelBuildReq modelBuildReq)
-            throws SQLException {
+    public List<DBColumn> listColumnsBySql(@RequestBody ModelBuildReq modelBuildReq,
+            HttpServletRequest request, HttpServletResponse response) throws SQLException {
+        requireDatabaseAccess(modelBuildReq.getDatabaseId(), request, response);
         return databaseService.getColumns(modelBuildReq.getDatabaseId(), modelBuildReq.getSql());
     }
 
@@ -115,5 +134,26 @@ public class DatabaseController {
             HttpServletResponse response) {
         User user = UserHolder.findUser(request, response);
         return databaseService.getDatabaseParameters(user);
+    }
+
+    private void requireDatabaseAccess(Long databaseId, HttpServletRequest request,
+            HttpServletResponse response) {
+        if (databaseId == null) {
+            throw new InvalidArgumentException("databaseId is required");
+        }
+        User user = UserHolder.findUser(request, response);
+        databaseService.getDatabase(databaseId, user);
+    }
+
+    private void validateMetadataIdentifier(String identifier, boolean required) {
+        if (identifier == null || identifier.isBlank()) {
+            if (required) {
+                throw new InvalidArgumentException("Database metadata identifier is required");
+            }
+            return;
+        }
+        if (!SAFE_METADATA_IDENTIFIER.matcher(identifier).matches()) {
+            throw new InvalidArgumentException("Invalid database metadata identifier");
+        }
     }
 }
