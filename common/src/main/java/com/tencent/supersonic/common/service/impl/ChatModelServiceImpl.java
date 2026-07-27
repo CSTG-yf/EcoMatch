@@ -7,6 +7,8 @@ import com.tencent.supersonic.common.persistence.dataobject.ChatModelDO;
 import com.tencent.supersonic.common.persistence.mapper.ChatModelMapper;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ChatModelService;
 import com.tencent.supersonic.common.util.JsonUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -25,14 +27,10 @@ public class ChatModelServiceImpl extends ServiceImpl<ChatModelMapper, ChatModel
         implements ChatModelService {
     @Override
     public List<ChatModel> getChatModels(User user) {
-        return list().stream().map(this::convert).filter(chatModel -> {
-            if (chatModel.isPublic() || user.isSuperAdmin()
-                    || chatModel.getCreatedBy().equals(user.getName())
-                    || chatModel.getViewers().contains(user.getName())) {
-                return true;
-            }
-            return false;
-        }).sorted(Comparator.comparingLong(ChatModel::getId)).collect(Collectors.toList());
+        requireAuthenticatedUser(user);
+        return list().stream().map(this::convert).filter(chatModel -> canView(user, chatModel))
+                .map(chatModel -> user.isSuperAdmin() ? chatModel : redactCredentials(chatModel))
+                .sorted(Comparator.comparingLong(ChatModel::getId)).collect(Collectors.toList());
     }
 
     @Override
@@ -45,44 +43,54 @@ public class ChatModelServiceImpl extends ServiceImpl<ChatModelMapper, ChatModel
 
     @Override
     public ChatModel createChatModel(ChatModel chatModel, User user) {
+        requireSuperAdmin(user);
+        if (chatModel == null) {
+            throw new InvalidArgumentException("Chat model is required");
+        }
         ChatModelDO chatModelDO = convert(chatModel);
         chatModelDO.setCreatedBy(user.getName());
         chatModelDO.setCreatedAt(new Date());
         chatModelDO.setUpdatedBy(user.getName());
         chatModelDO.setUpdatedAt(chatModelDO.getCreatedAt());
         chatModelDO.setIsOpen(chatModel.getIsOpen());
-        if (StringUtils.isBlank(chatModel.getAdmin())) {
-            chatModelDO.setAdmin(user.getName());
-        }
-        if (!chatModel.getViewers().isEmpty()) {
+        chatModelDO.setAdmin(user.getName());
+        if (chatModel.getViewers() != null && !chatModel.getViewers().isEmpty()) {
             chatModelDO.setViewer(JsonUtil.toString(chatModel.getViewers()));
         }
         save(chatModelDO);
-        chatModel.setId(chatModelDO.getId());
-        return chatModel;
+        return convert(chatModelDO);
     }
 
     @Override
     public ChatModel updateChatModel(ChatModel chatModel, User user) {
+        requireSuperAdmin(user);
+        if (chatModel == null || chatModel.getId() == null) {
+            throw new InvalidArgumentException("Chat model id is required");
+        }
+        ChatModel existing = getChatModel(chatModel.getId());
+        if (existing == null) {
+            throw new InvalidArgumentException("Chat model does not exist");
+        }
         ChatModelDO chatModelDO = convert(chatModel);
+        chatModelDO.setCreatedBy(existing.getCreatedBy());
+        chatModelDO.setCreatedAt(existing.getCreatedAt());
         chatModelDO.setUpdatedBy(user.getName());
         chatModelDO.setUpdatedAt(new Date());
         chatModelDO.setIsOpen(chatModel.getIsOpen());
-        if (StringUtils.isBlank(chatModel.getAdmin())) {
-            chatModel.setAdmin(user.getName());
-        }
-        if (!chatModel.getViewers().isEmpty()) {
+        chatModelDO.setAdmin(StringUtils.defaultIfBlank(chatModel.getAdmin(), existing.getAdmin()));
+        if (chatModel.getViewers() != null && !chatModel.getViewers().isEmpty()) {
             chatModelDO.setViewer(JsonUtil.toString(chatModel.getViewers()));
         }
         updateById(chatModelDO);
-        return chatModel;
+        return convert(chatModelDO);
     }
 
     @Override
     public void deleteChatModel(Integer id, User user) {
+        requireSuperAdmin(user);
         ChatModel chatModel = getChatModel(id);
-        if (!checkAdminPermission(user, chatModel)) {
-            throw new RuntimeException("没有权限删除该大模型");
+        if (chatModel == null) {
+            throw new InvalidArgumentException("Chat model does not exist");
         }
 
         removeById(id);
@@ -109,12 +117,33 @@ public class ChatModelServiceImpl extends ServiceImpl<ChatModelMapper, ChatModel
         return chatModelDO;
     }
 
-    private boolean checkAdminPermission(User user, ChatModel chatModel) {
-        String admin = chatModel.getAdmin();
-        if (user.isSuperAdmin()) {
-            return true;
+    private boolean canView(User user, ChatModel chatModel) {
+        return chatModel != null && (chatModel.isPublic() || user.isSuperAdmin()
+                || StringUtils.equals(chatModel.getCreatedBy(), user.getName())
+                || chatModel.getViewers() != null
+                        && chatModel.getViewers().contains(user.getName()));
+    }
+
+    private ChatModel redactCredentials(ChatModel chatModel) {
+        ChatModelConfig config = chatModel.getConfig();
+        if (config != null) {
+            config.setApiKey(null);
+            config.setSecretKey(null);
         }
-        return admin != null && admin.equals(user.getName())
-                || chatModel.getCreatedBy().equals(user.getName());
+        return chatModel;
+    }
+
+    private void requireAuthenticatedUser(User user) {
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+    }
+
+    private void requireSuperAdmin(User user) {
+        requireAuthenticatedUser(user);
+        if (!user.isSuperAdmin()) {
+            throw new InvalidPermissionException(
+                    "Only super administrators can manage chat models");
+        }
     }
 }

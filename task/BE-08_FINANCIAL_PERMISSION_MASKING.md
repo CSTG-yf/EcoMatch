@@ -8,6 +8,9 @@
 - 权限组查看、创建、修改和删除接口统一要求超级管理员身份，普通用户不能读取授权对象、岗位条件、属性条件或篡改行列权限。
 - 用户令牌详情和删除接口执行对象所有权校验，仅令牌所有者或超级管理员可操作，阻断通过枚举 `tokenId` 获取或撤销他人令牌。
 - 数据库 catalog、schema、table 和 SQL 字段探测接口复用数据源查看权限，未授权用户不能借助元数据接口探测异构数据源结构。
+- 数据库连接测试、新增和更新仅允许超级管理员执行；VIEWER 或公开数据源调用方只能获得不含密码的连接元数据，模型关联数据源接口同样不返回凭据。
+- 语义模型详情、按 ID 批量读取、域内模型、关联数据源和字段变更检查统一校验模型 `ADMIN`/`VIEWER` 权限，混合批量请求包含越权模型时整批拒绝；模型 Schema 构建仅允许超级管理员执行。
+- LLM 连接配置新增、更新、删除和连接测试仅允许超级管理员执行，更新时保留服务端创建者元数据；非管理员查看可用模型时移除 API Key 和 Secret Key，连接失败仅返回通用错误并记录不可逆摘要。
 - 组合自然语言查询入口在进入语义解析前强制使用登录用户覆盖请求体自报身份，并在解析失败时返回通用错误，不允许伪造 `user` 影响 Schema 映射，也不回显原始业务问题。
 - 在现有用户、组织和行列权限基础上增加角色授权与用户属性条件，形成 RBAC+ABAC 组合匹配。
 - 授权组支持 `authorizedRoles` 和 `attributeConditions`，属性条件全部满足后才生效。
@@ -71,6 +74,10 @@
 - `AgentServiceAccessTest`：开放 Agent 仅可查看不可管理，跨用户更新/删除拒绝，所有者更新保留创建元数据。
 - `MemoryServiceAccessTest`：跨 Agent 创建/更新、混合批量删除和无条件删除拒绝，未指定 Agent 的分页查询按可管理 Agent 集合收口。
 - `ConfigServiceAccessTest`：配置新增/修改、管理检索和 Schema 读取按模型 `ADMIN`/`VIEWER` 权限隔离。
+- `ChatModelServiceAccessTest`：校验 LLM 配置变更仅限超级管理员，非管理员模型列表不返回连接密钥，更新不能篡改创建者元数据。
+- `ChatModelControllerSecurityTest`：校验 LLM 连接测试需要超级管理员，底层提供商异常和连接细节不回显。
+- `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建的对象级权限。
+- `DatabaseServicePermissionTest`：校验数据源连接管理权限和 VIEWER 密码脱敏。
 - `SensitiveLogUtilsTest`：校验日志摘要稳定可关联，且不包含 SQL、证件号等原始内容。
 - `RestExceptionHandlerTest`：校验未知异常消息不回显，参数错误仍保留受控的可操作提示。
 - `BusinessInsightProcessorTest`：验证脱敏字段不进入数值证据或图表字段，并降级为低置信度表格。

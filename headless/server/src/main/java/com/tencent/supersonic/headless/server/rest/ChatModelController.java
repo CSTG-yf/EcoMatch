@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.pojo.ChatModelParameters;
 import com.tencent.supersonic.common.pojo.Parameter;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ChatModelService;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
@@ -71,7 +72,13 @@ public class ChatModelController {
     }
 
     @PostMapping("/testConnection")
-    public boolean testConnection(@RequestBody ChatModelConfig modelConfig) {
+    public boolean testConnection(@RequestBody ChatModelConfig modelConfig,
+            HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse) {
+        User user = UserHolder.findUser(httpServletRequest, httpServletResponse);
+        if (user == null || !user.isSuperAdmin()) {
+            throw new InvalidPermissionException(
+                    "Only super administrators can test chat model connections");
+        }
         return ModelConfigHelper.testConnection(modelConfig);
     }
 }

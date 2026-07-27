@@ -4,6 +4,8 @@
 
 - 默认危险函数集合补充 H2、SQLite、PostgreSQL、SQL Server 和 DuckDB 的跨库/外部文件入口，包括 `CSVREAD`、`readfile`、`dblink`、`OPENROWSET`、`read_xlsx` 等，避免只读 `SELECT` 绕过数据边界。
 - 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符仅接受安全字符，阻断通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
+- 数据库连接测试、新增和更新仅允许超级管理员执行，阻断普通登录用户通过自定义 JDBC 地址触发服务端任意连接；不存在的数据源统一 fail-closed。
+- 语义模型 Schema 构建仅允许超级管理员执行，避免未授权请求借助模型构建流程连接数据源或调用外部模型。
 - 结构化查询的普通比较、集合、区间和模糊过滤值统一规范化为转义后的 SQL 字符串字面量，不再信任客户端预先添加的首尾引号，阻断通过过滤值闭合字面量并注入布尔表达式。
 - 结构化查询的 WHERE/HAVING 解析失败统一 fail-closed；同时捕获 JSqlParser 语法异常和词法异常，只记录异常类型并返回通用参数错误，不再静默丢弃指标过滤条件、返回空 SQL 或输出解析器堆栈。
 - `innerLayerNative` 原生层模式仅允许可信服务端代码设置，SQL、数据集、结构化和指标请求均禁止通过外部 JSON 选择执行及缓存安全域。
@@ -52,6 +54,8 @@
 - `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/advisory lock 状态函数绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist 及非法配置拒绝，以及受限派生查询兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
+- `DatabaseServicePermissionTest`：校验普通用户不能测试或变更数据库连接，VIEWER 读取数据源详情时不返回密码，数据源管理员仍可读取受控凭据。
+- `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建均按模型权限或超级管理员身份 fail-closed。
 - `SqlFilterUtilsSecurityTest`：校验比较、IN、LIKE 和普通含撇号值均被规范化到单一字符串字面量，不能通过预加引号逃逸过滤条件。
 - `QueryStructReqSecurityTest`：校验 WHERE/HAVING 的语法与词法解析失败均转换为通用参数错误并 fail-closed。
 - `SemanticQueryRequestSecurityTest`：校验外部 JSON 不能关闭鉴权或开启原生层模式，可信服务端代码仍可显式设置内部模式。

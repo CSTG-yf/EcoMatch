@@ -7,6 +7,8 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
@@ -57,12 +59,20 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
 
     @Override
     public boolean testConnect(DatabaseReq databaseReq, User user) {
+        requireSuperAdmin(user);
+        if (databaseReq == null) {
+            throw new InvalidArgumentException("Database configuration is required");
+        }
         DatabaseResp database = DatabaseConverter.convert(databaseReq);
         return JdbcDataSourceUtils.testDatabase(database);
     }
 
     @Override
     public DatabaseResp createOrUpdateDatabase(DatabaseReq databaseReq, User user) {
+        requireSuperAdmin(user);
+        if (databaseReq == null) {
+            throw new InvalidArgumentException("Database configuration is required");
+        }
         if (StringUtils.isNotBlank(databaseReq.getDatabaseType())
                 && EngineType.OTHER.getName().equalsIgnoreCase(databaseReq.getType())) {
             databaseReq.setType(databaseReq.getDatabaseType());
@@ -166,13 +176,22 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
     @Override
     public DatabaseResp getDatabase(Long id) {
         DatabaseDO databaseDO = getById(id);
+        if (databaseDO == null) {
+            return null;
+        }
         return DatabaseConverter.convertWithPassword(databaseDO);
     }
 
     @Override
     public DatabaseResp getDatabase(Long id, User user) {
         DatabaseResp databaseResp = getDatabase(id);
+        if (databaseResp == null) {
+            throw new InvalidArgumentException("Database does not exist");
+        }
         checkPermission(databaseResp, user);
+        if (!checkAdminPermission(user, databaseResp)) {
+            databaseResp.setPassword(null);
+        }
         return databaseResp;
     }
 
@@ -333,14 +352,28 @@ public class DatabaseServiceImpl extends ServiceImpl<DatabaseDOMapper, DatabaseD
     }
 
     private void checkPermission(DatabaseResp databaseResp, User user) {
+        if (databaseResp == null) {
+            throw new InvalidArgumentException("Database does not exist");
+        }
+        if (user == null || StringUtils.isBlank(user.getName())) {
+            throw new InvalidPermissionException("User identity is required");
+        }
         List<String> admins = databaseResp.getAdmins();
         List<String> viewers = databaseResp.getViewers();
-        if (!admins.contains(user.getName()) && !viewers.contains(user.getName())
-                && !databaseResp.getCreatedBy().equalsIgnoreCase(user.getName())
+        if (!databaseResp.isPublic() && !admins.contains(user.getName())
+                && !viewers.contains(user.getName())
+                && !StringUtils.equalsIgnoreCase(databaseResp.getCreatedBy(), user.getName())
                 && !user.isSuperAdmin()) {
             String message = String.format("您暂无当前数据库%s权限, 请联系数据库创建人:%s开通", databaseResp.getName(),
                     databaseResp.getCreatedBy());
             throw new RuntimeException(message);
+        }
+    }
+
+    private void requireSuperAdmin(User user) {
+        if (user == null || !user.isSuperAdmin()) {
+            throw new InvalidPermissionException(
+                    "Only super administrators can manage database connections");
         }
     }
 }
