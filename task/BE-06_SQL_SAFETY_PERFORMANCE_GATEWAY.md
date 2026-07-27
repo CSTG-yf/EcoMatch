@@ -4,6 +4,8 @@
 
 - 默认危险函数集合补充 H2、SQLite、PostgreSQL、SQL Server 和 DuckDB 的跨库/外部文件入口，包括 `CSVREAD`、`readfile`、`dblink`、`OPENROWSET`、`read_xlsx` 等，避免只读 `SELECT` 绕过数据边界。
 - 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符仅接受安全字符，阻断通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
+- 结构化查询的普通比较、集合、区间和模糊过滤值统一规范化为转义后的 SQL 字符串字面量，不再信任客户端预先添加的首尾引号，阻断通过过滤值闭合字面量并注入布尔表达式。
+- 结构化查询的 WHERE/HAVING 解析失败统一 fail-closed；同时捕获 JSqlParser 语法异常和词法异常，只记录异常类型并返回通用参数错误，不再静默丢弃指标过滤条件、返回空 SQL 或输出解析器堆栈。
 - 使用 JSqlParser 强制单条只读 `SELECT`，基于解析后的规范 SQL 拦截写操作、多语句、`SELECT INTO`、`FOR SHARE/UPDATE` 行锁、状态变更函数、危险函数和文件写入，避免注释分隔绕过。
 - 拦截 PostgreSQL `pg_read_file`、`pg_read_binary_file`、`pg_ls_dir` 和 `pg_stat_file` 等服务端文件读取/探测函数，避免只读 SQL 被用于读取数据库主机文件系统。
 - 默认拦截 DuckDB `read_parquet`、`read_csv_auto`、`read_text`、`glob` 等文件读取及扫描函数，覆盖投影和表函数位置，避免只读 SELECT 读取数据库主机文件。
@@ -48,6 +50,8 @@
 - `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`SELECT INTO`、行锁和序列/会话/advisory lock 状态函数绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist 及非法配置拒绝，以及受限派生查询兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
+- `SqlFilterUtilsSecurityTest`：校验比较、IN、LIKE 和普通含撇号值均被规范化到单一字符串字面量，不能通过预加引号逃逸过滤条件。
+- `QueryStructReqSecurityTest`：校验 WHERE/HAVING 的语法与词法解析失败均转换为通用参数错误并 fail-closed。
 - `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果；目标驱动忽略最大行数时仍由应用层拒绝超限结果。
 - `ExplainCostPolicyTest`：结构化、嵌套 JSON、文本执行计划、数字字符串、超阈值拒绝及缺失估算 fail-closed。
 - `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，并校验接收和拒绝计数。

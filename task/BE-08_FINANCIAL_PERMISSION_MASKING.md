@@ -7,6 +7,7 @@
 - 权限组查看、创建、修改和删除接口统一要求超级管理员身份，普通用户不能读取授权对象、岗位条件、属性条件或篡改行列权限。
 - 用户令牌详情和删除接口执行对象所有权校验，仅令牌所有者或超级管理员可操作，阻断通过枚举 `tokenId` 获取或撤销他人令牌。
 - 数据库 catalog、schema、table 和 SQL 字段探测接口复用数据源查看权限，未授权用户不能借助元数据接口探测异构数据源结构。
+- 组合自然语言查询入口在进入语义解析前强制使用登录用户覆盖请求体自报身份，并在解析失败时返回通用错误，不允许伪造 `user` 影响 Schema 映射，也不回显原始业务问题。
 - 在现有用户、组织和行列权限基础上增加角色授权与用户属性条件，形成 RBAC+ABAC 组合匹配。
 - 授权组支持 `authorizedRoles` 和 `attributeConditions`，属性条件全部满足后才生效。
 - 中高敏字段在语义查询权限切面返回前统一脱敏，覆盖问数展示、下载导出和大模型解释入口。
@@ -64,6 +65,7 @@
 - `ChatManageServiceAccessTest`：跨用户历史读取在进入查询仓储前拒绝，结果保存只使用持久化绑定的会话和原始问题。
 - `ChatManageServiceAccessTest`：ShowCase 忽略客户端用户名并强制绑定当前用户。
 - `ChatQueryServiceAccessTest`：摘要轮询和二次取数在访问缓存、历史结果或解析上下文前先执行对象鉴权，不可见 Agent 在进入查询链路前拒绝。
+- `ChatQueryApiControllerSecurityTest`：组合自然语言查询覆盖客户端伪造用户，解析器仅接收登录身份，失败响应不包含原始问题。
 - `PluginServiceAccessTest`：插件跨用户更新、删除和管理查询 fail-closed，所有者更新不能覆盖创建者。
 - `AgentServiceAccessTest`：开放 Agent 仅可查看不可管理，跨用户更新/删除拒绝，所有者更新保留创建元数据。
 - `MemoryServiceAccessTest`：跨 Agent 创建/更新、混合批量删除和无条件删除拒绝，未指定 Agent 的分页查询按可管理 Agent 集合收口。

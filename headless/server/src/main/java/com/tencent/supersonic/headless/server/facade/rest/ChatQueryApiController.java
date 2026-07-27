@@ -53,6 +53,7 @@ public class ChatQueryApiController {
     public Object queryByNL(@RequestBody QueryNLReq queryNLReq, HttpServletRequest request,
             HttpServletResponse response) throws Exception {
         User user = UserHolder.findUser(request, response);
+        queryNLReq.setUser(user);
         ParseResp parseResp = chatLayerService.parse(queryNLReq);
         if (parseResp.getState().equals(ParseResp.ParseState.COMPLETED)) {
             SemanticParseInfo parseInfo = parseResp.getSelectedParses().get(0);
@@ -62,7 +63,6 @@ public class ChatQueryApiController {
             return semanticLayerService.queryByReq(sqlReq, user);
         }
 
-        throw new RuntimeException(
-                "Failed to parse natural language query: " + queryNLReq.getQueryText());
+        throw new RuntimeException("Failed to parse natural language query");
     }
 }

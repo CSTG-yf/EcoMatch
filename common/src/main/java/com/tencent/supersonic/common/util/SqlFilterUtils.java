@@ -24,7 +24,6 @@ import static com.tencent.supersonic.common.pojo.Constants.SYS_VAR;
 @Slf4j
 public class SqlFilterUtils {
 
-    private static String pattern = "^'.*?'$";
     private static String numericPattern = "^[0-9]+$";
 
     public List<String> getFiltersCol(List<Filter> filters) {
@@ -161,16 +160,16 @@ public class SqlFilterUtils {
         whereClause
                 .append(criterion.getColumn() + SPACE + criterion.getOperator().getValue() + SPACE);
         String value = criterion.getValue().toString();
-        if (criterion.isNeedApostrophe() && !Pattern.matches(pattern, value)) {
-            // like click => 'like%'
-            whereClause.append(
-                    Constants.APOSTROPHE + value + Constants.PERCENT_SIGN + Constants.APOSTROPHE);
-
+        if (criterion.isNeedApostrophe()) {
+            boolean explicitlyQuoted = isQuotedString(value);
+            String normalizedValue = normalizeStringValue(value);
+            if (!explicitlyQuoted) {
+                normalizedValue += Constants.PERCENT_SIGN;
+            }
+            whereClause.append(Constants.APOSTROPHE).append(normalizedValue)
+                    .append(Constants.APOSTROPHE);
         } else {
-            // like 'click' => 'like%'
-            whereClause.append(Constants.APOSTROPHE
-                    + value.replaceAll(Constants.APOSTROPHE, Constants.PERCENT_SIGN)
-                    + Constants.APOSTROPHE);
+            whereClause.append(value);
         }
         return whereClause.toString();
     }
@@ -230,10 +229,23 @@ public class SqlFilterUtils {
     }
 
     private String valueApostropheLogic(String value) {
-        if (Pattern.matches(pattern, value) || Pattern.matches(numericPattern, value)) {
+        if (Pattern.matches(numericPattern, value)) {
             return value;
         }
-        return Constants.APOSTROPHE + value + Constants.APOSTROPHE;
+        return Constants.APOSTROPHE + normalizeStringValue(value) + Constants.APOSTROPHE;
+    }
+
+    private boolean isQuotedString(String value) {
+        return value.length() >= 2 && value.startsWith(Constants.APOSTROPHE)
+                && value.endsWith(Constants.APOSTROPHE);
+    }
+
+    private String normalizeStringValue(String value) {
+        String normalized = value;
+        if (isQuotedString(normalized)) {
+            normalized = normalized.substring(1, normalized.length() - 1);
+        }
+        return normalized.replace("''", "'").replace("'", "''");
     }
 
     private String judgeNullLogic(Criterion criterion) {

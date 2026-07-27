@@ -10,6 +10,7 @@ import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.Order;
 import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.DateModeUtils;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
@@ -23,6 +24,7 @@ import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.parser.TokenMgrException;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.GroupByElement;
@@ -141,8 +143,11 @@ public class QueryStructReq extends SemanticQueryReq {
         String sql = null;
         try {
             sql = buildSql(this, isBizName);
-        } catch (JSQLParserException e) {
-            log.error("buildSql error", e);
+        } catch (JSQLParserException | TokenMgrException e) {
+            log.warn("Failed to build structured query SQL: errorType={}",
+                    e.getClass().getSimpleName());
+            throw new InvalidArgumentException(
+                    "Structured query contains an invalid filter expression");
         }
 
         QuerySqlReq result = new QuerySqlReq();
@@ -321,8 +326,11 @@ public class QueryStructReq extends SemanticQueryReq {
         if (StringUtils.isNotBlank(havingClause)) {
             try {
                 return CCJSqlParserUtil.parseCondExpression(havingClause);
-            } catch (JSQLParserException e) {
-                log.error("Failed to parse having clause", e);
+            } catch (JSQLParserException | TokenMgrException e) {
+                log.warn("Failed to parse structured query HAVING clause: errorType={}",
+                        e.getClass().getSimpleName());
+                throw new InvalidArgumentException(
+                        "Structured query contains an invalid metric filter expression");
             }
         }
         return null;
