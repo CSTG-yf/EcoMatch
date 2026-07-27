@@ -28,12 +28,14 @@ import net.sf.jsqlparser.statement.select.TableStatement;
 import net.sf.jsqlparser.statement.select.Values;
 
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /** Validates executable SQL before it reaches a physical data source. */
@@ -74,6 +76,7 @@ public class SqlSafetyPolicy {
     private final int maxSelectDepth;
     private final int maxParseTimeMs;
     private final Set<String> dangerousFunctions;
+    private final Pattern dangerousFunctionCallPattern;
 
     public SqlSafetyPolicy(int maxSqlLength) {
         this(maxSqlLength, "", DEFAULT_MAX_SELECT_DEPTH, DEFAULT_MAX_PARSE_TIME_MS);
@@ -116,6 +119,7 @@ public class SqlSafetyPolicy {
             configured.add(normalizeFunctionIdentifier(function));
         }
         this.dangerousFunctions = Collections.unmodifiableSet(configured);
+        this.dangerousFunctionCallPattern = compileDangerousFunctionCallPattern(configured);
     }
 
     public void validate(String sql) {
@@ -146,14 +150,20 @@ public class SqlSafetyPolicy {
         if (LOCK_OR_FILE_WRITE.matcher(normalized).find()) {
             throw new SqlPolicyViolationException("Locking and file-writing clauses are forbidden");
         }
-        for (String function : dangerousFunctions) {
-            if (Pattern.compile("(?is)\\b" + Pattern.quote(function) + "\\s*\\(")
-                    .matcher(normalized).find()) {
-                throw new SqlPolicyViolationException(
-                        "Dangerous SQL function is forbidden: " + function);
-            }
+        java.util.regex.Matcher dangerousFunctionMatcher =
+                dangerousFunctionCallPattern.matcher(normalized);
+        if (dangerousFunctionMatcher.find()) {
+            throw new SqlPolicyViolationException(
+                    "Dangerous SQL function is forbidden: " + dangerousFunctionMatcher.group(1));
         }
         validateSelectTree((Select) statement);
+    }
+
+    private Pattern compileDangerousFunctionCallPattern(Set<String> functions) {
+        String alternatives =
+                functions.stream().sorted(Comparator.comparingInt(String::length).reversed())
+                        .map(Pattern::quote).collect(Collectors.joining("|"));
+        return Pattern.compile("(?is)\\b(" + alternatives + ")\\s*\\(");
     }
 
     private void validateSelectTree(Select statement) {

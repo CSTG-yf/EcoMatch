@@ -20,6 +20,7 @@
 - 禁止 `TABLE table_name` 这类绕过投影及范围约束的 Select 子类型；未显式支持的新 Select AST 类型统一 fail-closed，普通常量 `VALUES` 仍可执行。
 - 除 `nextval(...)` 外，同时拦截 Oracle `sequence.NEXTVAL` 和 SQL Server `NEXT VALUE FOR sequence`，避免只读外观查询推进数据库序列状态。
 - 内置危险函数集合不可被配置移除，并支持通过 `s2.query-gateway.denied-functions` 追加目标数据库的有副作用 UDF；非法函数标识在启动时直接拒绝。
+- 内置及追加危险函数在策略构造期排序并编译为单一不可变匹配器，查询热路径不再为每个函数重复创建正则对象；同一策略可被并发查询安全复用，扩充跨方言 denylist 不再线性放大正则编译成本。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
 - 对 SELECT、CTE、集合分支和派生子查询执行 AST 层级计数，默认超过 16 层即拒绝，避免深层查询在安全遍历、改写或数据库规划阶段形成栈和 CPU 资源耗尽。
 - SQL 解析复用 JSqlParser 可取消超时机制并开放独立解析预算，超时后中断解析任务并按策略拒绝处理，避免复杂 SQL 长时间占用网关线程。
@@ -63,7 +64,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL 服务端文件及数据库状态函数、SQLite 扩展加载、DuckDB/H2/SQLite/PostgreSQL 外部数据与动态查询函数、ClickHouse/StarRocks 外部连接表函数、SQL Server 命令扩展、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL 服务端文件及数据库状态函数、SQLite 扩展加载、DuckDB/H2/SQLite/PostgreSQL 外部数据与动态查询函数、ClickHouse/StarRocks 外部连接表函数、SQL Server 命令扩展、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、并发复用预编译策略、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。

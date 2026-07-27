@@ -202,6 +202,14 @@ class SqlSafetyPolicyAdvancedTest {
     }
 
     @Test
+    void reusesCompiledDangerousFunctionPolicyAcrossConcurrentValidation() {
+        assertDoesNotThrow(() -> java.util.stream.IntStream.range(0, 200).parallel()
+                .forEach(index -> policy
+                        .validate("SELECT account_id, balance FROM bank_account WHERE account_id = "
+                                + index)));
+    }
+
+    @Test
     void rejectsExcessivelyNestedSqlBeforePhysicalExecution() {
         String nested = "SELECT 1";
         for (int depth = 0; depth < 20; depth++) {
