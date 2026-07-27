@@ -112,7 +112,7 @@ class AuthServiceImplValidationTest {
     void isolatesMalformedStoredGroupsWithoutDroppingValidAuthorization() {
         String valid = """
                 {"modelId":1,"name":"valid","groupId":1,
-                 "authRules":[{"metrics":["loan_balance"]}],
+                 "authRules":[{"metrics":["loan_balance","LOAN_BALANCE"]}],
                  "authorizedUsers":["analyst"],"dimensionFilters":[]}
                 """;
         String invalid = """
@@ -123,13 +123,15 @@ class AuthServiceImplValidationTest {
                 .thenReturn(List.of("{", invalid, valid));
         when(userService.getUserAllOrgId("analyst")).thenReturn(Set.of());
         QueryAuthResReq request = new QueryAuthResReq();
-        request.setModelIds(List.of(1L));
+        request.setModelIds(List.of(1L, 1L));
 
         AuthorizedResourceResp response =
                 authService.queryAuthorizedResources(request, User.get(2L, "analyst"));
 
         assertEquals(1, response.getAuthResList().size());
         assertEquals("loan_balance", response.getAuthResList().get(0).getName());
+        assertEquals(1L, response.getFilters().get(0).getModelId());
+        assertEquals(List.of(), response.getFilters().get(0).getExpressions());
     }
 
     private AuthGroup validGroup() {

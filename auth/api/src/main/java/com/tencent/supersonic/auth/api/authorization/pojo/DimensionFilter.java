@@ -8,6 +8,7 @@ import java.util.List;
 @Data
 public class DimensionFilter {
 
+    private Long modelId;
     private List<String> expressions = new ArrayList<>();
     private String description;
 }

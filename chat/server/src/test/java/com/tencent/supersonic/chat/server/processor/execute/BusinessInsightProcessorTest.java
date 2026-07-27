@@ -82,6 +82,42 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void rejectsOversizedOrNestedMainQueryTextAndCellValues() {
+        BusinessInsightConfig config = new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95,
+                10_000, 100, 4, 100, 4, 10_000);
+
+        QueryResult oversizedTextResult = new QueryResult();
+        oversizedTextResult.setQueryState(QueryState.SUCCESS);
+        oversizedTextResult
+                .setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
+        oversizedTextResult.setQueryResults(List.of(row("A", 10)));
+        ExecuteContext oversizedTextContext =
+                new ExecuteContext(ChatExecuteReq.builder().queryText("12345").build());
+        oversizedTextContext.setResponse(oversizedTextResult);
+
+        QueryResult oversizedCellResult = new QueryResult();
+        oversizedCellResult.setQueryState(QueryState.SUCCESS);
+        oversizedCellResult
+                .setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
+        oversizedCellResult.setQueryResults(List.of(row("12345", 10)));
+        ExecuteContext oversizedCellContext = new ExecuteContext(new ChatExecuteReq());
+        oversizedCellContext.setResponse(oversizedCellResult);
+
+        QueryResult nestedCellResult = new QueryResult();
+        nestedCellResult.setQueryState(QueryState.SUCCESS);
+        nestedCellResult
+                .setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
+        nestedCellResult.setQueryResults(List.of(Map.of("branch", List.of("A"), "amount", 10)));
+        ExecuteContext nestedCellContext = new ExecuteContext(new ChatExecuteReq());
+        nestedCellContext.setResponse(nestedCellResult);
+
+        BusinessInsightProcessor processor = new BusinessInsightProcessor(config);
+        assertThrows(IllegalStateException.class, () -> processor.process(oversizedTextContext));
+        assertThrows(IllegalStateException.class, () -> processor.process(oversizedCellContext));
+        assertThrows(IllegalStateException.class, () -> processor.process(nestedCellContext));
+    }
+
+    @Test
     void rejectsMalformedMainQueryResultBeforeProfiling() {
         QueryResult nullRowResult = new QueryResult();
         nullRowResult.setQueryState(QueryState.SUCCESS);

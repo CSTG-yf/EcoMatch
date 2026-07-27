@@ -22,6 +22,8 @@ import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.SchemaFilterReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
+import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
+import com.tencent.supersonic.headless.api.pojo.response.MetricSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -48,11 +50,13 @@ import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.StringJoiner;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -156,7 +160,7 @@ public class S2DataPermissionAspect {
             }
             // 6. check row permission
             denialReasonCode = "AUTH_ROW_POLICY_DENIED";
-            checkRowPermission(queryReq, authorizedResource);
+            checkRowPermission(queryReq, authorizedResource, modelIds);
 
             authorizationDecisionFinalized = true;
             publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_POLICY_ALLOWED");
@@ -241,18 +245,21 @@ public class S2DataPermissionAspect {
             SemanticSchemaResp semanticSchemaResp) {
         // get high sensitive fields in query
         Set<String> bizNamesInQueryReq = getBizNameInQueryReq(semanticQueryReq, semanticSchemaResp);
-        Set<String> sensitiveBizNamesByModel =
-                getHighSensitiveBizNamesByModelId(semanticSchemaResp);
-        Set<String> sensitiveBizNameInQuery = bizNamesInQueryReq.parallelStream()
-                .filter(sensitiveBizNamesByModel::contains).collect(Collectors.toSet());
-
-        // get high sensitive field cur user has been authed
-        Set<String> sensitiveBizNameUserAuthed = authorizedResource.getAuthResList().stream()
-                .map(AuthRes::getName).collect(Collectors.toSet());
-        sensitiveBizNameInQuery.removeAll(sensitiveBizNameUserAuthed);
-        if (!CollectionUtils.isEmpty(sensitiveBizNameInQuery)) {
-            Set<String> sensitiveResNames =
-                    semanticSchemaResp.getNameFromBizNames(sensitiveBizNameInQuery);
+        Set<String> normalizedQueryFields = bizNamesInQueryReq.stream().filter(Objects::nonNull)
+                .map(this::normalizeResourceName).collect(Collectors.toSet());
+        Set<ModelResourceKey> sensitiveResources =
+                highSensitiveResources(semanticSchemaResp, modelIds, normalizedQueryFields);
+        Set<ModelResourceKey> authorizedResources =
+                authorizedResource.getAuthResList().stream().filter(Objects::nonNull)
+                        .filter(resource -> resource.getModelId() != null)
+                        .filter(resource -> StringUtils.isNotBlank(resource.getName()))
+                        .map(resource -> new ModelResourceKey(resource.getModelId(),
+                                normalizeResourceName(resource.getName())))
+                        .collect(Collectors.toSet());
+        sensitiveResources.removeAll(authorizedResources);
+        if (!sensitiveResources.isEmpty()) {
+            Set<String> sensitiveResNames = sensitiveResources.stream()
+                    .map(ModelResourceKey::resourceName).collect(Collectors.toSet());
             List<String> modelAdmin = modelService.getModelAdmin(modelIds.iterator().next());
             String message =
                     String.format("存在以下敏感资源:%s您暂无权限，请联系管理员%s申请", sensitiveResNames, modelAdmin);
@@ -274,12 +281,12 @@ public class S2DataPermissionAspect {
     }
 
     private void checkRowPermission(SemanticQueryReq queryReq,
-            AuthorizedResourceResp authorizedResource) {
+            AuthorizedResourceResp authorizedResource, Set<Long> modelIds) {
         if (queryReq instanceof QuerySqlReq) {
-            doRowPermission((QuerySqlReq) queryReq, authorizedResource);
+            doRowPermission((QuerySqlReq) queryReq, authorizedResource, modelIds);
         }
         if (queryReq instanceof QueryStructReq) {
-            doRowPermission((QueryStructReq) queryReq, authorizedResource);
+            doRowPermission((QueryStructReq) queryReq, authorizedResource, modelIds);
         }
     }
 
@@ -301,40 +308,25 @@ public class S2DataPermissionAspect {
         return schemaService.fetchSemanticSchema(filter);
     }
 
-    private void doRowPermission(QuerySqlReq querySqlReq,
-            AuthorizedResourceResp authorizedResource) {
+    private void doRowPermission(QuerySqlReq querySqlReq, AuthorizedResourceResp authorizedResource,
+            Set<Long> modelIds) {
         log.debug("Start doRowPermission logic");
 
-        if (CollectionUtils.isEmpty(authorizedResource.getFilters())) {
-            log.debug("authorizedResource.getFilters() is empty");
+        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds);
+        if (StringUtils.isBlank(rowPermissionExpression)) {
+            log.debug("No effective row permission filters");
             return;
         }
-        List<String> dimensionFilters = authorizedResource.getFilters().stream()
-                .flatMap(filter -> filter.getExpressions().stream()).filter(StringUtils::isNotBlank)
-                .collect(Collectors.toList());
-
-        if (dimensionFilters.isEmpty()) {
-            log.debug("Dimension filters are empty");
-            return;
-        }
-        validateDimensionFilters(dimensionFilters);
-
-        StringJoiner joiner = new StringJoiner(" OR ");
-        dimensionFilters.stream().filter(
-                filter -> StringUtils.isNotEmpty(filter) && StringUtils.isNotEmpty(filter.trim()))
-                .forEach(filter -> joiner.add(" ( " + filter + " ) "));
 
         try {
-            Expression expression = CCJSqlParserUtil.parseCondExpression(" ( " + joiner + " ) ");
-            if (StringUtils.isNotEmpty(joiner.toString())) {
-                String originalSql = querySqlReq.getSql();
-                String modifiedSql = SqlAddHelper.addWhere(originalSql, expression);
-                log.debug("Applying {} row permission filters to SQL [{}]", dimensionFilters.size(),
-                        SensitiveLogUtils.summarize(originalSql));
-                querySqlReq.setSql(modifiedSql);
-                log.debug("Row permission applied to SQL [{}]",
-                        SensitiveLogUtils.summarize(modifiedSql));
-            }
+            Expression expression = CCJSqlParserUtil.parseCondExpression(rowPermissionExpression);
+            String originalSql = querySqlReq.getSql();
+            String modifiedSql = SqlAddHelper.addWhere(originalSql, expression);
+            log.debug("Applying model-scoped row permission to SQL [{}]",
+                    SensitiveLogUtils.summarize(originalSql));
+            querySqlReq.setSql(modifiedSql);
+            log.debug("Row permission applied to SQL [{}]",
+                    SensitiveLogUtils.summarize(modifiedSql));
         } catch (JSQLParserException e) {
             log.warn("Failed to apply row permission filter: type={}, error=[{}]",
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
@@ -344,38 +336,64 @@ public class S2DataPermissionAspect {
     }
 
     private void doRowPermission(QueryStructReq queryStructReq,
-            AuthorizedResourceResp authorizedResource) {
+            AuthorizedResourceResp authorizedResource, Set<Long> modelIds) {
         log.debug("start doRowPermission logic");
 
-        if (CollectionUtils.isEmpty(authorizedResource.getFilters())) {
-            log.debug("authorizedResource.getFilters() is empty");
+        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds);
+        if (StringUtils.isBlank(rowPermissionExpression)) {
+            log.debug("No effective row permission filters");
             return;
         }
-        List<String> dimensionFilters = authorizedResource.getFilters().stream()
-                .flatMap(filter -> filter.getExpressions().stream()).filter(StringUtils::isNotBlank)
-                .collect(Collectors.toList());
+        log.debug("Applying model-scoped row permission to structured query [{}]",
+                SensitiveLogUtils.summarize(queryStructReq));
+        Filter filter = new Filter("", FilterOperatorEnum.SQL_PART, rowPermissionExpression);
+        List<Filter> filters =
+                Optional.ofNullable(queryStructReq.getOriginalFilter()).orElseGet(ArrayList::new);
+        filters.add(filter);
+        queryStructReq.setDimensionFilters(filters);
+        log.debug("Row permission applied to structured query [{}]",
+                SensitiveLogUtils.summarize(queryStructReq));
+    }
 
-        if (dimensionFilters.isEmpty()) {
-            log.debug("dimensionFilters is empty");
-            return;
+    private String buildRowPermissionExpression(AuthorizedResourceResp authorizedResource,
+            Set<Long> modelIds) {
+        if (authorizedResource == null
+                || CollectionUtils.isEmpty(authorizedResource.getFilters())) {
+            return null;
         }
-        validateDimensionFilters(dimensionFilters);
-
-        StringJoiner joiner = new StringJoiner(" OR ");
-        dimensionFilters.forEach(filter -> joiner.add(" ( " + filter + " ) "));
-
-        String joinedFilters = joiner.toString();
-        if (StringUtils.isNotEmpty(joinedFilters)) {
-            log.debug("Applying {} row permission filters to structured query [{}]",
-                    dimensionFilters.size(), SensitiveLogUtils.summarize(queryStructReq));
-            Filter filter = new Filter("", FilterOperatorEnum.SQL_PART, joinedFilters);
-            List<Filter> filters = Optional.ofNullable(queryStructReq.getOriginalFilter())
-                    .orElseGet(ArrayList::new);
-            filters.add(filter);
-            queryStructReq.setDimensionFilters(filters);
-            log.debug("Row permission applied to structured query [{}]",
-                    SensitiveLogUtils.summarize(queryStructReq));
+        Map<Long, List<DimensionFilter>> filtersByModel = new LinkedHashMap<>();
+        for (DimensionFilter filter : authorizedResource.getFilters()) {
+            if (filter == null || filter.getModelId() == null
+                    || !modelIds.contains(filter.getModelId())) {
+                throw new InvalidPermissionException(
+                        "Row permission filter has an invalid model scope; query execution was denied");
+            }
+            if (filter.getExpressions() == null) {
+                throw new InvalidPermissionException(
+                        "Row permission filter is invalid; query execution was denied");
+            }
+            filtersByModel.computeIfAbsent(filter.getModelId(), key -> new ArrayList<>())
+                    .add(filter);
         }
+
+        List<String> modelClauses = new ArrayList<>();
+        for (Map.Entry<Long, List<DimensionFilter>> entry : filtersByModel.entrySet()) {
+            if (entry.getValue().stream().anyMatch(filter -> filter.getExpressions().isEmpty())) {
+                continue;
+            }
+            Set<String> expressions =
+                    entry.getValue().stream().flatMap(filter -> filter.getExpressions().stream())
+                            .collect(Collectors.toCollection(LinkedHashSet::new));
+            if (expressions.stream().anyMatch(StringUtils::isBlank)) {
+                throw new InvalidPermissionException(
+                        "Row permission filter is invalid; query execution was denied");
+            }
+            validateDimensionFilters(new ArrayList<>(expressions));
+            String modelClause = expressions.stream().map(expression -> "( " + expression + " )")
+                    .collect(Collectors.joining(" OR "));
+            modelClauses.add("( " + modelClause + " )");
+        }
+        return modelClauses.isEmpty() ? null : String.join(" AND ", modelClauses);
     }
 
     private void validateDimensionFilters(List<String> dimensionFilters) {
@@ -443,6 +461,45 @@ public class S2DataPermissionAspect {
         return highSensitiveCols;
     }
 
+    private Set<ModelResourceKey> highSensitiveResources(SemanticSchemaResp semanticSchemaResp,
+            Set<Long> modelIds, Set<String> normalizedQueryFields) {
+        Set<ModelResourceKey> resources = new HashSet<>();
+        if (!CollectionUtils.isEmpty(semanticSchemaResp.getDimensions())) {
+            for (DimSchemaResp dimension : semanticSchemaResp.getDimensions()) {
+                addSensitiveResource(resources, dimension.getModelId(), dimension.getBizName(),
+                        dimension.getSensitiveLevel(), modelIds, normalizedQueryFields);
+            }
+        }
+        if (!CollectionUtils.isEmpty(semanticSchemaResp.getMetrics())) {
+            for (MetricSchemaResp metric : semanticSchemaResp.getMetrics()) {
+                addSensitiveResource(resources, metric.getModelId(), metric.getBizName(),
+                        metric.getSensitiveLevel(), modelIds, normalizedQueryFields);
+            }
+        }
+        return resources;
+    }
+
+    private void addSensitiveResource(Set<ModelResourceKey> resources, Long modelId,
+            String resourceName, Integer sensitiveLevel, Set<Long> modelIds,
+            Set<String> normalizedQueryFields) {
+        String normalizedName = normalizeResourceName(resourceName);
+        if (!SensitiveLevelEnum.HIGH.getCode().equals(sensitiveLevel)
+                || !normalizedQueryFields.contains(normalizedName)) {
+            return;
+        }
+        if (modelId == null) {
+            throw new InvalidPermissionException(
+                    "Sensitive resource has no model scope; query execution was denied");
+        }
+        if (modelIds.contains(modelId)) {
+            resources.add(new ModelResourceKey(modelId, normalizedName));
+        }
+    }
+
+    private String normalizeResourceName(String resourceName) {
+        return StringUtils.defaultString(resourceName).toLowerCase(java.util.Locale.ROOT);
+    }
+
     public AuthorizedResourceResp getAuthorizedResource(User user, Set<Long> modelIds) {
         QueryAuthResReq queryAuthResReq = new QueryAuthResReq();
         queryAuthResReq.setModelIds(new ArrayList<>(modelIds));
@@ -464,19 +521,22 @@ public class S2DataPermissionAspect {
         if (CollectionUtils.isEmpty(filters)) {
             return;
         }
+        List<DimensionFilter> restrictedFilters = filters.stream().filter(Objects::nonNull)
+                .filter(filter -> !CollectionUtils.isEmpty(filter.getExpressions())).toList();
+        if (restrictedFilters.isEmpty()) {
+            return;
+        }
         List<String> admins = modelService.getModelAdmin(modelIds.iterator().next());
 
-        if (!CollectionUtils.isEmpty(filters)) {
+        if (!CollectionUtils.isEmpty(restrictedFilters)) {
             ModelResp modelResp = modelService.getModel(modelIds.iterator().next());
             List<String> exprList = new ArrayList<>();
             List<String> descList = new ArrayList<>();
-            filters.stream().forEach(filter -> {
+            restrictedFilters.forEach(filter -> {
                 if (StringUtils.isNotEmpty(filter.getDescription())) {
                     descList.add(filter.getDescription());
                 }
-                if (!"[]".equals(filter.getExpressions().toString())) {
-                    exprList.add(filter.getExpressions().toString());
-                }
+                exprList.add(filter.getExpressions().toString());
             });
             if (!CollectionUtils.isEmpty(exprList)) {
                 String promptInfo = "当前结果已经过行权限过滤，详细过滤条件如下:%s, 申请权限请联系管理员%s";
@@ -487,4 +547,6 @@ public class S2DataPermissionAspect {
             }
         }
     }
+
+    private record ModelResourceKey(Long modelId, String resourceName) {}
 }

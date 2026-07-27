@@ -58,7 +58,7 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         try {
             BusinessInsightConfig rules = rules();
             QueryResult result = executeContext.getResponse();
-            validateInputSize(result, rules);
+            BusinessInsightInputValidator.validate(executeContext, result, rules);
             validateInputShape(result);
             FieldProfile profile = profile(result);
             enrichMetricDefinitions(executeContext, profile);
@@ -76,17 +76,6 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
         } finally {
             QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXPLAIN,
                     System.nanoTime() - explainStart);
-        }
-    }
-
-    private void validateInputSize(QueryResult result, BusinessInsightConfig rules) {
-        if (result.getQueryResults().size() > rules.getMaxInputRows()) {
-            throw new IllegalStateException(
-                    "Business insight input exceeds maximum row count: " + rules.getMaxInputRows());
-        }
-        if (result.getQueryColumns().size() > rules.getMaxInputColumns()) {
-            throw new IllegalStateException("Business insight input exceeds maximum column count: "
-                    + rules.getMaxInputColumns());
         }
     }
 

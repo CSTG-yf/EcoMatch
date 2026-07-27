@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.server.aspect;
 
+import com.tencent.supersonic.auth.api.authorization.pojo.AuthRes;
 import com.tencent.supersonic.auth.api.authorization.pojo.DimensionFilter;
 import com.tencent.supersonic.auth.api.authorization.response.AuthorizedResourceResp;
 import com.tencent.supersonic.auth.api.authorization.service.AuthService;
@@ -179,6 +180,60 @@ class S2DataPermissionMaskingTest {
     }
 
     @Test
+    void doesNotReuseSensitiveColumnGrantAcrossModels() throws Throwable {
+        QueryStructReq request = new QueryStructReq();
+        request.setNeedAuth(true);
+        when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
+        when(queryStructUtils.getModelIdsFromStruct(eq(request), any())).thenReturn(Set.of(1L, 2L));
+        when(queryStructUtils.getBizNameFromStruct(request)).thenReturn(Set.of("mobile"));
+
+        DimSchemaResp first = sensitiveDimension(1L);
+        DimSchemaResp second = sensitiveDimension(2L);
+        SemanticSchemaResp multiModelSchema = new SemanticSchemaResp();
+        multiModelSchema.setDimensions(List.of(first, second));
+        when(schemaService.fetchSemanticSchema(any())).thenReturn(multiModelSchema);
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.ADMIN)))
+                .thenReturn(List.of());
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.VIEWER)))
+                .thenReturn(List.of(model(1L), model(2L)));
+
+        AuthorizedResourceResp authorization = new AuthorizedResourceResp();
+        authorization.setAuthResList(List.of(new AuthRes(1L, "mobile")));
+        when(authService.queryAuthorizedResources(any(), eq(analyst))).thenReturn(authorization);
+
+        assertThrows(InvalidPermissionException.class, () -> aspect.doAround(joinPoint));
+        verify(joinPoint, never()).proceed();
+    }
+
+    @Test
+    void combinesRowFiltersWithOrWithinModelAndAndAcrossModels() throws Throwable {
+        QueryStructReq request = new QueryStructReq();
+        request.setNeedAuth(true);
+        when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
+        when(queryStructUtils.getModelIdsFromStruct(eq(request), any())).thenReturn(Set.of(1L, 2L));
+        when(queryStructUtils.getBizNameFromStruct(request)).thenReturn(Set.of());
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.ADMIN)))
+                .thenReturn(List.of());
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.VIEWER)))
+                .thenReturn(List.of(model(1L), model(2L)));
+
+        AuthorizedResourceResp authorization = new AuthorizedResourceResp();
+        authorization.setFilters(List.of(filter(1L, "branch_id = '001'"),
+                filter(1L, "branch_id = '002'"), filter(2L, "tenant_id = 'A'")));
+        when(authService.queryAuthorizedResources(any(), eq(analyst))).thenReturn(authorization);
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        assertEquals("ok", aspect.doAround(joinPoint));
+
+        assertEquals(1, request.getDimensionFilters().size());
+        String expression = String.valueOf(request.getDimensionFilters().get(0).getValue());
+        assertTrue(expression.contains("branch_id = '001'"));
+        assertTrue(expression.contains(" OR "));
+        assertTrue(expression.contains("tenant_id = 'A'"));
+        assertTrue(expression.contains(" AND "));
+    }
+
+    @Test
     void businessFailureAfterAuthorizationDoesNotCreateDeniedDecision() throws Throwable {
         QueryStructReq request = new QueryStructReq();
         request.setNeedAuth(false);
@@ -259,6 +314,7 @@ class S2DataPermissionMaskingTest {
                 .thenReturn(List.of(model));
 
         DimensionFilter filter = new DimensionFilter();
+        filter.setModelId(1L);
         filter.setExpressions(List.of(expression));
         AuthorizedResourceResp authorization = new AuthorizedResourceResp();
         authorization.setFilters(List.of(filter));
@@ -323,13 +379,31 @@ class S2DataPermissionMaskingTest {
     }
 
     private SemanticSchemaResp schema() {
+        SemanticSchemaResp schema = new SemanticSchemaResp();
+        schema.setDimensions(List.of(sensitiveDimension(1L)));
+        return schema;
+    }
+
+    private DimSchemaResp sensitiveDimension(long modelId) {
         DimSchemaResp dimension = new DimSchemaResp();
+        dimension.setModelId(modelId);
         dimension.setName("mobile");
         dimension.setBizName("mobile");
         dimension.setSensitiveLevel(SensitiveLevelEnum.HIGH.getCode());
-        SemanticSchemaResp schema = new SemanticSchemaResp();
-        schema.setDimensions(List.of(dimension));
-        return schema;
+        return dimension;
+    }
+
+    private ModelResp model(long modelId) {
+        ModelResp model = new ModelResp();
+        model.setId(modelId);
+        return model;
+    }
+
+    private DimensionFilter filter(long modelId, String expression) {
+        DimensionFilter filter = new DimensionFilter();
+        filter.setModelId(modelId);
+        filter.setExpressions(List.of(expression));
+        return filter;
     }
 
     private SemanticQueryResp response() {

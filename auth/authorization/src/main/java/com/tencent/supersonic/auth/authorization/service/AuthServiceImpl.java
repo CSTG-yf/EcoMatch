@@ -20,6 +20,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -136,20 +137,26 @@ public class AuthServiceImpl implements AuthService {
         if (req.getModelIds().stream().anyMatch(modelId -> modelId == null || modelId <= 0)) {
             throw new IllegalArgumentException("Authorization model ids must be positive");
         }
+        List<Long> requestedModelIds = req.getModelIds().stream().distinct().toList();
         Set<String> userOrgIds = userService.getUserAllOrgId(user.getName());
         List<AuthGroup> groups =
-                getAuthGroups(req.getModelIds(), user, new ArrayList<>(userOrgIds));
+                getAuthGroups(requestedModelIds, user, new ArrayList<>(userOrgIds));
         AuthorizedResourceResp resource = new AuthorizedResourceResp();
         Map<Long, List<AuthGroup>> authGroupsByModelId =
                 groups.stream().collect(Collectors.groupingBy(AuthGroup::getModelId));
-        for (Long modelId : req.getModelIds()) {
+        Set<String> resourceKeys = new HashSet<>();
+        for (Long modelId : requestedModelIds) {
             if (authGroupsByModelId.containsKey(modelId)) {
                 List<AuthGroup> authGroups = authGroupsByModelId.get(modelId);
                 for (AuthGroup authRuleGroup : authGroups) {
                     List<AuthRule> authRules = authRuleGroup.getAuthRules();
                     for (AuthRule authRule : authRules) {
                         for (String resBizName : authRule.resourceNames()) {
-                            resource.getAuthResList().add(new AuthRes(modelId, resBizName));
+                            String resourceKey =
+                                    modelId + "\u0000" + resBizName.toLowerCase(Locale.ROOT);
+                            if (resourceKeys.add(resourceKey)) {
+                                resource.getAuthResList().add(new AuthRes(modelId, resBizName));
+                            }
                         }
                     }
                 }
@@ -160,8 +167,11 @@ public class AuthServiceImpl implements AuthService {
             List<AuthGroup> authGroups = entry.getValue();
             for (AuthGroup authGroup : authGroups) {
                 DimensionFilter df = new DimensionFilter();
+                df.setModelId(authGroup.getModelId());
                 df.setDescription(authGroup.getDimensionFilterDescription());
-                df.setExpressions(authGroup.getDimensionFilters());
+                df.setExpressions(
+                        CollectionUtils.isEmpty(authGroup.getDimensionFilters()) ? List.of()
+                                : List.copyOf(authGroup.getDimensionFilters()));
                 resource.getFilters().add(df);
             }
         }
