@@ -1,5 +1,6 @@
 package com.tencent.supersonic.auth.authorization.service;
 
+import com.google.gson.Gson;
 import com.tencent.supersonic.auth.api.authentication.service.UserService;
 import com.tencent.supersonic.auth.api.authorization.pojo.AuthGroup;
 import com.tencent.supersonic.auth.api.authorization.pojo.AuthRule;
@@ -86,6 +87,14 @@ class AuthServiceImplValidationTest {
         assertThrows(IllegalArgumentException.class,
                 () -> authService.addOrUpdateAuthGroup(oversizedIdentifier));
 
+        AuthGroup tooManyResources = validGroup();
+        AuthRule resourceRule = new AuthRule();
+        resourceRule.setMetrics(
+                java.util.stream.IntStream.range(0, 1_000).mapToObj(i -> "metric_" + i).toList());
+        tooManyResources.setAuthRules(java.util.Collections.nCopies(11, resourceRule));
+        assertThrows(IllegalArgumentException.class,
+                () -> authService.addOrUpdateAuthGroup(tooManyResources));
+
         verifyNoInteractions(jdbcTemplate);
     }
 
@@ -96,6 +105,9 @@ class AuthServiceImplValidationTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> authService.queryAuthorizedResources(request, User.get(2L, "analyst")));
+        request.setModelIds(List.of(1L));
+        assertThrows(IllegalArgumentException.class,
+                () -> authService.queryAuthorizedResources(request, null));
 
         verifyNoInteractions(userService, jdbcTemplate);
     }
@@ -134,6 +146,44 @@ class AuthServiceImplValidationTest {
         assertEquals(List.of(), response.getFilters().get(0).getExpressions());
     }
 
+    @Test
+    void rejectsAuthorizationAggregationThatExceedsRuntimeBudget() {
+        String valid = """
+                {"modelId":1,"name":"valid","groupId":1,
+                 "authRules":[{"metrics":["loan_balance"]}],
+                 "authorizedUsers":["analyst"],"dimensionFilters":[]}
+                """;
+        when(jdbcTemplate.queryForList(anyString(), eq(String.class)))
+                .thenReturn(java.util.Collections.nCopies(1_001, valid));
+        when(userService.getUserAllOrgId("analyst")).thenReturn(Set.of());
+        QueryAuthResReq request = new QueryAuthResReq();
+        request.setModelIds(List.of(1L));
+
+        assertThrows(IllegalStateException.class,
+                () -> authService.queryAuthorizedResources(request, User.get(2L, "analyst")));
+    }
+
+    @Test
+    void rejectsUniqueResourceAndRowFilterAggregationBeyondRuntimeBudgets() {
+        when(userService.getUserAllOrgId("analyst")).thenReturn(Set.of());
+        QueryAuthResReq request = new QueryAuthResReq();
+        request.setModelIds(List.of(1L));
+
+        AuthGroup firstResources = groupWithResources("a", 6_000);
+        AuthGroup secondResources = groupWithResources("b", 6_000);
+        when(jdbcTemplate.queryForList(anyString(), eq(String.class))).thenReturn(
+                List.of(new Gson().toJson(firstResources), new Gson().toJson(secondResources)));
+        assertThrows(IllegalStateException.class,
+                () -> authService.queryAuthorizedResources(request, User.get(2L, "analyst")));
+
+        AuthGroup filterGroup = validGroup();
+        filterGroup.setDimensionFilters(java.util.Collections.nCopies(1_000, "branch_id = '001'"));
+        when(jdbcTemplate.queryForList(anyString(), eq(String.class)))
+                .thenReturn(java.util.Collections.nCopies(11, new Gson().toJson(filterGroup)));
+        assertThrows(IllegalStateException.class,
+                () -> authService.queryAuthorizedResources(request, User.get(2L, "analyst")));
+    }
+
     private AuthGroup validGroup() {
         AuthRule rule = new AuthRule();
         rule.setMetrics(List.of("loan_balance"));
@@ -143,6 +193,20 @@ class AuthServiceImplValidationTest {
         group.setAuthorizedUsers(List.of("analyst"));
         group.setAuthRules(List.of(rule));
         group.setDimensionFilters(List.of("branch_id = '001'"));
+        return group;
+    }
+
+    private AuthGroup groupWithResources(String prefix, int resourceCount) {
+        List<AuthRule> rules = new java.util.ArrayList<>();
+        for (int ruleIndex = 0; ruleIndex < resourceCount / 1_000; ruleIndex++) {
+            int offset = ruleIndex * 1_000;
+            AuthRule rule = new AuthRule();
+            rule.setMetrics(java.util.stream.IntStream.range(offset, offset + 1_000)
+                    .mapToObj(index -> prefix + "_metric_" + index).toList());
+            rules.add(rule);
+        }
+        AuthGroup group = validGroup();
+        group.setAuthRules(rules);
         return group;
     }
 }

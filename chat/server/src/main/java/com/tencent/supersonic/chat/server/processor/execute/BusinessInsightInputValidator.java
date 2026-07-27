@@ -14,6 +14,12 @@ final class BusinessInsightInputValidator {
     private BusinessInsightInputValidator() {}
 
     static void validate(ExecuteContext context, QueryResult result, BusinessInsightConfig rules) {
+        if (context == null || result == null || rules == null) {
+            throw invalid("context, result, and rules are required");
+        }
+        if (result.getQueryResults() == null || result.getQueryColumns() == null) {
+            throw invalid("result rows and columns are required");
+        }
         if (result.getQueryResults().size() > rules.getMaxInputRows()) {
             throw invalid("input exceeds maximum row count: " + rules.getMaxInputRows());
         }

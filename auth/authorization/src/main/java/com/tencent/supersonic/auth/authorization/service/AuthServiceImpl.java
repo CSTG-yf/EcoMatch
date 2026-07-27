@@ -37,6 +37,11 @@ public class AuthServiceImpl implements AuthService {
     private static final int MAX_MODEL_IDS = 1_000;
     private static final int MAX_RULES_PER_GROUP = 1_000;
     private static final int MAX_IDENTIFIERS_PER_FIELD = 1_000;
+    private static final int MAX_RESOURCES_PER_GROUP = 10_000;
+    private static final int MAX_MATCHED_GROUPS = 1_000;
+    private static final int MAX_AUTHORIZED_RESOURCES = 10_000;
+    private static final int MAX_AUTHORIZED_FILTER_EXPRESSIONS = 10_000;
+    private static final int MAX_AUTHORIZED_FILTER_TEXT_LENGTH = 1_048_576;
     private static final int MAX_ATTRIBUTES_PER_GROUP = 100;
     private static final int MAX_AUTH_TEXT_LENGTH = 4_096;
 
@@ -127,6 +132,9 @@ public class AuthServiceImpl implements AuthService {
         if (req == null) {
             throw new IllegalArgumentException("Authorization resource request is required");
         }
+        if (user == null || !StringUtils.hasText(user.getName())) {
+            throw new IllegalArgumentException("Authorization user identity is required");
+        }
         if (CollectionUtils.isEmpty(req.getModelIds())) {
             return new AuthorizedResourceResp();
         }
@@ -141,6 +149,10 @@ public class AuthServiceImpl implements AuthService {
         Set<String> userOrgIds = userService.getUserAllOrgId(user.getName());
         List<AuthGroup> groups =
                 getAuthGroups(requestedModelIds, user, new ArrayList<>(userOrgIds));
+        if (groups.size() > MAX_MATCHED_GROUPS) {
+            throw new IllegalStateException(
+                    "Matched authorization group count exceeds maximum: " + MAX_MATCHED_GROUPS);
+        }
         AuthorizedResourceResp resource = new AuthorizedResourceResp();
         Map<Long, List<AuthGroup>> authGroupsByModelId =
                 groups.stream().collect(Collectors.groupingBy(AuthGroup::getModelId));
@@ -155,6 +167,11 @@ public class AuthServiceImpl implements AuthService {
                             String resourceKey =
                                     modelId + "\u0000" + resBizName.toLowerCase(Locale.ROOT);
                             if (resourceKeys.add(resourceKey)) {
+                                if (resourceKeys.size() > MAX_AUTHORIZED_RESOURCES) {
+                                    throw new IllegalStateException(
+                                            "Authorized resource count exceeds maximum: "
+                                                    + MAX_AUTHORIZED_RESOURCES);
+                                }
                                 resource.getAuthResList().add(new AuthRes(modelId, resBizName));
                             }
                         }
@@ -163,15 +180,32 @@ public class AuthServiceImpl implements AuthService {
             }
         }
         Set<Map.Entry<Long, List<AuthGroup>>> entries = authGroupsByModelId.entrySet();
+        long filterExpressionCount = 0;
+        long filterTextLength = 0;
         for (Map.Entry<Long, List<AuthGroup>> entry : entries) {
             List<AuthGroup> authGroups = entry.getValue();
             for (AuthGroup authGroup : authGroups) {
+                List<String> expressions =
+                        CollectionUtils.isEmpty(authGroup.getDimensionFilters()) ? List.of()
+                                : authGroup.getDimensionFilters();
+                filterExpressionCount += expressions.size();
+                filterTextLength += expressions.stream().mapToLong(String::length).sum();
+                filterTextLength += authGroup.getDimensionFilterDescription() == null ? 0
+                        : authGroup.getDimensionFilterDescription().length();
+                if (filterExpressionCount > MAX_AUTHORIZED_FILTER_EXPRESSIONS) {
+                    throw new IllegalStateException(
+                            "Authorized row filter expression count exceeds maximum: "
+                                    + MAX_AUTHORIZED_FILTER_EXPRESSIONS);
+                }
+                if (filterTextLength > MAX_AUTHORIZED_FILTER_TEXT_LENGTH) {
+                    throw new IllegalStateException(
+                            "Authorized row filter text exceeds maximum length: "
+                                    + MAX_AUTHORIZED_FILTER_TEXT_LENGTH);
+                }
                 DimensionFilter df = new DimensionFilter();
                 df.setModelId(authGroup.getModelId());
                 df.setDescription(authGroup.getDimensionFilterDescription());
-                df.setExpressions(
-                        CollectionUtils.isEmpty(authGroup.getDimensionFilters()) ? List.of()
-                                : List.copyOf(authGroup.getDimensionFilters()));
+                df.setExpressions(List.copyOf(expressions));
                 resource.getFilters().add(df);
             }
         }
@@ -243,7 +277,8 @@ public class AuthServiceImpl implements AuthService {
             throw new IllegalArgumentException(
                     "Authorization resource rule count exceeds maximum: " + MAX_RULES_PER_GROUP);
         }
-        group.getAuthRules().forEach(rule -> {
+        long resourceCount = 0;
+        for (AuthRule rule : group.getAuthRules()) {
             if (rule == null) {
                 throw new IllegalArgumentException("Authorization resource rule must not be null");
             }
@@ -255,7 +290,13 @@ public class AuthServiceImpl implements AuthService {
                 throw new IllegalArgumentException(
                         "Authorization resource rule must contain a metric or dimension");
             }
-        });
+            resourceCount += rule.resourceNames().size();
+            if (resourceCount > MAX_RESOURCES_PER_GROUP) {
+                throw new IllegalArgumentException(
+                        "Authorization resource count exceeds maximum per group: "
+                                + MAX_RESOURCES_PER_GROUP);
+            }
+        }
         validateIdentifiers(group.getDimensionFilters(), "dimension filter");
     }
 

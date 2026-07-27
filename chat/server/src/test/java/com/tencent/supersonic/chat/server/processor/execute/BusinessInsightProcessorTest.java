@@ -141,6 +141,29 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void rejectsMissingMainQueryStructuresExplicitly() {
+        BusinessInsightProcessor processor = new BusinessInsightProcessor();
+        ExecuteContext missingResponse = new ExecuteContext(new ChatExecuteReq());
+
+        QueryResult missingRowsResult = new QueryResult();
+        missingRowsResult.setQueryState(QueryState.SUCCESS);
+        missingRowsResult.setQueryColumns(List.of(column("amount", "NUMBER")));
+        ExecuteContext missingRows = new ExecuteContext(new ChatExecuteReq());
+        missingRows.setResponse(missingRowsResult);
+
+        QueryResult missingColumnsResult = new QueryResult();
+        missingColumnsResult.setQueryState(QueryState.SUCCESS);
+        missingColumnsResult.setQueryResults(List.of(row("amount", 10)));
+        ExecuteContext missingColumns = new ExecuteContext(new ChatExecuteReq());
+        missingColumns.setResponse(missingColumnsResult);
+
+        assertThrows(IllegalStateException.class, () -> processor.process(null));
+        assertThrows(IllegalStateException.class, () -> processor.process(missingResponse));
+        assertThrows(IllegalStateException.class, () -> processor.process(missingRows));
+        assertThrows(IllegalStateException.class, () -> processor.process(missingColumns));
+    }
+
+    @Test
     void rejectsAmbiguousOrNonCanonicalMainQueryResultFields() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);

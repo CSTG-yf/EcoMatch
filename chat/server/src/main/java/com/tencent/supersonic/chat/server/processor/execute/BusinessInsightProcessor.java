@@ -56,6 +56,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
     public void process(ExecuteContext executeContext) {
         long explainStart = System.nanoTime();
         try {
+            if (executeContext == null) {
+                throw new IllegalStateException("Business insight context is required");
+            }
             BusinessInsightConfig rules = rules();
             QueryResult result = executeContext.getResponse();
             BusinessInsightInputValidator.validate(executeContext, result, rules);
