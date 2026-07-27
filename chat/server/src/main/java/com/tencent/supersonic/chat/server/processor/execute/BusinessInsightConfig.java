@@ -28,14 +28,26 @@ public class BusinessInsightConfig {
             @Value("${s2.business-insight.high-confidence:0.95}") double highConfidence,
             @Value("${s2.business-insight.max-input-rows:10000}") int maxInputRows,
             @Value("${s2.business-insight.max-input-columns:100}") int maxInputColumns) {
-        this.smallSampleThreshold = Math.max(1, smallSampleThreshold);
-        this.pieMaxCategories = Math.max(2, pieMaxCategories);
-        this.anomalyZScore = Math.max(0.1, anomalyZScore);
-        this.lowConfidence = clamp(lowConfidence);
-        this.evidenceConfidence = clamp(evidenceConfidence);
-        this.highConfidence = clamp(highConfidence);
-        this.maxInputRows = Math.max(1, maxInputRows);
-        this.maxInputColumns = Math.max(1, maxInputColumns);
+        requireAtLeast(smallSampleThreshold, 1, "small-sample-threshold");
+        requireAtLeast(pieMaxCategories, 2, "pie-max-categories");
+        requirePositiveFinite(anomalyZScore, "anomaly-z-score");
+        requireProbability(lowConfidence, "low-confidence");
+        requireProbability(evidenceConfidence, "evidence-confidence");
+        requireProbability(highConfidence, "high-confidence");
+        if (lowConfidence > evidenceConfidence || evidenceConfidence > highConfidence) {
+            throw new IllegalArgumentException(
+                    "Business insight confidence thresholds must be ordered low <= evidence <= high");
+        }
+        requireAtLeast(maxInputRows, 1, "max-input-rows");
+        requireAtLeast(maxInputColumns, 1, "max-input-columns");
+        this.smallSampleThreshold = smallSampleThreshold;
+        this.pieMaxCategories = pieMaxCategories;
+        this.anomalyZScore = anomalyZScore;
+        this.lowConfidence = lowConfidence;
+        this.evidenceConfidence = evidenceConfidence;
+        this.highConfidence = highConfidence;
+        this.maxInputRows = maxInputRows;
+        this.maxInputColumns = maxInputColumns;
     }
 
     public BusinessInsightConfig(int smallSampleThreshold, int pieMaxCategories,
@@ -49,7 +61,24 @@ public class BusinessInsightConfig {
         return new BusinessInsightConfig(3, 6, 2.0, 0.65, 0.82, 0.95, 10_000, 100);
     }
 
-    private double clamp(double value) {
-        return Math.max(0, Math.min(1, value));
+    private void requireAtLeast(int value, int minimum, String property) {
+        if (value < minimum) {
+            throw new IllegalArgumentException(
+                    "s2.business-insight." + property + " must be at least " + minimum);
+        }
+    }
+
+    private void requirePositiveFinite(double value, String property) {
+        if (!Double.isFinite(value) || value <= 0) {
+            throw new IllegalArgumentException(
+                    "s2.business-insight." + property + " must be finite and greater than zero");
+        }
+    }
+
+    private void requireProbability(double value, String property) {
+        if (!Double.isFinite(value) || value < 0 || value > 1) {
+            throw new IllegalArgumentException(
+                    "s2.business-insight." + property + " must be finite and within [0,1]");
+        }
     }
 }

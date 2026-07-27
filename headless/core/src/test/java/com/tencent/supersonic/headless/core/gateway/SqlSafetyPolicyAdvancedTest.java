@@ -174,6 +174,17 @@ class SqlSafetyPolicyAdvancedTest {
                 () -> new SqlSafetyPolicy(10_000, "unsafe-function()"));
     }
 
+    @Test
+    void rejectsExcessivelyNestedSqlBeforePhysicalExecution() {
+        String nested = "SELECT 1";
+        for (int depth = 0; depth < 20; depth++) {
+            nested = "SELECT 1 FROM (" + nested + ") nested_" + depth;
+        }
+        String sql = nested;
+
+        assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));
+    }
+
     private void assertDangerousFunctionRejected(String sql) {
         SqlPolicyViolationException violation =
                 assertThrows(SqlPolicyViolationException.class, () -> policy.validate(sql));

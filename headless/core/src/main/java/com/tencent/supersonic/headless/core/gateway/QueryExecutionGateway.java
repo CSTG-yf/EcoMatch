@@ -38,18 +38,25 @@ public class QueryExecutionGateway {
             @Value("${s2.query-gateway.max-concurrency:20}") int maxConcurrency,
             @Value("${s2.query-gateway.acquire-timeout-ms:1000}") long acquireTimeoutMs,
             @Value("${s2.query-gateway.max-sql-length:100000}") int maxSqlLength,
-            @Value("${s2.query-gateway.denied-functions:}") String deniedFunctions) {
+            @Value("${s2.query-gateway.denied-functions:}") String deniedFunctions,
+            @Value("${s2.query-gateway.max-select-depth:16}") int maxSelectDepth) {
         requirePositive(maxConcurrency, "max-concurrency");
         requirePositive(acquireTimeoutMs, "acquire-timeout-ms");
         requirePositive(maxSqlLength, "max-sql-length");
+        requirePositive(maxSelectDepth, "max-select-depth");
         this.maxConcurrency = maxConcurrency;
         this.permits = new Semaphore(this.maxConcurrency, true);
         this.acquireTimeoutMs = acquireTimeoutMs;
-        this.safetyPolicy = new SqlSafetyPolicy(maxSqlLength, deniedFunctions);
+        this.safetyPolicy = new SqlSafetyPolicy(maxSqlLength, deniedFunctions, maxSelectDepth);
     }
 
     public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength) {
-        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, "");
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, "", 16);
+    }
+
+    public QueryExecutionGateway(int maxConcurrency, long acquireTimeoutMs, int maxSqlLength,
+            String deniedFunctions) {
+        this(maxConcurrency, acquireTimeoutMs, maxSqlLength, deniedFunctions, 16);
     }
 
     public <T> T execute(String sql, Supplier<T> action) {

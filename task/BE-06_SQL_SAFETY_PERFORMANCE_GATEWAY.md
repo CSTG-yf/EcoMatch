@@ -20,6 +20,7 @@
 - 除 `nextval(...)` 外，同时拦截 Oracle `sequence.NEXTVAL` 和 SQL Server `NEXT VALUE FOR sequence`，避免只读外观查询推进数据库序列状态。
 - 内置危险函数集合不可被配置移除，并支持通过 `s2.query-gateway.denied-functions` 追加目标数据库的有副作用 UDF；非法函数标识在启动时直接拒绝。
 - 对 CTE、UNION 分支和嵌套子查询逐级检查无界 `SELECT *`，任一直接读取基础表的分支缺少 `WHERE`、`LIMIT` 或 `FETCH` 均拒绝执行；允许外层只投影已受限 CTE 或子查询的安全写法。
+- 对 SELECT、CTE、集合分支和派生子查询执行 AST 层级计数，默认超过 16 层即拒绝，避免深层查询在安全遍历、改写或数据库规划阶段形成栈和 CPU 资源耗尽。
 - 执行前运行 `EXPLAIN`，递归兼容结构化、嵌套 JSON 和文本计划中的估算行数，超过阈值时拒绝查询；支持在目标数据库确认格式后开启“缺失估算即拒绝”。
 - EXPLAIN 已识别估算字段中的负数、`NaN`、无穷值和非数字内容统一拒绝；估算阈值、并发数、许可等待、SQL 长度、查询超时和结果行数上限必须为正数，错误配置不再被静默修正或退化为无限制执行。
 - 通过公平信号量限制并发，等待超时后快速失败，并记录接收数、拒绝数和累计执行耗时。
@@ -46,6 +47,7 @@
 | `s2.query-gateway.max-concurrency` | `20` | 最大并发物理查询数 |
 | `s2.query-gateway.acquire-timeout-ms` | `1000` | 获取执行许可的最长等待时间 |
 | `s2.query-gateway.max-sql-length` | `100000` | SQL 最大字符数 |
+| `s2.query-gateway.max-select-depth` | `16` | SELECT、CTE、集合分支和派生子查询最大嵌套深度 |
 | `s2.query-gateway.denied-functions` | 空 | 追加禁止执行的数据库函数，使用逗号分隔，可配置 schema 限定名 |
 | `s2.source.query-timeout-seconds` | `30` | JDBC 查询超时 |
 | `s2.source.result-limit` | `1000000` | 最大返回行数 |
@@ -58,7 +60,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、非法配置拒绝及安全常量 `VALUES` 兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。
@@ -78,7 +80,7 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 526 项测试（3 项按环境条件跳过），无失败或错误。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 530 项测试（3 项按环境条件跳过），无失败或错误。
 
 ## 本地性能基线
 

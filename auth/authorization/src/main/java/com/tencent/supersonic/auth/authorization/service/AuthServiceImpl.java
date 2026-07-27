@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +33,7 @@ public class AuthServiceImpl implements AuthService {
 
     private UserService userService;
     private final AuthGroupMatcher authGroupMatcher = new AuthGroupMatcher();
+    private final Set<String> invalidConfigWarnings = ConcurrentHashMap.newKeySet();
 
     public AuthServiceImpl(JdbcTemplate jdbcTemplate, UserService userService) {
         this.jdbcTemplate = jdbcTemplate;
@@ -42,8 +44,21 @@ public class AuthServiceImpl implements AuthService {
         List<String> rows =
                 jdbcTemplate.queryForList("select config from s2_auth_groups", String.class);
         Gson g = new Gson();
-        return rows.stream().map(row -> g.fromJson(row, AuthGroup.class))
-                .collect(Collectors.toList());
+        List<AuthGroup> groups = new ArrayList<>();
+        for (String row : rows) {
+            try {
+                AuthGroup group = g.fromJson(row, AuthGroup.class);
+                validateAuthGroup(group);
+                groups.add(group);
+            } catch (RuntimeException e) {
+                String configMetadata = SensitiveLogUtils.summarize(row);
+                if (invalidConfigWarnings.add(configMetadata)) {
+                    log.warn("Ignoring invalid authorization group: config=[{}], errorType={}",
+                            configMetadata, e.getClass().getSimpleName());
+                }
+            }
+        }
+        return groups;
     }
 
     @Override

@@ -38,6 +38,7 @@ import java.util.stream.Stream;
 /** Validates executable SQL before it reaches a physical data source. */
 public class SqlSafetyPolicy {
 
+    private static final int DEFAULT_MAX_SELECT_DEPTH = 16;
     private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "csv_scan",
             "csvread", "csvwrite", "dblink", "dblink_connect", "dblink_exec", "file_read",
             "file_write", "get_lock", "glob", "json_scan", "load_file", "lo_export", "lo_get",
@@ -54,14 +55,25 @@ public class SqlSafetyPolicy {
             Pattern.compile("[A-Za-z_][A-Za-z0-9_$]*(?:\\.[A-Za-z_][A-Za-z0-9_$]*)*");
 
     private final int maxSqlLength;
+    private final int maxSelectDepth;
     private final Set<String> dangerousFunctions;
 
     public SqlSafetyPolicy(int maxSqlLength) {
-        this(maxSqlLength, "");
+        this(maxSqlLength, "", DEFAULT_MAX_SELECT_DEPTH);
     }
 
     public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions) {
+        this(maxSqlLength, additionalDangerousFunctions, DEFAULT_MAX_SELECT_DEPTH);
+    }
+
+    public SqlSafetyPolicy(int maxSqlLength, String additionalDangerousFunctions,
+            int maxSelectDepth) {
+        if (maxSelectDepth <= 0) {
+            throw new IllegalArgumentException(
+                    "s2.query-gateway.max-select-depth must be greater than zero");
+        }
         this.maxSqlLength = maxSqlLength;
+        this.maxSelectDepth = maxSelectDepth;
         Set<String> configured = new LinkedHashSet<>(DEFAULT_DANGEROUS_FUNCTIONS);
         String additions = additionalDangerousFunctions == null ? "" : additionalDangerousFunctions;
         for (String rawFunction : additions.split(",")) {
@@ -117,23 +129,28 @@ public class SqlSafetyPolicy {
 
     private void validateSelectTree(Select statement) {
         Set<Select> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-        validateSelect(statement, Collections.emptySet(), visited);
+        validateSelect(statement, Collections.emptySet(), visited, 0);
     }
 
-    private void validateSelect(Select select, Set<String> inheritedCteNames, Set<Select> visited) {
+    private void validateSelect(Select select, Set<String> inheritedCteNames, Set<Select> visited,
+            int depth) {
         if (select == null || !visited.add(select)) {
             return;
+        }
+        if (depth > maxSelectDepth) {
+            throw new SqlPolicyViolationException(
+                    "SQL SELECT nesting exceeds the configured maximum of " + maxSelectDepth);
         }
         Set<String> cteNames = new LinkedHashSet<>(inheritedCteNames);
         if (select.getWithItemsList() != null) {
             select.getWithItemsList().stream().filter(withItem -> withItem.getAlias() != null)
                     .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
                     .forEach(cteNames::add);
-            select.getWithItemsList()
-                    .forEach(withItem -> validateSelect(withItem.getSelect(), cteNames, visited));
+            select.getWithItemsList().forEach(
+                    withItem -> validateSelect(withItem.getSelect(), cteNames, visited, depth + 1));
         }
 
-        ExpressionVisitorAdapter visitor = dangerousFunctionVisitor(cteNames, visited);
+        ExpressionVisitorAdapter visitor = dangerousFunctionVisitor(cteNames, visited, depth);
         if (select.getForClause() != null) {
             throw new SqlPolicyViolationException("Row-locking SELECT clauses are forbidden");
         }
@@ -141,20 +158,20 @@ public class SqlSafetyPolicy {
             validateReadOnlySelectFeatures(plainSelect);
             validateDangerousFunctions(plainSelect, visitor);
             validateSelectAllBranch(plainSelect, cteNames);
-            validateNestedSelect(plainSelect.getFromItem(), cteNames, visited);
+            validateNestedSelect(plainSelect.getFromItem(), cteNames, visited, depth);
             if (plainSelect.getJoins() != null) {
-                plainSelect.getJoins().forEach(
-                        join -> validateNestedSelect(join.getRightItem(), cteNames, visited));
+                plainSelect.getJoins().forEach(join -> validateNestedSelect(join.getRightItem(),
+                        cteNames, visited, depth));
             }
         } else if (select instanceof Values values) {
             visit(values.getExpressions(), visitor);
         } else if (select instanceof SetOperationList setOperationList) {
             if (setOperationList.getSelects() != null) {
                 setOperationList.getSelects()
-                        .forEach(child -> validateSelect(child, cteNames, visited));
+                        .forEach(child -> validateSelect(child, cteNames, visited, depth + 1));
             }
         } else if (select instanceof ParenthesedSelect parenthesedSelect) {
-            validateSelect(parenthesedSelect.getSelect(), cteNames, visited);
+            validateSelect(parenthesedSelect.getSelect(), cteNames, visited, depth);
         } else if (select instanceof TableStatement) {
             throw new SqlPolicyViolationException(
                     "TABLE statements are forbidden; use a bounded SELECT");
@@ -166,7 +183,7 @@ public class SqlSafetyPolicy {
     }
 
     private ExpressionVisitorAdapter dangerousFunctionVisitor(Set<String> cteNames,
-            Set<Select> visited) {
+            Set<Select> visited, int depth) {
         return new ExpressionVisitorAdapter() {
             @Override
             public void visit(Function function) {
@@ -197,12 +214,12 @@ public class SqlSafetyPolicy {
 
             @Override
             public void visit(ParenthesedSelect parenthesedSelect) {
-                validateSelect(parenthesedSelect, cteNames, visited);
+                validateSelect(parenthesedSelect, cteNames, visited, depth + 1);
             }
 
             @Override
             public void visit(Select nestedSelect) {
-                validateSelect(nestedSelect, cteNames, visited);
+                validateSelect(nestedSelect, cteNames, visited, depth + 1);
             }
         };
     }
@@ -274,14 +291,16 @@ public class SqlSafetyPolicy {
         }
     }
 
-    private void validateNestedSelect(FromItem source, Set<String> cteNames, Set<Select> visited) {
+    private void validateNestedSelect(FromItem source, Set<String> cteNames, Set<Select> visited,
+            int depth) {
         if (source instanceof ParenthesedSelect parenthesedSelect) {
-            validateSelect(parenthesedSelect, cteNames, visited);
+            validateSelect(parenthesedSelect, cteNames, visited, depth + 1);
         } else if (source instanceof ParenthesedFromItem parenthesedFromItem) {
-            validateNestedSelect(parenthesedFromItem.getFromItem(), cteNames, visited);
+            validateNestedSelect(parenthesedFromItem.getFromItem(), cteNames, visited, depth);
             if (parenthesedFromItem.getJoins() != null) {
-                parenthesedFromItem.getJoins().forEach(
-                        join -> validateNestedSelect(join.getRightItem(), cteNames, visited));
+                parenthesedFromItem.getJoins()
+                        .forEach(join -> validateNestedSelect(join.getRightItem(), cteNames,
+                                visited, depth));
             }
         }
     }
