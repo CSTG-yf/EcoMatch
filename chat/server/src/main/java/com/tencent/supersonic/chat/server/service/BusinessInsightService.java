@@ -84,6 +84,7 @@ public class BusinessInsightService {
 
     private Set<String> validateColumns(BusinessInsightReq request) {
         Set<String> fields = new HashSet<>();
+        Set<String> canonicalFields = new HashSet<>();
         Set<String> declaredFields = new HashSet<>();
         for (QueryColumn column : request.getQueryColumns()) {
             String field = column == null ? null
@@ -96,6 +97,7 @@ public class BusinessInsightService {
                 throw new InvalidArgumentException(
                         "queryColumns contains duplicate field: " + field);
             }
+            canonicalFields.add(field);
             Set<String> aliases = Stream
                     .of(column.getBizName(), column.getNameEn(), column.getName())
                     .filter(StringUtils::isNotBlank).map(value -> value.toLowerCase(Locale.ROOT))
@@ -111,13 +113,29 @@ public class BusinessInsightService {
                         "queryResults does not contain declared field: " + field);
             }
         }
-        boolean hasUndeclaredField = request.getQueryResults().stream()
-                .flatMap(row -> row.keySet().stream()).anyMatch(field -> field == null
-                        || !declaredFields.contains(field.toLowerCase(Locale.ROOT)));
-        if (hasUndeclaredField) {
-            throw new InvalidArgumentException("queryResults contains an undeclared field");
-        }
+        request.getQueryResults()
+                .forEach(row -> validateResultRowFields(row.keySet(), canonicalFields));
         return declaredFields;
+    }
+
+    private void validateResultRowFields(Set<String> rowFields, Set<String> canonicalFields) {
+        if (rowFields.isEmpty()) {
+            throw new InvalidArgumentException("queryResults contains an empty row");
+        }
+        Set<String> normalizedFields = new HashSet<>();
+        for (String field : rowFields) {
+            if (StringUtils.isBlank(field)) {
+                throw new InvalidArgumentException("queryResults contains an unnamed result field");
+            }
+            if (!normalizedFields.add(field.toLowerCase(Locale.ROOT))) {
+                throw new InvalidArgumentException(
+                        "queryResults contains case-insensitive duplicate fields");
+            }
+            if (!canonicalFields.contains(field)) {
+                throw new InvalidArgumentException(
+                        "queryResults contains a non-canonical or undeclared field: " + field);
+            }
+        }
     }
 
     private void validateMaskedColumns(BusinessInsightReq request, Set<String> declaredFields) {

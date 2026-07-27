@@ -95,20 +95,43 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
             throw new IllegalStateException("Business insight input contains a null row");
         }
         Set<String> fields = new LinkedHashSet<>();
+        Set<String> normalizedFields = new LinkedHashSet<>();
         for (QueryColumn column : result.getQueryColumns()) {
             String field = column == null ? null : fieldName(column);
             if (StringUtils.isBlank(field)) {
                 throw new IllegalStateException(
                         "Business insight input contains an unnamed column");
             }
-            if (!fields.add(field)) {
+            if (!normalizedFields.add(field.toLowerCase(Locale.ROOT))) {
                 throw new IllegalStateException(
                         "Business insight input contains duplicate column: " + field);
             }
+            fields.add(field);
             if (!result.getQueryResults().isEmpty()
                     && result.getQueryResults().stream().noneMatch(row -> row.containsKey(field))) {
                 throw new IllegalStateException(
                         "Business insight input does not contain declared field: " + field);
+            }
+        }
+        for (Map<String, Object> row : result.getQueryResults()) {
+            if (row.isEmpty()) {
+                throw new IllegalStateException("Business insight input contains an empty row");
+            }
+            Set<String> normalizedRowFields = new LinkedHashSet<>();
+            for (String field : row.keySet()) {
+                if (StringUtils.isBlank(field)) {
+                    throw new IllegalStateException(
+                            "Business insight input contains an unnamed result field");
+                }
+                if (!normalizedRowFields.add(field.toLowerCase(Locale.ROOT))) {
+                    throw new IllegalStateException(
+                            "Business insight input contains case-insensitive duplicate fields");
+                }
+                if (!fields.contains(field)) {
+                    throw new IllegalStateException(
+                            "Business insight input contains a non-canonical or undeclared field: "
+                                    + field);
+                }
             }
         }
     }

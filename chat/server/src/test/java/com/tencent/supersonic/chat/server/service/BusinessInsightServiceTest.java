@@ -7,6 +7,7 @@ import com.tencent.supersonic.chat.server.processor.execute.BusinessInsightConfi
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -151,6 +152,32 @@ class BusinessInsightServiceTest {
         assertThrows(RuntimeException.class,
                 () -> new BusinessInsightService(BusinessInsightConfig.defaults())
                         .recommend(request));
+    }
+
+    @Test
+    void rejectsCaseVariantAndEmptyResultRows() {
+        BusinessInsightService service =
+                new BusinessInsightService(BusinessInsightConfig.defaults());
+        BusinessInsightReq caseVariant = request();
+        caseVariant.setQueryResults(List.of(Map.of("category_name", "A", "metric_value", 10),
+                Map.of("category_name", "B", "METRIC_VALUE", 20)));
+
+        assertThrows(RuntimeException.class, () -> service.explain(caseVariant));
+
+        BusinessInsightReq duplicateVariant = request();
+        Map<String, Object> ambiguousRow = new LinkedHashMap<>();
+        ambiguousRow.put("category_name", "A");
+        ambiguousRow.put("metric_value", 10);
+        ambiguousRow.put("METRIC_VALUE", 20);
+        duplicateVariant.setQueryResults(List.of(ambiguousRow));
+
+        assertThrows(RuntimeException.class, () -> service.explain(duplicateVariant));
+
+        BusinessInsightReq emptyRow = request();
+        emptyRow.setQueryResults(
+                List.of(Map.of("category_name", "A", "metric_value", 10), Map.of()));
+
+        assertThrows(RuntimeException.class, () -> service.explain(emptyRow));
     }
 
     private BusinessInsightReq request() {

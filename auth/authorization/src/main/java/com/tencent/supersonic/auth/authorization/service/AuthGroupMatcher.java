@@ -2,6 +2,7 @@ package com.tencent.supersonic.auth.authorization.service;
 
 import com.tencent.supersonic.auth.api.authorization.pojo.AuthGroup;
 import com.tencent.supersonic.common.pojo.User;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.CollectionUtils;
 
 import java.util.Collections;
@@ -55,6 +56,8 @@ public class AuthGroupMatcher {
             return false;
         }
         return conditions.entrySet().stream()
-                .allMatch(entry -> entry.getValue().equals(attributes.get(entry.getKey())));
+                .allMatch(entry -> StringUtils.isNotBlank(entry.getKey())
+                        && StringUtils.isNotBlank(entry.getValue())
+                        && entry.getValue().equals(attributes.get(entry.getKey())));
     }
 }

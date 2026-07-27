@@ -4,6 +4,7 @@ import com.tencent.supersonic.auth.api.authorization.pojo.AuthGroup;
 import com.tencent.supersonic.common.pojo.User;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,5 +50,24 @@ class AuthGroupMatcherTest {
         user.setAttributes(Map.of("job", "branch_manager"));
 
         assertTrue(matcher.matches(group, user, List.of()));
+    }
+
+    @Test
+    void malformedAttributePoliciesFailClosed() {
+        User user = User.get(2L, "alice");
+        user.setAttributes(Map.of("region", "jiangsu"));
+        AuthGroup group = new AuthGroup();
+        group.setAuthorizedUsers(List.of("alice"));
+
+        Map<String, String> nullValue = new LinkedHashMap<>();
+        nullValue.put("region", null);
+        group.setAttributeConditions(nullValue);
+        assertFalse(matcher.matches(group, user, List.of()));
+
+        group.setAttributeConditions(Map.of("", "jiangsu"));
+        assertFalse(matcher.matches(group, user, List.of()));
+
+        group.setAttributeConditions(Map.of("region", " "));
+        assertFalse(matcher.matches(group, user, List.of()));
     }
 }

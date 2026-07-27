@@ -78,10 +78,10 @@
 | [x] | BE-03 金融意图识别与语义标准化 | 已完成 | 2026-07-22 | `task/BE-03_FINANCIAL_INTENT_STANDARDIZATION.md` |
 | [x] | BE-04 十轮上下文引擎 | 已完成 | 2026-07-23 | `task/BE-04_TEN_ROUND_CONTEXT.md` |
 | [x] | BE-05 复杂 NL2SQL 增强 | 已完成 | 2026-07-23 | `task/BE-05_COMPLEX_NL2SQL.md` |
-| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，执行入口、驱动与加速器结果行数兜底、缓存安全模式隔离、响应快照、危险函数 AST 校验（含 PostgreSQL/DuckDB/H2/SQLite/SQL Server 外部数据读取、`VALUES`/PIVOT/LATERAL VIEW、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口）、目标数据库追加 denylist 及只读 SELECT 状态变更绕过均已收口；2026-07-27 完成跨方言外部数据函数、数据源元数据鉴权与连接管理收口、标识符注入防护、结构化过滤值字面量转义、WHERE/HAVING 解析失败 fail-closed、内部原生模式防伪造、批量 SQL 整批失败保护、模型 Schema 构建保护，以及 JDBC URL、语义查询/纠错/翻译日志和失败响应防泄露，待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
-| [x] | BE-08 金融级权限和动态脱敏 | 已完成；2026-07-27 补齐签名令牌中的角色/属性传播、认证授权日志防泄露、全局异常防泄露、权限组管理鉴权、用户令牌所有权、数据源元数据及连接凭据保护、语义模型对象鉴权、LLM 连接配置与测试鉴权、Dify 凭证/提示词及 NL2SQL 候选/过滤值/查询规则日志防泄露，以及组合 NL 查询登录身份覆盖（含字段策略、脱敏旁路、行权限 fail-open、SQL 别名/大小写及同一行大小写碰撞绕过、重复脱敏幂等、缓存前脱敏、元数据缺失 fail-closed、未知血缘全量掩码、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置鉴权） | 2026-07-27 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
+| [ ] | BE-06 SQL 安全与性能网关 | 开发及本地性能验收已完成，执行入口、驱动与加速器结果行数兜底、缓存安全模式隔离、响应快照、危险函数 AST 校验（含 PostgreSQL/DuckDB/H2/SQLite/SQL Server 外部数据读取、`VALUES`/PIVOT/LATERAL VIEW、括号 FromItem/嵌套 JOIN、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口）、目标数据库追加 denylist 及只读 SELECT 状态变更绕过均已收口；2026-07-27 完成跨方言外部数据函数、数据源元数据鉴权与连接管理收口、标识符注入防护、结构化过滤值字面量转义、WHERE/HAVING 解析失败 fail-closed、内部原生模式防伪造、批量 SQL 整批失败保护、模型 Schema 构建保护，以及 JDBC URL、语义查询/纠错/翻译日志和失败响应防泄露，待 QA-03 在目标数据库和稳定环境完成最终验收 | - | `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`、`task/BE-06_PERFORMANCE_REPORT.md` |
+| [x] | BE-08 金融级权限和动态脱敏 | 已完成；2026-07-27 补齐签名令牌中的角色/属性传播、异常属性策略 fail-closed、认证授权日志防泄露、全局异常防泄露、权限组管理鉴权、用户令牌所有权、数据源元数据及连接凭据保护、语义模型对象鉴权、LLM 连接配置与测试鉴权、Dify 凭证/提示词及 NL2SQL 候选/过滤值/查询规则日志防泄露，以及组合 NL 查询登录身份覆盖（含字段策略、脱敏旁路、行权限 fail-open、SQL 别名/大小写及同一行大小写碰撞绕过、重复脱敏幂等、缓存前脱敏、元数据缺失 fail-closed、未知血缘全量掩码、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置鉴权） | 2026-07-27 | `task/BE-08_FINANCIAL_PERMISSION_MASKING.md` |
 | [ ] | BE-09 审计与异常行为告警 | 后端开发完成，已交付审计清洗、独立事务哈希链、异常规则、告警去重处置、机构隔离和管理接口；待 FE-08、QA-02、正式身份属性和生产规则验收 | 2026-07-25 | `task/BE-09_AUDIT_ALERT.md` |
-| [x] | BE-10 业务化解释与图表推荐服务 | 已完成；2026-07-27 补齐独立接口匿名访客拒绝、脱敏元数据传播、字段归属 fail-closed 校验并修复 DATA-03 校验入口（含独立接口、同比环比、空结果、小样本策略、图表字段契约与一致性校验、字段/业务标签跨指标证据归因、贡献分类与同比环比月份对复算、主查询及独立接口资源与结构保护、构成意图识别） | 2026-07-27 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
+| [x] | BE-10 业务化解释与图表推荐服务 | 已完成；2026-07-27 补齐独立接口匿名访客拒绝、脱敏元数据传播、字段归属及规范键 fail-closed 校验并修复 DATA-03 校验入口（含独立接口、同比环比、空结果、小样本策略、图表字段契约与一致性校验、字段/业务标签跨指标证据归因、贡献分类与同比环比月份对复算、主查询及独立接口资源与结构保护、构成意图识别） | 2026-07-27 | `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md` |
 | [x] | DATA-01 金融意图数据集 | 已完成 | 2026-07-22 | `task/DATA-01_FINANCIAL_INTENT_DATASET.md` |
 | [x] | DATA-02 NL2SQL 标注数据集 | 已完成；200 条官方题及 115/36/49 无泄漏评测划分已纳入 Java 冻结契约回归门禁 | 2026-07-27 | `task/DATA-02_NL2SQL_DATASET.md` |
 | [x] | DATA-03 图表与业务解释数据集 | 已完成 | 2026-07-23 | `task/DATA-03_CHART_EXPLANATION_DATASET.md` |
@@ -180,7 +180,7 @@
 
 ### BE-06 SQL 安全与性能网关
 
-- 状态：开发、本地性能、超时取消、结果集读取异常及驱动/加速器超大结果 fail-closed、`SELECT INTO`/行锁/状态变更函数及 PostgreSQL/DuckDB 文件读取封堵（含 `VALUES`/PIVOT/LATERAL VIEW、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口 AST 检查）、目标数据库危险函数追加 denylist、五阶段分位数、结果缓存、独立热点指标缓存、JDBC/语义查询诊断防泄露及全部物理执行入口收口验收完成（2026-07-27），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
+- 状态：开发、本地性能、超时取消、结果集读取异常及驱动/加速器超大结果 fail-closed、`SELECT INTO`/行锁/状态变更函数及 PostgreSQL/DuckDB 文件读取封堵（含 `VALUES`/PIVOT/LATERAL VIEW、括号 FromItem/嵌套 JOIN、`TABLE` Select 子类型、Oracle/SQL Server 序列推进、分页、DISTINCT ON、TOP、层级查询和命名窗口 AST 检查）、目标数据库危险函数追加 denylist、五阶段分位数、结果缓存、独立热点指标缓存、JDBC/语义查询诊断防泄露及全部物理执行入口收口验收完成（2026-07-27），实现说明见 `task/BE-06_SQL_SAFETY_PERFORMANCE_GATEWAY.md`，实测报告见 `task/BE-06_PERFORMANCE_REPORT.md`；目标数据库和稳定环境指标待 QA-03 验收。
 - 优先级：P0
 - 依赖关系：上游依赖 BE-05；下游被 QA-03、OPS-01 和最终性能验收依赖。
 - 工作内容：
@@ -206,7 +206,7 @@
 
 ### BE-08 金融级权限和动态脱敏
 
-- 状态：已完成（2026-07-27），包含字段级策略、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、SQL 别名和结果键大小写脱敏、同一结果行大小写碰撞防护、重复脱敏幂等、空敏感值及未声明空值元数据保留、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置对象鉴权，以及 Dify、NL2SQL、语义纠错、查询规则和 JDBC 查询链路日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
+- 状态：已完成（2026-07-27），包含字段级策略、异常属性策略 fail-closed、`needAuth=false`、模型管理员脱敏旁路、空模型授权旁路、行权限 fail-open、SQL 别名和结果键大小写脱敏、同一结果行大小写碰撞防护、重复脱敏幂等、空敏感值及未声明空值元数据保留、查询/会话/历史/ShowCase/Agent/Memory/插件/模型配置对象鉴权，以及 Dify、NL2SQL、语义纠错、查询规则和 JDBC 查询链路日志明文封堵，实现说明见 `task/BE-08_FINANCIAL_PERMISSION_MASKING.md`。
 - 优先级：P0
 - 依赖关系：上游依赖机构、岗位和数据敏感等级规则；下游被 BE-09、FE-06、FE-08 和 QA-02 依赖。
 - 工作内容：
@@ -233,7 +233,7 @@
 
 ### BE-10 业务化解释与图表推荐服务
 
-- 状态：已完成（2026-07-27），独立推荐/解释接口、匿名访客入口拒绝、可配置规则、图表字段角色与结构契约、可复算同比环比、空结果、小样本策略、独立一致性校验、贡献分类与同比环比月份对复算、脱敏状态与字段元数据一致性、主查询与独立接口输入规模、结构及极端数值保护、构成类问题意图识别已交付，实现说明见 `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md`。
+- 状态：已完成（2026-07-27），独立推荐/解释接口、匿名访客入口拒绝、规范结果键与大小写歧义 fail-closed、可配置规则、图表字段角色与结构契约、可复算同比环比、空结果、小样本策略、独立一致性校验、贡献分类与同比环比月份对复算、脱敏状态与字段元数据一致性、主查询与独立接口输入规模、结构及极端数值保护、构成类问题意图识别已交付，实现说明见 `task/BE-10_BUSINESS_EXPLANATION_CHART_RECOMMENDATION.md`。
 - 优先级：P1
 - 依赖关系：上游依赖 DATA-03 和 BE-02；下游被 FE-04、FE-05、FE-09 和业务理解度评测依赖。
 - 工作内容：

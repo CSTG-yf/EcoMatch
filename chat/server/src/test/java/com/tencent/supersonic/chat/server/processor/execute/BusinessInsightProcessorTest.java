@@ -105,6 +105,20 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void rejectsAmbiguousOrNonCanonicalMainQueryResultFields() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("branch", "CATEGORY"), column("amount", "NUMBER")));
+        result.setQueryResults(
+                List.of(Map.of("branch", "A", "amount", 10), Map.of("branch", "B", "AMOUNT", 20)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        assertThrows(IllegalStateException.class,
+                () -> new BusinessInsightProcessor().process(context));
+    }
+
+    @Test
     void identifiesNumericColumnWhenFirstRowIsNull() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);

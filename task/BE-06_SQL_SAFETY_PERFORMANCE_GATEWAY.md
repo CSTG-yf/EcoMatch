@@ -14,6 +14,7 @@
 - 拦截 PostgreSQL `pg_read_file`、`pg_read_binary_file`、`pg_ls_dir` 和 `pg_stat_file` 等服务端文件读取/探测函数，避免只读 SQL 被用于读取数据库主机文件系统。
 - 默认拦截 DuckDB `read_parquet`、`read_csv_auto`、`read_text`、`glob` 等文件读取及扫描函数，覆盖投影和表函数位置，避免只读 SELECT 读取数据库主机文件。
 - 危险函数同时执行 AST 级校验，覆盖带引号或 schema 限定的函数名，以及投影、WHERE、HAVING、QUALIFY、JOIN、GROUP BY、ORDER BY、DISTINCT ON、TOP、LIMIT/OFFSET/FETCH、层级查询、命名窗口、PIVOT、LATERAL VIEW 和表函数位置，避免文本变体绕过。
+- FromItem 与 JOIN 树递归展开括号表项，括号内表函数、嵌套 JOIN 右侧及 ON 条件执行同一 AST 校验，阻断 `FROM ("pg_ls_dir"(...))` 等带引号函数绕过。
 - 对顶层、CTE、集合分支、派生表和表达式子查询中的 `VALUES` 递归执行同一危险函数校验，阻断通过非 `PlainSelect` AST 执行带引号文件读取或状态变更函数。
 - 禁止 `TABLE table_name` 这类绕过投影及范围约束的 Select 子类型；未显式支持的新 Select AST 类型统一 fail-closed，普通常量 `VALUES` 仍可执行。
 - 除 `nextval(...)` 外，同时拦截 Oracle `sequence.NEXTVAL` 和 SQL Server `NEXT VALUE FOR sequence`，避免只读外观查询推进数据库序列状态。
@@ -56,7 +57,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、非法配置拒绝及安全常量 `VALUES` 兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、非法配置拒绝及安全常量 `VALUES` 兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。
@@ -76,7 +77,7 @@
 - `QueryGatewayMonitorServiceTest`：校验超级管理员访问和普通用户拒绝。
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
-- `common`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 五个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 506 项测试（3 项按环境条件跳过），无失败或错误。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 520 项测试（3 项按环境条件跳过），无失败或错误。
 
 ## 本地性能基线
 

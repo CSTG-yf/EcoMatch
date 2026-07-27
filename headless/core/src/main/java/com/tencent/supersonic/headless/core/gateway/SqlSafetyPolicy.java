@@ -17,6 +17,7 @@ import net.sf.jsqlparser.statement.select.AllColumns;
 import net.sf.jsqlparser.statement.select.AllTableColumns;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
+import net.sf.jsqlparser.statement.select.ParenthesedFromItem;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
@@ -28,6 +29,7 @@ import net.sf.jsqlparser.statement.select.Values;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -210,12 +212,7 @@ public class SqlSafetyPolicy {
         visit(select.getWhere(), visitor);
         visit(select.getHaving(), visitor);
         visit(select.getQualify(), visitor);
-        if (select.getJoins() != null) {
-            select.getJoins().stream()
-                    .flatMap(join -> Stream.ofNullable(join.getOnExpressions())
-                            .flatMap(java.util.Collection::stream))
-                    .forEach(expression -> visit(expression, visitor));
-        }
+        visitJoinExpressionsAndSources(select.getJoins(), visitor);
         if (select.getGroupBy() != null && select.getGroupBy().getGroupByExpressions() != null) {
             select.getGroupBy().getGroupByExpressions()
                     .forEach(expression -> visitIfExpression(expression, visitor));
@@ -239,10 +236,6 @@ public class SqlSafetyPolicy {
                     .forEach(function -> visit(function, visitor));
         }
         visitFromItemExpressions(select.getFromItem(), visitor);
-        if (select.getJoins() != null) {
-            select.getJoins()
-                    .forEach(join -> visitFromItemExpressions(join.getRightItem(), visitor));
-        }
     }
 
     private void validateSelectModifiers(Select select, ExpressionVisitorAdapter visitor) {
@@ -284,6 +277,12 @@ public class SqlSafetyPolicy {
     private void validateNestedSelect(FromItem source, Set<String> cteNames, Set<Select> visited) {
         if (source instanceof ParenthesedSelect parenthesedSelect) {
             validateSelect(parenthesedSelect, cteNames, visited);
+        } else if (source instanceof ParenthesedFromItem parenthesedFromItem) {
+            validateNestedSelect(parenthesedFromItem.getFromItem(), cteNames, visited);
+            if (parenthesedFromItem.getJoins() != null) {
+                parenthesedFromItem.getJoins().forEach(
+                        join -> validateNestedSelect(join.getRightItem(), cteNames, visited));
+            }
         }
     }
 
@@ -328,6 +327,9 @@ public class SqlSafetyPolicy {
         }
         if (fromItem instanceof TableFunction tableFunction) {
             tableFunction.getFunction().accept(visitor);
+        } else if (fromItem instanceof ParenthesedFromItem parenthesedFromItem) {
+            visitFromItemExpressions(parenthesedFromItem.getFromItem(), visitor);
+            visitJoinExpressionsAndSources(parenthesedFromItem.getJoins(), visitor);
         }
         if (fromItem.getPivot() != null) {
             fromItem.getPivot().accept(visitor);
@@ -335,6 +337,18 @@ public class SqlSafetyPolicy {
         if (fromItem.getUnPivot() != null) {
             fromItem.getUnPivot().accept(visitor);
         }
+    }
+
+    private void visitJoinExpressionsAndSources(List<Join> joins,
+            ExpressionVisitorAdapter visitor) {
+        if (joins == null) {
+            return;
+        }
+        joins.stream()
+                .flatMap(join -> Stream.ofNullable(join.getOnExpressions())
+                        .flatMap(java.util.Collection::stream))
+                .forEach(expression -> visit(expression, visitor));
+        joins.forEach(join -> visitFromItemExpressions(join.getRightItem(), visitor));
     }
 
     private String normalizeFunctionName(Function function) {

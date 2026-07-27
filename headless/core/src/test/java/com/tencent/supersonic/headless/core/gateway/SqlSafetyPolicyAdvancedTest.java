@@ -105,6 +105,9 @@ class SqlSafetyPolicyAdvancedTest {
                 () -> policy.validate("SELECT 1 WHERE pg_sleep(1) IS NULL"));
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT 1 FROM pg_ls_dir('/tmp') LIMIT 1"));
+        assertDangerousFunctionRejected("SELECT 1 FROM (\"pg_ls_dir\"('/tmp')) files LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT 1 FROM (safe_table s JOIN other_table o " + "ON \"sleep\"(1) = 0) LIMIT 1");
         assertDangerousFunctionRejected("SELECT 1 LIMIT sleep(1)");
         assertDangerousFunctionRejected("SELECT DISTINCT ON (\"pg_sleep\"(1)) 1");
         assertDangerousFunctionRejected("SELECT TOP (\"sleep\"(1)) 1");
