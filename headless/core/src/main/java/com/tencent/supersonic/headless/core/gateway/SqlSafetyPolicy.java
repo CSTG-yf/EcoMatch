@@ -41,16 +41,30 @@ public class SqlSafetyPolicy {
 
     private static final int DEFAULT_MAX_SELECT_DEPTH = 16;
     private static final int DEFAULT_MAX_PARSE_TIME_MS = 5_000;
-    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("benchmark", "csv_scan",
-            "csvread", "csvwrite", "dblink", "dblink_connect", "dblink_exec", "file_read",
-            "file_write", "get_lock", "glob", "json_scan", "load_file", "lo_export", "lo_get",
-            "lo_import", "nextval", "opendatasource", "openquery", "openrowset", "parquet_scan",
-            "pg_advisory_lock", "pg_advisory_unlock", "pg_advisory_unlock_all",
-            "pg_advisory_xact_lock", "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_sleep",
-            "pg_stat_file", "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_write_file",
-            "read_blob", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_ndjson",
-            "read_ndjson_auto", "read_parquet", "read_text", "read_xlsx", "read_xml", "readfile",
-            "release_lock", "set_config", "setval", "sleep", "sys_eval", "sys_exec", "writefile");
+    private static final Set<String> DEFAULT_DANGEROUS_FUNCTIONS = Set.of("azureblobstorage",
+            "benchmark", "cluster", "clusterallreplicas", "csv_scan", "csvread", "csvwrite",
+            "dblink", "dblink_cancel_query", "dblink_connect", "dblink_connect_u",
+            "dblink_disconnect", "dblink_exec", "dblink_get_notify", "dblink_get_result",
+            "dblink_is_busy", "dblink_open", "dblink_send_query", "delta_scan", "executable",
+            "executablepool", "file", "file_read", "file_write", "files", "get_lock", "getenv",
+            "glob", "hdfs", "http_get", "http_post", "iceberg_scan", "jdbc", "json_scan",
+            "link_schema", "load_extension", "load_file", "lo_create", "lo_export", "lo_get",
+            "lo_import", "lo_lseek", "lo_lseek64", "lo_open", "lo_put", "lo_read", "lo_tell",
+            "lo_tell64", "lo_truncate", "lo_truncate64", "lo_unlink", "lo_write", "mysql",
+            "mysql_query", "mysql_scan", "nextval", "odbc", "opendatasource", "openquery",
+            "openrowset", "parquet_scan", "pg_advisory_lock", "pg_advisory_unlock",
+            "pg_advisory_unlock_all", "pg_advisory_xact_lock", "pg_cancel_backend",
+            "pg_create_restore_point", "pg_log_backend_memory_contexts", "pg_ls_dir", "pg_promote",
+            "pg_read_binary_file", "pg_read_file", "pg_reload_conf", "pg_rotate_logfile",
+            "pg_sleep", "pg_stat_file", "pg_switch_wal", "pg_terminate_backend",
+            "pg_try_advisory_lock", "pg_try_advisory_xact_lock", "pg_wal_replay_pause",
+            "pg_wal_replay_resume", "pg_write_file", "postgres_attach", "postgres_query",
+            "postgres_scan", "postgresql", "query", "query_table", "read_blob", "read_csv",
+            "read_csv_auto", "read_json", "read_json_auto", "read_ndjson", "read_ndjson_auto",
+            "read_parquet", "read_text", "read_xlsx", "read_xml", "readfile", "release_lock",
+            "remote", "remotesecure", "s3", "set_config", "setval", "setvariable", "sleep",
+            "sqlite_attach", "sqlite_scan", "sys_eval", "sys_exec", "url", "writefile",
+            "xp_cmdshell");
     private static final Pattern LOCK_OR_FILE_WRITE = Pattern.compile(
             "(?is)\\b(for\\s+update|lock\\s+in\\s+share\\s+mode|into\\s+(out|dump)file)\\b");
     private static final Pattern FUNCTION_IDENTIFIER =

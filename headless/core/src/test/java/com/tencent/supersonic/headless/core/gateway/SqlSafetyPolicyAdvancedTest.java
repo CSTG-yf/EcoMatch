@@ -159,6 +159,33 @@ class SqlSafetyPolicyAdvancedTest {
     }
 
     @Test
+    void rejectsExtensionLoadingAndDatabaseStateFunctions() {
+        assertDangerousFunctionRejected("SELECT load_extension('/tmp/untrusted-extension')");
+        assertDangerousFunctionRejected("SELECT pg_terminate_backend(42)");
+        assertDangerousFunctionRejected("SELECT pg_reload_conf()");
+        assertDangerousFunctionRejected("SELECT setvariable('bank_scope', 'all')");
+        assertDangerousFunctionRejected(
+                "SELECT link_schema('REMOTE', 'org.h2.Driver', 'jdbc:h2:tcp://remote/db', 'u', 'p', 'PUBLIC')");
+        assertDangerousFunctionRejected("SELECT xp_cmdshell('whoami')");
+    }
+
+    @Test
+    void rejectsExternalConnectorAndDynamicQueryFunctions() {
+        assertDangerousFunctionRejected(
+                "SELECT * FROM postgres_scan('host=remote', 'bank', 'customer') LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM mysql_query('host=remote', 'SELECT secret FROM customer') LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM url('https://internal.example/export.csv') LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM s3('s3://private-bank-bucket/customer.parquet') LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM remote('db.internal', 'bank.customer') LIMIT 1");
+        assertDangerousFunctionRejected("SELECT * FROM files('/var/lib/bank/*') LIMIT 1");
+        assertDangerousFunctionRejected("SELECT * FROM query('SELECT * FROM secret') LIMIT 1");
+    }
+
+    @Test
     void rejectsConfiguredDatabaseSpecificFunctions() {
         SqlSafetyPolicy configured =
                 new SqlSafetyPolicy(10_000, "bank_audit_write, utility.remote_call");

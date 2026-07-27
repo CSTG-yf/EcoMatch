@@ -3,6 +3,7 @@
 ## 已实现
 
 - 默认危险函数集合补充 H2、SQLite、PostgreSQL、SQL Server 和 DuckDB 的跨库/外部文件入口，包括 `CSVREAD`、`readfile`、`dblink`、`OPENROWSET`、`read_xlsx` 等，避免只读 `SELECT` 绕过数据边界。
+- 默认拒绝集进一步覆盖 SQLite 扩展加载、H2 远程 Schema 链接、PostgreSQL 后端/配置/WAL 状态函数、DuckDB 动态查询及 PostgreSQL/MySQL/SQLite 扫描器、ClickHouse/StarRocks 外部 URL、对象存储、集群和文件表函数，以及 SQL Server 命令扩展；合法 `SELECT` 不能借数据库函数绕过数据源边界或只读约束。
 - 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符仅接受安全字符，阻断通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
 - 数据库连接测试、新增和更新仅允许超级管理员执行，阻断普通登录用户通过自定义 JDBC 地址触发服务端任意连接；不存在的数据源统一 fail-closed。
 - 语义模型 Schema 构建仅允许超级管理员执行，避免未授权请求借助模型构建流程连接数据源或调用外部模型。
@@ -62,7 +63,7 @@
 ## 验证
 
 - `SqlSafetyPolicyTest`：只读、危险函数、多语句和无界查询。
-- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL/DuckDB 文件读取、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
+- `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL 服务端文件及数据库状态函数、SQLite 扩展加载、DuckDB/H2/SQLite/PostgreSQL 外部数据与动态查询函数、ClickHouse/StarRocks 外部连接表函数、SQL Server 命令扩展、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。
