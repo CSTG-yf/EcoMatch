@@ -15,7 +15,6 @@ import org.springframework.stereotype.Component;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -62,8 +61,6 @@ public class DataMaskingService {
         Set<String> maskedColumns =
                 Stream.ofNullable(response.getMaskedColumns()).flatMap(java.util.Collection::stream)
                         .collect(Collectors.toCollection(LinkedHashSet::new));
-        Map<Map<String, Object>, Map<String, String>> resultKeyIndexes =
-                buildResultKeyIndexes(response);
         Set<String> declaredResultKeys = new HashSet<>();
         for (QueryColumn column : response.getColumns()) {
             if (column == null) {
@@ -89,9 +86,8 @@ public class DataMaskingService {
                 if (row == null) {
                     continue;
                 }
-                Map<String, String> keyIndex = resultKeyIndexes.get(row);
-                Set<String> matchingKeys = normalizedResultKeys.stream().map(keyIndex::get)
-                        .filter(StringUtils::isNotBlank)
+                Set<String> matchingKeys = row.keySet().stream().filter(StringUtils::isNotBlank)
+                        .filter(key -> normalizedResultKeys.contains(key.toLowerCase(Locale.ROOT)))
                         .collect(Collectors.toCollection(LinkedHashSet::new));
                 for (String key : matchingKeys) {
                     maskedColumns.add(key);
@@ -132,21 +128,6 @@ public class DataMaskingService {
             throw new InvalidPermissionException(
                     "Data masking metadata is unavailable; query result was denied");
         }
-    }
-
-    private Map<Map<String, Object>, Map<String, String>> buildResultKeyIndexes(
-            SemanticQueryResp response) {
-        Map<Map<String, Object>, Map<String, String>> indexes = new IdentityHashMap<>();
-        for (Map<String, Object> row : response.getResultList()) {
-            if (row == null) {
-                continue;
-            }
-            Map<String, String> keyIndex = new LinkedHashMap<>();
-            row.keySet().stream().filter(StringUtils::isNotBlank)
-                    .forEach(key -> keyIndex.putIfAbsent(key.toLowerCase(Locale.ROOT), key));
-            indexes.put(row, keyIndex);
-        }
-        return indexes;
     }
 
     private Object maskValue(String resultField, String sensitiveField, Object value) {

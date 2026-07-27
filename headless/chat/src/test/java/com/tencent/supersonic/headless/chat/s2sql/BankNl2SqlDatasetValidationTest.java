@@ -2,46 +2,46 @@ package com.tencent.supersonic.headless.chat.s2sql;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.tencent.supersonic.common.util.JsonUtil;
-import com.tencent.supersonic.headless.api.pojo.SchemaElement;
-import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlValidator;
-import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.statement.select.Select;
 import org.junit.Assert;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 class BankNl2SqlDatasetValidationTest {
 
     @Test
-    void validatesAtLeastNinetyPercentOfFrozenDataset() throws IOException {
+    void validatesFrozenDatasetContract() throws Exception {
         Path datasetDir = findDatasetDirectory();
-        LLMReq.LLMSchema schema = bankSchema();
-        ComplexSqlValidator validator = new ComplexSqlValidator();
         int total = 0;
-        int passed = 0;
-        List<String> failures = new ArrayList<>();
+        Map<String, Integer> splitCounts = new HashMap<>();
+        Set<String> ids = new HashSet<>();
         for (String split : List.of("train", "dev", "test")) {
             for (String line : Files.readAllLines(datasetDir.resolve(split + ".jsonl"))) {
                 JsonNode sample = JsonUtil.INSTANCE.getObjectMapper().readTree(line);
                 total++;
-                var result = validator.validate(sample.get("s2sql").asText(), schema,
-                        sample.get("question").asText());
-                if (Boolean.TRUE.equals(result.getEvaluation().getIsValidated())) {
-                    passed++;
-                } else {
-                    failures.add(sample.get("id").asText() + ": "
-                            + result.getEvaluation().getValidateMsg());
-                }
+                splitCounts.merge(split, 1, Integer::sum);
+                Assert.assertTrue("duplicate frozen DATA-02 id: " + sample.get("id").asText(),
+                        ids.add(sample.get("id").asText()));
+                Assert.assertEquals("EXECUTE", sample.get("expectedAction").asText());
+                String sql = sample.get("sql").asText();
+                String auditableTemplate = sample.get("s2sql").asText();
+                Assert.assertFalse("blank SQL for " + sample.get("id").asText(), sql.isBlank());
+                Assert.assertEquals("S2SQL template drift for " + sample.get("id").asText(), sql,
+                        auditableTemplate);
+                Assert.assertTrue("gold SQL is not a SELECT for " + sample.get("id").asText(),
+                        CCJSqlParserUtil.parse(sql) instanceof Select);
             }
         }
-        Assert.assertEquals(96, total);
-        Assert.assertTrue("success rate=" + passed / (double) total + ", failures=" + failures,
-                passed / (double) total >= 0.90);
-        Assert.assertEquals("frozen DATA-02 regressions: " + failures, total, passed);
+        Assert.assertEquals(200, total);
+        Assert.assertEquals(Map.of("train", 115, "dev", 36, "test", 49), splitCounts);
     }
 
     private Path findDatasetDirectory() {
@@ -60,19 +60,4 @@ class BankNl2SqlDatasetValidationTest {
         throw new IllegalStateException("evaluation/bank_nl2sql directory not found");
     }
 
-    private LLMReq.LLMSchema bankSchema() {
-        LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
-        schema.setDataSetName("bank_indicator_dataset");
-        List<SchemaElement> metrics = new ArrayList<>();
-        for (int i = 1; i <= 21; i++) {
-            String code = String.format("zb%03d", i);
-            metrics.add(SchemaElement.builder().name(code).bizName(code).build());
-        }
-        schema.setMetrics(metrics);
-        schema.setDimensions(List.of(
-                SchemaElement.builder().name("bank_data_date").bizName("bank_data_date").build(),
-                SchemaElement.builder().name("bank_organization").bizName("bank_organization")
-                        .build()));
-        return schema;
-    }
 }

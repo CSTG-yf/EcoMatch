@@ -138,6 +138,19 @@ class DataMaskingServiceTest {
     }
 
     @Test
+    void masksEveryCaseVariantOfSensitiveResultKey() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("mobile", "13812345678");
+        response.getResultList().get(0).put("MOBILE", "13987654321");
+
+        service.mask(response, schema("mobile"), User.get(2L, "analyst"));
+
+        assertEquals("138****5678", response.getResultList().get(0).get("mobile"));
+        assertEquals("139****4321", response.getResultList().get(0).get("MOBILE"));
+        assertEquals(Set.of("mobile", "MOBILE"), response.getMaskedColumns());
+    }
+
+    @Test
     void fullyMasksColumnsAndRowKeysWithoutSchemaLineage() {
         DataMaskingService service = new DataMaskingService("", "");
         SemanticQueryResp response = response("derived_value", "13812345678");
