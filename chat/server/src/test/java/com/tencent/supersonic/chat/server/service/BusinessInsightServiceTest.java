@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -88,6 +89,33 @@ class BusinessInsightServiceTest {
 
         assertThrows(RuntimeException.class,
                 () -> new BusinessInsightService(config).recommend(request()));
+    }
+
+    @Test
+    void rejectsMaskedInputWithoutFieldMetadata() {
+        BusinessInsightReq request = request();
+        request.setDataMasked(true);
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .recommend(request));
+    }
+
+    @Test
+    void excludesDeclaredMaskedMetricsFromIndependentInsightApi() {
+        BusinessInsightReq request = request();
+        request.setDataMasked(true);
+        request.setMaskedColumns(Set.of("metric_value"));
+
+        BusinessInsightService service =
+                new BusinessInsightService(BusinessInsightConfig.defaults());
+        ChartInsightResp chart = service.recommend(request);
+        BusinessExplanation explanation = service.explain(request);
+
+        assertEquals("TABLE", chart.getRecommendedChart().getChartType());
+        assertTrue(explanation.getEvidence().isEmpty());
+        assertTrue(
+                explanation.getWarnings().stream().anyMatch(warning -> warning.contains("脱敏字段")));
     }
 
     private BusinessInsightReq request() {

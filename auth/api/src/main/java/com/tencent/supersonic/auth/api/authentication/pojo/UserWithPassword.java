@@ -6,15 +6,18 @@ import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_CREATE_TIME;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_IS_ADMIN;
+import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_ATTRIBUTES;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_DISPLAY_NAME;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_EMAIL;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_ID;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_NAME;
 import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_PASSWORD;
+import static com.tencent.supersonic.auth.api.authentication.constant.UserConstants.TOKEN_USER_ROLES;
 
 @Data
 @AllArgsConstructor
@@ -43,6 +46,10 @@ public class UserWithPassword extends User {
         claims.put(TOKEN_USER_DISPLAY_NAME, user.getDisplayName());
         claims.put(TOKEN_CREATE_TIME, System.currentTimeMillis());
         claims.put(TOKEN_IS_ADMIN, user.getIsAdmin());
+        claims.put(TOKEN_USER_ROLES,
+                user.getRoles() == null ? new HashSet<>() : new HashSet<>(user.getRoles()));
+        claims.put(TOKEN_USER_ATTRIBUTES, user.getAttributes() == null ? new HashMap<>()
+                : new HashMap<>(user.getAttributes()));
         return claims;
     }
 }

@@ -126,7 +126,7 @@ def _rows(sheet: Any, headers: tuple[str, ...]) -> Iterable[tuple[int, tuple[Any
         yield row_number, cells[: len(headers)]
 
 
-def _read_workbook(workbook_path: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str, str, str]], list[tuple[str, str, str, Decimal]]]:
+def read_workbook(workbook_path: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str, str, str]], list[tuple[str, str, str, Decimal]]]:
     workbook = load_workbook(workbook_path, read_only=True, data_only=True)
     try:
         required = {ORGANIZATION_SHEET, METRIC_SHEET, FACT_SHEET}
@@ -291,7 +291,7 @@ def build_database(
     workbook_path = Path(workbook_path)
     if not workbook_path.is_file():
         raise FileNotFoundError(f"workbook not found: {workbook_path}")
-    organizations, metrics, facts = _read_workbook(workbook_path)
+    organizations, metrics, facts = read_workbook(workbook_path)
     _write_sqlite(Path(sqlite_output_path), organizations, metrics, facts)
     if h2_script_output_path is not None:
         _write_h2_script(Path(h2_script_output_path), organizations, metrics, facts)

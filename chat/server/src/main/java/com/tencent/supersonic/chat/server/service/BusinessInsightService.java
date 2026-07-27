@@ -64,6 +64,9 @@ public class BusinessInsightService {
         result.setQueryState(QueryState.SUCCESS);
         result.setQueryColumns(request.getQueryColumns());
         result.setQueryResults(request.getQueryResults());
+        result.setDataMasked(request.isDataMasked());
+        result.setMaskedColumns(request.getMaskedColumns() == null ? Collections.emptySet()
+                : new HashSet<>(request.getMaskedColumns()));
 
         ExecuteContext context = new ExecuteContext(
                 ChatExecuteReq.builder().queryText(request.getQueryText()).build());

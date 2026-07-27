@@ -2,6 +2,8 @@
 
 ## 已实现
 
+- 独立推荐/解释接口接收并传播 `dataMasked` 与 `maskedColumns`，与主查询链路执行相同的脱敏元数据一致性校验；字段清单缺失时 fail-closed，已脱敏指标不会进入数值证据或图表字段。
+- DATA-03 生成器改用 DATA-02 的公共工作簿读取接口，并支持 `BANK_NL2SQL_WORKBOOK` 指定未纳入 Git 的比赛数据源，恢复 90 条冻结样本、30 条问卷和来源哈希的独立校验入口。
 - 新增确定性业务分析处理器，随 Chat 查询结果返回主推荐图、候选图、推荐理由、置信度和字段映射。
 - 提供独立的图表推荐接口 `POST /api/chat/insight/recommend` 和业务解释接口 `POST /api/chat/insight/explain`，接口访问前统一校验登录态。
 - 支持 `KPI_CARD`、`LINE`、`BAR`、`PIE`、`COMBO`、`TABLE` 六类图表。

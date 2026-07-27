@@ -9,7 +9,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class HttpHeaderUserStrategy implements UserStrategy {
@@ -59,7 +66,31 @@ public class HttpHeaderUserStrategy implements UserStrategy {
         String displayName = String.valueOf(claims.get(UserConstants.TOKEN_USER_DISPLAY_NAME));
         Integer isAdmin = claims.get(UserConstants.TOKEN_IS_ADMIN) == null ? 0
                 : Integer.parseInt(claims.get(UserConstants.TOKEN_IS_ADMIN).toString());
-        return User.get(userId, userName, displayName, email, isAdmin);
+        User user = User.get(userId, userName, displayName, email, isAdmin);
+        user.setRoles(readRoles(claims.get(UserConstants.TOKEN_USER_ROLES)));
+        user.setAttributes(readAttributes(claims.get(UserConstants.TOKEN_USER_ATTRIBUTES)));
+        return user;
     }
 
+    private Set<String> readRoles(Object claim) {
+        if (!(claim instanceof Collection<?> values)) {
+            return Collections.emptySet();
+        }
+        return values.stream().filter(value -> value != null).map(String::valueOf)
+                .filter(value -> !value.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Map<String, String> readAttributes(Object claim) {
+        if (!(claim instanceof Map<?, ?> values)) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> attributes = new LinkedHashMap<>();
+        values.forEach((key, value) -> {
+            if (key != null && value != null && !String.valueOf(key).isBlank()) {
+                attributes.put(String.valueOf(key), String.valueOf(value));
+            }
+        });
+        return attributes;
+    }
 }

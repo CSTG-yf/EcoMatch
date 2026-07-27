@@ -10,6 +10,7 @@ import com.tencent.supersonic.auth.api.authorization.request.QueryAuthResReq;
 import com.tencent.supersonic.auth.api.authorization.response.AuthorizedResourceResp;
 import com.tencent.supersonic.auth.api.authorization.service.AuthService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -121,8 +122,11 @@ public class AuthServiceImpl implements AuthService {
             }
             return authGroupMatcher.matches(group, user, departmentIds);
         }).collect(Collectors.toList());
-        log.info("user:{} department:{} roles:{} authGroups:{}", user.getName(), departmentIds,
-                user.getRoles(), groups);
+        log.debug(
+                "Authorization groups resolved: user=[{}], departments=[{}], roles=[{}], count={}",
+                SensitiveLogUtils.summarize(user.getName()),
+                SensitiveLogUtils.summarize(departmentIds),
+                SensitiveLogUtils.summarize(user.getRoles()), groups.size());
         return groups;
     }
 }

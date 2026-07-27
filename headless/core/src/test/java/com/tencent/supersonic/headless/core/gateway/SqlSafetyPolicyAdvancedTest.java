@@ -119,6 +119,17 @@ class SqlSafetyPolicyAdvancedTest {
     }
 
     @Test
+    void rejectsCrossDialectExternalDataFunctions() {
+        assertDangerousFunctionRejected("SELECT * FROM CSVREAD('C:/bank/customers.csv') LIMIT 1");
+        assertDangerousFunctionRejected("SELECT readfile('/etc/passwd')");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM dblink('bank_remote', 'SELECT secret FROM customer') "
+                        + "AS remote(secret varchar) LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM read_xlsx('C:/bank/customers.xlsx') LIMIT 1");
+    }
+
+    @Test
     void rejectsConfiguredDatabaseSpecificFunctions() {
         SqlSafetyPolicy configured =
                 new SqlSafetyPolicy(10_000, "bank_audit_write, utility.remote_call");

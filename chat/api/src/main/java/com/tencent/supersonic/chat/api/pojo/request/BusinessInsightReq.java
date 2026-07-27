@@ -17,4 +17,6 @@ public class BusinessInsightReq {
     private List<QueryColumn> queryColumns = new ArrayList<>();
     private List<Map<String, Object>> queryResults = new ArrayList<>();
     private Set<SchemaElement> metrics = new HashSet<>();
+    private boolean dataMasked;
+    private Set<String> maskedColumns = new HashSet<>();
 }

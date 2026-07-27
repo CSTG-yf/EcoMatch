@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import sqlite3
 from collections import Counter
 from pathlib import Path
@@ -13,14 +14,15 @@ from typing import Any
 
 OUTPUT_DIR = Path(__file__).resolve().parent
 NL2SQL_DIR = OUTPUT_DIR.parent / "bank_nl2sql"
-_SOURCE_SPEC = importlib.util.spec_from_file_location("bank_nl2sql_builder", NL2SQL_DIR / "build_dataset.py")
+ROOT = OUTPUT_DIR.parents[1]
+_SOURCE_SPEC = importlib.util.spec_from_file_location(
+    "bank_nl2sql_database_builder", NL2SQL_DIR / "db" / "build_database.py"
+)
 if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:
     raise RuntimeError("Unable to load DATA-02 workbook utilities")
 _SOURCE_MODULE = importlib.util.module_from_spec(_SOURCE_SPEC)
 _SOURCE_SPEC.loader.exec_module(_SOURCE_MODULE)
-create_database = _SOURCE_MODULE.create_database
-find_workbook = _SOURCE_MODULE.find_workbook
-workbook_rows = _SOURCE_MODULE.workbook_rows
+read_workbook = _SOURCE_MODULE.read_workbook
 
 SPLITS = ("train", "dev", "test")
 CHART_TYPES = ("KPI_CARD", "LINE", "BAR", "PIE", "COMBO", "TABLE")
@@ -38,6 +40,39 @@ PAIR_POOL = (
     ("ZB015", "ZB016"), ("ZB020", "ZB021"),
 )
 SCENES = tuple(METRIC_POOLS)
+
+
+def find_workbook() -> Path:
+    configured_path = os.environ.get("BANK_NL2SQL_WORKBOOK")
+    if configured_path:
+        workbook = Path(configured_path).expanduser().resolve()
+        if not workbook.is_file():
+            raise RuntimeError(f"configured competition workbook not found: {workbook}")
+        return workbook
+    candidates = sorted((ROOT / "task").glob("*.xlsx"))
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "expected exactly one competition workbook under task/ or "
+            "BANK_NL2SQL_WORKBOOK to identify it"
+        )
+    return candidates[0]
+
+
+def workbook_rows(workbook: Path):
+    return read_workbook(workbook)
+
+
+def create_database(organizations, metrics, facts, database: str = ":memory:") -> sqlite3.Connection:
+    connection = sqlite3.connect(database)
+    connection.executescript((NL2SQL_DIR / "schema.sql").read_text(encoding="utf-8"))
+    connection.executemany("INSERT INTO bank_organization_dim VALUES (?, ?)", organizations)
+    connection.executemany("INSERT INTO bank_metric_dim VALUES (?, ?, ?, ?)", metrics)
+    connection.executemany(
+        "INSERT INTO bank_indicator_fact VALUES (?, ?, ?, ?)",
+        [(date, org, metric, float(value)) for date, org, metric, value in facts],
+    )
+    connection.commit()
+    return connection
 
 
 def dump_json(path: Path, value: Any) -> None:
