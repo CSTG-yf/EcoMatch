@@ -1,14 +1,15 @@
 package com.tencent.supersonic.headless.core.gateway;
 
-import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.Function;
+import net.sf.jsqlparser.expression.NextValExpression;
 import net.sf.jsqlparser.expression.WindowDefinition;
 import net.sf.jsqlparser.expression.WindowElement;
 import net.sf.jsqlparser.expression.WindowOffset;
 import net.sf.jsqlparser.expression.WindowRange;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.Statements;
@@ -19,14 +20,17 @@ import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.ParenthesedSelect;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
+import net.sf.jsqlparser.statement.select.SetOperationList;
 import net.sf.jsqlparser.statement.select.TableFunction;
+import net.sf.jsqlparser.statement.select.TableStatement;
+import net.sf.jsqlparser.statement.select.Values;
 
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /** Validates executable SQL before it reaches a physical data source. */
@@ -106,37 +110,62 @@ public class SqlSafetyPolicy {
                         "Dangerous SQL function is forbidden: " + function);
             }
         }
-        validateSelectAllQueries((Select) statement);
+        validateSelectTree((Select) statement);
     }
 
-    private void validateSelectAllQueries(Select statement) {
-        Set<String> cteNames = statement.getWithItemsList() == null ? Collections.emptySet()
-                : statement.getWithItemsList().stream()
-                        .filter(withItem -> withItem.getAlias() != null)
-                        .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
-                        .collect(Collectors.toSet());
-        for (Select select : SqlSelectHelper.getAllSelect(statement)) {
-            if (!(select instanceof PlainSelect)) {
-                continue;
-            }
-            PlainSelect plainSelect = (PlainSelect) select;
-            validateReadOnlySelectFeatures(plainSelect);
-            validateDangerousFunctions(plainSelect);
-            boolean selectsAll =
-                    plainSelect.getSelectItems().stream().map(item -> item.getExpression())
-                            .anyMatch(expression -> expression instanceof AllColumns
-                                    || expression instanceof AllTableColumns);
-            boolean bounded = plainSelect.getWhere() != null || plainSelect.getLimit() != null
-                    || plainSelect.getFetch() != null;
-            if (selectsAll && !bounded && !readsOnlyDerivedSources(plainSelect, cteNames)) {
-                throw new SqlPolicyViolationException(
-                        "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
-            }
+    private void validateSelectTree(Select statement) {
+        Set<Select> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        validateSelect(statement, Collections.emptySet(), visited);
+    }
+
+    private void validateSelect(Select select, Set<String> inheritedCteNames, Set<Select> visited) {
+        if (select == null || !visited.add(select)) {
+            return;
         }
+        Set<String> cteNames = new LinkedHashSet<>(inheritedCteNames);
+        if (select.getWithItemsList() != null) {
+            select.getWithItemsList().stream().filter(withItem -> withItem.getAlias() != null)
+                    .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
+                    .forEach(cteNames::add);
+            select.getWithItemsList()
+                    .forEach(withItem -> validateSelect(withItem.getSelect(), cteNames, visited));
+        }
+
+        ExpressionVisitorAdapter visitor = dangerousFunctionVisitor(cteNames, visited);
+        if (select.getForClause() != null) {
+            throw new SqlPolicyViolationException("Row-locking SELECT clauses are forbidden");
+        }
+        if (select instanceof PlainSelect plainSelect) {
+            validateReadOnlySelectFeatures(plainSelect);
+            validateDangerousFunctions(plainSelect, visitor);
+            validateSelectAllBranch(plainSelect, cteNames);
+            validateNestedSelect(plainSelect.getFromItem(), cteNames, visited);
+            if (plainSelect.getJoins() != null) {
+                plainSelect.getJoins().forEach(
+                        join -> validateNestedSelect(join.getRightItem(), cteNames, visited));
+            }
+        } else if (select instanceof Values values) {
+            visit(values.getExpressions(), visitor);
+        } else if (select instanceof SetOperationList setOperationList) {
+            if (setOperationList.getSelects() != null) {
+                setOperationList.getSelects()
+                        .forEach(child -> validateSelect(child, cteNames, visited));
+            }
+        } else if (select instanceof ParenthesedSelect parenthesedSelect) {
+            validateSelect(parenthesedSelect.getSelect(), cteNames, visited);
+        } else if (select instanceof TableStatement) {
+            throw new SqlPolicyViolationException(
+                    "TABLE statements are forbidden; use a bounded SELECT");
+        } else {
+            throw new SqlPolicyViolationException(
+                    "Unsupported SELECT form: " + select.getClass().getSimpleName());
+        }
+        validateSelectModifiers(select, visitor);
     }
 
-    private void validateDangerousFunctions(PlainSelect select) {
-        ExpressionVisitorAdapter visitor = new ExpressionVisitorAdapter() {
+    private ExpressionVisitorAdapter dangerousFunctionVisitor(Set<String> cteNames,
+            Set<Select> visited) {
+        return new ExpressionVisitorAdapter() {
             @Override
             public void visit(Function function) {
                 String functionName = normalizeFunctionName(function);
@@ -146,7 +175,37 @@ public class SqlSafetyPolicy {
                 }
                 super.visit(function);
             }
+
+            @Override
+            public void visit(NextValExpression nextValExpression) {
+                throw new SqlPolicyViolationException(
+                        "Sequence state-changing expressions are forbidden");
+            }
+
+            @Override
+            public void visit(Column column) {
+                String columnName = normalizeQuotedIdentifier(column.getColumnName());
+                if ("nextval".equals(columnName) && column.getTable() != null
+                        && column.getTable().getName() != null) {
+                    throw new SqlPolicyViolationException(
+                            "Sequence state-changing expressions are forbidden");
+                }
+                super.visit(column);
+            }
+
+            @Override
+            public void visit(ParenthesedSelect parenthesedSelect) {
+                validateSelect(parenthesedSelect, cteNames, visited);
+            }
+
+            @Override
+            public void visit(Select nestedSelect) {
+                validateSelect(nestedSelect, cteNames, visited);
+            }
         };
+    }
+
+    private void validateDangerousFunctions(PlainSelect select, ExpressionVisitorAdapter visitor) {
         select.getSelectItems().forEach(item -> visit(item.getExpression(), visitor));
         visit(select.getWhere(), visitor);
         visit(select.getHaving(), visitor);
@@ -161,15 +220,34 @@ public class SqlSafetyPolicy {
             select.getGroupBy().getGroupByExpressions()
                     .forEach(expression -> visitIfExpression(expression, visitor));
         }
-        if (select.getOrderByElements() != null) {
-            select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
-        }
         if (select.getDistinct() != null && select.getDistinct().getOnSelectItems() != null) {
             select.getDistinct().getOnSelectItems()
                     .forEach(item -> visit(item.getExpression(), visitor));
         }
         if (select.getTop() != null) {
             visit(select.getTop().getExpression(), visitor);
+        }
+        if (select.getOracleHierarchical() != null) {
+            visit(select.getOracleHierarchical().getStartExpression(), visitor);
+            visit(select.getOracleHierarchical().getConnectExpression(), visitor);
+        }
+        if (select.getWindowDefinitions() != null) {
+            select.getWindowDefinitions().forEach(window -> visitWindowDefinition(window, visitor));
+        }
+        if (select.getLateralViews() != null) {
+            select.getLateralViews().stream().map(lateralView -> lateralView.getGeneratorFunction())
+                    .forEach(function -> visit(function, visitor));
+        }
+        visitFromItemExpressions(select.getFromItem(), visitor);
+        if (select.getJoins() != null) {
+            select.getJoins()
+                    .forEach(join -> visitFromItemExpressions(join.getRightItem(), visitor));
+        }
+    }
+
+    private void validateSelectModifiers(Select select, ExpressionVisitorAdapter visitor) {
+        if (select.getOrderByElements() != null) {
+            select.getOrderByElements().forEach(orderBy -> visit(orderBy.getExpression(), visitor));
         }
         if (select.getLimit() != null) {
             visit(select.getLimit().getOffset(), visitor);
@@ -189,16 +267,23 @@ public class SqlSafetyPolicy {
         if (select.getFetch() != null) {
             visit(select.getFetch().getExpression(), visitor);
         }
-        if (select.getOracleHierarchical() != null) {
-            visit(select.getOracleHierarchical().getStartExpression(), visitor);
-            visit(select.getOracleHierarchical().getConnectExpression(), visitor);
+    }
+
+    private void validateSelectAllBranch(PlainSelect select, Set<String> cteNames) {
+        boolean selectsAll = select.getSelectItems().stream().map(item -> item.getExpression())
+                .anyMatch(expression -> expression instanceof AllColumns
+                        || expression instanceof AllTableColumns);
+        boolean bounded =
+                select.getWhere() != null || select.getLimit() != null || select.getFetch() != null;
+        if (selectsAll && !bounded && !readsOnlyDerivedSources(select, cteNames)) {
+            throw new SqlPolicyViolationException(
+                    "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
         }
-        if (select.getWindowDefinitions() != null) {
-            select.getWindowDefinitions().forEach(window -> visitWindowDefinition(window, visitor));
-        }
-        visitTableFunction(select.getFromItem(), visitor);
-        if (select.getJoins() != null) {
-            select.getJoins().forEach(join -> visitTableFunction(join.getRightItem(), visitor));
+    }
+
+    private void validateNestedSelect(FromItem source, Set<String> cteNames, Set<Select> visited) {
+        if (source instanceof ParenthesedSelect parenthesedSelect) {
+            validateSelect(parenthesedSelect, cteNames, visited);
         }
     }
 
@@ -237,9 +322,18 @@ public class SqlSafetyPolicy {
         }
     }
 
-    private void visitTableFunction(FromItem fromItem, ExpressionVisitorAdapter visitor) {
+    private void visitFromItemExpressions(FromItem fromItem, ExpressionVisitorAdapter visitor) {
+        if (fromItem == null) {
+            return;
+        }
         if (fromItem instanceof TableFunction tableFunction) {
             tableFunction.getFunction().accept(visitor);
+        }
+        if (fromItem.getPivot() != null) {
+            fromItem.getPivot().accept(visitor);
+        }
+        if (fromItem.getUnPivot() != null) {
+            fromItem.getUnPivot().accept(visitor);
         }
     }
 
@@ -258,6 +352,12 @@ public class SqlSafetyPolicy {
         String normalized = function.toLowerCase(Locale.ROOT);
         int qualifier = normalized.lastIndexOf('.');
         return qualifier < 0 ? normalized : normalized.substring(qualifier + 1);
+    }
+
+    private String normalizeQuotedIdentifier(String identifier) {
+        return identifier == null ? ""
+                : identifier.replace("\"", "").replace("`", "").replace("[", "").replace("]", "")
+                        .toLowerCase(Locale.ROOT);
     }
 
     private void validateReadOnlySelectFeatures(PlainSelect select) {

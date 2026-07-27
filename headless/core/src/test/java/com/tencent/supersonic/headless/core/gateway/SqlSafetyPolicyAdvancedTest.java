@@ -77,6 +77,12 @@ class SqlSafetyPolicyAdvancedTest {
                 () -> policy.validate("SELECT setval('account_seq', 1)"));
         assertThrows(SqlPolicyViolationException.class,
                 () -> policy.validate("SELECT pg_advisory_lock(1)"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT account_seq.NEXTVAL FROM dual"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT \"account_seq\".\"NEXTVAL\" FROM dual"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("SELECT NEXT VALUE FOR account_seq"));
     }
 
     @Test
@@ -106,6 +112,26 @@ class SqlSafetyPolicyAdvancedTest {
                 "SELECT 1 FROM dual START WITH \"sleep\"(1) = 0 CONNECT BY 1 = 0");
         assertDangerousFunctionRejected("SELECT row_number() OVER w FROM bank_account "
                 + "WINDOW w AS (PARTITION BY \"sleep\"(1))");
+        assertDangerousFunctionRejected("SELECT * FROM bank_account "
+                + "PIVOT (\"sleep\"(balance) FOR branch_id IN (1)) p LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT * FROM bank_account " + "LATERAL VIEW \"sleep\"(balance) t AS x LIMIT 1");
+    }
+
+    @Test
+    void rejectsDangerousFunctionsInsideValuesSelects() {
+        assertDangerousFunctionRejected("VALUES (\"pg_read_file\"('/etc/passwd'))");
+        assertDangerousFunctionRejected("WITH leaked AS (VALUES (\"pg_read_file\"('/etc/passwd'))) "
+                + "SELECT * FROM leaked LIMIT 1");
+        assertDangerousFunctionRejected(
+                "SELECT 1 WHERE EXISTS (VALUES (\"pg_read_file\"('/etc/passwd')))");
+    }
+
+    @Test
+    void rejectsUnboundedTableStatementsButAllowsConstantValues() {
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validate("TABLE bank_account"));
+        assertDoesNotThrow(() -> policy.validate("VALUES (1, 'safe'), (2, 'constant')"));
     }
 
     @Test

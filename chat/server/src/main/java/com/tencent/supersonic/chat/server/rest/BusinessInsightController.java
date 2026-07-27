@@ -5,6 +5,8 @@ import com.tencent.supersonic.chat.api.pojo.request.BusinessInsightReq;
 import com.tencent.supersonic.chat.api.pojo.response.BusinessExplanation;
 import com.tencent.supersonic.chat.api.pojo.response.ChartInsightResp;
 import com.tencent.supersonic.chat.server.service.BusinessInsightService;
+import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,14 +27,22 @@ public class BusinessInsightController {
     @PostMapping("/recommend")
     public ChartInsightResp recommend(@RequestBody BusinessInsightReq insightReq,
             HttpServletRequest request, HttpServletResponse response) {
-        UserHolder.findUser(request, response);
+        requireAuthenticated(request, response);
         return insightService.recommend(insightReq);
     }
 
     @PostMapping("/explain")
     public BusinessExplanation explain(@RequestBody BusinessInsightReq insightReq,
             HttpServletRequest request, HttpServletResponse response) {
-        UserHolder.findUser(request, response);
+        requireAuthenticated(request, response);
         return insightService.explain(insightReq);
+    }
+
+    private void requireAuthenticated(HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        if (user == null || User.getVisitUser().getName().equals(user.getName())) {
+            throw new InvalidPermissionException(
+                    "Authentication is required for business insight endpoints");
+        }
     }
 }
