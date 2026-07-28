@@ -39,6 +39,7 @@
 - JDBC、查询加速器和数据库管理 SQL 均在实际执行前进入统一网关，避免加速器命中或管理接口绕过只读策略、限流和性能监控。
 - 数据库管理 SQL 的非策略异常统一转换为通用查询失败信息，日志仅保留异常类型和不可逆摘要；策略拒绝原因仍原样保留。
 - JDBC 驱动解析、连接测试、重试和资源关闭日志不再记录完整 URL、驱动异常正文或堆栈；不支持的数据源类型和连接失败响应统一使用通用消息。
+- JDBC 连接池初始化、连接有效性检查和数据库元数据适配器仅记录 URL/异常不可逆摘要；Flight SQL 的查询、预编译句柄和关闭句柄仅记录摘要，创建或执行失败统一返回固定错误，避免回显 SQL、认证头及驱动细节。
 - 语义查询解析、改写、纠错和翻译日志统一记录不可逆摘要；翻译失败响应不再回显 S2SQL 或底层异常消息。
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度、鉴权开关和内部原生执行模式，避免权限结果跨用户或跨安全模式复用。
 - 结果缓存写入和读取均使用响应快照，隔离结果行、列定义、授权信息和脱敏元数据，防止调用方修改共享缓存对象。
@@ -69,7 +70,7 @@
 - `SqlSafetyPolicyAdvancedTest`：注释拆分危险函数、UNION/CTE/嵌套子查询中的无界 `SELECT *`、`TABLE` 全表读取、`VALUES`/PIVOT/LATERAL VIEW/括号 FromItem 与嵌套 JOIN 非标准表达式位置、`SELECT INTO`、行锁和 Oracle/SQL Server/PostgreSQL 序列、会话及 advisory lock 状态变更绕过，覆盖 PostgreSQL 服务端文件及数据库状态函数、SQLite 扩展加载、DuckDB/H2/SQLite/PostgreSQL 外部数据与动态查询函数、ClickHouse/StarRocks 外部连接表函数、SQL Server 命令扩展、DISTINCT ON、TOP、层级查询和命名窗口中的带引号危险函数、目标数据库追加 denylist、并发复用预编译策略、超深 SQL 拒绝、非法配置拒绝及安全常量 `VALUES` 兼容性。
 - `JdbcExecutorGatewayCoverageTest`：校验危险 SQL 在进入 JDBC 或查询加速器前被统一网关拒绝，并校验加速器或执行器超大结果被网关计为失败。
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
-- `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL 和异常正文仅以摘要进入日志，且不附带异常堆栈。
+- `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL、Flight 查询与预编译句柄和异常正文仅以摘要进入日志，且不附带异常堆栈；Flight 创建或查找预编译语句失败时对外仅返回固定错误。
 - `DatabaseServicePermissionTest`：校验普通用户不能测试或变更数据库连接，VIEWER 读取数据源详情时不返回密码，数据源管理员仍可读取受控凭据。
 - `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建均按模型权限或超级管理员身份 fail-closed。
 - `SqlFilterUtilsSecurityTest`：校验比较、IN、LIKE 和普通含撇号值均被规范化到单一字符串字面量，不能通过预加引号逃逸过滤条件。
@@ -88,7 +89,7 @@
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
 - `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 554 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 559 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
 
 ## 本地性能基线
 

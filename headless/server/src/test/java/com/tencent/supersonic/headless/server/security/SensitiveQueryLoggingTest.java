@@ -4,6 +4,10 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.google.common.util.concurrent.MoreExecutors;
+import com.google.protobuf.ByteString;
+import com.tencent.supersonic.auth.api.authentication.config.AuthenticationConfig;
+import com.tencent.supersonic.auth.api.authentication.service.UserService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.SemanticSchema;
@@ -17,16 +21,29 @@ import com.tencent.supersonic.headless.chat.utils.ComponentFactory;
 import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
 import com.tencent.supersonic.headless.core.utils.SqlGenerateUtils;
+import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import com.tencent.supersonic.headless.server.facade.service.impl.S2ChatLayerService;
 import com.tencent.supersonic.headless.server.service.DataSetService;
 import com.tencent.supersonic.headless.server.service.SchemaService;
+import com.tencent.supersonic.headless.server.service.impl.FlightServiceImpl;
 import com.tencent.supersonic.headless.server.utils.QueryUtils;
+import org.apache.arrow.flight.CallHeaders;
+import org.apache.arrow.flight.FlightConstants;
+import org.apache.arrow.flight.FlightProducer.CallContext;
+import org.apache.arrow.flight.FlightProducer.ServerStreamListener;
+import org.apache.arrow.flight.FlightProducer.StreamListener;
+import org.apache.arrow.flight.Result;
+import org.apache.arrow.flight.ServerHeaderMiddleware;
+import org.apache.arrow.flight.sql.impl.FlightSql.ActionCreatePreparedStatementRequest;
+import org.apache.arrow.flight.sql.impl.FlightSql.CommandPreparedStatementQuery;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class SensitiveQueryLoggingTest {
@@ -163,6 +181,62 @@ class SensitiveQueryLoggingTest {
             assertTrue(logs.contains("union SQL metadata:[sha256="));
         } finally {
             detach(QueryUtils.class, appender);
+        }
+    }
+
+    @Test
+    void flightPreparedStatementFailureDoesNotExposeQueryOrStackTrace() {
+        String secretSql = "SELECT card_no FROM flight_secret_104";
+        FlightServiceImpl service = new FlightServiceImpl(mock(SemanticLayerService.class),
+                mock(AuthenticationConfig.class), mock(UserService.class));
+        CallContext context = mock(CallContext.class);
+        ServerHeaderMiddleware middleware = mock(ServerHeaderMiddleware.class);
+        CallHeaders headers = mock(CallHeaders.class);
+        when(context.getMiddleware(FlightConstants.HEADER_KEY)).thenReturn(middleware);
+        when(middleware.headers()).thenReturn(headers);
+        when(headers.containsKey(any())).thenReturn(false);
+        StreamListener<Result> listener = mock(StreamListener.class);
+        ListAppender<ILoggingEvent> appender = attach(FlightServiceImpl.class, Level.ERROR);
+        try {
+            service.createPreparedStatement(
+                    ActionCreatePreparedStatementRequest.newBuilder().setQuery(secretSql).build(),
+                    context, listener);
+
+            ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+            verify(listener).onError(error.capture());
+            assertTrue(
+                    error.getValue().getMessage().contains("Failed to create prepared statement"));
+            assertFalse(error.getValue().getMessage().contains(secretSql));
+            String logs = messages(appender);
+            assertFalse(logs.contains(secretSql));
+            assertTrue(logs.contains("type=Exception"));
+            assertTrue(logs.contains("error=[sha256="));
+            assertNull(appender.list.get(0).getThrowableProxy());
+        } finally {
+            detach(FlightServiceImpl.class, appender);
+        }
+    }
+
+    @Test
+    void flightMissingHandleLogContainsOnlyDigest() {
+        String secretHandle = "FLIGHT_SECRET_HANDLE_105";
+        FlightServiceImpl service = new FlightServiceImpl(mock(SemanticLayerService.class),
+                mock(AuthenticationConfig.class), mock(UserService.class));
+        ExecutorService executor = MoreExecutors.newDirectExecutorService();
+        service.setExecutorService(executor, 10, 1);
+        ServerStreamListener listener = mock(ServerStreamListener.class);
+        ListAppender<ILoggingEvent> appender = attach(FlightServiceImpl.class, Level.INFO);
+        try {
+            service.getStreamPreparedStatement(CommandPreparedStatementQuery.newBuilder()
+                    .setPreparedStatementHandle(ByteString.copyFromUtf8(secretHandle)).build(),
+                    mock(CallContext.class), listener);
+
+            assertFalse(messages(appender).contains(secretHandle));
+            assertTrue(messages(appender).contains("handle=[sha256="));
+            assertTrue(appender.list.stream().allMatch(event -> event.getThrowableProxy() == null));
+        } finally {
+            executor.shutdownNow();
+            detach(FlightServiceImpl.class, appender);
         }
     }
 

@@ -106,7 +106,8 @@ public class SqlUtils {
         try {
             connection = jdbcDataSourceUtils.getConnection(database);
         } catch (Exception e) {
-            log.warn("e:", e);
+            log.warn("JDBC connection validation failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         } finally {
             JdbcDataSourceUtils.releaseConnection(connection);
         }

@@ -8,6 +8,7 @@ import com.tencent.supersonic.chat.server.plugin.PluginRecallResult;
 import com.tencent.supersonic.chat.server.plugin.recognize.PluginRecognizer;
 import com.tencent.supersonic.chat.server.pojo.ParseContext;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.store.embedding.Retrieval;
 import dev.langchain4j.store.embedding.RetrieveQueryResult;
 import lombok.extern.slf4j.Slf4j;
@@ -74,7 +75,8 @@ public class EmbeddingRecallRecognizer extends PluginRecognizer {
             }
             return embeddingRetrievals;
         } catch (Exception e) {
-            log.warn("get embedding result error ", e);
+            log.warn("Failed to get embedding result: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return Lists.newArrayList();
     }

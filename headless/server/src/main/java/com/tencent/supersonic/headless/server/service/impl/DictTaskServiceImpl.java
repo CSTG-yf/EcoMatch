@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
 import com.tencent.supersonic.common.util.BeanMapper;
 import com.tencent.supersonic.common.util.DateUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DimValueMap;
 import com.tencent.supersonic.headless.api.pojo.request.DictItemFilter;
 import com.tencent.supersonic.headless.api.pojo.request.DictSingleTaskReq;
@@ -123,9 +124,11 @@ public class DictTaskServiceImpl implements DictTaskService {
         try {
             dictWordService.loadDictWord();
         } catch (Exception e) {
-            log.error("reloadCustomDictionary error", e);
+            log.error("Failed to reload custom dictionary: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             status = TaskStatusEnum.ERROR.getStatus();
-            dictTaskDO.setDescription(e.toString());
+            dictTaskDO
+                    .setDescription("Dictionary reload failed: " + SensitiveLogUtils.summarize(e));
         }
         dictTaskDO.setStatus(status);
         dictTaskDO.setElapsedMs(DateUtils.calculateDiffMs(dictTaskDO.getCreatedAt()));
@@ -141,7 +144,8 @@ public class DictTaskServiceImpl implements DictTaskService {
         try {
             dictWordService.loadDictWord();
         } catch (Exception e) {
-            log.error("reloadCustomDictionary error", e);
+            log.error("Failed to reload custom dictionary: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         // Add a clear dictionary file record
         DictTaskDO dictTaskDO =

@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.core.pojo;
 
 import com.alibaba.druid.pool.DruidDataSource;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.core.utils.JdbcDataSourceUtils;
@@ -151,10 +152,11 @@ public class JdbcDataSource {
                 if (druidDataSource != null && !druidDataSource.isClosed()) {
                     return druidDataSource;
                 }
-                throw new RuntimeException("Unable to get datasource for jdbcUrl: " + jdbcUrl);
+                throw new IllegalStateException("Unable to initialize JDBC data source");
             }
         } catch (InterruptedException e) {
-            throw new RuntimeException("Unable to get datasource for jdbcUrl: " + jdbcUrl);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while initializing JDBC data source");
         }
 
         druidDataSource = dataSourceMap.get(key);
@@ -170,7 +172,7 @@ public class JdbcDataSource {
             try {
                 Class.forName(className);
             } catch (ClassNotFoundException e) {
-                throw new RuntimeException("Unable to get driver instance for jdbcUrl: " + jdbcUrl);
+                throw new IllegalStateException("Unable to initialize JDBC driver");
             }
 
             druidDataSource.setDriverClassName(className);
@@ -227,8 +229,10 @@ public class JdbcDataSource {
             try {
                 druidDataSource.init();
             } catch (Exception e) {
-                log.error("Exception during pool initialization", e);
-                throw new RuntimeException(e.getMessage());
+                log.error("JDBC pool initialization failed: url=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(jdbcUrl), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new IllegalStateException("Unable to initialize JDBC data source");
             }
 
             dataSourceMap.put(key, druidDataSource);

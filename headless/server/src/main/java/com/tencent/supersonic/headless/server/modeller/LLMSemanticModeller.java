@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.service.ChatModelService;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DbSchema;
 import com.tencent.supersonic.headless.api.pojo.ModelSchema;
 import com.tencent.supersonic.headless.api.pojo.request.ModelBuildReq;
@@ -127,7 +128,8 @@ public class LLMSemanticModeller implements SemanticModeller {
                         .writeValueAsString(objectMapper.readValue(inputStream, Object.class));
             }
         } catch (Exception e) {
-            log.error("Failed to load model-building system exemplars", e);
+            log.error("Failed to load model-building system exemplars: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return "";
     }

@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.core.pojo;
 import javax.sql.DataSource;
 
 import com.tencent.supersonic.common.pojo.QueryColumn;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.core.config.ExecutorConfig;
 import com.zaxxer.hikari.HikariConfig;
@@ -156,7 +157,8 @@ public class DuckDbSource {
                 list.add(row);
             }
         } catch (Exception e) {
-            log.error("buildResult error {}", e);
+            log.error("Build DuckDB result failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return list;
     }

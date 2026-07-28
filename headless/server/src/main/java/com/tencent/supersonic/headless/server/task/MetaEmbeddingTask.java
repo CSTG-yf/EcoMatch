@@ -5,6 +5,7 @@ import javax.annotation.PreDestroy;
 import com.tencent.supersonic.common.config.EmbeddingConfig;
 import com.tencent.supersonic.common.pojo.DataItem;
 import com.tencent.supersonic.common.service.EmbeddingService;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.server.service.DimensionService;
 import com.tencent.supersonic.headless.server.service.MetricService;
 import dev.langchain4j.inmemory.spring.InMemoryEmbeddingStoreFactory;
@@ -71,7 +72,8 @@ public class MetaEmbeddingTask implements CommandLineRunner {
             embeddingService.addQuery(embeddingConfig.getMetaCollectionName(),
                     TextSegmentConvert.convertToEmbedding(dimensionDataItems));
         } catch (Exception e) {
-            log.error("Failed to reload meta embedding.", e);
+            log.error("Failed to reload meta embedding: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         long duration = System.currentTimeMillis() - startTime;
         log.info("Embedding has been regularly reloaded  in {} milliseconds", duration);
@@ -82,7 +84,8 @@ public class MetaEmbeddingTask implements CommandLineRunner {
         try {
             reloadMetaEmbedding();
         } catch (Exception e) {
-            log.error("initMetaEmbedding error", e);
+            log.error("Failed to initialize meta embedding: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 }

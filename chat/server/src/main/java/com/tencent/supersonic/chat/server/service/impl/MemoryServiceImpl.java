@@ -24,6 +24,7 @@ import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ExemplarService;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
@@ -295,7 +296,8 @@ public class MemoryServiceImpl implements MemoryService, CommandLineRunner {
             }
 
         } catch (Exception e) {
-            log.error("Failed to load system exemplars", e);
+            log.error("Failed to load system exemplars: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 }

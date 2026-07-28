@@ -5,6 +5,7 @@ import com.tencent.supersonic.common.pojo.DataEvent;
 import com.tencent.supersonic.common.pojo.DataItem;
 import com.tencent.supersonic.common.pojo.enums.EventType;
 import com.tencent.supersonic.common.service.EmbeddingService;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.TextSegmentConvert;
 import lombok.extern.slf4j.Slf4j;
@@ -56,7 +57,9 @@ public class MetaEmbeddingListener {
         try {
             Thread.sleep(embeddingOperationSleepTime);
         } catch (InterruptedException e) {
-            log.error("", e);
+            Thread.currentThread().interrupt();
+            log.warn("Meta embedding operation interrupted: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 }

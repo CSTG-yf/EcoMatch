@@ -6,6 +6,7 @@ import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.enums.TagDefineType;
 import com.tencent.supersonic.headless.api.pojo.request.TagDeleteReq;
@@ -92,7 +93,8 @@ public class TagMetaServiceImpl implements TagMetaService {
             try {
                 create(tagReq, user);
             } catch (Exception e) {
-                log.warn("createBatch, e:{}", e);
+                log.warn("Failed to create tag in batch: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             }
         }
         return tagReqList.size();
@@ -110,7 +112,8 @@ public class TagMetaServiceImpl implements TagMetaService {
             try {
                 tagRepository.deleteBatch(tagDeleteReq);
             } catch (Exception e) {
-                log.warn("createBatch, e:{}", e);
+                log.warn("Failed to delete tag in batch: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             }
         }
         return true;

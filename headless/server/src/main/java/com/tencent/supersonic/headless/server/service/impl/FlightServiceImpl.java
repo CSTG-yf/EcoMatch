@@ -15,6 +15,7 @@ import com.tencent.supersonic.auth.api.authentication.request.UserReq;
 import com.tencent.supersonic.auth.api.authentication.service.UserService;
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Param;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
@@ -118,7 +119,7 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
     public void getStreamStatement(final TicketStatementQuery ticketStatementQuery,
             final CallContext context, final ServerStreamListener listener) {
         final ByteString handle = ticketStatementQuery.getStatementHandle();
-        log.info("getStreamStatement {} ", handle);
+        log.info("getStreamStatement handle=[{}]", SensitiveLogUtils.summarize(handle));
         executeQuery(handle, listener);
     }
 
@@ -131,7 +132,8 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
                     .setStatementHandle(preparedStatementHandle).build();
             return getFlightInfoForSchema(ticket, descriptor, null);
         } catch (Exception e) {
-            log.error("getFlightInfoStatement error {}", e);
+            log.error("getFlightInfoStatement failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return null;
     }
@@ -139,7 +141,8 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
     @Override
     public void getStreamPreparedStatement(final CommandPreparedStatementQuery command,
             final CallContext context, final ServerStreamListener listener) {
-        log.info("getStreamPreparedStatement {}", command.getPreparedStatementHandle());
+        log.info("getStreamPreparedStatement handle=[{}]",
+                SensitiveLogUtils.summarize(command.getPreparedStatementHandle()));
         executeQuery(command.getPreparedStatementHandle(), listener);
     }
 
@@ -149,7 +152,8 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
             listener.error(
                     CallStatus.INTERNAL.withDescription("Failed to get prepared statement: empty")
                             .toRuntimeException());
-            log.error("getStreamPreparedStatement error {}", hander);
+            log.error("Prepared statement was not found: handle=[{}]",
+                    SensitiveLogUtils.summarize(hander));
             listener.completed();
             return;
         }
@@ -188,11 +192,12 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
                     }
                 }
             } catch (Exception e) {
-                listener.error(CallStatus.INTERNAL
-                        .withDescription(
-                                String.format("Failed to get exec statement %s", e.getMessage()))
-                        .toRuntimeException());
-                log.error("getStreamPreparedStatement error {}", hander);
+                listener.error(
+                        CallStatus.INTERNAL.withDescription("Failed to execute prepared statement")
+                                .toRuntimeException());
+                log.error("Prepared statement execution failed: handle=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(hander), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             } finally {
                 preparedStatementCache.invalidate(hander);
                 listener.completed();
@@ -204,7 +209,8 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
     @Override
     public void closePreparedStatement(final ActionClosePreparedStatementRequest request,
             final CallContext context, final StreamListener<Result> listener) {
-        log.info("closePreparedStatement {}", request.getPreparedStatementHandle());
+        log.info("closePreparedStatement handle=[{}]",
+                SensitiveLogUtils.summarize(request.getPreparedStatementHandle()));
         listener.onCompleted();
     }
 
@@ -245,8 +251,9 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
             querySqlReq.setParams(
                     Arrays.asList(new Param(authenticationConfig.getTokenHttpHeaderKey(), auth)));
             preparedStatementCache.put(preparedStatementHandle, querySqlReq);
-            log.info("createPreparedStatement {} {} {} ", preparedStatementHandle, dataSetId,
-                    query);
+            log.info("createPreparedStatement handle=[{}], dataSetId={}, query=[{}]",
+                    SensitiveLogUtils.summarize(preparedStatementHandle), dataSetId,
+                    SensitiveLogUtils.summarize(query));
             return preparedStatementHandle;
         } catch (Exception e) {
             throw e;
@@ -263,11 +270,10 @@ public class FlightServiceImpl extends BasicFlightSqlProducer implements FlightS
                     .setPreparedStatementHandle(preparedStatementHandle).build();
             listener.onNext(new Result(pack(result).toByteArray()));
         } catch (Exception e) {
-            listener.onError(
-                    CallStatus.INTERNAL
-                            .withDescription(String.format(
-                                    "Failed to create prepared statement: %s", e.getMessage()))
-                            .toRuntimeException());
+            listener.onError(CallStatus.INTERNAL
+                    .withDescription("Failed to create prepared statement").toRuntimeException());
+            log.error("Prepared statement creation failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         } finally {
             listener.onCompleted();
         }

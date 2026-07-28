@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.core.adaptor.db;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.enums.TimeDimensionEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DBColumn;
 import com.tencent.supersonic.headless.api.pojo.enums.FieldType;
 import com.tencent.supersonic.headless.core.pojo.ConnectInfo;
@@ -74,7 +75,8 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
                 }
             }
         } catch (SQLException e) {
-            log.error("Failed to get tables and views", e);
+            log.error("Get Kyuubi tables and views failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return tablesAndViews;
     }

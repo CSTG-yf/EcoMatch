@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.*;
 import com.tencent.supersonic.common.pojo.enums.*;
 import com.tencent.supersonic.common.util.BeanMapper;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.ItemValueConfig;
 import com.tencent.supersonic.headless.api.pojo.request.DictItemReq;
@@ -167,7 +168,9 @@ public class DictUtils {
             constructDictLines(valueAndFrequencyPair, lines, nature);
             addWhiteValueLines(dictItemResp, lines, nature);
         } catch (Exception e) {
-            log.error("dictItemResp:{},fetchItemValue error:", dictItemResp, e);
+            log.error("Failed to fetch dictionary item: item=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(dictItemResp), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return lines;
     }

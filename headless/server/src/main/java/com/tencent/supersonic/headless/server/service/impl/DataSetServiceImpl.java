@@ -12,6 +12,7 @@ import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.BeanMapper;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetDetail;
 import com.tencent.supersonic.headless.api.pojo.DataSetModelConfig;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
@@ -335,7 +336,8 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
             String tableName = SqlSelectHelper.getTableName(sql);
             dataSets = getDataSets(tableName, user);
         } catch (Exception e) {
-            log.error("getDataSetIdFromSql error:{}", e);
+            log.error("Failed to resolve dataset from SQL: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         if (org.apache.commons.collections.CollectionUtils.isEmpty(dataSets)) {
             throw new InvalidArgumentException("从Sql参数中无法获取到DataSetId");

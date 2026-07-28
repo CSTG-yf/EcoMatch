@@ -158,7 +158,8 @@ public class TagQueryServiceImpl implements TagQueryService {
                 }
             }
         } catch (Exception e) {
-            log.warn("queryTagDateFromDbBySql date info e, e:{}", e);
+            log.warn("Failed to query tag date from database: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         String dateDefault = queryTagDate(dim);
         log.info("queryTagDate by default, dateDefault:{}.", dateDefault);

@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.pojo.DateConf;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -100,7 +101,8 @@ public class ParseInfoFormatProcessor implements ParseResultProcessor {
                 parseInfo.setDateInfo(extractDateFilter(expressions, dsSchema));
             }
         } catch (Exception e) {
-            log.error("failed to extract date range:", e);
+            log.error("Failed to extract date range: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
 
         // extract dimension filters from S2SQL
@@ -108,7 +110,8 @@ public class ParseInfoFormatProcessor implements ParseResultProcessor {
             List<QueryFilter> queryFilters = extractDimensionFilter(dsSchema, expressions);
             parseInfo.getDimensionFilters().addAll(queryFilters);
         } catch (Exception e) {
-            log.error("failed to extract dimension filters:", e);
+            log.error("Failed to extract dimension filters: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
 
         // extract metrics from S2SQL

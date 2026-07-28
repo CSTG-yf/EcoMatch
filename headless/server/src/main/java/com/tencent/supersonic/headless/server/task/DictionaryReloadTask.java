@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.server.task;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.server.service.impl.DictWordService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,7 +28,8 @@ public class DictionaryReloadTask implements CommandLineRunner {
             dictWordService.loadDictWord();
             log.debug("ApplicationStartedInit end");
         } catch (Exception e) {
-            log.error("ApplicationStartedInit error", e);
+            log.error("Failed to initialize dictionary: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 
@@ -38,7 +40,8 @@ public class DictionaryReloadTask implements CommandLineRunner {
         try {
             dictWordService.reloadDictWord();
         } catch (Exception e) {
-            log.error("reloadKnowledge error", e);
+            log.error("Failed to reload dictionary: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         log.debug("reloadKnowledge end");
     }

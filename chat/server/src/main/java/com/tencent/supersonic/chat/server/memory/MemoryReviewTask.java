@@ -74,8 +74,8 @@ public class MemoryReviewTask {
                 try {
                     processMemory(memory, agent);
                 } catch (Exception e) {
-                    log.error("Exception occurred while processing memory with id {}: {}",
-                            memory.getId(), e.getMessage(), e);
+                    log.error("Failed to process memory id={}: type={}, error=[{}]", memory.getId(),
+                            e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 }
             });
         }
