@@ -45,7 +45,7 @@ public class EmbeddingRecallRecognizer extends PluginRecognizer {
                 continue;
             }
             Pair<Boolean, Set<Long>> pair = PluginManager.resolve(plugin, parseContext);
-            log.info("embedding plugin resolve: {}", pair);
+            log.info("Embedding plugin resolution=[{}]", SensitiveLogUtils.summarize(pair));
             if (pair.getLeft()) {
                 Set<Long> dataSetList = pair.getRight();
                 if (CollectionUtils.isEmpty(dataSetList)) {

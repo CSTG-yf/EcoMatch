@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.knowledge;
 
 import com.hankcs.hanlp.corpus.io.IIOAdapter;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -16,7 +17,7 @@ public class HadoopFileIOAdapter implements IIOAdapter {
 
     @Override
     public InputStream open(String path) throws IOException {
-        log.info("open:{}", path);
+        log.info("Open Hadoop path=[{}]", SensitiveLogUtils.summarize(path));
         Configuration conf = new Configuration();
         FileSystem fs = FileSystem.get(URI.create(path), conf);
         return fs.open(new Path(path));
@@ -24,7 +25,7 @@ public class HadoopFileIOAdapter implements IIOAdapter {
 
     @Override
     public OutputStream create(String path) throws IOException {
-        log.info("create:{}", path);
+        log.info("Create Hadoop path=[{}]", SensitiveLogUtils.summarize(path));
         Configuration conf = new Configuration();
         FileSystem fs = FileSystem.get(URI.create(path), conf);
         return fs.create(new Path(path));

@@ -56,7 +56,8 @@ public class AESEncryptionUtil {
 
             return Base64.getEncoder().encodeToString(combined);
         } catch (Throwable e) {
-            log.error("encrypt", e);
+            log.error("AES encryption failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
             throw e;
         }
     }

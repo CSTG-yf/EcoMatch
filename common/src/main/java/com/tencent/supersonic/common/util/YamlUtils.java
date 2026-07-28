@@ -32,7 +32,8 @@ public class YamlUtils {
         try {
             return mapper.readValue(yamlStr, clazz);
         } catch (JsonProcessingException e) {
-            log.error("", e);
+            log.error("YAML deserialization failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return null;
     }
@@ -54,7 +55,8 @@ public class YamlUtils {
             return yaml.replaceAll("\"True\"", "true").replaceAll("\"true\"", "true")
                     .replaceAll("\"false\"", "false").replaceAll("\"False\"", "false");
         } catch (IOException e) {
-            log.error("", e);
+            log.error("YAML serialization failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return null;
     }

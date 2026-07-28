@@ -64,7 +64,8 @@ public class DefaultSemanticTranslator implements SemanticTranslator {
                             StringUtils.normalizeSpace(queryStatement.getSqlQuery().getSql())),
                     queryStatement.getErrMsg()));
         }
-        log.info("parse with ontologyQuery fields: [{}]", ontologyQuery.getFields());
+        log.info("Parse semantic query with fields=[{}]",
+                SensitiveLogUtils.summarize(ontologyQuery.getFields()));
 
         SqlQuery sqlQuery = queryStatement.getSqlQuery();
         String ontologyOuterSql = sqlQuery.getSql();

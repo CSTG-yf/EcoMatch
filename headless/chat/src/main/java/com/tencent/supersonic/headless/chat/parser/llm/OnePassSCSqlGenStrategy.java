@@ -85,7 +85,7 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
         LLMResp llmResp = new LLMResp();
         llmResp.setQuery(llmReq.getQueryText());
         // 1.recall exemplars
-        log.debug("OnePassSCSqlGenStrategy llmReq:\n{}", llmReq);
+        log.debug("OnePassSCSqlGenStrategy request=[{}]", SensitiveLogUtils.summarize(llmReq));
         List<List<Text2SQLExemplar>> exemplarsList = promptHelper.getFewShotExemplars(llmReq);
 
         // 2.generate sql generation prompt for each self-consistency inference

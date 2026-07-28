@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.knowledge.helper;
 
 import com.hankcs.hanlp.corpus.tag.Nature;
 import com.tencent.supersonic.common.pojo.enums.DictWordType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.knowledge.DataSetInfoStat;
@@ -82,7 +83,8 @@ public class NatureHelper {
             split[1] = String.valueOf(dataSetId);
             return String.join(DictWordType.NATURE_SPILT, split);
         } catch (NumberFormatException e) {
-            log.error("", e);
+            log.error("Dictionary nature conversion failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return null;
     }
@@ -186,7 +188,9 @@ public class NatureHelper {
                     return Long.valueOf(split[index]);
                 }
             } catch (NumberFormatException e) {
-                log.error("Error parsing long from nature: {}", nature, e);
+                log.error("Dictionary nature id parsing failed: nature=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(nature), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             }
         }
         return null;

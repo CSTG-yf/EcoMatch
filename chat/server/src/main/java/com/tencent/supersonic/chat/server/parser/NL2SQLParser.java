@@ -220,8 +220,10 @@ public class NL2SQLParser implements ChatQueryParser {
         parseContext.getRequest().setQueryText(rewrittenQuery);
         queryNLReq.setQueryText(rewrittenQuery);
         context.setRewrittenQuery(rewrittenQuery);
-        log.info("Context rounds: {} Current Query: {}, Rewritten Query: {}",
-                context.getUsedRounds(), currentMapResult.getQueryText(), rewrittenQuery);
+        log.info("Context rounds: {}, currentQuery=[{}], rewrittenQuery=[{}]",
+                context.getUsedRounds(),
+                SensitiveLogUtils.summarize(currentMapResult.getQueryText()),
+                SensitiveLogUtils.summarize(rewrittenQuery));
     }
 
     private String generateSchemaPrompt(List<SchemaElementMatch> elementMatches) {

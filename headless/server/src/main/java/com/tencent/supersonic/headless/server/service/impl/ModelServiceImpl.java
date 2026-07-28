@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
 import com.tencent.supersonic.headless.api.pojo.enums.DimensionType;
 import com.tencent.supersonic.headless.api.pojo.request.*;
@@ -180,13 +181,16 @@ public class ModelServiceImpl implements ModelService {
         List<DateInfoDO> dimensions = dateInfoRepository.getDateInfos(dimension);
         List<DateInfoDO> metrics = dateInfoRepository.getDateInfos(metric);
 
-        log.info("getDateDate, dimension:{}, dimensions dateInfo:{}", dimension, dimensions);
-        log.info("getDateDate, metric:{}, metrics dateInfo:{}", metric, metrics);
+        log.info("Resolve model date metadata: dimension=[{}], dimensions=[{}]",
+                SensitiveLogUtils.summarize(dimension), SensitiveLogUtils.summarize(dimensions));
+        log.info("Resolve model date metadata: metric=[{}], metrics=[{}]",
+                SensitiveLogUtils.summarize(metric), SensitiveLogUtils.summarize(metrics));
         itemDates.addAll(convert(dimensions));
         itemDates.addAll(convert(metrics));
 
         ItemDateResp itemDateDescriptor = calculateDateInternal(itemDates);
-        log.info("itemDateDescriptor:{}", itemDateDescriptor);
+        log.info("Resolved item date descriptor=[{}]",
+                SensitiveLogUtils.summarize(itemDateDescriptor));
 
         return itemDateDescriptor;
     }

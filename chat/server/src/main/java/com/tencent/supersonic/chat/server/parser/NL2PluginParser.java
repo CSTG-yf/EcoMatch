@@ -3,7 +3,7 @@ package com.tencent.supersonic.chat.server.parser;
 import com.tencent.supersonic.chat.server.plugin.recognize.PluginRecognizer;
 import com.tencent.supersonic.chat.server.pojo.ParseContext;
 import com.tencent.supersonic.chat.server.util.ComponentFactory;
-import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -22,8 +22,8 @@ public class NL2PluginParser implements ChatQueryParser {
     public void parse(ParseContext parseContext) {
         pluginRecognizers.forEach(pluginRecognizer -> {
             pluginRecognizer.recognize(parseContext);
-            log.info("{} recallResult:{}", pluginRecognizer.getClass().getSimpleName(),
-                    JsonUtil.toString(parseContext.getResponse()));
+            log.info("{} recallResult=[{}]", pluginRecognizer.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(parseContext.getResponse()));
         });
     }
 }

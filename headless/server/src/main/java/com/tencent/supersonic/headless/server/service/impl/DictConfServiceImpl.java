@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.server.service.impl;
 
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.DictItemFilter;
 import com.tencent.supersonic.headless.api.pojo.request.DictItemReq;
 import com.tencent.supersonic.headless.api.pojo.response.DictItemResp;
@@ -35,7 +36,7 @@ public class DictConfServiceImpl implements DictConfService {
             throw new RuntimeException("dictConf is existed");
         }
         Long id = dictRepository.addDictConf(dictConfDO);
-        log.debug("dictConfDO:{}", dictConfDO);
+        log.debug("Dictionary configuration=[{}]", SensitiveLogUtils.summarize(dictConfDO));
 
         DictItemFilter filter =
                 DictItemFilter.builder().id(id).status(itemValueReq.getStatus()).build();

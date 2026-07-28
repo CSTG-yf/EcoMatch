@@ -23,12 +23,17 @@ public class RetryUtils {
                     try {
                         Thread.sleep(50);
                     } catch (InterruptedException e) {
-                        log.error("e", e);
+                        Thread.currentThread().interrupt();
+                        log.warn("Retry interrupted: type={}, error=[{}]",
+                                e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+                        throw new IllegalStateException("Retry interrupted");
                     }
-                    log.warn("Retry exec {}, {}", index, ex.getMessage());
+                    log.warn("Retry attempt failed: attempt={}, type={}, error=[{}]", index,
+                            ex.getClass().getSimpleName(), SensitiveLogUtils.summarize(ex));
                     continue;
                 }
-                log.warn("Retry {} times all fail, err: {}", retryNum, ex.getMessage());
+                log.warn("All retry attempts failed: attempts={}, type={}, error=[{}]", retryNum,
+                        ex.getClass().getSimpleName(), SensitiveLogUtils.summarize(ex));
                 throw ex;
             }
             break;

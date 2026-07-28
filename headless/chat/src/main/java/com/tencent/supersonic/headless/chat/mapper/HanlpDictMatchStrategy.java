@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.mapper;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.knowledge.HanlpMapResult;
 import com.tencent.supersonic.headless.chat.knowledge.KnowledgeBaseService;
@@ -68,8 +69,9 @@ public class HanlpDictMatchStrategy extends SingleMatchStrategy<HanlpMapResult> 
                     return parseResult;
                 }).collect(Collectors.toCollection(LinkedHashSet::new));
 
-        log.debug("detectSegment:{},after isSimilarity parseResults:{}", detectSegment,
-                hanlpMapResults);
+        log.debug("Detected segment=[{}], similarity results=[{}]",
+                SensitiveLogUtils.summarize(detectSegment),
+                SensitiveLogUtils.summarize(hanlpMapResults));
 
         // step5. take only M dimensionValue or N-M metric/dimension value per rond.
         int oneDetectionValueSize =

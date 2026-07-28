@@ -45,7 +45,8 @@ public class MD5Util {
                 }
             }
         } catch (Exception e) {
-            log.error("", e);
+            log.error("MD5 digest failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
 
         if (isUpper) {

@@ -3,6 +3,7 @@ package dev.langchain4j.inmemory.spring;
 import com.tencent.supersonic.common.config.EmbeddingConfig;
 import com.tencent.supersonic.common.pojo.EmbeddingStoreConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.BaseEmbeddingStoreFactory;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -62,10 +63,13 @@ public class InMemoryEmbeddingStoreFactory extends BaseEmbeddingStoreFactory {
                     && !collectionName.equals(embeddingConfig.getText2sqlCollectionName())) {
                 embeddingStore = InMemoryEmbeddingStore.fromFile(filePath);
                 embeddingStore.entries = new CopyOnWriteArraySet<>(embeddingStore.entries);
-                log.info("embeddingStore reload from file:{}", filePath);
+                log.info("Embedding store reloaded from file=[{}]",
+                        SensitiveLogUtils.summarize(filePath));
             }
         } catch (Exception e) {
-            log.error("load persistFile error, persistFile:" + filePath, e);
+            log.error("Embedding store reload failed: file=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(filePath), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return embeddingStore;
     }
@@ -91,7 +95,9 @@ public class InMemoryEmbeddingStoreFactory extends BaseEmbeddingStoreFactory {
                     inMemoryEmbeddingStore.serializeToFile(filePath);
                 }
             } catch (Exception e) {
-                log.error("persistFile error, persistFile:" + filePath, e);
+                log.error("Embedding store persistence failed: file=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(filePath), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             }
         }
     }

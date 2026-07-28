@@ -2,6 +2,7 @@ package com.tencent.supersonic.common.jsqlparser;
 
 import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.common.util.EditDistanceUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
@@ -325,7 +326,8 @@ public class SqlReplaceHelper {
             Expression expression = SqlRemoveHelper.filteredExpression(where, SqlEditEnum.DATEDIFF);
             ((PlainSelect) selectStatement).setWhere(expression);
         } catch (Exception e) {
-            log.info("replaceFunction has an exception:{}", e.toString());
+            log.info("Function replacement failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
 
         return selectStatement.toString();
@@ -620,7 +622,8 @@ public class SqlReplaceHelper {
                                 .parseCondExpression("(" + andExpression.toString() + ")");
                     }
                 } catch (JSQLParserException e) {
-                    log.error("JSQLParserException", e);
+                    log.error("Date condition parsing failed: type={}, error=[{}]",
+                            e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 }
             }
             return expression;
@@ -848,7 +851,9 @@ public class SqlReplaceHelper {
         String columnName = StringUtil.replaceBackticks(column.getColumnName());
         String replaceColumn = getReplaceValue(columnName, fieldNameMap, exactReplace);
         if (StringUtils.isNotBlank(replaceColumn)) {
-            log.debug("Replaced column {} to {}", column.getColumnName(), replaceColumn);
+            log.debug("Replaced column=[{}] with=[{}]",
+                    SensitiveLogUtils.summarize(column.getColumnName()),
+                    SensitiveLogUtils.summarize(replaceColumn));
             column.setColumnName(replaceColumn);
         }
     }

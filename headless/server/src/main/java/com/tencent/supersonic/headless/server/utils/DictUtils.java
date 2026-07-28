@@ -123,7 +123,8 @@ public class DictUtils {
         if (TypeEnums.DIMENSION.equals(TypeEnums.valueOf(dictConfDO.getType()))) {
             DimensionResp dimension = dimensionService.getDimension(dictConfDO.getItemId());
             if (Objects.isNull(dimension)) {
-                log.info("dimension is null, dictConfDO:{}", dictConfDO);
+                log.info("Dictionary dimension is missing: config=[{}]",
+                        SensitiveLogUtils.summarize(dictConfDO));
                 return null;
             }
             dictItemResp.setModelId(dimension.getModelId());

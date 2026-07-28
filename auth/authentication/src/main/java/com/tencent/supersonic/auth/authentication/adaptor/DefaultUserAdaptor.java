@@ -14,6 +14,7 @@ import com.tencent.supersonic.auth.authentication.utils.TokenService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.util.AESEncryptionUtil;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -114,7 +115,8 @@ public class DefaultUserAdaptor implements UserAdaptor {
             updateLastLogin(userReq.getName());
             return token;
         } catch (Exception e) {
-            log.error("", e);
+            log.error("Login token creation failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             throw new RuntimeException("password encrypt error, please try again");
         }
     }

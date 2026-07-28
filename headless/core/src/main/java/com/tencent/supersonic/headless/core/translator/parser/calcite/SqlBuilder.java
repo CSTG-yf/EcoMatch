@@ -178,7 +178,8 @@ public class SqlBuilder {
 
             TableView tableView =
                     renderOne(queryMetrics, queryDimensions, dataModel, scope, schema);
-            log.info("tableView {}", StringUtils.normalizeSpace(tableView.getTable().toString()));
+            log.info("Table view=[{}]", SensitiveLogUtils
+                    .summarize(StringUtils.normalizeSpace(tableView.getTable().toString())));
             String alias = Constants.JOIN_TABLE_PREFIX + dataModel.getName();
             tableView.setAlias(alias);
             tableView.setPrimary(primary);
@@ -345,7 +346,8 @@ public class SqlBuilder {
             }
             tableView.setTable(DataModelNode.build(dataModel, scope));
         } catch (Exception e) {
-            log.error("Failed to create sqlNode for data model {}", dataModel);
+            log.error("Failed to create SQL node for data model=[{}]",
+                    SensitiveLogUtils.summarize(dataModel));
         }
 
         return tableView;

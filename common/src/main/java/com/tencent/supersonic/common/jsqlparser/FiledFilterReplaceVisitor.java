@@ -1,5 +1,6 @@
 package com.tencent.supersonic.common.jsqlparser;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Expression;
@@ -141,7 +142,8 @@ public class FiledFilterReplaceVisitor extends ExpressionVisitorAdapter {
             comparisonOperator.setASTNode(parsedExpression.getASTNode());
             return CCJSqlParserUtil.parseCondExpression(comparisonOperatorStr);
         } catch (JSQLParserException e) {
-            log.error("JSQLParserException", e);
+            log.error("Filter expression parsing failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return null;
     }

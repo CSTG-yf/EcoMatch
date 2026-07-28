@@ -62,7 +62,8 @@ public class TokenService {
         String appName = request.getHeader("AppId");
         if (StringUtils.isBlank(appName)) {
             String message = "AppId is blank, get app_user failed";
-            log.warn("{}, uri: {}", message, request.getServletPath());
+            log.warn("{}, uri=[{}]", message,
+                    SensitiveLogUtils.summarize(request.getServletPath()));
             throw new AccessException(message);
         }
 

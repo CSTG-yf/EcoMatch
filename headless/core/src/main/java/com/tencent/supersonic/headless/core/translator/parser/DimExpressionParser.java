@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.core.translator.parser;
 
 import com.tencent.supersonic.common.jsqlparser.SqlReplaceHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import com.tencent.supersonic.headless.core.pojo.OntologyQuery;
@@ -51,7 +52,8 @@ public class DimExpressionParser implements QueryParser {
 
         Set<DimSchemaResp> queryDimensions = ontologyQuery.getDimensions();
         Set<String> queryFields = ontologyQuery.getFields();
-        log.debug("begin to generateDerivedMetric {} [{}]", queryDimensions);
+        log.debug("Generate derived dimension expressions=[{}]",
+                SensitiveLogUtils.summarize(queryDimensions));
 
         Map<String, String> dim2Expr = new HashMap<>();
         for (DimSchemaResp queryDim : queryDimensions) {

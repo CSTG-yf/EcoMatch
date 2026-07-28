@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.knowledge.file;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.knowledge.helper.HanlpHelper;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -32,7 +33,8 @@ public class ChatLocalFileConfig {
         try {
             hanlpPropertiesPath = HanlpHelper.getHanlpPropertiesPath();
         } catch (FileNotFoundException e) {
-            log.warn("getResourceDir, e:", e);
+            log.warn("Chat dictionary resource directory resolution failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return hanlpPropertiesPath;
     }

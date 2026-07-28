@@ -2,6 +2,7 @@ package com.hankcs.hanlp.collection.trie.bintrie;
 
 import com.hankcs.hanlp.LoadRemoveService;
 import com.hankcs.hanlp.corpus.io.ByteArray;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.DataOutputStream;
@@ -277,10 +278,12 @@ public abstract class BaseNode<V> implements Comparable<BaseNode> {
 
     public void walkNode(Set<Map.Entry<String, V>> entrySet, Set<Long> modelIdOrDataSetIds) {
         if (status == Status.WORD_MIDDLE_2 || status == Status.WORD_END_3) {
-            log.debug("walkNode before:{}", value.toString());
+            log.debug("Walk trie node before=[{}]", SensitiveLogUtils.summarize(value));
             List natures = new LoadRemoveService().removeNatures((List) value, modelIdOrDataSetIds);
             String name = this.prefix != null ? this.prefix + c : "" + c;
-            log.debug("walkNode name:{},after:{},natures:{}", name, (List) value, natures);
+            log.debug("Walk trie node name=[{}], after=[{}], natures=[{}]",
+                    SensitiveLogUtils.summarize(name), SensitiveLogUtils.summarize(value),
+                    SensitiveLogUtils.summarize(natures));
             entrySet.add(new TrieEntry(name, (V) natures));
         }
     }

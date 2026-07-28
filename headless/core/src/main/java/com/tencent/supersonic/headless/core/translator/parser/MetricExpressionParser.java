@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.core.translator.parser;
 
 import com.tencent.supersonic.common.jsqlparser.SqlReplaceHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Measure;
 import com.tencent.supersonic.headless.api.pojo.enums.MetricDefineType;
 import com.tencent.supersonic.headless.api.pojo.response.MetricSchemaResp;
@@ -51,7 +52,8 @@ public class MetricExpressionParser implements QueryParser {
         List<MetricSchemaResp> allMetrics = semanticSchema.getMetrics();
         Set<MetricSchemaResp> queryMetrics = ontologyQuery.getMetrics();
         Set<String> queryFields = ontologyQuery.getFields();
-        log.debug("begin to generateDerivedMetric {} [{}]", queryMetrics);
+        log.debug("Generate derived metric expressions=[{}]",
+                SensitiveLogUtils.summarize(queryMetrics));
 
         Set<String> allFields = new HashSet<>();
         Map<String, Measure> allMeasures = new HashMap<>();
@@ -121,7 +123,8 @@ public class MetricExpressionParser implements QueryParser {
             }
             if (!CollectionUtils.isEmpty(replace)) {
                 String expr = SqlReplaceHelper.replaceExpression(metricExpr, replace);
-                log.debug("derived metric {}->{}", metricExpr, expr);
+                log.debug("Derived metric expression=[{}], expanded=[{}]",
+                        SensitiveLogUtils.summarize(metricExpr), SensitiveLogUtils.summarize(expr));
                 return expr;
             }
         }

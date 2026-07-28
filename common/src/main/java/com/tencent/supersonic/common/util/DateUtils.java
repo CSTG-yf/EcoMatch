@@ -41,7 +41,8 @@ public class DateUtils {
                 dateFormat.parse(date);
                 return DateTimeFormatter.ofPattern(format);
             } catch (ParseException e) {
-                log.warn("date parse has a exception:{}", e.toString());
+                log.warn("Date parsing failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             }
         }
         return DateTimeFormatter.ofPattern(formats[0]);
@@ -55,7 +56,8 @@ public class DateUtils {
                 LocalDateTime.parse(date, dateTimeFormatter);
                 return dateTimeFormatter;
             } catch (DateTimeParseException e) {
-                log.warn("date parse has a exception:{}", e.toString());
+                log.warn("Date-time parsing failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             }
         }
         return DateTimeFormatter.ofPattern(formats[0]);
@@ -202,7 +204,10 @@ public class DateUtils {
             }
             return datesInRange;
         } catch (Exception e) {
-            log.info("parse date failed, startDate:{}, endDate:{}", startDateStr, endDateStr, e);
+            log.info("Date range parsing failed: start=[{}], end=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(startDateStr),
+                    SensitiveLogUtils.summarize(endDateStr), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return Lists.newArrayList();
     }

@@ -5,6 +5,7 @@ import com.google.common.collect.Maps;
 import com.tencent.supersonic.common.calcite.Configuration;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.enums.EngineType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.Identify;
 import com.tencent.supersonic.headless.api.pojo.Measure;
@@ -110,7 +111,9 @@ public class DataModelNode extends SemanticNode {
         for (String field : fields) {
             if (!metrics.contains(field) && !dimensions.contains(field)) {
                 dimensions.add(field);
-                log.info("add column {} {}", dataModel.getName(), field);
+                log.info("Add data model column: model=[{}], field=[{}]",
+                        SensitiveLogUtils.summarize(dataModel.getName()),
+                        SensitiveLogUtils.summarize(field));
             }
         }
         SchemaBuilder.addSourceView(scope.getValidator().getCatalogReader().getRootSchema(), db, tb,
@@ -169,7 +172,7 @@ public class DataModelNode extends SemanticNode {
             relatedDataModels = Collections.singletonList(baseDataModel);
         }
 
-        log.debug("relatedDataModels {}", relatedDataModels);
+        log.debug("Related data models=[{}]", SensitiveLogUtils.summarize(relatedDataModels));
         return relatedDataModels;
     }
 

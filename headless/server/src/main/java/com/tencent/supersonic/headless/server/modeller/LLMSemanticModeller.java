@@ -82,9 +82,9 @@ public class LLMSemanticModeller implements SemanticModeller {
                 AiServices.create(ModelSchemaExtractor.class, getChatModel(modelBuildReq));
         Prompt prompt = generatePrompt(dbSchema, otherDbSchema, chatApp.get());
         modelSchema = extractor.generateModelSchema(prompt.toUserMessage().singleText());
-        log.info("dbSchema:  {}\n otherRelatedDBSchema:{}\n modelSchema: {}",
-                JsonUtil.toString(dbSchema), JsonUtil.toString(otherDbSchema),
-                JsonUtil.toString(modelSchema));
+        log.info("Model building completed: dbSchema=[{}], relatedSchemas=[{}], modelSchema=[{}]",
+                SensitiveLogUtils.summarize(dbSchema), SensitiveLogUtils.summarize(otherDbSchema),
+                SensitiveLogUtils.summarize(modelSchema));
     }
 
     private List<DbSchema> getOtherDbSchema(DbSchema curSchema, List<DbSchema> dbSchemas) {

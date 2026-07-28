@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.knowledge.builder;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.chat.knowledge.DictWord;
 import lombok.extern.slf4j.Slf4j;
@@ -18,7 +19,8 @@ public abstract class BaseWordBuilder {
         try {
             dictWords = getDictWordsWithException(schemaElements);
         } catch (Exception e) {
-            log.error("getWordNatureList error,", e);
+            log.error("Dictionary word construction failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return dictWords;
     }

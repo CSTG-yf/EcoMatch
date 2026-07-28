@@ -20,6 +20,7 @@ import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.service.ChatModelService;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
@@ -180,7 +181,9 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
                         .parseAndExecute(ChatParseReq.builder().chatId(-1).agentId(agent.getId())
                                 .queryText(example).user(User.getDefaultUser()).build());
             } catch (Exception e) {
-                log.warn("agent:{} example execute failed:{}", agent.getName(), example);
+                log.warn("Agent example execution failed: agent=[{}], example=[{}]",
+                        SensitiveLogUtils.summarize(agent.getName()),
+                        SensitiveLogUtils.summarize(example));
             }
         }
     }

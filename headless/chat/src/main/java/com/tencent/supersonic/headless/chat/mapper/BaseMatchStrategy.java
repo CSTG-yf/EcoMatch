@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.mapper;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.MapModeEnum;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
@@ -40,7 +41,8 @@ public abstract class BaseMatchStrategy<T extends MapResult> implements MatchStr
             return null;
         }
 
-        log.debug("terms:{},,detectDataSetIds:{}", terms, detectDataSetIds);
+        log.debug("Match terms=[{}], dataSetIds=[{}]", SensitiveLogUtils.summarize(terms),
+                SensitiveLogUtils.summarize(detectDataSetIds));
 
         List<T> detects = detect(chatQueryContext, terms, detectDataSetIds);
         Map<MatchText, List<T>> result = new HashMap<>();
@@ -63,12 +65,14 @@ public abstract class BaseMatchStrategy<T extends MapResult> implements MatchStr
                 boolean isDeleted = existResults.removeIf(existResult -> {
                     boolean delete = existResult.lessOrEqualSimilar(oneRoundResult);
                     if (delete) {
-                        log.debug("deleted existResult:{}", existResult);
+                        log.debug("Deleted existing match=[{}]",
+                                SensitiveLogUtils.summarize(existResult));
                     }
                     return delete;
                 });
                 if (isDeleted) {
-                    log.debug("deleted, add oneRoundResult:{}", oneRoundResult);
+                    log.debug("Added one-round match=[{}]",
+                            SensitiveLogUtils.summarize(oneRoundResult));
                     existResults.add(oneRoundResult);
                 }
             } else {

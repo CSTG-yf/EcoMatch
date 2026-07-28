@@ -8,6 +8,7 @@ import com.hankcs.hanlp.dictionary.DynamicCustomDictionary;
 import com.hankcs.hanlp.seg.Segment;
 import com.hankcs.hanlp.seg.common.Term;
 import com.tencent.supersonic.common.pojo.enums.DictWordType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.knowledge.DatabaseMapResult;
 import com.tencent.supersonic.headless.chat.knowledge.DictWord;
@@ -49,7 +50,8 @@ public class HanlpHelper {
         try {
             resetHanlpConfig();
         } catch (FileNotFoundException e) {
-            log.error("resetHanlpConfig error", e);
+            log.error("HanLP configuration reset failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 
@@ -117,8 +119,9 @@ public class HanlpHelper {
 
         HanLP.Config.CustomDictionaryPath = Arrays.stream(HanLP.Config.CustomDictionaryPath)
                 .map(path -> hanlpPropertiesPath + FILE_SPILT + path).toArray(String[]::new);
-        log.info("hanlpPropertiesPath:{},CustomDictionaryPath:{}", hanlpPropertiesPath,
-                HanLP.Config.CustomDictionaryPath);
+        log.info("HanLP properties path=[{}], custom dictionary paths=[{}]",
+                SensitiveLogUtils.summarize(hanlpPropertiesPath),
+                SensitiveLogUtils.summarize(HanLP.Config.CustomDictionaryPath));
 
         HanLP.Config.CoreDictionaryPath =
                 hanlpPropertiesPath + FILE_SPILT + HanLP.Config.CoreDictionaryPath;
@@ -184,18 +187,18 @@ public class HanlpHelper {
     }
 
     public static boolean addToCustomDictionary(DictWord dictWord) {
-        log.debug("dictWord:{}", dictWord);
+        log.debug("Dictionary word=[{}]", SensitiveLogUtils.summarize(dictWord));
         return getDynamicCustomDictionary().insert(dictWord.getWord(),
                 dictWord.getNatureWithFrequency());
     }
 
     public static void removeFromCustomDictionary(DictWord dictWord) {
-        log.debug("dictWord:{}", dictWord);
+        log.debug("Dictionary word=[{}]", SensitiveLogUtils.summarize(dictWord));
         CoreDictionary.Attribute attribute = getDynamicCustomDictionary().get(dictWord.getWord());
         if (attribute == null) {
             return;
         }
-        log.info("get attribute:{}", attribute);
+        log.info("Dictionary attribute=[{}]", SensitiveLogUtils.summarize(attribute));
         getDynamicCustomDictionary().remove(dictWord.getWord());
         StringBuilder sb = new StringBuilder();
         List<Nature> natureList = new ArrayList<>();
@@ -208,7 +211,8 @@ public class HanlpHelper {
         }
         String natureWithFrequency = sb.toString();
         int len = natureWithFrequency.length();
-        log.info("filtered natureWithFrequency:{}", natureWithFrequency);
+        log.info("Filtered dictionary natures=[{}]",
+                SensitiveLogUtils.summarize(natureWithFrequency));
         if (StringUtils.isNotBlank(natureWithFrequency)) {
             getDynamicCustomDictionary().add(dictWord.getWord(),
                     natureWithFrequency.substring(0, len - 1));
@@ -310,7 +314,7 @@ public class HanlpHelper {
                 }
                 return false;
             }).collect(Collectors.toList());
-            log.debug("terms filter by dataSetId:{}", dataSetIds);
+            log.debug("Terms filtered by dataSetIds=[{}]", SensitiveLogUtils.summarize(dataSetIds));
             logTerms(terms);
         }
         return terms;
@@ -336,8 +340,9 @@ public class HanlpHelper {
             return;
         }
         for (S2Term term : terms) {
-            log.debug("word:{},nature:{},frequency:{}", term.word, term.nature.toString(),
-                    term.getFrequency());
+            log.debug("Term word=[{}], nature=[{}], frequency={}",
+                    SensitiveLogUtils.summarize(term.word),
+                    SensitiveLogUtils.summarize(term.nature), term.getFrequency());
         }
     }
 }

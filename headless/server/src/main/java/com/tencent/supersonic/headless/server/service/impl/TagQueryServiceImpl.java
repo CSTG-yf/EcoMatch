@@ -162,7 +162,7 @@ public class TagQueryServiceImpl implements TagQueryService {
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         String dateDefault = queryTagDate(dim);
-        log.info("queryTagDate by default, dateDefault:{}.", dateDefault);
+        log.info("Query tag date by default: date=[{}].", SensitiveLogUtils.summarize(dateDefault));
         return dateDefault;
     }
 

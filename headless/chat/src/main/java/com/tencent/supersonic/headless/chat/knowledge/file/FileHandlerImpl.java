@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.knowledge.file;
 
 import com.github.pagehelper.PageInfo;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.DictValueReq;
 import com.tencent.supersonic.headless.api.pojo.response.DictValueResp;
 import lombok.extern.slf4j.Slf4j;
@@ -49,9 +50,11 @@ public class FileHandlerImpl implements FileHandler {
         Path targetPath = Paths.get(target);
         try {
             Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            log.info("backupFile successfully! path:{}", targetPath.toAbsolutePath());
+            log.info("Dictionary backup completed: path=[{}]",
+                    SensitiveLogUtils.summarize(targetPath.toAbsolutePath()));
         } catch (IOException e) {
-            log.info("Failed to copy file: " + e.getMessage());
+            log.warn("Dictionary backup failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
     }
 
@@ -62,7 +65,8 @@ public class FileHandlerImpl implements FileHandler {
             Files.createDirectories(path);
             log.info("Directory created successfully!");
         } catch (IOException e) {
-            log.info("Failed to create directory: " + e.getMessage());
+            log.warn("Dictionary directory creation failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 
@@ -71,9 +75,12 @@ public class FileHandlerImpl implements FileHandler {
         Path path = Paths.get(filePath);
         try {
             Files.delete(path);
-            log.info("File:{} deleted successfully!", getAbsolutePath(filePath));
+            log.info("Dictionary file deleted: file=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)));
         } catch (IOException e) {
-            log.warn("Failed to delete file:{}, e:", getAbsolutePath(filePath), e);
+            log.warn("Dictionary file deletion failed: file=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)),
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 
@@ -143,7 +150,7 @@ public class FileHandlerImpl implements FileHandler {
         if (existPath(path)) {
             return path;
         }
-        log.info("dict file:{} is not exist", path);
+        log.info("Dictionary file does not exist: file=[{}]", SensitiveLogUtils.summarize(path));
         return null;
     }
 
@@ -158,7 +165,8 @@ public class FileHandlerImpl implements FileHandler {
         List<DictValueResp> fileData = new ArrayList<>();
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
-            log.warn("[getFileData] File does not exist: {}", getAbsolutePath(filePath));
+            log.warn("Dictionary file does not exist: file=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)));
             return fileData;
         }
 
@@ -167,7 +175,8 @@ public class FileHandlerImpl implements FileHandler {
                     .map(lineStr -> convert2Resp(lineStr)).filter(line -> Objects.nonNull(line))
                     .collect(Collectors.toList());
         } catch (IOException e) {
-            log.warn("[getFileData] e:{}", e);
+            log.warn("Dictionary file reading failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return fileData;
     }
@@ -189,7 +198,8 @@ public class FileHandlerImpl implements FileHandler {
     private Long getFileLineNum(String filePath) {
         Path path = Paths.get(filePath);
         if (!Files.exists(path)) {
-            log.warn("[getFileData] File does not exist: {}", getAbsolutePath(filePath));
+            log.warn("Dictionary file does not exist: file=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)));
             return 0L;
         }
 
@@ -206,10 +216,12 @@ public class FileHandlerImpl implements FileHandler {
     public Boolean existPath(String pathStr) {
         Path path = Paths.get(pathStr);
         if (Files.exists(path)) {
-            log.info("path:{} exists!", getAbsolutePath(pathStr));
+            log.info("Dictionary path exists: path=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(pathStr)));
             return true;
         } else {
-            log.info("path:{} not exists!", getAbsolutePath(pathStr));
+            log.info("Dictionary path does not exist: path=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(pathStr)));
         }
         return false;
     }
@@ -235,9 +247,12 @@ public class FileHandlerImpl implements FileHandler {
                     writer.newLine();
                 }
             }
-            log.info("File:{} written successfully!", getAbsolutePath(filePath));
+            log.info("Dictionary file written: file=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)));
         } catch (IOException e) {
-            log.info("Failed to write file:{}, e:", getAbsolutePath(filePath), e);
+            log.warn("Dictionary file write failed: file=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(getAbsolutePath(filePath)),
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 

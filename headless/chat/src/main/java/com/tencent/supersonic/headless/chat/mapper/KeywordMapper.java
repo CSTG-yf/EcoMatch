@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.mapper;
 
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
@@ -141,7 +142,8 @@ public class KeywordMapper extends BaseMapper {
                     .similarity(EditDistanceUtils.getSimilarity(match.getDetectWord(),
                             schemaElement.getName()))
                     .build();
-            log.debug("add to schema, elementMatch {}", schemaElementMatch);
+            log.debug("Add schema element match=[{}]",
+                    SensitiveLogUtils.summarize(schemaElementMatch));
             addToSchemaMap(chatQueryContext.getMapInfo(), schemaElement.getDataSetId(),
                     schemaElementMatch);
         }

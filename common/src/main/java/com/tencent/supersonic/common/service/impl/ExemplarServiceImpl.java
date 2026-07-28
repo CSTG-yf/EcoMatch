@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.service.EmbeddingService;
 import com.tencent.supersonic.common.service.ExemplarService;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.RetrieveQuery;
@@ -95,7 +96,8 @@ public class ExemplarServiceImpl implements ExemplarService, CommandLineRunner {
             String collection = embeddingConfig.getText2sqlCollectionName();
             exemplars.stream().forEach(e -> storeExemplar(collection, e));
         } catch (Exception e) {
-            log.error("Failed to load system exemplars", e);
+            log.error("Failed to load system exemplars: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
     }
 }

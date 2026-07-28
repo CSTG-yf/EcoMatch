@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.mapper;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementMatch;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
@@ -108,8 +109,8 @@ public class DatabaseMatchStrategy extends SingleMatchStrategy<DatabaseMapResult
 
         if (!existElement) {
             threshold = threshold / 2;
-            log.debug("ModelElementMatches:{},not exist Element threshold reduce by half:{}",
-                    modelElementMatches, threshold);
+            log.debug("Model element matches=[{}], threshold reduced to {}",
+                    SensitiveLogUtils.summarize(modelElementMatches), threshold);
         }
         return getThreshold(threshold, minThreshold,
                 chatQueryContext.getRequest().getMapModeEnum());

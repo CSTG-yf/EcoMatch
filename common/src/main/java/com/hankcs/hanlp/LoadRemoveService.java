@@ -1,6 +1,7 @@
 package com.hankcs.hanlp;
 
 import com.tencent.supersonic.common.pojo.enums.DictWordType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.CollectionUtils;
@@ -43,7 +44,9 @@ public class LoadRemoveService {
             }
             return Long.valueOf(split[1]);
         } catch (NumberFormatException e) {
-            log.error("", e);
+            log.error("Dictionary nature id parsing failed: nature=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(nature), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return null;
     }

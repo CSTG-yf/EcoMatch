@@ -11,6 +11,7 @@ import com.tencent.supersonic.common.service.impl.EmbeddingServiceImpl;
 import com.tencent.supersonic.common.util.DifyClient;
 import com.tencent.supersonic.common.util.DifyRequest;
 import com.tencent.supersonic.common.util.DifyResult;
+import com.tencent.supersonic.common.util.HttpClientUtils;
 import com.tencent.supersonic.common.util.HttpUtils;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
 import dev.langchain4j.data.segment.TextSegment;
@@ -163,6 +164,33 @@ class SensitiveLoggingTest {
             assertTrue(logs.contains("errorType:IllegalStateException"));
         } finally {
             detach(EmbeddingServiceImpl.class, appender);
+        }
+    }
+
+    @Test
+    void httpClientFailureDoesNotExposeUrlHeadersParamsOrException() {
+        String secretUrl = "http://127.0.0.1:1/TOP_SECRET_URL_95";
+        String secretToken = "TOP_SECRET_TOKEN_95";
+        String secretParam = "TOP_SECRET_PARAM_95";
+        ListAppender<ILoggingEvent> appender = attach(HttpClientUtils.class, Level.DEBUG);
+        try {
+            RuntimeException error = assertThrows(RuntimeException.class,
+                    () -> HttpClientUtils.doPost(secretUrl,
+                            Map.of("Authorization", "Bearer " + secretToken),
+                            Map.of("customer", secretParam)));
+
+            assertTrue(error.getMessage().contains("HTTP POST failed"));
+            assertFalse(error.getMessage().contains(secretUrl));
+            String logs = messages(appender);
+            assertFalse(logs.contains("TOP_SECRET_URL_95"));
+            assertFalse(logs.contains(secretToken));
+            assertFalse(logs.contains(secretParam));
+            assertTrue(logs.contains("uri=[sha256="));
+            assertTrue(logs.contains("headers=[sha256="));
+            assertTrue(logs.contains("params=[sha256="));
+            assertTrue(appender.list.stream().allMatch(event -> event.getThrowableProxy() == null));
+        } finally {
+            detach(HttpClientUtils.class, appender);
         }
     }
 

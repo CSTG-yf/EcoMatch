@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Stopwatch;
 import com.tencent.supersonic.common.pojo.Constants;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.ItemDateFilter;
 import com.tencent.supersonic.headless.api.pojo.request.DateInfoReq;
 import com.tencent.supersonic.headless.server.persistence.dataobject.DateInfoDO;
@@ -46,7 +47,8 @@ public class DateInfoRepositoryImpl implements DateInfoRepository {
                 dateInfoDO.setCreatedBy(Constants.ADMIN_LOWER);
                 dateInfoDO.setUpdatedBy(Constants.ADMIN_LOWER);
             } catch (JsonProcessingException e) {
-                log.info("e,", e);
+                log.warn("Date information parsing failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             }
             dateInfoDOList.add(dateInfoDO);
         });

@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.knowledge;
 
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
 import com.tencent.supersonic.common.pojo.enums.DictWordType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.response.S2Term;
 import com.tencent.supersonic.headless.chat.knowledge.helper.HanlpHelper;
 import lombok.extern.slf4j.Slf4j;
@@ -135,7 +136,8 @@ public class KnowledgeBaseService {
         try {
             HanlpHelper.reloadCustomDictionary();
         } catch (Exception e) {
-            log.error("reloadCustomDictionary error", e);
+            log.error("Custom dictionary reload failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
 
         // 2. acquire write lock, clear trie and rebuild (short operation)

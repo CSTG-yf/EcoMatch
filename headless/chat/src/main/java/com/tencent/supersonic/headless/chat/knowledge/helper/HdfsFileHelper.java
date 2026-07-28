@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.knowledge.helper;
 import com.hankcs.hanlp.HanLP.Config;
 import com.hankcs.hanlp.dictionary.DynamicCustomDictionary;
 import com.hankcs.hanlp.utility.Predefine;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
@@ -27,11 +28,13 @@ public class HdfsFileHelper {
     public static void deleteCacheFile(String[] path) throws IOException {
         FileSystem fs = FileSystem.get(URI.create(path[0]), new Configuration());
         String cacheFilePath = path[0] + Predefine.BIN_EXT;
-        log.info("delete cache file:{}", cacheFilePath);
+        log.info("Delete HDFS cache file=[{}]", SensitiveLogUtils.summarize(cacheFilePath));
         try {
             fs.delete(new Path(cacheFilePath), false);
         } catch (Exception e) {
-            log.error("delete:" + cacheFilePath, e);
+            log.error("HDFS cache file deletion failed: file=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(cacheFilePath), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         int customBase = cacheFilePath.lastIndexOf(FileHelper.FILE_SPILT);
         String customPath =
@@ -40,12 +43,14 @@ public class HdfsFileHelper {
         for (String file : fileList) {
             try {
                 fs.delete(new Path(file), false);
-                log.info("delete cache file:{}", file);
+                log.info("Delete HDFS cache file=[{}]", SensitiveLogUtils.summarize(file));
             } catch (Exception e) {
-                log.error("delete " + file, e);
+                log.error("HDFS file deletion failed: file=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(file), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             }
         }
-        log.info("fileList:{}", fileList);
+        log.info("HDFS file list=[{}]", SensitiveLogUtils.summarize(fileList));
     }
 
     /**
@@ -63,9 +68,9 @@ public class HdfsFileHelper {
         Path hdfsPath = new Path(cacheFilePath);
         String parentPath = hdfsPath.getParent().toString();
         Path customPath = new Path(parentPath, "*.txt");
-        log.info("customPath:{}", customPath);
+        log.info("HDFS custom path=[{}]", SensitiveLogUtils.summarize(customPath));
         List<String> fileList = getFileList(fs, customPath);
-        log.info("CustomDictionaryPath:{}", fileList);
+        log.info("HDFS custom dictionary paths=[{}]", SensitiveLogUtils.summarize(fileList));
         Config.CustomDictionaryPath = fileList.toArray(new String[0]);
         customDictionary.path =
                 (Config.CustomDictionaryPath == null || Config.CustomDictionaryPath.length == 0)

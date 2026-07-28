@@ -20,6 +20,7 @@ import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryReposi
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.PageUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.response.ParseTimeCostResp;
 import lombok.extern.slf4j.Slf4j;
@@ -153,7 +154,8 @@ public class ChatQueryRepositoryImpl implements ChatQueryRepository {
         try {
             chatQueryDOMapper.insert(chatQueryDO);
         } catch (Exception e) {
-            log.info("database insert has an exception:{}", e.toString());
+            log.warn("Chat query insert failed: type={}, error=[{}]", e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
         }
         return chatQueryDO.getQuestionId();
     }

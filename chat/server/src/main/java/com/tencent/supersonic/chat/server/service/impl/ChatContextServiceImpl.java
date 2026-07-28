@@ -3,6 +3,7 @@ package com.tencent.supersonic.chat.server.service.impl;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatContextRepository;
 import com.tencent.supersonic.chat.server.pojo.ChatContext;
 import com.tencent.supersonic.chat.server.service.ChatContextService;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -23,7 +24,7 @@ public class ChatContextServiceImpl implements ChatContextService {
 
     @Override
     public void updateContext(ChatContext chatCtx) {
-        log.debug("save ChatContext {}", chatCtx);
+        log.debug("Save chat context=[{}]", SensitiveLogUtils.summarize(chatCtx));
         chatContextRepository.updateContext(chatCtx);
     }
 }

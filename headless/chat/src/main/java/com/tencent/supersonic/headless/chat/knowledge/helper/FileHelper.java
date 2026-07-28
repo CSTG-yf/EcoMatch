@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.knowledge.helper;
 
 import com.hankcs.hanlp.HanLP.Config;
 import com.hankcs.hanlp.dictionary.DynamicCustomDictionary;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
@@ -26,9 +27,12 @@ public class FileHelper {
         for (File file : customSubFiles) {
             try {
                 file.delete();
-                log.info("customPath:{},delete file:{}", customPath, file);
+                log.info("Delete dictionary cache: path=[{}], file=[{}]",
+                        SensitiveLogUtils.summarize(customPath), SensitiveLogUtils.summarize(file));
             } catch (Exception e) {
-                log.error("delete " + file, e);
+                log.error("Dictionary cache file deletion failed: file=[{}], type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(file), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
             }
         }
     }
@@ -72,7 +76,7 @@ public class FileHelper {
             }
         }
 
-        log.debug("CustomDictionaryPath:{}", fileList);
+        log.debug("Custom dictionary paths=[{}]", SensitiveLogUtils.summarize(fileList));
         Config.CustomDictionaryPath = fileList.toArray(new String[0]);
         customDictionary.path =
                 (Config.CustomDictionaryPath == null || Config.CustomDictionaryPath.length == 0)

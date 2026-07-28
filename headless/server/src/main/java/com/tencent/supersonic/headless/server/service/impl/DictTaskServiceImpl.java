@@ -85,7 +85,7 @@ public class DictTaskServiceImpl implements DictTaskService {
     private Long handleDictTaskByItemResp(DictItemResp dictItemResp, User user) {
         DictTaskDO dictTaskDO =
                 dictConverter.generateDictTaskDO(dictItemResp, user, TaskStatusEnum.PENDING);
-        log.info("[addDictTask] dictTaskDO:{}", dictTaskDO);
+        log.info("Dictionary task added: task=[{}]", SensitiveLogUtils.summarize(dictTaskDO));
         dictRepository.addDictTask(dictTaskDO);
         Long idInDb = dictTaskDO.getId();
         dictItemResp.setId(idInDb);
@@ -150,7 +150,7 @@ public class DictTaskServiceImpl implements DictTaskService {
         // Add a clear dictionary file record
         DictTaskDO dictTaskDO =
                 dictConverter.generateDictTaskDO(dictItemResp, user, TaskStatusEnum.INITIAL);
-        log.info("[addDictTask] dictTaskDO:{}", dictTaskDO);
+        log.info("Dictionary task added: task=[{}]", SensitiveLogUtils.summarize(dictTaskDO));
         dictRepository.addDictTask(dictTaskDO);
         return 0L;
     }

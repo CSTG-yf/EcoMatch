@@ -455,7 +455,9 @@ public class JsonUtil {
                     typeFactory.constructCollectionType(List.class, mapType);
             return getObjectMapper().readValue(json, collectionType);
         } catch (Exception e) {
-            log.error("json:{} to listMap error:", json, e);
+            log.error("JSON list-map deserialization failed: input=[{}], type={}, error=[{}]",
+                    SensitiveLogUtils.summarize(json), e.getClass().getSimpleName(),
+                    SensitiveLogUtils.summarize(e));
             return null;
         }
     }

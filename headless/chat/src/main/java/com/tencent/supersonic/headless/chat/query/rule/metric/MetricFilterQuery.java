@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.query.rule.metric;
 import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.FilterType;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.QueryMultiStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
@@ -68,7 +69,8 @@ public class MetricFilterQuery extends MetricSemanticQuery {
     private void addDimension(QueryStructReq queryStructReq, boolean onlyOperateInFilter) {
         if (!queryStructReq.getDimensionFilters().isEmpty()) {
             List<String> dimensions = queryStructReq.getGroups();
-            log.debug("addDimension before [{}]", queryStructReq.getGroups());
+            log.debug("Add dimension input=[{}]",
+                    SensitiveLogUtils.summarize(queryStructReq.getGroups()));
             List<Filter> filters = new ArrayList<>(queryStructReq.getDimensionFilters());
             if (onlyOperateInFilter) {
                 filters = filters.stream()
@@ -81,7 +83,8 @@ public class MetricFilterQuery extends MetricSemanticQuery {
                 }
             });
             queryStructReq.setGroups(dimensions);
-            log.debug("addDimension after [{}]", queryStructReq.getGroups());
+            log.debug("Add dimension output=[{}]",
+                    SensitiveLogUtils.summarize(queryStructReq.getGroups()));
         }
     }
 }

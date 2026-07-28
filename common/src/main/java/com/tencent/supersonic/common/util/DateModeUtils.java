@@ -54,7 +54,7 @@ public class DateModeUtils {
             return String.format("(%s >= '%s' and %s <= '%s')", dateInfo.getDateField(),
                     dateInfo.getStartDate(), dateInfo.getDateField(), dateInfo.getEndDate());
         } else {
-            log.info("dateDate:{}", dateDate);
+            log.info("Date range metadata=[{}]", SensitiveLogUtils.summarize(dateDate));
         }
         String dateFormatStr = dateDate.getDateFormat();
         if (StringUtils.isEmpty(dateFormatStr)) {
@@ -207,7 +207,8 @@ public class DateModeUtils {
             LocalDate end = LocalDate.parse(endDate, formatter);
             return start.until(end, chronoUnit) + 1;
         } catch (Exception e) {
-            log.warn("e:{}", e);
+            log.warn("Date interval calculation failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
         }
         return -1L;
     }

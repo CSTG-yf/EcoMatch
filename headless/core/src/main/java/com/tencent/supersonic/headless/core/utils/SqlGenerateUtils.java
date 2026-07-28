@@ -202,7 +202,7 @@ public class SqlGenerateUtils {
 
             return dateModeUtils.defaultRecentDateInfo(dateInfo);
         }
-        log.debug("dateDate:{}", dateDate);
+        log.debug("Date range metadata=[{}]", SensitiveLogUtils.summarize(dateDate));
         return dateModeUtils.getDateWhereStr(dateInfo, dateDate);
     }
 

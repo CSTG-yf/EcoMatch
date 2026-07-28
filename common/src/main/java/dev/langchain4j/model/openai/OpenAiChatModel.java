@@ -1,5 +1,6 @@
 package dev.langchain4j.model.openai;
 
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import dev.ai4j.openai4j.OpenAiClient;
 import dev.ai4j.openai4j.OpenAiHttpException;
 import dev.ai4j.openai4j.chat.ChatCompletionRequest;
@@ -211,7 +212,8 @@ public class OpenAiChatModel implements ChatLanguageModel, TokenCountEstimator {
             try {
                 listener.onRequest(requestContext);
             } catch (Exception e) {
-                log.warn("Exception while calling model listener", e);
+                log.warn("Model request listener failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
             }
         });
 
@@ -231,7 +233,8 @@ public class OpenAiChatModel implements ChatLanguageModel, TokenCountEstimator {
                 try {
                     listener.onResponse(responseContext);
                 } catch (Exception e) {
-                    log.warn("Exception while calling model listener", e);
+                    log.warn("Model response listener failed: type={}, error=[{}]",
+                            e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 }
             });
 
@@ -252,7 +255,8 @@ public class OpenAiChatModel implements ChatLanguageModel, TokenCountEstimator {
                 try {
                     listener.onError(errorContext);
                 } catch (Exception e2) {
-                    log.warn("Exception while calling model listener", e2);
+                    log.warn("Model error listener failed: type={}, error=[{}]",
+                            e2.getClass().getSimpleName(), SensitiveLogUtils.summarize(e2));
                 }
             });
 

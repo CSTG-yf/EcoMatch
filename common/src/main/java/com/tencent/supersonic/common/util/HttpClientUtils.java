@@ -22,7 +22,6 @@ import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.config.RegistryBuilder;
 import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.socket.PlainConnectionSocketFactory;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
@@ -35,7 +34,6 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.protocol.HttpContext;
-import org.apache.http.ssl.SSLContexts;
 import org.apache.http.util.CharsetUtils;
 import org.apache.http.util.EntityUtils;
 import org.springframework.util.CollectionUtils;
@@ -77,10 +75,7 @@ public class HttpClientUtils {
 
     private static void init() {
         try {
-            SSLConnectionSocketFactory sslConnectionSocketFactory = new SSLConnectionSocketFactory(
-                    SSLContexts.custom().loadTrustMaterial((chain, authType) -> true).build(),
-                    new String[] {"SSLv2Hello", "SSLv3", "TLSv1", "TLSv1.1", "TLSv1.2"}, null,
-                    NoopHostnameVerifier.INSTANCE);
+            SSLConnectionSocketFactory sslConnectionSocketFactory = createSslSocketFactory();
 
             PoolingHttpClientConnectionManager connManager = new PoolingHttpClientConnectionManager(
                     RegistryBuilder.<ConnectionSocketFactory>create()
@@ -107,13 +102,18 @@ public class HttpClientUtils {
                         }
                         if (exception instanceof NoHttpResponseException) {
                             // 如果服务器丢掉了连接，那么就重试
-                            log.warn("Retry, No response from server on  {}  error: {}",
-                                    executionCount, exception.getMessage());
+                            log.warn(
+                                    "HTTP retry after no response: attempt={}, type={}, error=[{}]",
+                                    executionCount, exception.getClass().getSimpleName(),
+                                    SensitiveLogUtils.summarize(exception));
                             return true;
                         } else if (exception instanceof SocketException) {
                             // 如果服务器断开了连接，那么就重试
-                            log.warn("Retry, No connection from server on {} error: {}",
-                                    executionCount, exception.getMessage());
+                            log.warn(
+                                    "HTTP retry after disconnected socket: attempt={}, type={}, "
+                                            + "error=[{}]",
+                                    executionCount, exception.getClass().getSimpleName(),
+                                    SensitiveLogUtils.summarize(exception));
                             return true;
                         }
                         return false;
@@ -141,9 +141,14 @@ public class HttpClientUtils {
                     // 关闭无效和空闲的连接
                     .evictIdleConnections(5L, TimeUnit.SECONDS).build();
         } catch (Exception e) {
-            log.error(e.getMessage(), e);
-            throw new RuntimeException(e);
+            log.error("HTTP client initialization failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw new IllegalStateException("HTTP client initialization failed");
         }
+    }
+
+    static SSLConnectionSocketFactory createSslSocketFactory() {
+        return SSLConnectionSocketFactory.getSystemSocketFactory();
     }
 
     /**
@@ -191,13 +196,19 @@ public class HttpClientUtils {
                 response = httpClient.execute(httpPost);
                 // 获取返回结果
                 HttpClientResult result = getHttpClientResult(response);
-                log.info("uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpPost) + "------params:" + params, result);
+                log.info("HTTP POST completed: uri=[{}], headers=[{}], params=[{}], response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpPost)),
+                        SensitiveLogUtils.summarize(params), SensitiveLogUtils.summarize(result));
                 return result;
             } catch (Exception e) {
-                log.error("uri:{}, req:{}", url, "headers:" + headers + "------params:" + params,
-                        e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP POST failed: uri=[{}], headers=[{}], params=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(params), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP POST failed");
             } finally {
                 close(httpPost, response);
             }
@@ -274,13 +285,19 @@ public class HttpClientUtils {
 
                 // 获取返回结果
                 HttpClientResult res = getHttpClientResult(response);
-                log.debug("GET uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpGet) + "------params:" + params, res);
+                log.debug("HTTP GET completed: uri=[{}], headers=[{}], params=[{}], response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpGet)),
+                        SensitiveLogUtils.summarize(params), SensitiveLogUtils.summarize(res));
                 return res;
             } catch (Exception e) {
-                log.error("GET error! uri:{}, req:{}", url,
-                        "headers:" + headers + "------params:" + params, e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP GET failed: uri=[{}], headers=[{}], params=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(params), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP GET failed");
             } finally {
                 close(httpGet, response);
             }
@@ -306,19 +323,22 @@ public class HttpClientUtils {
             try {
                 EntityUtils.consume(response.getEntity());
             } catch (Throwable ex) {
-                log.error("entity close error : ", ex);
+                log.error("HTTP response entity close failed: type={}, error=[{}]",
+                        ex.getClass().getSimpleName(), SensitiveLogUtils.summarize(ex));
             }
             try {
                 response.close();
             } catch (Throwable ex) {
-                log.error("response close error : ", ex);
+                log.error("HTTP response close failed: type={}, error=[{}]",
+                        ex.getClass().getSimpleName(), SensitiveLogUtils.summarize(ex));
             }
         }
         if (httpRequest != null) {
             try {
                 httpRequest.abort();
             } catch (Throwable ex) {
-                log.error("httpPost abort error : ", ex);
+                log.error("HTTP request abort failed: type={}, error=[{}]",
+                        ex.getClass().getSimpleName(), SensitiveLogUtils.summarize(ex));
             }
         }
     }
@@ -413,13 +433,21 @@ public class HttpClientUtils {
                 response = httpClient.execute(httpPost);
                 // 获取返回结果
                 HttpClientResult res = getHttpClientResult(response);
-                log.info("doPostJSON uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpPost) + "------req:" + req, res);
+                log.info(
+                        "HTTP POST JSON completed: uri=[{}], headers=[{}], request=[{}], "
+                                + "response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpPost)),
+                        SensitiveLogUtils.summarize(req), SensitiveLogUtils.summarize(res));
                 return res;
             } catch (Exception e) {
-                log.error("doPostJSON error! uri:{}, req:{}", url,
-                        "headers:" + headers + "------req:" + req, e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP POST JSON failed: uri=[{}], headers=[{}], request=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(req), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP POST JSON failed");
             } finally {
                 close(httpPost, response);
             }
@@ -458,14 +486,22 @@ public class HttpClientUtils {
                 // 获取返回结果
                 HttpClientResult res = getHttpClientResult(response);
 
-                log.info("doGetJSON uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpGet) + "------params:" + params, res);
+                log.info(
+                        "HTTP GET JSON completed: uri=[{}], headers=[{}], params=[{}], "
+                                + "response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpGet)),
+                        SensitiveLogUtils.summarize(params), SensitiveLogUtils.summarize(res));
 
                 return res;
             } catch (Exception e) {
-                log.warn("doGetJSON error! uri:{}, req:{}", url,
-                        "headers:" + headers + "------params:" + params, e);
-                throw new RuntimeException(e.getMessage());
+                log.warn(
+                        "HTTP GET JSON failed: uri=[{}], headers=[{}], params=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(params), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP GET JSON failed");
             } finally {
                 close(httpGet, response);
             }
@@ -525,13 +561,21 @@ public class HttpClientUtils {
                 response = httpClient.execute(httpPost);
                 // 执行请求并获得响应结果
                 HttpClientResult res = getHttpClientResult(response);
-                log.info("doFileUpload uri:{}, req:{}, resp:{}", url,
-                        "params:" + params + ", fullFilePath:" + fullFilePath, res);
+                log.info(
+                        "HTTP file upload completed: uri=[{}], params=[{}], file=[{}], "
+                                + "response=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(params),
+                        SensitiveLogUtils.summarize(fullFilePath),
+                        SensitiveLogUtils.summarize(res));
                 return res;
             } catch (Exception e) {
-                log.error("doFileUpload error! uri:{}, req:{}", url,
-                        "params:" + params + ", fullFilePath:" + fullFilePath, e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP file upload failed: uri=[{}], params=[{}], file=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(params),
+                        SensitiveLogUtils.summarize(fullFilePath), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP file upload failed");
             } finally {
                 try {
                     if (null != inputStream) {
@@ -540,7 +584,8 @@ public class HttpClientUtils {
                     // 释放资源
                     close(httpPost, response);
                 } catch (IOException e) {
-                    log.error("HttpClientUtils release error!", e);
+                    log.error("HTTP upload resource release failed: type={}, error=[{}]",
+                            e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 }
             }
         });
@@ -597,13 +642,21 @@ public class HttpClientUtils {
                 response = httpClient.execute(httpDelete);
 
                 HttpClientResult res = getHttpClientResult(response);
-                log.info("doDeleteJSON uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpDelete) + "------req:" + req, res);
+                log.info(
+                        "HTTP DELETE JSON completed: uri=[{}], headers=[{}], request=[{}], "
+                                + "response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpDelete)),
+                        SensitiveLogUtils.summarize(req), SensitiveLogUtils.summarize(res));
                 return res;
             } catch (Exception e) {
-                log.error("doDeleteJSON error! uri:{}, req:{}", url,
-                        "headers:" + headers + "------req:" + req, e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP DELETE JSON failed: uri=[{}], headers=[{}], request=[{}], "
+                                + "type={}, error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(req), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP DELETE JSON failed");
             } finally {
                 close(httpDelete, response);
             }
@@ -649,13 +702,21 @@ public class HttpClientUtils {
                 httpPut.setEntity(stringEntity);
                 response = httpClient.execute(httpPut);
                 HttpClientResult res = getHttpClientResult(response);
-                log.info("doPutJSON uri:{}, req:{}, resp:{}", url,
-                        "headers:" + getHeaders(httpPut) + "------req:" + req, res);
+                log.info(
+                        "HTTP PUT JSON completed: uri=[{}], headers=[{}], request=[{}], "
+                                + "response=[{}]",
+                        SensitiveLogUtils.summarize(url),
+                        SensitiveLogUtils.summarize(getHeaders(httpPut)),
+                        SensitiveLogUtils.summarize(req), SensitiveLogUtils.summarize(res));
                 return res;
             } catch (Exception e) {
-                log.error("doPutJSON error! uri:{}, req:{}", url,
-                        "headers:" + headers + "------req:" + req, e);
-                throw new RuntimeException(e.getMessage());
+                log.error(
+                        "HTTP PUT JSON failed: uri=[{}], headers=[{}], request=[{}], type={}, "
+                                + "error=[{}]",
+                        SensitiveLogUtils.summarize(url), SensitiveLogUtils.summarize(headers),
+                        SensitiveLogUtils.summarize(req), e.getClass().getSimpleName(),
+                        SensitiveLogUtils.summarize(e));
+                throw new RuntimeException("HTTP PUT JSON failed");
             } finally {
                 close(httpPut, response);
             }

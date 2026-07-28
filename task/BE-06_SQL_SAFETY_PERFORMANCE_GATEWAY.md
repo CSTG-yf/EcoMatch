@@ -89,7 +89,7 @@
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
 - `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 559 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 561 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
 
 ## 本地性能基线
 

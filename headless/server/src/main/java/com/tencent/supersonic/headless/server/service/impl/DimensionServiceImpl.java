@@ -17,6 +17,7 @@ import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DimValueMap;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.ModelDetail;
@@ -391,7 +392,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
             valueList.add(value);
         }
         String json = aliasGenerateHelper.generateDimensionValueAlias(JSON.toJSONString(valueList));
-        log.info("return llm res is :{}", json);
+        log.info("Dimension alias model response=[{}]", SensitiveLogUtils.summarize(json));
         String ret = aliasGenerateHelper.extractJsonStringFromAiMessage(json);
         JSONObject jsonObject = JSON.parseObject(ret);
         List<DimValueMap> dimValueMapsResp = new ArrayList<>();
