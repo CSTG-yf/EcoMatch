@@ -34,4 +34,10 @@ public class ExecutorConfig {
 
     @Value("${s2.accelerator.duckDb.threads:32}")
     private Integer threads;
+
+    @Value("${s2.source.query-timeout-seconds:30}")
+    private Integer queryTimeoutSeconds;
+
+    @Value("${s2.source.result-limit:1000000}")
+    private Integer resultLimit;
 }

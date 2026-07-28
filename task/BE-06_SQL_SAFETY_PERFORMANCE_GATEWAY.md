@@ -35,6 +35,8 @@
 - JDBC 层统一设置查询超时、最大结果行数和 Fetch Size；超时由驱动取消执行。
 - JDBC 结果迭代增加应用层行数上限，即使目标驱动忽略 `setMaxRows` 也会在超限时 fail-closed；查询加速器和其他执行实现返回的结果同样在网关执行闭包内二次校验。
 - 结果集迭代期间的驱动异常和读取超时不再被吞掉；异常向网关传播并计入失败，禁止以成功状态返回不完整数据。
+- DuckDB 加速辅助查询复用 JDBC 查询超时、Fetch Size 和 `limit + 1` 溢出探针，结果读取异常与超限行统一 fail-closed；启用时对连接池、内存、线程、超时、结果上限和临时目录配置执行启动期校验。
+- DuckDB MySQL 挂载、Parquet 元数据、分区、Schema 和视图辅助工具对连接值、SQL 字面量及标识符执行结构化校验；视图定义必须由 JSqlParser 解析为单条 `SELECT`，阻断路径、配置或标识符拼接额外语句。
 - 策略拒绝保留可操作的安全原因，其他 JDBC/驱动异常统一返回通用查询失败信息，避免把物理 SQL、库表结构或连接细节暴露给调用方。
 - JDBC、查询加速器和数据库管理 SQL 均在实际执行前进入统一网关，避免加速器命中或管理接口绕过只读策略、限流和性能监控。
 - 数据库管理 SQL 的非策略异常统一转换为通用查询失败信息，日志仅保留异常类型和不可逆摘要；策略拒绝原因仍原样保留。
@@ -78,6 +80,7 @@
 - `SemanticQueryRequestSecurityTest`：校验外部 JSON 不能关闭鉴权或开启原生层模式，可信服务端代码仍可显式设置内部模式。
 - `SqlQueryApiControllerSecurityTest`：校验批量数量、空语句、普通批量及严格批量失败均 fail-closed，并仅返回通用错误。
 - `SqlUtilsResultReadTest`：校验结果集读取异常向上抛出，不返回静默截断的部分结果；目标驱动忽略最大行数时仍由应用层拒绝超限结果；禁止通过零值或负值配置取消超时、结果和成本边界。
+- `DuckDbSourceSecurityTest`、`JdbcDuckDbUtilsSecurityTest`：校验 DuckDB 驱动异常传播、应用层行数兜底、JDBC 超时与溢出探针下发、非法配置 fail-fast，以及连接值、路径、标识符和多语句视图注入防护。
 - `ExplainCostPolicyTest`：结构化、嵌套 JSON、文本执行计划、数字字符串、超阈值拒绝、异常估算值拒绝及缺失估算 fail-closed。
 - `QueryExecutionGatewayTest`：并发许可耗尽时快速拒绝，非法并发/等待/SQL 长度配置 fail-fast，并校验接收和拒绝计数。
 - `QueryExecutionGatewayTest`：校验策略拒绝、执行失败、活动查询和平均耗时快照。
@@ -89,7 +92,7 @@
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
 - `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 561 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 568 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
 
 ## 本地性能基线
 
