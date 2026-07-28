@@ -127,7 +127,35 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
   --output .local-dev/bank-nl2sql/supersonic-final-report.json
 ```
 
-报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、阶段耗时、标准错误类别、S2SQL 与物理 SQL 摘要；不会写出实际查询行或金标答案。
+报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、标准错误类别、S2SQL 与物理 SQL 摘要；解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出实际查询行或金标答案。
+
+## QA-03 语义缓存验收
+
+`run_qa03_cache_eval.py` 在已部署实例上验证真实语义查询缓存。运行器给模板 SQL 增加一次性注释形成全新缓存键，要求首请求明确返回 `useCache=false`，等待异步缓存写入后要求连续热请求全部返回 `useCache=true`，并通过超级管理员网关监控接口复核命中、未命中、物理执行和阶段计数增量。
+
+查询模板只保存在本地，例如 `.local-dev/bank-nl2sql/qa03-cache-query.json`：
+
+```json
+{
+  "sql": "SELECT branch_id, SUM(balance) FROM bank_account WHERE biz_date = '2026-07-28' GROUP BY branch_id",
+  "modelIds": [1]
+}
+```
+
+Token 只通过环境变量传入，HTTP 客户端拒绝重定向，避免管理员凭据被转发到非预期地址；输出报告不包含服务 URL、Token、Cookie、SQL、查询响应或结果行：
+
+```powershell
+$env:QA03_AUTH_TOKEN='<超级管理员令牌>'
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_qa03_cache_eval.py `
+  --base-url http://127.0.0.1:9080 `
+  --query-template .local-dev/bank-nl2sql/qa03-cache-query.json `
+  --scenario aggregate-cache `
+  --warm-samples 200 `
+  --output .local-dev/bank-nl2sql/qa03-cache-report.json
+```
+
+模板账号必须是目标环境提供的只读压测账号；运行器会移除模板中的 `needAuth` 和 `innerLayerNative`，不能通过验收工具关闭鉴权或选择内部执行模式。
 
 ## 页面问答诊断（手工备用）
 

@@ -1,5 +1,9 @@
 package com.tencent.supersonic.headless.server.utils;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.tencent.supersonic.common.pojo.Aggregator;
 import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.User;
@@ -15,6 +19,7 @@ import com.tencent.supersonic.headless.server.persistence.repository.StatReposit
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -28,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class StatUtilsSecurityTest {
 
@@ -108,5 +114,42 @@ class StatUtilsSecurityTest {
         assertNull(captured.get().getQuerySqlCmd());
         assertNull(captured.get().getQueryStructCmd());
         assertNull(captured.get().getSql());
+    }
+
+    @Test
+    void asynchronousPersistenceFailureDoesNotLogSensitiveExceptionOrStackTrace() throws Exception {
+        QuerySqlReq request = new QuerySqlReq();
+        request.setSql("SELECT revenue FROM ds_1");
+        statUtils.initSqlStatInfo(request, User.get(7L, "alice"));
+        String secret = "account_no=6222000099998888";
+        when(statRepository.createRecord(any(QueryStat.class)))
+                .thenThrow(new IllegalStateException("persistence failure contains " + secret));
+
+        CountDownLatch logged = new CountDownLatch(1);
+        Logger logger = (Logger) LoggerFactory.getLogger(StatUtils.class);
+        logger.setLevel(Level.WARN);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>() {
+            @Override
+            protected void append(ILoggingEvent event) {
+                super.append(event);
+                logged.countDown();
+            }
+        };
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            statUtils.statInfo2DbAsync(TaskStatusEnum.SUCCESS);
+
+            assertTrue(logged.await(3, TimeUnit.SECONDS));
+            String message = appender.list.get(0).getFormattedMessage();
+            assertFalse(message.contains(secret));
+            assertFalse(message.contains("persistence failure contains"));
+            assertTrue(message.contains("type=CompletionException"));
+            assertTrue(message.contains("error=[sha256="));
+            assertNull(appender.list.get(0).getThrowableProxy());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 }

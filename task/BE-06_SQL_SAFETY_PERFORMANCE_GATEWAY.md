@@ -43,6 +43,7 @@
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度、鉴权开关和内部原生执行模式，避免权限结果跨用户或跨安全模式复用。
 - 结果缓存写入和读取均使用响应快照，隔离结果行、列定义、授权信息和脱敏元数据，防止调用方修改共享缓存对象。
 - 提供显式启用的 `QueryGatewayTargetDatabaseIT` 目标数据库验收工具，通过环境变量读取连接和测试 SQL，自动执行预热、平均/P50/P95/P99 采样、至少 5 分钟并发稳定性、JDBC 超时取消、取消后健康检查和数据库端残留语句探针；按场景输出不包含 JDBC URL、凭据或 SQL 的 JSON 报告，并记录客户端 JVM 资源峰值。
+- DATA-02 真实接口评测器增加解析、执行、解释和端到端成功链路的平均/P50/P95/P99/最大耗时分布；新增语义缓存 QA-03 运行器，使用一次性缓存键验证冷请求、异步物化和连续热命中，并用超级管理员监控快照复核缓存、物理执行和阶段计数增量。
 
 ## 配置
 
@@ -86,7 +87,8 @@
 - `QueryGatewayH2IntegrationTest`：基于真实 H2 JDBC 执行验证安全策略、`EXPLAIN`、结果行数限制和并发稳定性。
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 552 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 554 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
 
 ## 本地性能基线
 

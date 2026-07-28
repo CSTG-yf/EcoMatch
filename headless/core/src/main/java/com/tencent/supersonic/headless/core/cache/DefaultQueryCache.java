@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.QueryAuthorization;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
@@ -63,7 +64,9 @@ public class DefaultQueryCache implements QueryCache {
                             () -> hotMetricQuery ? cacheManager.putHotMetric(cacheKey, snapshot)
                                     : cacheManager.put(cacheKey, snapshot))
                     .exceptionally(exception -> {
-                        log.warn("exception:", exception);
+                        log.warn("Cache write failed: type={}, error=[{}]",
+                                exception.getClass().getSimpleName(),
+                                SensitiveLogUtils.summarize(exception));
                         return null;
                     });
             log.debug("put to cache, key: {}", cacheKey);

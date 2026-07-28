@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run  # noqa: E402
 from run_supersonic_eval import (  # noqa: E402
     SuperSonicEvaluationError,
+    _latency_distribution,
     _load_resumable_items,
     run_supersonic_evaluation,
 )
@@ -53,6 +54,21 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
 
 
 class RunSuperSonicEvalTest(unittest.TestCase):
+    def test_reports_nearest_rank_latency_percentiles(self) -> None:
+        self.assertEqual(
+            _latency_distribution([1, 2, 3, 4, 100, None]),
+            {
+                "count": 5,
+                "average": 22.0,
+                "p50": 3.0,
+                "p95": 100.0,
+                "p99": 100.0,
+                "max": 100.0,
+            },
+        )
+        self.assertEqual(_latency_distribution([])["count"], 0)
+        self.assertIsNone(_latency_distribution([])["p95"])
+
     def test_runs_the_frontend_conversation_chain_without_sending_gold_fields(self) -> None:
         requests: list[tuple[str, dict]] = []
 
@@ -159,6 +175,11 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
+        self.assertGreaterEqual(report["items"][0]["endToEndMs"], 0)
+        self.assertEqual(
+            report["timingDistributionsMs"]["successfulEndToEnd"]["count"],
+            1,
+        )
         self.assertTrue(report["items"][0]["conversationCleaned"])
         self.assertNotIn("rows", report["items"][0])
 

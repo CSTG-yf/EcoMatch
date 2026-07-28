@@ -118,4 +118,30 @@ mvn -pl headless/server -am `
   test
 ```
 
-简单查询、复杂查询和跨库查询分别设置不同 `QA03_SCENARIO` 运行并留存报告。缓存命中与未命中需通过已部署应用的语义查询接口执行，数据库服务端 CPU、内存、连接数和慢查询由目标环境监控同步留证；本工具记录客户端 JVM 堆内存、线程峰值和进程 CPU 使用率，不能替代数据库端监控。
+简单查询、复杂查询和跨库查询分别设置不同 `QA03_SCENARIO` 运行并留存报告。数据库服务端 CPU、内存、连接数和慢查询由目标环境监控同步留证；本工具记录客户端 JVM 堆内存、线程峰值和进程 CPU 使用率，不能替代数据库端监控。
+
+## QA-03 应用端验收工具
+
+完整 NL2SQL 链路使用 `run_supersonic_eval.py`。报告对解析、执行、解释以及解析开始至解释完成的端到端耗时输出平均值、P50、P95、P99 和最大值，并单列执行及解释均成功的样本，避免失败请求稀释成功链路性能结论。执行方法见 `evaluation/bank_nl2sql/README.md`。
+
+语义缓存使用 `run_qa03_cache_eval.py`。运行器：
+
+1. 从本地 JSON 读取一条代表性只读 `QuerySqlReq`。
+2. 移除外部请求不得控制的 `needAuth` 和 `innerLayerNative`。
+3. 增加一次性 SQL 注释生成未使用过的缓存键，首请求必须返回 `useCache=false`。
+4. 等待异步写入完成，随后所有采样必须返回 `useCache=true`。
+5. 对比运行前后的超级管理员网关快照，至少记录一次未命中和全部已验证命中。
+6. 输出冷请求耗时、热请求平均/P50/P95/P99/最大耗时，以及缓存、物理网关和五阶段计数增量。
+
+```powershell
+$env:QA03_AUTH_TOKEN='<超级管理员令牌>'
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_qa03_cache_eval.py `
+  --base-url http://127.0.0.1:9080 `
+  --query-template .local-dev/bank-nl2sql/qa03-cache-query.json `
+  --scenario aggregate-cache `
+  --warm-samples 200 `
+  --output .local-dev/bank-nl2sql/qa03-cache-report.json
+```
+
+认证令牌只允许通过环境变量传入，HTTP 重定向统一拒绝，避免管理员凭据被转发到非预期地址。报告不保存服务 URL、Token、Cookie、模板 SQL、查询响应或结果数据。缓存运行器验证应用语义缓存，`QueryGatewayTargetDatabaseIT` 验证目标 JDBC 和物理执行；两类报告均通过后才能关闭对应 QA-03 验收项。

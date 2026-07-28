@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -55,6 +56,32 @@ def _unwrap_api_response(response: Any) -> dict[str, Any]:
 
 def _rate(numerator: int, denominator: int) -> float:
     return round(numerator / denominator, 6) if denominator else 0.0
+
+
+def _latency_distribution(values: Iterable[float | int | None]) -> dict[str, float | int | None]:
+    samples = sorted(float(value) for value in values if value is not None)
+    if not samples:
+        return {
+            "count": 0,
+            "average": None,
+            "p50": None,
+            "p95": None,
+            "p99": None,
+            "max": None,
+        }
+
+    def percentile(fraction: float) -> float:
+        index = max(0, min(len(samples) - 1, math.ceil(fraction * len(samples)) - 1))
+        return round(samples[index], 3)
+
+    return {
+        "count": len(samples),
+        "average": round(sum(samples) / len(samples), 3),
+        "p50": percentile(0.50),
+        "p95": percentile(0.95),
+        "p99": percentile(0.99),
+        "max": round(samples[-1], 3),
+    }
 
 
 def _safe_column_names(execute_response: dict[str, Any]) -> list[str]:
@@ -184,6 +211,7 @@ def _evaluate_record(
         "parseMs": None,
         "executeMs": None,
         "summaryMs": None,
+        "endToEndMs": None,
         "summaryState": None,
         "textSummary": None,
         "errorCategory": None,
@@ -207,6 +235,12 @@ def _evaluate_record(
         item["errorType"] = type(error).__name__
         return item
 
+    query_started = time.perf_counter()
+
+    def finish_query_timing() -> dict[str, Any]:
+        item["endToEndMs"] = round((time.perf_counter() - query_started) * 1000, 3)
+        return item
+
     parse_payload = {
         "queryText": question,
         "agentId": agent_id,
@@ -228,7 +262,7 @@ def _evaluate_record(
     except Exception as error:
         item["errorCategory"] = "PARSE_ERROR"
         item["errorType"] = type(error).__name__
-        return item
+        return finish_query_timing()
 
     execute_payload = {
         "queryId": query_id,
@@ -264,7 +298,7 @@ def _evaluate_record(
     except Exception as error:
         item["errorCategory"] = "EXECUTION_ERROR"
         item["errorType"] = type(error).__name__
-        return item
+        return finish_query_timing()
 
     try:
         summary_state, text_summary, summary_ms = _poll_execute_summary(
@@ -281,6 +315,7 @@ def _evaluate_record(
         item["summaryState"] = "ERROR"
         item["summaryErrorType"] = type(error).__name__
 
+    finish_query_timing()
     if cleanup_conversations and item["match"]:
         try:
             cleaned = _unwrap_api_value(
@@ -299,6 +334,16 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     parse_latencies = [item["parseMs"] for item in items if item["parseMs"] is not None]
     execute_latencies = [item["executeMs"] for item in items if item["executeMs"] is not None]
     summary_latencies = [item["summaryMs"] for item in items if item["summaryMs"] is not None]
+    end_to_end_latencies = [
+        item["endToEndMs"] for item in items if item.get("endToEndMs") is not None
+    ]
+    successful_end_to_end_latencies = [
+        item["endToEndMs"]
+        for item in items
+        if item.get("endToEndMs") is not None
+        and item.get("execute") is True
+        and item.get("summaryState") == "SUCCESS"
+    ]
     count = len(items)
     parsed = sum(int(item["parse"]) for item in items)
     executed = sum(int(item["execute"]) for item in items)
@@ -316,6 +361,15 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
             "averageSummaryMs": round(sum(summary_latencies) / len(summary_latencies), 3)
             if summary_latencies
             else None,
+        },
+        "timingDistributionsMs": {
+            "parse": _latency_distribution(parse_latencies),
+            "execute": _latency_distribution(execute_latencies),
+            "summary": _latency_distribution(summary_latencies),
+            "endToEnd": _latency_distribution(end_to_end_latencies),
+            "successfulEndToEnd": _latency_distribution(
+                successful_end_to_end_latencies
+            ),
         },
         "byDifficulty": _record_group_metrics(items, "difficulty"),
         "bySqlFeature": _record_group_metrics(items, "sqlFeatures"),

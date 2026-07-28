@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
+import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.SqlFilterUtils;
 import com.tencent.supersonic.common.util.TraceIdUtil;
 import com.tencent.supersonic.headless.api.pojo.QueryStat;
@@ -74,7 +75,8 @@ public class StatUtils {
         CompletableFuture.runAsync(() -> {
             statRepository.createRecord(queryStatInfo);
         }).exceptionally(exception -> {
-            log.warn("queryStatInfo, exception:", exception);
+            log.warn("Query statistics persistence failed: type={}, error=[{}]",
+                    exception.getClass().getSimpleName(), SensitiveLogUtils.summarize(exception));
             return null;
         });
 
@@ -132,7 +134,7 @@ public class StatUtils {
                 queryStatInfo.setModelId(queryTagReq.getModelIds().get(0));
             }
         } catch (JsonProcessingException e) {
-            log.error("", e);
+            logSerializationFailure("tag", e);
         }
         StatUtils.set(queryStatInfo);
     }
@@ -159,7 +161,7 @@ public class StatUtils {
                 queryStatInfo.setModelId(querySqlReq.getModelIds().get(0));
             }
         } catch (JsonProcessingException e) {
-            log.error("initStatInfo:{}", e);
+            logSerializationFailure("sql", e);
         }
         StatUtils.set(queryStatInfo);
     }
@@ -193,7 +195,7 @@ public class StatUtils {
                 queryStatInfo.setModelId(queryStructReq.getModelIds().get(0));
             }
         } catch (JsonProcessingException e) {
-            log.error("", e);
+            logSerializationFailure("structured", e);
         }
         StatUtils.set(queryStatInfo);
     }
@@ -222,6 +224,12 @@ public class StatUtils {
 
     private String digest(String value) {
         return StringUtils.isBlank(value) ? null : DigestUtils.sha256Hex(value);
+    }
+
+    private void logSerializationFailure(String queryType, JsonProcessingException exception) {
+        log.warn("Query statistics serialization failed: queryType={}, type={}, error=[{}]",
+                queryType, exception.getClass().getSimpleName(),
+                SensitiveLogUtils.summarize(exception));
     }
 
     /**

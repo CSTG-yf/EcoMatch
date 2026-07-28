@@ -45,6 +45,7 @@
 - 需要鉴权的查询无法确定模型范围时直接拒绝，避免空模型集合触发管理员判断旁路。
 - SQL 与结构化查询共用行权限表达式校验，拦截多语句、注释、子查询和 DML/DDL 关键字；表达式解析失败时 fail-closed，不执行未过滤查询。
 - 缓存写入和命中日志只记录键与命中状态，不输出查询请求或结果对象；用户、角色和属性作用域经 SHA-256 后进入缓存键，避免身份属性和敏感结果进入日志。
+- 异步缓存写入及查询统计持久化失败只记录异常类型和不可逆摘要，不再把异步包装异常、SQL 条件或客户数据通过异常消息和堆栈写入日志；查询统计序列化失败采用同一规则。
 - SQL、自然语言问题、语义解析上下文、行权限表达式、授权请求、WebService 结果及所有模型提示词/响应在日志中统一记录 SHA-256 指纹与长度，不记录客户条件、过滤值、生成 SQL 或结果明文；指纹保留跨阶段关联排障能力。
 - Dify 请求头、API Key、提示词和用户标识，以及 NL2SQL 候选、语义纠错、查询规则和指标替换信息均只记录不可逆摘要，不记录原始对象或异常堆栈。
 - WebService 插件使用结构化 URI 参数编码，响应和异常只记录不可逆摘要，不再输出远端响应正文或异常消息。
@@ -73,7 +74,7 @@
 - `DataMaskingServiceTest`：SQL 别名、物理源字段和结果键大小写不一致仍按源字段规则脱敏，并覆盖同一结果行多个大小写变体全部脱敏。
 - `DataMaskingServiceTest`：未知字段血缘和未声明结果键在敏感模型中按全量掩码处理，并覆盖敏感字段及未声明结果键为空时仍保留脱敏元数据。
 - `DataMaskingIdempotenceTest`：连续脱敏两次后值保持稳定，且缓存响应已有脱敏字段元数据不会丢失。
-- `DefaultQueryCacheTest`：验证鉴权模式缓存隔离，以及结果行、授权信息和脱敏元数据在缓存写入、读取之间互不污染。
+- `DefaultQueryCacheTest`：验证鉴权模式缓存隔离，结果行、授权信息和脱敏元数据在缓存写入、读取之间互不污染，并覆盖异步缓存失败日志不包含异常明文或堆栈。
 - `S2DataPermissionMaskingTest`：验证 `needAuth=false` 和模型管理员路径均不能绕过动态脱敏，并覆盖 Schema 缺失、空模型范围、行权限注入拒绝、同名敏感字段跨模型授权隔离，以及模型内 OR、模型间 AND 的行权限组合。
 - `ChatObjectAccessPolicyTest`：查询及会话的所有者、超级管理员和越权访问。
 - `ChatManageServiceAccessTest`：跨用户历史读取在进入查询仓储前拒绝，结果保存只使用持久化绑定的会话和原始问题。
@@ -90,6 +91,7 @@
 - `DatabaseServicePermissionTest`：校验数据源连接管理权限和 VIEWER 密码脱敏。
 - `SensitiveLogUtilsTest`：校验日志摘要稳定可关联，且不包含 SQL、证件号等原始内容。
 - `SensitiveLoggingTest`、`SensitiveQueryLoggingTest`：校验 Dify 凭证/提示词、JDBC URL、问题文本、过滤值、候选 SQL、语义纠错和查询规则不进入日志明文。
+- `StatUtilsSecurityTest`：校验查询统计仅持久化 SQL/请求摘要、过滤字段名，并覆盖异步持久化失败日志不包含客户条件或异常堆栈。
 - `RestExceptionHandlerTest`：校验未知异常消息不回显，参数错误仍保留受控的可操作提示。
 - `BusinessInsightProcessorTest`：验证脱敏字段不进入数值证据或图表字段，并降级为低置信度表格。
 - `DataInterpretProcessorTest`：验证可选大模型解读的问题来源、输入/输出长度、流式并发容量、TTL、重复任务和防御性缓存快照。
