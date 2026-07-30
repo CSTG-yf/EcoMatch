@@ -1,22 +1,22 @@
 {
   "command": {
-    "durationMs": 110690,
+    "durationMs": 107003,
     "exitCode": 0
   },
   "controls": [
     {
-      "caseCount": 53,
+      "caseCount": 57,
       "description": "Authentication, administration and semantic object APIs reject anonymous or unauthorized callers.",
       "id": "identity-and-vertical-access",
       "status": "PASS",
-      "testCount": 13
+      "testCount": 15
     },
     {
-      "caseCount": 24,
+      "caseCount": 36,
       "description": "Users cannot read another user's chat, query, agent, memory, plugin or configuration data.",
       "id": "horizontal-object-access",
       "status": "PASS",
-      "testCount": 7
+      "testCount": 8
     },
     {
       "caseCount": 23,
@@ -55,23 +55,23 @@
     }
   ],
   "failures": [],
-  "generatedAt": "2026-07-30T15:02:36.658432+00:00",
+  "generatedAt": "2026-07-30T15:49:06.398656+00:00",
   "schemaVersion": "1.0",
   "status": "PASS",
   "summary": {
-    "caseCount": 148,
+    "caseCount": 164,
     "controlCount": 7,
     "failureCount": 0,
     "passedControlCount": 7,
-    "passedTestClassCount": 29,
-    "testClassCount": 29
+    "passedTestClassCount": 32,
+    "testClassCount": 32
   },
   "task": "QA-02A",
   "tests": [
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.auth.authentication.rest.UserControllerTokenAccessTest",
-      "durationMs": 179,
+      "durationMs": 201,
       "failed": 0,
       "id": "user-token-access",
       "module": "auth/authentication",
@@ -82,7 +82,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.auth.authorization.rest.AuthControllerAccessTest",
-      "durationMs": 143,
+      "durationMs": 227,
       "failed": 0,
       "id": "authorization-api-access",
       "module": "auth/authorization",
@@ -93,7 +93,7 @@
     {
       "caseCount": 9,
       "className": "com.tencent.supersonic.auth.authorization.service.AuthServiceImplValidationTest",
-      "durationMs": 701,
+      "durationMs": 428,
       "failed": 0,
       "id": "authorization-policy-validation",
       "module": "auth/authorization",
@@ -104,7 +104,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.common.rest.SystemConfigControllerAccessTest",
-      "durationMs": 293,
+      "durationMs": 107,
       "failed": 0,
       "id": "system-config-controller-access",
       "module": "common",
@@ -115,7 +115,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.auth.authorization.service.SystemConfigAccessGuardImplTest",
-      "durationMs": 12,
+      "durationMs": 7,
       "failed": 0,
       "id": "system-config-admin-guard",
       "module": "auth/authorization",
@@ -126,7 +126,7 @@
     {
       "caseCount": 1,
       "className": "com.tencent.supersonic.headless.server.rest.EvaluationReportControllerTest",
-      "durationMs": 107,
+      "durationMs": 186,
       "failed": 0,
       "id": "evaluation-report-access",
       "module": "headless/server",
@@ -135,9 +135,42 @@
       "status": "PASS"
     },
     {
+      "caseCount": 1,
+      "className": "com.tencent.supersonic.headless.server.rest.DashboardControllerTest",
+      "durationMs": 66,
+      "failed": 0,
+      "id": "dashboard-controller-identity",
+      "module": "headless/server",
+      "passed": 1,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 12,
+      "className": "com.tencent.supersonic.headless.server.service.DashboardServiceTest",
+      "durationMs": 293,
+      "failed": 0,
+      "id": "dashboard-object-access",
+      "module": "headless/server",
+      "passed": 12,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.headless.server.service.CanvasServiceAccessTest",
+      "durationMs": 31,
+      "failed": 0,
+      "id": "legacy-canvas-access",
+      "module": "headless/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.service.DataSetServiceAccessTest",
-      "durationMs": 133,
+      "durationMs": 102,
       "failed": 0,
       "id": "dataset-access",
       "module": "headless/server",
@@ -148,7 +181,7 @@
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.headless.server.service.DatabaseServicePermissionTest",
-      "durationMs": 608,
+      "durationMs": 626,
       "failed": 0,
       "id": "database-access",
       "module": "headless/server",
@@ -159,7 +192,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.service.ModelServiceAccessBoundaryTest",
-      "durationMs": 985,
+      "durationMs": 335,
       "failed": 0,
       "id": "model-access",
       "module": "headless/server",
@@ -170,7 +203,7 @@
     {
       "caseCount": 4,
       "className": "com.tencent.supersonic.headless.server.service.SemanticItemMutationAccessTest",
-      "durationMs": 207,
+      "durationMs": 181,
       "failed": 0,
       "id": "semantic-mutation-access",
       "module": "headless/server",
@@ -181,7 +214,7 @@
     {
       "caseCount": 5,
       "className": "com.tencent.supersonic.headless.server.service.TagMetaServiceAccessTest",
-      "durationMs": 23,
+      "durationMs": 14,
       "failed": 0,
       "id": "tag-access",
       "module": "headless/server",
@@ -192,7 +225,7 @@
     {
       "caseCount": 5,
       "className": "com.tencent.supersonic.headless.server.service.TermServiceAccessTest",
-      "durationMs": 53,
+      "durationMs": 37,
       "failed": 0,
       "id": "term-access",
       "module": "headless/server",
@@ -203,7 +236,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicyTest",
-      "durationMs": 9,
+      "durationMs": 8,
       "failed": 0,
       "id": "chat-object-policy",
       "module": "chat/server",
@@ -214,7 +247,7 @@
     {
       "caseCount": 5,
       "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest",
-      "durationMs": 137,
+      "durationMs": 157,
       "failed": 0,
       "id": "chat-history-access",
       "module": "chat/server",
@@ -225,7 +258,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.chat.server.service.impl.ChatQueryServiceAccessTest",
-      "durationMs": 86,
+      "durationMs": 88,
       "failed": 0,
       "id": "chat-query-access",
       "module": "chat/server",
@@ -236,7 +269,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.service.impl.AgentServiceAccessTest",
-      "durationMs": 561,
+      "durationMs": 559,
       "failed": 0,
       "id": "agent-access",
       "module": "chat/server",
@@ -247,7 +280,7 @@
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.chat.server.service.impl.ConfigServiceAccessTest",
-      "durationMs": 36,
+      "durationMs": 44,
       "failed": 0,
       "id": "config-access",
       "module": "chat/server",
@@ -258,7 +291,7 @@
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.chat.server.service.impl.MemoryServiceAccessTest",
-      "durationMs": 186,
+      "durationMs": 235,
       "failed": 0,
       "id": "memory-access",
       "module": "chat/server",
@@ -269,7 +302,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.service.impl.PluginServiceAccessTest",
-      "durationMs": 176,
+      "durationMs": 167,
       "failed": 0,
       "id": "plugin-access",
       "module": "chat/server",
@@ -280,7 +313,7 @@
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.common.service.impl.ChatModelServiceAccessTest",
-      "durationMs": 398,
+      "durationMs": 316,
       "failed": 0,
       "id": "chat-model-access",
       "module": "common",
@@ -291,7 +324,7 @@
     {
       "caseCount": 14,
       "className": "com.tencent.supersonic.headless.server.aspect.S2DataPermissionMaskingTest",
-      "durationMs": 510,
+      "durationMs": 486,
       "failed": 0,
       "id": "row-column-permission",
       "module": "headless/server",
@@ -302,7 +335,7 @@
     {
       "caseCount": 14,
       "className": "com.tencent.supersonic.headless.server.security.DataMaskingServiceTest",
-      "durationMs": 79,
+      "durationMs": 151,
       "failed": 0,
       "id": "dynamic-masking",
       "module": "headless/server",
@@ -313,7 +346,7 @@
     {
       "caseCount": 1,
       "className": "com.tencent.supersonic.headless.server.security.DataMaskingIdempotenceTest",
-      "durationMs": 19,
+      "durationMs": 24,
       "failed": 0,
       "id": "masking-idempotence",
       "module": "headless/server",
@@ -324,7 +357,7 @@
     {
       "caseCount": 6,
       "className": "com.tencent.supersonic.headless.core.cache.DefaultQueryCacheTest",
-      "durationMs": 6497,
+      "durationMs": 5591,
       "failed": 0,
       "id": "secure-query-cache",
       "module": "headless/core",
@@ -335,7 +368,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.rest.BusinessInsightControllerSecurityTest",
-      "durationMs": 5415,
+      "durationMs": 5029,
       "failed": 0,
       "id": "insight-controller-access",
       "module": "chat/server",
@@ -346,7 +379,7 @@
     {
       "caseCount": 19,
       "className": "com.tencent.supersonic.chat.server.service.BusinessInsightServiceTest",
-      "durationMs": 125,
+      "durationMs": 118,
       "failed": 0,
       "id": "masked-insight",
       "module": "chat/server",
@@ -357,7 +390,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.processor.execute.BankResultProjectionHandlerTest",
-      "durationMs": 816,
+      "durationMs": 791,
       "failed": 0,
       "id": "result-projection",
       "module": "chat/server",
@@ -368,7 +401,7 @@
     {
       "caseCount": 6,
       "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest",
-      "durationMs": 2603,
+      "durationMs": 1628,
       "failed": 0,
       "id": "sensitive-common-logging",
       "module": "common",
@@ -379,7 +412,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest",
-      "durationMs": 1915,
+      "durationMs": 1823,
       "failed": 0,
       "id": "sensitive-query-logging",
       "module": "headless/server",

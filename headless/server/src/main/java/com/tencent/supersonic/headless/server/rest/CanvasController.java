@@ -34,13 +34,17 @@ public class CanvasController {
     }
 
     @GetMapping("/getViewInfoList/{domainId}")
-    public List<CanvasDO> getCanvasList(@PathVariable("domainId") Long domainId) {
-        return canvasService.getCanvasList(domainId);
+    public List<CanvasDO> getCanvasList(@PathVariable("domainId") Long domainId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return canvasService.getCanvasList(domainId, user);
     }
 
     @DeleteMapping("/deleteViewInfo/{id}")
-    public void deleteCanvas(@PathVariable("id") Long id) {
-        canvasService.deleteCanvas(id);
+    public void deleteCanvas(@PathVariable("id") Long id, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        canvasService.deleteCanvas(id, user);
     }
 
     @GetMapping("/getDomainSchemaRela/{domainId}")

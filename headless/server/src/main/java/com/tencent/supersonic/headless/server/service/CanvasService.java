@@ -9,11 +9,11 @@ import java.util.List;
 
 public interface CanvasService {
 
-    List<CanvasDO> getCanvasList(Long domainId);
+    List<CanvasDO> getCanvasList(Long domainId, User user);
 
     List<CanvasSchemaResp> getCanvasSchema(Long domainId, User user);
 
     CanvasDO createOrUpdateCanvas(CanvasReq canvasReq, User user);
 
-    void deleteCanvas(Long id);
+    void deleteCanvas(Long id, User user);
 }

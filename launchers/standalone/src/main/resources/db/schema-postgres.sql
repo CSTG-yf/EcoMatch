@@ -455,6 +455,29 @@ CREATE TABLE IF NOT EXISTS s2_canvas (
     updated_by varchar(100) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS s2_dashboard (
+    id BIGSERIAL PRIMARY KEY,
+    domain_id bigint NOT NULL,
+    name varchar(120) NOT NULL,
+    description varchar(1000),
+    status varchar(20) NOT NULL DEFAULT 'DRAFT',
+    access_scope varchar(20) NOT NULL DEFAULT 'PRIVATE',
+    owner varchar(100) NOT NULL,
+    organization_id varchar(200),
+    config text NOT NULL,
+    version integer NOT NULL DEFAULT 0,
+    published_at timestamp,
+    disabled_at timestamp,
+    created_at timestamp NOT NULL,
+    created_by varchar(100) NOT NULL,
+    updated_at timestamp NOT NULL,
+    updated_by varchar(100) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_domain_status
+    ON s2_dashboard(domain_id, status);
+CREATE INDEX IF NOT EXISTS idx_dashboard_owner ON s2_dashboard(owner);
+CREATE INDEX IF NOT EXISTS idx_dashboard_org ON s2_dashboard(organization_id);
+
 CREATE TABLE IF NOT EXISTS s2_system_config (
     id SERIAL PRIMARY KEY,
     admin varchar(500),

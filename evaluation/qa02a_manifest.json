@@ -33,6 +33,21 @@
       "className": "com.tencent.supersonic.headless.server.rest.EvaluationReportControllerTest"
     },
     {
+      "id": "dashboard-controller-identity",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.rest.DashboardControllerTest"
+    },
+    {
+      "id": "dashboard-object-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.DashboardServiceTest"
+    },
+    {
+      "id": "legacy-canvas-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.CanvasServiceAccessTest"
+    },
+    {
       "id": "dataset-access",
       "module": "headless/server",
       "className": "com.tencent.supersonic.headless.server.service.DataSetServiceAccessTest"
@@ -159,12 +174,14 @@
         "system-config-controller-access",
         "system-config-admin-guard",
         "evaluation-report-access",
+        "dashboard-controller-identity",
         "dataset-access",
         "database-access",
         "model-access",
         "semantic-mutation-access",
         "tag-access",
         "term-access",
+        "legacy-canvas-access",
         "chat-model-access"
       ]
     },
@@ -178,7 +195,8 @@
         "agent-access",
         "config-access",
         "memory-access",
-        "plugin-access"
+        "plugin-access",
+        "dashboard-object-access"
       ]
     },
     {

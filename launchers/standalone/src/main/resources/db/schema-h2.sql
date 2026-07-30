@@ -288,6 +288,31 @@ create table IF NOT EXISTS `s2_canvas` (
 );
 COMMENT ON TABLE s2_canvas IS 'canvas table';
 
+create table IF NOT EXISTS `s2_dashboard` (
+    id              BIGINT auto_increment,
+    domain_id       BIGINT       not null,
+    name            varchar(120) not null,
+    description     varchar(1000) null,
+    status          varchar(20)  default 'DRAFT' not null,
+    access_scope    varchar(20)  default 'PRIVATE' not null,
+    owner           varchar(100) not null,
+    organization_id varchar(200) null,
+    config          LONGVARCHAR  not null,
+    version         INT          default 0 not null,
+    published_at    TIMESTAMP    null,
+    disabled_at     TIMESTAMP    null,
+    created_at      TIMESTAMP    not null,
+    created_by      varchar(100) not null,
+    updated_at      TIMESTAMP    not null,
+    updated_by      varchar(100) not null,
+    PRIMARY KEY (`id`)
+);
+CREATE INDEX IF NOT EXISTS idx_dashboard_domain_status
+    ON s2_dashboard(domain_id, status);
+CREATE INDEX IF NOT EXISTS idx_dashboard_owner ON s2_dashboard(owner);
+CREATE INDEX IF NOT EXISTS idx_dashboard_org ON s2_dashboard(organization_id);
+COMMENT ON TABLE s2_dashboard IS 'secured analytical dashboard';
+
 
 CREATE TABLE IF NOT EXISTS `s2_query_stat_info` (
   `id` INT NOT NULL AUTO_INCREMENT,

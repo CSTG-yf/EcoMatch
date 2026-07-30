@@ -34,8 +34,8 @@ Failures: 0
 
 python evaluation/run_qa02a.py --output task/QA-02A_ACCEPTANCE_REPORT.json
 Controls:     7/7
-Test classes: 29/29
-Test cases:   148/148
+Test classes: 32/32
+Test cases:   164/164
 
 pnpm --filter supersonic-fe run build:os
 Webpack: Compiled successfully

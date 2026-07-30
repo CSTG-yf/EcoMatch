@@ -379,6 +379,30 @@ CREATE TABLE IF NOT EXISTS `s2_canvas`
     PRIMARY KEY (`id`)
     ) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `s2_dashboard`
+(
+    `id`              bigint(20)   NOT NULL AUTO_INCREMENT,
+    `domain_id`       bigint(20)   NOT NULL,
+    `name`            varchar(120) NOT NULL,
+    `description`     varchar(1000) DEFAULT NULL,
+    `status`          varchar(20)  NOT NULL DEFAULT 'DRAFT',
+    `access_scope`    varchar(20)  NOT NULL DEFAULT 'PRIVATE',
+    `owner`           varchar(100) NOT NULL,
+    `organization_id` varchar(200) DEFAULT NULL,
+    `config`          mediumtext   NOT NULL,
+    `version`         int          NOT NULL DEFAULT 0,
+    `published_at`    datetime     DEFAULT NULL,
+    `disabled_at`     datetime     DEFAULT NULL,
+    `created_at`      datetime     NOT NULL,
+    `created_by`      varchar(100) NOT NULL,
+    `updated_at`      datetime     NOT NULL,
+    `updated_by`      varchar(100) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `idx_dashboard_domain_status` (`domain_id`, `status`),
+    KEY `idx_dashboard_owner` (`owner`),
+    KEY `idx_dashboard_org` (`organization_id`)
+) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS s2_user
 (
     id       int(11) NOT NULL AUTO_INCREMENT,
