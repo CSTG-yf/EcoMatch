@@ -99,7 +99,7 @@ class ModelControllerAccessTest {
         withUser(() -> assertThrows(InvalidPermissionException.class,
                 () -> controller.buildModelSchema(new ModelBuildReq(), request, response)));
 
-        verify(modelService, never()).buildModelSchema(any());
+        verify(modelService, never()).buildModelSchema(any(), any());
     }
 
     private ModelResp model(Long id) {

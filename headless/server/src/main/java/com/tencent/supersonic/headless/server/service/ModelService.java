@@ -18,6 +18,7 @@ import com.tencent.supersonic.headless.server.pojo.ModelFilter;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public interface ModelService {
 
@@ -37,7 +38,14 @@ public interface ModelService {
 
     UnAvailableItemResp getUnAvailableItem(FieldRemovedReq fieldRemovedReq);
 
-    Map<String, ModelSchema> buildModelSchema(ModelBuildReq modelBuildReq) throws SQLException;
+    Map<String, ModelSchema> buildModelSchema(ModelBuildReq modelBuildReq, User user)
+            throws SQLException;
+
+    void requireModelAdmin(Long modelId, User user);
+
+    void requireModelViewer(Long modelId, User user);
+
+    Set<Long> getAccessibleModelIds(User user, AuthType authType);
 
     List<ModelResp> getModelListWithAuth(User user, Long domainId, AuthType authType);
 
@@ -59,5 +67,5 @@ public interface ModelService {
             List<MetricReq> metricReqList, User user);
 
     void deleteModelDetailByDimAndMetric(Long modelId, List<DimensionDO> dimensionReqList,
-            List<MetricDO> metricReqList);
+            List<MetricDO> metricReqList, User user);
 }

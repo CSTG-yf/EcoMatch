@@ -13,6 +13,7 @@ import com.tencent.supersonic.headless.api.pojo.ModelDetail;
 import com.tencent.supersonic.headless.api.pojo.enums.DimensionType;
 import com.tencent.supersonic.headless.api.pojo.enums.IdentifyType;
 import com.tencent.supersonic.headless.api.pojo.request.ModelReq;
+import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
 import com.tencent.supersonic.headless.server.persistence.dataobject.ModelDO;
 import com.tencent.supersonic.headless.server.persistence.repository.DateInfoRepository;
@@ -72,6 +73,8 @@ class ModelServiceImplTest {
         MetricService metricService = Mockito.mock(MetricService.class);
         DimensionService dimensionService = Mockito.mock(DimensionService.class);
         DatabaseService databaseService = Mockito.mock(DatabaseService.class);
+        when(databaseService.getDatabase(Mockito.any(), Mockito.any()))
+                .thenReturn(new DatabaseResp());
         DomainService domainService = Mockito.mock(DomainService.class);
         UserService userService = Mockito.mock(UserService.class);
         DateInfoRepository dateInfoRepository = Mockito.mock(DateInfoRepository.class);

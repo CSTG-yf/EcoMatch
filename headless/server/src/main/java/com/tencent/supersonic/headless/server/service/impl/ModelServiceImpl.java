@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.pojo.enums.EventType;
 import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
@@ -89,6 +90,7 @@ public class ModelServiceImpl implements ModelService {
     @Override
     @Transactional
     public ModelResp createModel(ModelReq modelReq, User user) throws Exception {
+        validateModelCreateRequest(modelReq, user);
         // checkParams(modelReq);
         ModelDO modelDO = ModelConverter.convert(modelReq, user);
         modelRepository.createModel(modelDO);
@@ -103,9 +105,11 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional
     public List<ModelResp> createModel(ModelBuildReq modelBuildReq, User user) throws Exception {
+        validateModelBuildRequest(modelBuildReq, user);
         List<ModelResp> modelResps = Lists.newArrayList();
-        Map<String, ModelSchema> modelSchemaMap = buildModelSchema(modelBuildReq);
+        Map<String, ModelSchema> modelSchemaMap = buildModelSchema(modelBuildReq, user);
         for (Map.Entry<String, ModelSchema> entry : modelSchemaMap.entrySet()) {
             ModelReq modelReq =
                     ModelConverter.convert(entry.getValue(), modelBuildReq, entry.getKey());
@@ -118,22 +122,37 @@ public class ModelServiceImpl implements ModelService {
     @Override
     @Transactional
     public ModelResp updateModel(ModelReq modelReq, User user) throws Exception {
+        if (modelReq == null || modelReq.getId() == null) {
+            throw new InvalidArgumentException("Model id is required");
+        }
+        ModelDO existing = getRequiredModelDO(modelReq.getId());
+        requireModelAdmin(existing.getId(), user);
+        if (modelReq.getDomainId() == null) {
+            modelReq.setDomainId(existing.getDomainId());
+        }
+        if (modelReq.getDatabaseId() == null) {
+            modelReq.setDatabaseId(existing.getDatabaseId());
+        }
+        requireTargetModelResources(existing, modelReq, user);
+        String createdBy = existing.getCreatedBy();
+        Date createdAt = existing.getCreatedAt();
         // Comment out below checks for now, they seem unnecessary and
         // lead to unexpected exception in updating model
         /*
          * checkParams(modelReq); checkRelations(modelReq);
          */
-        ModelDO modelDO = modelRepository.getModelById(modelReq.getId());
-        ModelConverter.convert(modelDO, modelReq, user);
-        modelRepository.updateModel(modelDO);
+        ModelConverter.convert(existing, modelReq, user);
+        existing.setCreatedBy(createdBy);
+        existing.setCreatedAt(createdAt);
+        modelRepository.updateModel(existing);
         // create or update dimension
-        List<DimensionReq> dimensionReqs = ModelConverter.convertDimensionList(modelDO);
-        dimensionService.alterDimensionBatch(dimensionReqs, modelDO.getId(), user);
+        List<DimensionReq> dimensionReqs = ModelConverter.convertDimensionList(existing);
+        dimensionService.alterDimensionBatch(dimensionReqs, existing.getId(), user);
         // create or update metric
-        List<MetricReq> metricReqs = ModelConverter.convertMetricList(modelDO);
-        metricService.alterMetricBatch(metricReqs, modelDO.getId(), user);
-        sendEvent(modelDO, EventType.UPDATE, user);
-        return ModelConverter.convert(modelDO);
+        List<MetricReq> metricReqs = ModelConverter.convertMetricList(existing);
+        metricService.alterMetricBatch(metricReqs, existing.getId(), user);
+        sendEvent(existing, EventType.UPDATE, user);
+        return ModelConverter.convert(existing);
     }
 
     @Override
@@ -164,10 +183,8 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public void deleteModel(Long id, User user) {
-        ModelDO datasourceDO = modelRepository.getModelById(id);
-        if (datasourceDO == null) {
-            return;
-        }
+        ModelDO datasourceDO = getRequiredModelDO(id);
+        requireModelAdmin(id, user);
         checkDelete(id);
         datasourceDO.setStatus(StatusEnum.DELETED.getCode());
         datasourceDO.setUpdatedAt(new Date());
@@ -209,8 +226,9 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
-    public Map<String, ModelSchema> buildModelSchema(ModelBuildReq modelBuildReq)
+    public Map<String, ModelSchema> buildModelSchema(ModelBuildReq modelBuildReq, User user)
             throws SQLException {
+        validateModelBuildRequest(modelBuildReq, user);
         List<DbSchema> dbSchemas = getDbSchemes(modelBuildReq);
         Map<String, ModelSchema> modelSchemaMap = new ConcurrentHashMap<>();
         CompletableFuture.allOf(dbSchemas.stream()
@@ -496,16 +514,19 @@ public class ModelServiceImpl implements ModelService {
     }
 
     @Override
+    @Transactional
     public void batchUpdateStatus(MetaBatchReq metaBatchReq, User user) {
-        if (CollectionUtils.isEmpty(metaBatchReq.getIds())) {
-            return;
+        if (metaBatchReq == null || CollectionUtils.isEmpty(metaBatchReq.getIds())) {
+            throw new InvalidArgumentException("Model ids must not be empty");
         }
+        Set<Long> ids = positiveIds(metaBatchReq.getIds(), "Model ids");
         ModelFilter modelFilter = new ModelFilter();
-        modelFilter.setIds(metaBatchReq.getIds());
+        modelFilter.setIds(new ArrayList<>(ids));
         List<ModelDO> modelDOS = modelRepository.getModelList(modelFilter);
-        if (CollectionUtils.isEmpty(modelDOS)) {
-            return;
+        if (modelDOS == null || modelDOS.size() != ids.size()) {
+            throw new InvalidArgumentException("One or more models do not exist");
         }
+        modelDOS.forEach(model -> requireModelAdmin(model.getId(), user));
         modelDOS = modelDOS.stream().peek(modelDO -> {
             modelDO.setStatus(metaBatchReq.getStatus());
             modelDO.setUpdatedAt(new Date());
@@ -529,7 +550,8 @@ public class ModelServiceImpl implements ModelService {
     @Override
     public void updateModelByDimAndMetric(Long modelId, List<DimensionReq> dimensionReqList,
             List<MetricReq> metricReqList, User user) {
-        ModelDO modelDO = getModelDO(modelId);
+        requireModelAdmin(modelId, user);
+        ModelDO modelDO = getRequiredModelDO(modelId);
         ModelDetail modelDetail = JsonUtil.toObject(modelDO.getModelDetail(), ModelDetail.class);
         if (!CollectionUtils.isEmpty(dimensionReqList)) {
             dimensionReqList.forEach(dimensionReq -> {
@@ -586,8 +608,9 @@ public class ModelServiceImpl implements ModelService {
 
     @Override
     public void deleteModelDetailByDimAndMetric(Long modelId, List<DimensionDO> dimensionList,
-            List<MetricDO> metricReqList) {
-        ModelDO modelDO = getModelDO(modelId);
+            List<MetricDO> metricReqList, User user) {
+        requireModelAdmin(modelId, user);
+        ModelDO modelDO = getRequiredModelDO(modelId);
         ModelDetail modelDetail = JsonUtil.toObject(modelDO.getModelDetail(), ModelDetail.class);
         if (!CollectionUtils.isEmpty(dimensionList)) {
             dimensionList.forEach(dimensionReq -> {
@@ -621,6 +644,120 @@ public class ModelServiceImpl implements ModelService {
         return modelRepository.getModelById(id);
     }
 
+    @Override
+    public void requireModelAdmin(Long modelId, User user) {
+        requireModelAccess(modelId, user, AuthType.ADMIN);
+    }
+
+    @Override
+    public void requireModelViewer(Long modelId, User user) {
+        requireModelAccess(modelId, user, AuthType.VIEWER);
+    }
+
+    @Override
+    public Set<Long> getAccessibleModelIds(User user, AuthType authType) {
+        requireAuthenticatedUser(user);
+        if (authType == null) {
+            throw new InvalidArgumentException("Model access type is required");
+        }
+        return getModelListWithAuth(user, null, authType).stream().map(ModelResp::getId)
+                .collect(Collectors.toSet());
+    }
+
+    private void requireModelAccess(Long modelId, User user, AuthType authType) {
+        requireAuthenticatedUser(user);
+        ModelDO modelDO = getRequiredModelDO(modelId);
+        if (user.isSuperAdmin()) {
+            return;
+        }
+        ModelResp modelResp = ModelConverter.convert(modelDO);
+        Set<String> orgIds = userService.getUserAllOrgId(user.getName());
+        if (orgIds == null) {
+            orgIds = Collections.emptySet();
+        }
+        boolean directAccess =
+                AuthType.ADMIN.equals(authType) ? checkAdminPermission(orgIds, user, modelResp)
+                        : checkDataSetPermission(orgIds, user, modelResp);
+        if (directAccess || hasDomainAccess(modelDO.getDomainId(), user, authType)) {
+            return;
+        }
+        throw new InvalidPermissionException("No permission to access model");
+    }
+
+    private void validateModelCreateRequest(ModelReq modelReq, User user) {
+        if (modelReq == null) {
+            throw new InvalidArgumentException("Model request is required");
+        }
+        requireDomainAdmin(modelReq.getDomainId(), user);
+        requireDatabaseAccess(modelReq.getDatabaseId(), user);
+    }
+
+    private void validateModelBuildRequest(ModelBuildReq modelBuildReq, User user) {
+        if (modelBuildReq == null) {
+            throw new InvalidArgumentException("Model build request is required");
+        }
+        requireDomainAdmin(modelBuildReq.getDomainId(), user);
+        requireDatabaseAccess(modelBuildReq.getDatabaseId(), user);
+    }
+
+    private void requireTargetModelResources(ModelDO existing, ModelReq request, User user) {
+        if (!Objects.equals(existing.getDomainId(), request.getDomainId())) {
+            requireDomainAdmin(request.getDomainId(), user);
+        }
+        requireDatabaseAccess(request.getDatabaseId(), user);
+    }
+
+    private void requireDomainAdmin(Long domainId, User user) {
+        requireAuthenticatedUser(user);
+        if (domainId == null || domainId <= 0) {
+            throw new InvalidArgumentException("Model domain id must be positive");
+        }
+        if (!user.isSuperAdmin() && !hasDomainAccess(domainId, user, AuthType.ADMIN)) {
+            throw new InvalidPermissionException("No permission to manage model domain");
+        }
+    }
+
+    private boolean hasDomainAccess(Long domainId, User user, AuthType authType) {
+        Set<DomainResp> domains = domainService.getDomainAuthSet(user, authType);
+        return domains != null
+                && domains.stream().map(DomainResp::getId).anyMatch(domainId::equals);
+    }
+
+    private void requireDatabaseAccess(Long databaseId, User user) {
+        if (databaseId == null || databaseId <= 0) {
+            throw new InvalidArgumentException("Model database id must be positive");
+        }
+        if (databaseService.getDatabase(databaseId, user) == null) {
+            throw new InvalidArgumentException("Model database does not exist");
+        }
+    }
+
+    private ModelDO getRequiredModelDO(Long id) {
+        if (id == null || id <= 0) {
+            throw new InvalidArgumentException("Model id must be positive");
+        }
+        ModelDO modelDO = modelRepository.getModelById(id);
+        if (modelDO == null || Objects.equals(modelDO.getStatus(), StatusEnum.DELETED.getCode())) {
+            throw new InvalidArgumentException("Model does not exist");
+        }
+        return modelDO;
+    }
+
+    private Set<Long> positiveIds(List<Long> values, String field) {
+        if (CollectionUtils.isEmpty(values)
+                || values.stream().anyMatch(value -> value == null || value <= 0)) {
+            throw new InvalidArgumentException(field + " must be positive");
+        }
+        return new LinkedHashSet<>(values);
+    }
+
+    private void requireAuthenticatedUser(User user) {
+        if (user == null || StringUtils.isBlank(user.getName())
+                || User.getVisitUser().getName().equals(user.getName())) {
+            throw new InvalidPermissionException("Authentication is required to manage models");
+        }
+    }
+
     private List<DateInfoReq> convert(List<DateInfoDO> dateInfoDOList) {
         List<DateInfoReq> dateInfoCommendList = new ArrayList<>();
         dateInfoDOList.forEach(dateInfoDO -> {
@@ -634,16 +771,20 @@ public class ModelServiceImpl implements ModelService {
     }
 
     public static boolean checkAdminPermission(Set<String> orgIds, User user, ModelResp modelResp) {
+        if (user == null || StringUtils.isBlank(user.getName()) || modelResp == null) {
+            return false;
+        }
         List<String> admins = modelResp.getAdmins();
         List<String> adminOrgs = modelResp.getAdminOrgs();
         if (user.isSuperAdmin()) {
             return true;
         }
         String userName = user.getName();
-        if (admins.contains(userName) || modelResp.getCreatedBy().equals(userName)) {
+        if ((admins != null && admins.contains(userName))
+                || userName.equals(modelResp.getCreatedBy())) {
             return true;
         }
-        if (CollectionUtils.isEmpty(adminOrgs)) {
+        if (CollectionUtils.isEmpty(adminOrgs) || CollectionUtils.isEmpty(orgIds)) {
             return false;
         }
         for (String orgId : orgIds) {
@@ -659,6 +800,9 @@ public class ModelServiceImpl implements ModelService {
         if (checkAdminPermission(orgIds, user, modelResp)) {
             return true;
         }
+        if (user == null || StringUtils.isBlank(user.getName()) || modelResp == null) {
+            return false;
+        }
         List<String> viewers = modelResp.getViewers();
         List<String> viewOrgs = modelResp.getViewOrgs();
         if (user.isSuperAdmin()) {
@@ -668,10 +812,11 @@ public class ModelServiceImpl implements ModelService {
             return true;
         }
         String userName = user.getName();
-        if (viewers.contains(userName) || modelResp.getCreatedBy().equals(userName)) {
+        if ((viewers != null && viewers.contains(userName))
+                || userName.equals(modelResp.getCreatedBy())) {
             return true;
         }
-        if (CollectionUtils.isEmpty(viewOrgs)) {
+        if (CollectionUtils.isEmpty(viewOrgs) || CollectionUtils.isEmpty(orgIds)) {
             return false;
         }
         for (String orgId : orgIds) {

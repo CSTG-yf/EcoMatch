@@ -52,9 +52,15 @@ public interface MetricService {
 
     List<MetricResp> getMetrics(MetaFilter metaFilter);
 
+    List<MetricResp> getMetrics(MetaFilter metaFilter, User user);
+
     List<MetricResp> getMetricsToCreateNewMetric(Long modelId);
 
+    List<MetricResp> getMetricsToCreateNewMetric(Long modelId, User user);
+
     MetricResp getMetric(Long modelId, String bizName);
+
+    MetricResp getMetric(Long modelId, String bizName, User user);
 
     MetricResp getMetric(Long id, User user);
 
@@ -64,7 +70,11 @@ public interface MetricService {
 
     Set<String> getMetricTags();
 
+    Set<String> getMetricTags(User user);
+
     List<DrillDownDimension> getDrillDownDimension(Long metricId);
+
+    List<DrillDownDimension> getDrillDownDimension(Long metricId, User user);
 
     void saveMetricQueryDefaultConfig(MetricQueryDefaultConfig defaultConfig, User user);
 

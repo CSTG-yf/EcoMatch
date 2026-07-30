@@ -100,14 +100,18 @@ public class MetricController {
     }
 
     @GetMapping("/getMetricList/{modelId}")
-    public List<MetricResp> getMetricList(@PathVariable("modelId") Long modelId) {
+    public List<MetricResp> getMetricList(@PathVariable("modelId") Long modelId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
         MetaFilter metaFilter = new MetaFilter(Lists.newArrayList(modelId));
-        return metricService.getMetrics(metaFilter);
+        return metricService.getMetrics(metaFilter, user);
     }
 
     @GetMapping("/getMetricsToCreateNewMetric/{modelId}")
-    public List<MetricResp> getMetricsToCreateNewMetric(@PathVariable("modelId") Long modelId) {
-        return metricService.getMetricsToCreateNewMetric(modelId);
+    public List<MetricResp> getMetricsToCreateNewMetric(@PathVariable("modelId") Long modelId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return metricService.getMetricsToCreateNewMetric(modelId, user);
     }
 
     @PostMapping("/queryMetric")
@@ -120,8 +124,10 @@ public class MetricController {
     @Deprecated
     @GetMapping("getMetric/{modelId}/{bizName}")
     public MetricResp getMetric(@PathVariable("modelId") Long modelId,
-            @PathVariable("bizName") String bizName) {
-        return metricService.getMetric(modelId, bizName);
+            @PathVariable("bizName") String bizName, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return metricService.getMetric(modelId, bizName, user);
     }
 
     @GetMapping("getMetric/{id}")
@@ -140,26 +146,33 @@ public class MetricController {
     }
 
     @GetMapping("/getAllHighSensitiveMetric")
-    public List<MetricResp> getAllHighSensitiveMetric() {
+    public List<MetricResp> getAllHighSensitiveMetric(HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
         MetricFilter metricFilter = new MetricFilter();
         metricFilter.setSensitiveLevel(SensitiveLevelEnum.HIGH.getCode());
-        return metricService.getMetrics(metricFilter);
+        return metricService.getMetrics(metricFilter, user);
     }
 
     @Deprecated
     @GetMapping("/getMetricTags")
-    public Set<String> getMetricTags() {
-        return metricService.getMetricTags();
+    public Set<String> getMetricTags(HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return metricService.getMetricTags(user);
     }
 
     @GetMapping("/getMetricClassifications")
-    public Set<String> getMetricClassifications() {
-        return metricService.getMetricTags();
+    public Set<String> getMetricClassifications(HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return metricService.getMetricTags(user);
     }
 
     @GetMapping("/getDrillDownDimension")
-    public List<DrillDownDimension> getDrillDownDimension(Long metricId) {
-        return metricService.getDrillDownDimension(metricId);
+    public List<DrillDownDimension> getDrillDownDimension(Long metricId, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return metricService.getDrillDownDimension(metricId, user);
     }
 
     @PostMapping("/saveMetricQueryDefaultConfig")

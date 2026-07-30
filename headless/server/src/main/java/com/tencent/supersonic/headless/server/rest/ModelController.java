@@ -154,7 +154,7 @@ public class ModelController {
             throw new InvalidPermissionException(
                     "Only super administrators can build model schemas");
         }
-        return modelService.buildModelSchema(modelBuildReq);
+        return modelService.buildModelSchema(modelBuildReq, user);
     }
 
     private void requireModelAccess(User user, Long modelId, AuthType authType) {

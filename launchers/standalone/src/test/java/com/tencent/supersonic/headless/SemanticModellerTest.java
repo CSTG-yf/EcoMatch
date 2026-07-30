@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless;
 
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
+import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.headless.api.pojo.ModelSchema;
 import com.tencent.supersonic.headless.api.pojo.enums.FieldType;
@@ -36,7 +37,8 @@ public class SemanticModellerTest extends BaseTest {
         modelSchemaReq.setDatabaseId(1L);
         modelSchemaReq.setDb("semantic");
         modelSchemaReq.setTables(Lists.newArrayList("s2_user_department", "s2_stay_time_statis"));
-        Map<String, ModelSchema> modelSchemaMap = modelService.buildModelSchema(modelSchemaReq);
+        Map<String, ModelSchema> modelSchemaMap =
+                modelService.buildModelSchema(modelSchemaReq, User.getDefaultUser());
 
         ModelSchema userModelSchema = modelSchemaMap.get("s2_user_department");
         Assertions.assertEquals(2, userModelSchema.getSemanticColumns().size());
@@ -69,7 +71,8 @@ public class SemanticModellerTest extends BaseTest {
         modelSchemaReq.setDb("semantic");
         modelSchemaReq.setSql(
                 "SELECT imp_date, user_name, page, 1 as pv, user_name as uv FROM s2_pv_uv_statis");
-        Map<String, ModelSchema> modelSchemaMap = modelService.buildModelSchema(modelSchemaReq);
+        Map<String, ModelSchema> modelSchemaMap =
+                modelService.buildModelSchema(modelSchemaReq, User.getDefaultUser());
 
         ModelSchema pvModelSchema = modelSchemaMap.values().iterator().next();
         Assertions.assertEquals(5, pvModelSchema.getSemanticColumns().size());

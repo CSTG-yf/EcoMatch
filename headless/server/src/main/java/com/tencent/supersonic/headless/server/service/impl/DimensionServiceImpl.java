@@ -12,6 +12,7 @@ import com.tencent.supersonic.common.pojo.DataEvent;
 import com.tencent.supersonic.common.pojo.DataItem;
 import com.tencent.supersonic.common.pojo.ModelRela;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.EventType;
 import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
@@ -51,11 +52,14 @@ import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -95,7 +99,9 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public DimensionResp createDimension(DimensionReq dimensionReq, User user) {
+        requireModelAdmin(dimensionReq == null ? null : dimensionReq.getModelId(), user);
         checkExist(Lists.newArrayList(dimensionReq));
         dimensionReq.createdBy(user.getName());
         DimensionDO dimensionDO = DimensionConverter.convert2DimensionDO(dimensionReq);
@@ -112,6 +118,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     @Override
     public void alterDimensionBatch(List<DimensionReq> dimensionReqs, Long modelId, User user)
             throws Exception {
+        requireModelAdmin(modelId, user);
         List<DimensionResp> dimensionResps = getDimensions(modelId);
         // get all dimension in model, only use bizname, because name can be changed to everything
         Map<String, DimensionResp> bizNameMap = dimensionResps.stream()
@@ -134,7 +141,9 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void createDimensionBatch(List<DimensionReq> dimensionReqs, User user) {
+        requireDimensionRequestAccess(dimensionReqs, user);
         List<DimensionDO> dimensionDOS =
                 dimensionReqs.stream().peek(dimension -> dimension.createdBy(user.getName()))
                         .map(DimensionConverter::convert2DimensionDO).collect(Collectors.toList());
@@ -147,9 +156,14 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void updateDimension(DimensionReq dimensionReq, User user) {
-        checkExist(Lists.newArrayList(dimensionReq));
+        if (dimensionReq == null || dimensionReq.getId() == null) {
+            throw new InvalidArgumentException("Dimension id is required");
+        }
         DimensionDO dimensionDO = dimensionRepository.getDimensionById(dimensionReq.getId());
+        requirePersistedDimensionAccess(dimensionDO, dimensionReq.getModelId(), user);
+        checkExist(Lists.newArrayList(dimensionReq));
         dimensionReq.updatedBy(user.getName());
         String oldName = dimensionDO.getName();
         DimensionConverter.convert(dimensionDO, dimensionReq);
@@ -164,7 +178,9 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void updateDimensionBatch(List<DimensionReq> dimensionReqList, User user) {
+        requireDimensionUpdateAccess(dimensionReqList, user);
         checkExist(dimensionReqList);
         List<DimensionDO> dimensionDOS = dimensionReqList.stream()
                 .map(DimensionConverter::convert2DimensionDO).collect(Collectors.toList());
@@ -176,6 +192,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void batchUpdateStatus(MetaBatchReq metaBatchReq, User user) {
         if (CollectionUtils.isEmpty(metaBatchReq.getIds())) {
             return;
@@ -183,9 +200,10 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         DimensionFilter dimensionFilter = new DimensionFilter();
         dimensionFilter.setIds(metaBatchReq.getIds());
         List<DimensionDO> dimensionDOS = dimensionRepository.getDimension(dimensionFilter);
-        if (CollectionUtils.isEmpty(dimensionDOS)) {
-            return;
-        }
+        requireCompleteBatch(metaBatchReq.getIds(), dimensionDOS, "dimensions");
+        requireModelAdmins(
+                dimensionDOS.stream().map(DimensionDO::getModelId).collect(Collectors.toSet()),
+                user);
         dimensionDOS = dimensionDOS.stream().peek(dimensionDO -> {
             dimensionDO.setStatus(metaBatchReq.getStatus());
             dimensionDO.setUpdatedAt(new Date());
@@ -201,6 +219,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void batchUpdateSensitiveLevel(MetaBatchReq metaBatchReq, User user) {
         if (CollectionUtils.isEmpty(metaBatchReq.getIds())) {
             return;
@@ -208,6 +227,10 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         DimensionFilter metaFilter = new DimensionFilter();
         metaFilter.setIds(metaBatchReq.getIds());
         List<DimensionDO> dimensionDOS = queryDimension(metaFilter);
+        requireCompleteBatch(metaBatchReq.getIds(), dimensionDOS, "dimensions");
+        requireModelAdmins(
+                dimensionDOS.stream().map(DimensionDO::getModelId).collect(Collectors.toSet()),
+                user);
         for (DimensionDO dimensionDO : dimensionDOS) {
             dimensionDO.setUpdatedAt(new Date());
             dimensionDO.setUpdatedBy(user.getName());
@@ -217,30 +240,33 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public void deleteDimension(Long id, User user) {
         DimensionDO dimensionDO = dimensionRepository.getDimensionById(id);
         if (dimensionDO == null) {
             throw new RuntimeException(String.format("the dimension %s not exist", id));
         }
+        requireModelAdmin(dimensionDO.getModelId(), user);
         dimensionDO.setStatus(StatusEnum.DELETED.getCode());
         dimensionDO.setUpdatedAt(new Date());
         dimensionDO.setUpdatedBy(user.getName());
         dimensionRepository.updateDimension(dimensionDO);
         // should update modelDetail
         modelService.deleteModelDetailByDimAndMetric(dimensionDO.getModelId(),
-                Lists.newArrayList(dimensionDO), null);
+                Lists.newArrayList(dimensionDO), null, user);
         sendEventBatch(Lists.newArrayList(dimensionDO), EventType.DELETE, user);
     }
 
     @Override
+    @Transactional
     public void deleteDimensionBatch(List<Long> idList, User user) {
         DimensionsFilter dimensionFilter = new DimensionsFilter();
         dimensionFilter.setDimensionIds(idList);
         List<DimensionDO> dimensionDOList = dimensionRepository.getDimensions(dimensionFilter);
-        if (CollectionUtils.isEmpty(dimensionDOList)) {
-            throw new RuntimeException(
-                    String.format("the dimension %s not exist", StringUtils.join(",", idList)));
-        }
+        requireCompleteBatch(idList, dimensionDOList, "dimensions");
+        requireModelAdmins(
+                dimensionDOList.stream().map(DimensionDO::getModelId).collect(Collectors.toSet()),
+                user);
         dimensionDOList.forEach(dimensionDO -> {
             dimensionDO.setStatus(StatusEnum.DELETED.getCode());
             dimensionDO.setUpdatedAt(new Date());
@@ -248,8 +274,9 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         });
         dimensionRepository.batchUpdateStatus(dimensionDOList);
         // should update modelDetail
-        modelService.deleteModelDetailByDimAndMetric(dimensionDOList.get(0).getModelId(),
-                dimensionDOList, null);
+        dimensionDOList.stream().collect(Collectors.groupingBy(DimensionDO::getModelId))
+                .forEach((modelId, dimensions) -> modelService
+                        .deleteModelDetailByDimAndMetric(modelId, dimensions, null, user));
         sendEventBatch(dimensionDOList, EventType.DELETE, user);
     }
 
@@ -265,6 +292,12 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
             }
         }
         return null;
+    }
+
+    @Override
+    public DimensionResp getDimension(String bizName, Long modelId, User user) {
+        modelService.requireModelViewer(modelId, user);
+        return getDimension(bizName, modelId);
     }
 
     @Override
@@ -288,6 +321,17 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         BeanUtils.copyProperties(dimensionDOPageInfo, pageInfo);
         pageInfo.setList(convertList(dimensionDOPageInfo.getList()));
         return pageInfo;
+    }
+
+    @Override
+    public PageInfo<DimensionResp> queryDimension(PageDimensionReq pageDimensionReq, User user) {
+        if (pageDimensionReq == null) {
+            throw new InvalidArgumentException("Dimension query is required");
+        }
+        PageDimensionReq authorized = new PageDimensionReq();
+        BeanUtils.copyProperties(pageDimensionReq, authorized);
+        authorized.setModelIds(restrictToAccessibleModels(pageDimensionReq.getModelIds(), user));
+        return queryDimension(authorized);
     }
 
     private List<DimensionDO> queryDimension(DimensionFilter dimensionFilter) {
@@ -315,6 +359,17 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
             return DimensionConverter.filterByDataSet(dimensionResps, dataSetResp);
         }
         return dimensionResps;
+    }
+
+    @Override
+    public List<DimensionResp> getDimensions(MetaFilter metaFilter, User user) {
+        if (metaFilter == null) {
+            throw new InvalidArgumentException("Dimension filter is required");
+        }
+        MetaFilter authorized = new MetaFilter();
+        BeanUtils.copyProperties(metaFilter, authorized);
+        authorized.setModelIds(restrictToAccessibleModels(metaFilter.getModelIds(), user));
+        return getDimensions(authorized);
     }
 
     private List<DimensionResp> getDimensions(Long modelId) {
@@ -349,6 +404,15 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         return getDimensions(dimensionFilter);
     }
 
+    @Override
+    public List<DimensionResp> getDimensionInModelCluster(Long modelId, User user) {
+        modelService.requireModelViewer(modelId, user);
+        Set<Long> accessibleModelIds = modelService.getAccessibleModelIds(user, AuthType.VIEWER);
+        return getDimensionInModelCluster(modelId).stream()
+                .filter(dimension -> accessibleModelIds.contains(dimension.getModelId()))
+                .collect(Collectors.toList());
+    }
+
     private List<DimensionResp> convertList(List<DimensionDO> dimensionDOS) {
         List<Long> modelIds =
                 dimensionDOS.stream().map(DimensionDO::getModelId).collect(Collectors.toList());
@@ -365,6 +429,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
 
     @Override
     public List<String> mockAlias(DimensionReq dimensionReq, String mockType, User user) {
+        requireModelAdmin(dimensionReq == null ? null : dimensionReq.getModelId(), user);
         String mockAlias = aliasGenerateHelper.generateAlias(mockType, dimensionReq.getName(),
                 dimensionReq.getBizName(), "", dimensionReq.getDescription());
         String ret = aliasGenerateHelper.extractJsonStringFromAiMessage(mockAlias);
@@ -373,6 +438,7 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
 
     @Override
     public List<DimValueMap> mockDimensionValueAlias(DimensionReq dimensionReq, User user) {
+        requireModelAdmin(dimensionReq == null ? null : dimensionReq.getModelId(), user);
         ModelResp modelResp = modelService.getModel(dimensionReq.getModelId());
         ModelDetail modelDetail = modelResp.getModelDetail();
         String sqlQuery = modelDetail.getSqlQuery();
@@ -470,8 +536,16 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
     }
 
     @Override
+    @Transactional
     public Boolean updateDimValueAlias(DimValueAliasReq req, User user) {
+        if (req == null || req.getId() == null) {
+            throw new InvalidArgumentException("Dimension id is required");
+        }
         DimensionDO dimensionDO = getById(req.getId());
+        if (dimensionDO == null) {
+            throw new InvalidArgumentException("Dimension does not exist");
+        }
+        requireModelAdmin(dimensionDO.getModelId(), user);
         List<DimValueMap> dimValueMapList = new ArrayList<>();
         if (StringUtils.isNotEmpty(dimensionDO.getDimValueMaps())) {
             dimValueMapList = JsonUtil.toList(dimensionDO.getDimValueMaps(), DimValueMap.class);
@@ -526,6 +600,85 @@ public class DimensionServiceImpl extends ServiceImpl<DimensionDOMapper, Dimensi
         dimensionDO.setDimValueMaps(JsonUtil.toString(dimValueMapList));
         updateById(dimensionDO);
         return true;
+    }
+
+    private void requireDimensionRequestAccess(List<DimensionReq> requests, User user) {
+        if (CollectionUtils.isEmpty(requests)) {
+            throw new InvalidArgumentException("Dimension requests must not be empty");
+        }
+        Set<Long> modelIds =
+                requests.stream().map(DimensionReq::getModelId).collect(Collectors.toSet());
+        requireSingleModelBatch(modelIds, "Dimension");
+        requireModelAdmins(modelIds, user);
+    }
+
+    private void requireDimensionUpdateAccess(List<DimensionReq> requests, User user) {
+        if (CollectionUtils.isEmpty(requests) || requests.stream()
+                .anyMatch(request -> request == null || request.getId() == null)) {
+            throw new InvalidArgumentException("Dimension ids are required");
+        }
+        Set<Long> modelIds = new HashSet<>();
+        for (DimensionReq request : requests) {
+            DimensionDO persisted = dimensionRepository.getDimensionById(request.getId());
+            requirePersistedDimensionAccess(persisted, request.getModelId(), user);
+            modelIds.add(persisted.getModelId());
+        }
+        requireSingleModelBatch(modelIds, "Dimension");
+    }
+
+    private void requirePersistedDimensionAccess(DimensionDO persisted, Long requestedModelId,
+            User user) {
+        if (persisted == null) {
+            throw new InvalidArgumentException("Dimension does not exist");
+        }
+        if (!Objects.equals(persisted.getModelId(), requestedModelId)) {
+            throw new InvalidArgumentException("Dimension model cannot be changed");
+        }
+        requireModelAdmin(persisted.getModelId(), user);
+    }
+
+    private void requireCompleteBatch(List<Long> requestedIds, List<DimensionDO> dimensions,
+            String field) {
+        Set<Long> uniqueIds = positiveIds(requestedIds, field);
+        Set<Long> foundIds = CollectionUtils.isEmpty(dimensions) ? Set.of()
+                : dimensions.stream().map(DimensionDO::getId).collect(Collectors.toSet());
+        if (!foundIds.containsAll(uniqueIds)) {
+            throw new InvalidArgumentException("One or more " + field + " do not exist");
+        }
+    }
+
+    private Set<Long> positiveIds(List<Long> ids, String field) {
+        if (CollectionUtils.isEmpty(ids) || ids.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new InvalidArgumentException(field + " ids must be positive");
+        }
+        return Set.copyOf(ids);
+    }
+
+    private void requireModelAdmins(Collection<Long> modelIds, User user) {
+        if (CollectionUtils.isEmpty(modelIds)) {
+            throw new InvalidArgumentException("Model ids must not be empty");
+        }
+        modelIds.forEach(modelId -> requireModelAdmin(modelId, user));
+    }
+
+    private void requireModelAdmin(Long modelId, User user) {
+        modelService.requireModelAdmin(modelId, user);
+    }
+
+    private void requireSingleModelBatch(Set<Long> modelIds, String itemType) {
+        if (modelIds.size() != 1) {
+            throw new InvalidArgumentException(itemType + " batch must belong to one model");
+        }
+    }
+
+    private List<Long> restrictToAccessibleModels(List<Long> requestedModelIds, User user) {
+        Set<Long> accessible = modelService.getAccessibleModelIds(user, AuthType.VIEWER);
+        if (CollectionUtils.isEmpty(requestedModelIds)) {
+            return accessible.isEmpty() ? Lists.newArrayList(-1L) : new ArrayList<>(accessible);
+        }
+        Set<Long> requested = new HashSet<>(positiveIds(requestedModelIds, "Model"));
+        requested.retainAll(accessible);
+        return requested.isEmpty() ? Lists.newArrayList(-1L) : new ArrayList<>(requested);
     }
 
     private DataItem getDataItem(DimensionDO dimensionDO) {

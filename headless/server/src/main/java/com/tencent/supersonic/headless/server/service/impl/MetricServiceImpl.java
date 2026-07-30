@@ -19,6 +19,7 @@ import com.tencent.supersonic.common.pojo.enums.EventType;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.util.BeanMapper;
 import com.tencent.supersonic.headless.api.pojo.DrillDownDimension;
 import com.tencent.supersonic.headless.api.pojo.Measure;
@@ -69,6 +70,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
@@ -121,7 +123,9 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public MetricResp createMetric(MetricReq metricReq, User user) {
+        requireModelAdmin(metricReq == null ? null : metricReq.getModelId(), user);
         checkExist(Lists.newArrayList(metricReq));
         MetricCheckUtils.checkParam(Lists.newArrayList(metricReq));
         metricReq.createdBy(user.getName());
@@ -137,7 +141,9 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void createMetricBatch(List<MetricReq> metricReqs, User user) {
+        requireMetricRequestAccess(metricReqs, user);
         List<MetricDO> metricDOS =
                 metricReqs.stream().peek(metric -> metric.createdBy(user.getName()))
                         .map(MetricConverter::convert2MetricDO).collect(Collectors.toList());
@@ -151,6 +157,7 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
 
     @Override
     public void alterMetricBatch(List<MetricReq> metricReqs, Long modelId, User user) {
+        requireModelAdmin(modelId, user);
         List<MetricResp> metricResps = getMetrics(new MetaFilter(Lists.newArrayList(modelId)));
         // get all metric in model, only use bizname, because name can be changed to everything
         Map<String, MetricResp> bizNameMap = metricResps.stream()
@@ -171,11 +178,16 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public MetricResp updateMetric(MetricReq metricReq, User user) {
+        if (metricReq == null || metricReq.getId() == null) {
+            throw new InvalidArgumentException("Metric id is required");
+        }
+        MetricDO metricDO = metricRepository.getMetricById(metricReq.getId());
+        requirePersistedMetricAccess(metricDO, metricReq.getModelId(), user);
         MetricCheckUtils.checkParam(Lists.newArrayList(metricReq));
         checkExist(Lists.newArrayList(metricReq));
         metricReq.updatedBy(user.getName());
-        MetricDO metricDO = metricRepository.getMetricById(metricReq.getId());
         String oldName = metricDO.getName();
         MetricConverter.convert(metricDO, metricReq);
         metricRepository.updateMetric(metricDO);
@@ -192,7 +204,9 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void updateMetricBatch(List<MetricReq> metricReqs, User user) {
+        requireMetricUpdateAccess(metricReqs, user);
         MetricCheckUtils.checkParam(metricReqs);
         checkExist(metricReqs);
         List<MetricDO> metricDOS = metricReqs.stream().map(MetricConverter::convert2MetricDO)
@@ -206,14 +220,15 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
 
 
     @Override
+    @Transactional
     public void batchUpdateStatus(MetaBatchReq metaBatchReq, User user) {
         if (CollectionUtils.isEmpty(metaBatchReq.getIds())) {
             return;
         }
         List<MetricDO> metricDOS = getMetrics(metaBatchReq.getIds());
-        if (CollectionUtils.isEmpty(metricDOS)) {
-            return;
-        }
+        requireCompleteMetricBatch(metaBatchReq.getIds(), metricDOS);
+        requireModelAdmins(metricDOS.stream().map(MetricDO::getModelId).collect(Collectors.toSet()),
+                user);
         metricDOS = metricDOS.stream().peek(metricDO -> {
             metricDO.setStatus(metaBatchReq.getStatus());
             metricDO.setUpdatedAt(new Date());
@@ -229,8 +244,12 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void batchPublish(List<Long> metricIds, User user) {
         List<MetricDO> metrics = getMetrics(metricIds);
+        requireCompleteMetricBatch(metricIds, metrics);
+        requireModelAdmins(metrics.stream().map(MetricDO::getModelId).collect(Collectors.toSet()),
+                user);
         for (MetricDO metricDO : metrics) {
             metricDO.setUpdatedAt(new Date());
             metricDO.setUpdatedBy(user.getName());
@@ -239,8 +258,12 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void batchUnPublish(List<Long> metricIds, User user) {
         List<MetricDO> metrics = getMetrics(metricIds);
+        requireCompleteMetricBatch(metricIds, metrics);
+        requireModelAdmins(metrics.stream().map(MetricDO::getModelId).collect(Collectors.toSet()),
+                user);
         for (MetricDO metricDO : metrics) {
             metricDO.setUpdatedAt(new Date());
             metricDO.setUpdatedBy(user.getName());
@@ -249,8 +272,12 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void batchUpdateClassifications(MetaBatchReq metaBatchReq, User user) {
         List<MetricDO> metrics = getMetrics(metaBatchReq.getIds());
+        requireCompleteMetricBatch(metaBatchReq.getIds(), metrics);
+        requireModelAdmins(metrics.stream().map(MetricDO::getModelId).collect(Collectors.toSet()),
+                user);
         for (MetricDO metricDO : metrics) {
             metricDO.setUpdatedAt(new Date());
             metricDO.setUpdatedBy(user.getName());
@@ -282,8 +309,12 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void batchUpdateSensitiveLevel(MetaBatchReq metaBatchReq, User user) {
         List<MetricDO> metrics = getMetrics(metaBatchReq.getIds());
+        requireCompleteMetricBatch(metaBatchReq.getIds(), metrics);
+        requireModelAdmins(metrics.stream().map(MetricDO::getModelId).collect(Collectors.toSet()),
+                user);
         for (MetricDO metricDO : metrics) {
             metricDO.setUpdatedAt(new Date());
             metricDO.setUpdatedBy(user.getName());
@@ -293,30 +324,32 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    @Transactional
     public void deleteMetric(Long id, User user) {
         MetricDO metricDO = metricRepository.getMetricById(id);
         if (metricDO == null) {
             throw new RuntimeException(String.format("the metric %s not exist", id));
         }
+        requireModelAdmin(metricDO.getModelId(), user);
         metricDO.setStatus(StatusEnum.DELETED.getCode());
         metricDO.setUpdatedAt(new Date());
         metricDO.setUpdatedBy(user.getName());
         metricRepository.updateMetric(metricDO);
         // should update modelDetail
         modelService.deleteModelDetailByDimAndMetric(metricDO.getModelId(), null,
-                Lists.newArrayList(metricDO));
+                Lists.newArrayList(metricDO), user);
         sendEventBatch(Lists.newArrayList(metricDO), EventType.DELETE, user);
     }
 
     @Override
+    @Transactional
     public void deleteMetricBatch(List<Long> idList, User user) {
         MetricsFilter metricsFilter = new MetricsFilter();
         metricsFilter.setMetricIds(idList);
         List<MetricDO> metricDOList = metricRepository.getMetrics(metricsFilter);
-        if (CollectionUtils.isEmpty(metricDOList)) {
-            throw new RuntimeException(
-                    String.format("the metrics %s not exist", StringUtils.join(",", idList)));
-        }
+        requireCompleteMetricBatch(idList, metricDOList);
+        requireModelAdmins(
+                metricDOList.stream().map(MetricDO::getModelId).collect(Collectors.toSet()), user);
         metricDOList.forEach(metricDO -> {
             metricDO.setStatus(StatusEnum.DELETED.getCode());
             metricDO.setUpdatedAt(new Date());
@@ -324,8 +357,9 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
         });
         metricRepository.batchUpdateStatus(metricDOList);
         // should update modelDetail
-        modelService.deleteModelDetailByDimAndMetric(metricDOList.get(0).getModelId(), null,
-                metricDOList);
+        metricDOList.stream().collect(Collectors.groupingBy(MetricDO::getModelId))
+                .forEach((modelId, metrics) -> modelService.deleteModelDetailByDimAndMetric(modelId,
+                        null, metrics, user));
         sendEventBatch(metricDOList, EventType.DELETE, user);
     }
 
@@ -371,6 +405,9 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
 
     @Override
     public PageInfo<MetricResp> queryMetric(PageMetricReq pageMetricReq, User user) {
+        if (pageMetricReq == null) {
+            throw new InvalidArgumentException("Metric query is required");
+        }
         MetricFilter metricFilter = new MetricFilter();
         metricFilter.setUserName(user.getName());
         BeanUtils.copyProperties(pageMetricReq, metricFilter);
@@ -389,7 +426,7 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
                     modelResps.stream().map(ModelResp::getId).collect(Collectors.toList());
             pageMetricReq.getModelIds().addAll(modelIds);
         }
-        metricFilter.setModelIds(pageMetricReq.getModelIds());
+        metricFilter.setModelIds(restrictToAccessibleModels(pageMetricReq.getModelIds(), user));
         List<Long> collectIds = getCollectIds(pageMetricReq, user);
         List<Long> idsToFilter = getIdsToFilter(pageMetricReq, collectIds);
         metricFilter.setIds(idsToFilter);
@@ -431,6 +468,17 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
             return MetricConverter.filterByDataSet(metricResps, dataSetResp);
         }
         return metricResps;
+    }
+
+    @Override
+    public List<MetricResp> getMetrics(MetaFilter metaFilter, User user) {
+        if (metaFilter == null) {
+            throw new InvalidArgumentException("Metric filter is required");
+        }
+        MetaFilter authorized = new MetaFilter();
+        BeanUtils.copyProperties(metaFilter, authorized);
+        authorized.setModelIds(restrictToAccessibleModels(metaFilter.getModelIds(), user));
+        return getMetrics(authorized);
     }
 
     private List<Long> getCollectIds(PageMetricReq pageMetricReq, User user) {
@@ -512,6 +560,12 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
                 .collect(Collectors.toList());
     }
 
+    @Override
+    public List<MetricResp> getMetricsToCreateNewMetric(Long modelId, User user) {
+        modelService.requireModelAdmin(modelId, user);
+        return getMetricsToCreateNewMetric(modelId);
+    }
+
     private void fillAdminRes(List<MetricResp> metricResps, User user) {
         List<ModelResp> modelResps = modelService.getModelListWithAuth(user, null, AuthType.ADMIN);
         if (CollectionUtils.isEmpty(modelResps)) {
@@ -540,11 +594,18 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    public MetricResp getMetric(Long modelId, String bizName, User user) {
+        modelService.requireModelViewer(modelId, user);
+        return getMetric(modelId, bizName);
+    }
+
+    @Override
     public MetricResp getMetric(Long id, User user) {
         MetricDO metricDO = metricRepository.getMetricById(id);
         if (metricDO == null) {
             return null;
         }
+        modelService.requireModelViewer(metricDO.getModelId(), user);
         ModelFilter modelFilter = new ModelFilter(true, Lists.newArrayList(metricDO.getModelId()));
         Map<Long, ModelResp> modelMap = modelService.getModelMap(modelFilter);
         List<CollectDO> collectList =
@@ -567,7 +628,7 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
 
     @Override
     public List<String> mockAlias(MetricBaseReq metricReq, String mockType, User user) {
-
+        requireModelAdmin(metricReq == null ? null : metricReq.getModelId(), user);
         String mockAlias = aliasGenerateHelper.generateAlias(mockType, metricReq.getName(),
                 metricReq.getBizName(), "", metricReq.getDescription());
         String ret = mockAlias.replaceAll("`", "").replace("json", "").replace("\n", "")
@@ -582,6 +643,13 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
             return new HashSet<>();
         }
         return metricResps.stream().flatMap(metricResp -> metricResp.getClassifications().stream())
+                .collect(Collectors.toSet());
+    }
+
+    @Override
+    public Set<String> getMetricTags(User user) {
+        return getMetrics(new MetaFilter(), user).stream()
+                .flatMap(metric -> metric.getClassifications().stream())
                 .collect(Collectors.toSet());
     }
 
@@ -618,7 +686,25 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
     }
 
     @Override
+    public List<DrillDownDimension> getDrillDownDimension(Long metricId, User user) {
+        MetricDO metric = metricRepository.getMetricById(metricId);
+        if (metric == null) {
+            throw new InvalidArgumentException("Metric does not exist");
+        }
+        modelService.requireModelViewer(metric.getModelId(), user);
+        return getDrillDownDimension(metricId);
+    }
+
+    @Override
     public void saveMetricQueryDefaultConfig(MetricQueryDefaultConfig defaultConfig, User user) {
+        if (defaultConfig == null || defaultConfig.getMetricId() == null) {
+            throw new InvalidArgumentException("Metric id is required");
+        }
+        MetricDO metric = metricRepository.getMetricById(defaultConfig.getMetricId());
+        if (metric == null) {
+            throw new InvalidArgumentException("Metric does not exist");
+        }
+        modelService.requireModelViewer(metric.getModelId(), user);
         MetricQueryDefaultConfigDO defaultConfigDO =
                 metricRepository.getDefaultQueryConfig(defaultConfig.getMetricId(), user.getName());
         if (defaultConfigDO == null) {
@@ -636,6 +722,11 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
 
     @Override
     public MetricQueryDefaultConfig getMetricQueryDefaultConfig(Long metricId, User user) {
+        MetricDO metric = metricRepository.getMetricById(metricId);
+        if (metric == null) {
+            throw new InvalidArgumentException("Metric does not exist");
+        }
+        modelService.requireModelViewer(metric.getModelId(), user);
         MetricQueryDefaultConfigDO metricQueryDefaultConfigDO =
                 metricRepository.getDefaultQueryConfig(metricId, user.getName());
         MetricQueryDefaultConfig metricQueryDefaultConfig = new MetricQueryDefaultConfig();
@@ -668,6 +759,84 @@ public class MetricServiceImpl extends ServiceImpl<MetricDOMapper, MetricDO>
                 }
             }
         }
+    }
+
+    private void requireMetricRequestAccess(List<MetricReq> requests, User user) {
+        if (CollectionUtils.isEmpty(requests)) {
+            throw new InvalidArgumentException("Metric requests must not be empty");
+        }
+        Set<Long> modelIds =
+                requests.stream().map(MetricReq::getModelId).collect(Collectors.toSet());
+        requireSingleModelBatch(modelIds, "Metric");
+        requireModelAdmins(modelIds, user);
+    }
+
+    private void requireMetricUpdateAccess(List<MetricReq> requests, User user) {
+        if (CollectionUtils.isEmpty(requests) || requests.stream()
+                .anyMatch(request -> request == null || request.getId() == null)) {
+            throw new InvalidArgumentException("Metric ids are required");
+        }
+        Set<Long> modelIds = new HashSet<>();
+        for (MetricReq request : requests) {
+            MetricDO persisted = metricRepository.getMetricById(request.getId());
+            requirePersistedMetricAccess(persisted, request.getModelId(), user);
+            modelIds.add(persisted.getModelId());
+        }
+        requireSingleModelBatch(modelIds, "Metric");
+    }
+
+    private void requirePersistedMetricAccess(MetricDO persisted, Long requestedModelId,
+            User user) {
+        if (persisted == null) {
+            throw new InvalidArgumentException("Metric does not exist");
+        }
+        if (!Objects.equals(persisted.getModelId(), requestedModelId)) {
+            throw new InvalidArgumentException("Metric model cannot be changed");
+        }
+        requireModelAdmin(persisted.getModelId(), user);
+    }
+
+    private void requireCompleteMetricBatch(List<Long> requestedIds, List<MetricDO> metrics) {
+        Set<Long> uniqueIds = positiveIds(requestedIds, "Metric");
+        Set<Long> foundIds = CollectionUtils.isEmpty(metrics) ? Set.of()
+                : metrics.stream().map(MetricDO::getId).collect(Collectors.toSet());
+        if (!foundIds.containsAll(uniqueIds)) {
+            throw new InvalidArgumentException("One or more metrics do not exist");
+        }
+    }
+
+    private Set<Long> positiveIds(List<Long> ids, String field) {
+        if (CollectionUtils.isEmpty(ids) || ids.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new InvalidArgumentException(field + " ids must be positive");
+        }
+        return Set.copyOf(ids);
+    }
+
+    private void requireModelAdmins(Collection<Long> modelIds, User user) {
+        if (CollectionUtils.isEmpty(modelIds)) {
+            throw new InvalidArgumentException("Model ids must not be empty");
+        }
+        modelIds.forEach(modelId -> requireModelAdmin(modelId, user));
+    }
+
+    private void requireModelAdmin(Long modelId, User user) {
+        modelService.requireModelAdmin(modelId, user);
+    }
+
+    private void requireSingleModelBatch(Set<Long> modelIds, String itemType) {
+        if (modelIds.size() != 1) {
+            throw new InvalidArgumentException(itemType + " batch must belong to one model");
+        }
+    }
+
+    private List<Long> restrictToAccessibleModels(List<Long> requestedModelIds, User user) {
+        Set<Long> accessible = modelService.getAccessibleModelIds(user, AuthType.VIEWER);
+        if (CollectionUtils.isEmpty(requestedModelIds)) {
+            return accessible.isEmpty() ? Lists.newArrayList(-1L) : new ArrayList<>(accessible);
+        }
+        Set<Long> requested = new HashSet<>(positiveIds(requestedModelIds, "Model"));
+        requested.retainAll(accessible);
+        return requested.isEmpty() ? Lists.newArrayList(-1L) : new ArrayList<>(requested);
     }
 
     private List<MetricResp> convertList(List<MetricDO> metricDOS) {

@@ -99,26 +99,34 @@ public class DimensionController {
     }
 
     @GetMapping("/getDimensionList/{modelId}")
-    public List<DimensionResp> getDimension(@PathVariable("modelId") Long modelId) {
+    public List<DimensionResp> getDimension(@PathVariable("modelId") Long modelId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
         DimensionFilter dimensionFilter = new DimensionFilter();
         dimensionFilter.setModelIds(Lists.newArrayList(modelId));
-        return dimensionService.getDimensions(dimensionFilter);
+        return dimensionService.getDimensions(dimensionFilter, user);
     }
 
     @GetMapping("/getDimensionInModelCluster/{modelId}")
-    public List<DimensionResp> getDimensionInModelCluster(@PathVariable("modelId") Long modelId) {
-        return dimensionService.getDimensionInModelCluster(modelId);
+    public List<DimensionResp> getDimensionInModelCluster(@PathVariable("modelId") Long modelId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return dimensionService.getDimensionInModelCluster(modelId, user);
     }
 
     @GetMapping("/{modelId}/{dimensionName}")
     public DimensionResp getDimensionDescByNameAndId(@PathVariable("modelId") Long modelId,
-            @PathVariable("dimensionName") String dimensionBizName) {
-        return dimensionService.getDimension(dimensionBizName, modelId);
+            @PathVariable("dimensionName") String dimensionBizName, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return dimensionService.getDimension(dimensionBizName, modelId, user);
     }
 
     @PostMapping("/queryDimension")
-    public PageInfo<DimensionResp> queryDimension(@RequestBody PageDimensionReq pageDimensionReq) {
-        return dimensionService.queryDimension(pageDimensionReq);
+    public PageInfo<DimensionResp> queryDimension(@RequestBody PageDimensionReq pageDimensionReq,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return dimensionService.queryDimension(pageDimensionReq, user);
     }
 
     @PostMapping("/queryDimValue")
@@ -137,9 +145,11 @@ public class DimensionController {
     }
 
     @GetMapping("/getAllHighSensitiveDimension")
-    public List<DimensionResp> getAllHighSensitiveDimension() {
+    public List<DimensionResp> getAllHighSensitiveDimension(HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
         MetaFilter metaFilter = new MetaFilter();
         metaFilter.setSensitiveLevel(SensitiveLevelEnum.HIGH.getCode());
-        return dimensionService.getDimensions(metaFilter);
+        return dimensionService.getDimensions(metaFilter, user);
     }
 }

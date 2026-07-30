@@ -19,7 +19,11 @@ public interface DimensionService {
 
     List<DimensionResp> getDimensions(MetaFilter metaFilter);
 
+    List<DimensionResp> getDimensions(MetaFilter metaFilter, User user);
+
     DimensionResp getDimension(String bizName, Long modelId);
+
+    DimensionResp getDimension(String bizName, Long modelId, User user);
 
     DimensionResp getDimension(Long id);
 
@@ -38,6 +42,8 @@ public interface DimensionService {
 
     PageInfo<DimensionResp> queryDimension(PageDimensionReq pageDimensionReq);
 
+    PageInfo<DimensionResp> queryDimension(PageDimensionReq pageDimensionReq, User user);
+
     List<DimensionResp> queryDimensions(DimensionsFilter dimensionsFilter);
 
     void batchUpdateSensitiveLevel(MetaBatchReq metaBatchReq, User user);
@@ -47,6 +53,8 @@ public interface DimensionService {
     void deleteDimensionBatch(List<Long> idList, User user);
 
     List<DimensionResp> getDimensionInModelCluster(Long modelId);
+
+    List<DimensionResp> getDimensionInModelCluster(Long modelId, User user);
 
     List<String> mockAlias(DimensionReq dimensionReq, String mockType, User user);
 
