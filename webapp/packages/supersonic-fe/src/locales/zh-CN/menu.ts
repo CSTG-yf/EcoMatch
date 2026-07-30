@@ -20,6 +20,7 @@ export default {
   'menu.plugin': '插件管理',
   'menu.login': '登录',
   'menu.system': '系统设置',
+  'menu.evaluation': '评测分析',
   'menu.chat': '问答对话',
   'menu.agent': '助理管理',
 };

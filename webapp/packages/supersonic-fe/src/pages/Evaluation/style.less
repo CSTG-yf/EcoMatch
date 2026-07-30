@@ -1,0 +1,134 @@
+.page {
+  min-height: 100%;
+  padding: 24px 32px 40px;
+  background: #f7f8fa;
+  color: #1f2937;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: 0;
+}
+
+.subtitle {
+  color: #667085;
+  font-size: 13px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.summaryItem {
+  min-width: 0;
+  padding: 18px 20px;
+  border-right: 1px solid #e5e7eb;
+
+  &:last-child {
+    border-right: 0;
+  }
+}
+
+.summaryLabel {
+  display: block;
+  margin-bottom: 8px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.summaryValue {
+  display: block;
+  overflow: hidden;
+  color: #101828;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  min-height: 460px;
+  padding: 4px 20px 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metricName {
+  color: #344054;
+  font-weight: 500;
+}
+
+.deltaPositive {
+  color: #067647;
+}
+
+.deltaNegative {
+  color: #b42318;
+}
+
+@media (max-width: 900px) {
+  .page {
+    padding: 16px;
+  }
+
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summaryItem {
+    border-bottom: 1px solid #e5e7eb;
+
+    &:nth-child(2) {
+      border-right: 0;
+    }
+
+    &:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+  }
+}
+
+@media (max-width: 520px) {
+  .summary {
+    grid-template-columns: 1fr;
+  }
+
+  .summaryItem {
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
+
+    &:nth-last-child(2) {
+      border-bottom: 1px solid #e5e7eb;
+    }
+  }
+}

@@ -218,6 +218,12 @@ const ROUTES = [
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
   },
   {
+    path: '/evaluation',
+    name: 'evaluation',
+    component: './Evaluation',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
+  },
+  {
     path: '/',
     redirect: '/model',
   },
