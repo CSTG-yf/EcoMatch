@@ -402,6 +402,8 @@ class BusinessInsightProcessorTest {
             }
             total++;
         }
+        System.out.printf("BANK_CHART_EVAL cases=%d matched=%d accuracy=%.4f%n", total, matched,
+                (double) matched / total);
         assertTrue(total > 0);
         assertTrue((double) matched / total >= 0.90,
                 String.format("chart accuracy was %d/%d", matched, total));
@@ -445,6 +447,8 @@ class BusinessInsightProcessorTest {
             }
             total++;
         }
+        System.out.printf("BANK_EXPLANATION_EVAL cases=%d matched=%d coverage=%.4f%n", total,
+                matched, (double) matched / total);
         assertTrue(total > 0);
         assertTrue((double) matched / total >= 0.90,
                 String.format("explanation coverage was %d/%d: %s", matched, total, failures));

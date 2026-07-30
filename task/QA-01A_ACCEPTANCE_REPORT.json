@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "1.0",
+  "task": "QA-01A",
+  "evaluatedAt": "2026-07-30",
+  "status": "PASS",
+  "evaluationMode": "gold",
+  "source": {
+    "datasetVersion": "0.1.0",
+    "workbookSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+    "databaseSha256": "f84c9b38845a7af34e542b161836971dc333aeaf7016ef0b40060eaecd55753d"
+  },
+  "summary": {
+    "requiredSuiteCount": 5,
+    "passedSuiteCount": 5,
+    "failedSuites": [],
+    "missingSuites": [],
+    "stageFailures": []
+  },
+  "suites": {
+    "intent": {
+      "caseCount": 52,
+      "intentAccuracy": 0.9808,
+      "metricSetAccuracy": 0.9615,
+      "clarificationAccuracy": 0.9231,
+      "status": "PASS"
+    },
+    "sqlExecution": {
+      "caseCount": 200,
+      "executionSuccessRate": 1.0,
+      "averageResponseTimeMs": 2.502,
+      "p95ResponseTimeMs": 5.203,
+      "status": "PASS"
+    },
+    "resultConsistency": {
+      "caseCount": 200,
+      "resultConsistencyRate": 1.0,
+      "status": "PASS"
+    },
+    "multiTurn": {
+      "testCount": 5,
+      "maxContextRounds": 10,
+      "passRate": 1.0,
+      "status": "PASS"
+    },
+    "chartRecommendation": {
+      "caseCount": 30,
+      "chartAccuracy": 1.0,
+      "explanationCoverage": 1.0,
+      "status": "PASS"
+    }
+  },
+  "negativeGate": {
+    "minimumIntentAccuracy": 1.0,
+    "actualIntentAccuracy": 0.9808,
+    "status": "FAIL",
+    "exitCode": 1,
+    "failureCategory": "THRESHOLD_VIOLATION"
+  },
+  "sensitivePayloadCheck": {
+    "containsSql": false,
+    "containsResultRows": false,
+    "containsCredentials": false,
+    "containsSourceAbsolutePath": false
+  }
+}

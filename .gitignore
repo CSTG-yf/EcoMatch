@@ -19,6 +19,7 @@ assembly/runtime/*
 chm_db/
 __pycache__/
 evaluation/.venv/
+/.local-dev/
 /dict
 assembly/build/*-SNAPSHOT
 **/node_modules/
