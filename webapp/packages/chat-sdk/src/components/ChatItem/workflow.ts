@@ -1,6 +1,7 @@
 export type QueryWorkflowStage =
   | 'idle'
   | 'parsing'
+  | 'clarifying'
   | 'executing'
   | 'explaining'
   | 'completed'
@@ -29,6 +30,7 @@ export const stageFromRequestError = (error: any): QueryWorkflowStage => {
 export const WORKFLOW_STAGE_TEXT: Record<QueryWorkflowStage, string> = {
   idle: '',
   parsing: '正在理解问题',
+  clarifying: '等待补充查询条件',
   executing: '正在查询数据',
   explaining: '正在生成业务解释',
   completed: '问数完成',

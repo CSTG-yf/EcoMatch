@@ -32,6 +32,7 @@ type Props = {
   ) => void;
   onSendMsg: (value: string) => void;
   onRetryHistory: () => void;
+  onContinueQuestion: (question: string) => void;
 };
 
 const MessageContainer: React.FC<Props> = ({
@@ -50,6 +51,7 @@ const MessageContainer: React.FC<Props> = ({
   onMsgDataLoaded,
   onSendMsg,
   onRetryHistory,
+  onContinueQuestion,
 }) => {
   const [triggerResize, setTriggerResize] = useState(false);
   const onResize = useCallback(() => {
@@ -141,6 +143,7 @@ const MessageContainer: React.FC<Props> = ({
                     }}
                     onUpdateMessageScroll={updateMessageContainerScroll}
                     onSendMsg={onSendMsg}
+                    onContinueQuestion={onContinueQuestion}
                     isLastMessage={index === messageList.length - 1}
                   />
                 </>

@@ -27,3 +27,5 @@ export const mergeHistoryMessages = (
     return true;
   });
 };
+
+export const buildContinuationDraft = (question: string) => `基于“${question}”继续提问：`;

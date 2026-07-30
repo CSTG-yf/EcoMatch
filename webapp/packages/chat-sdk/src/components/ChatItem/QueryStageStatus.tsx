@@ -4,6 +4,7 @@ import {
   CloseCircleOutlined,
   LoadingOutlined,
   LockOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { PREFIX_CLS } from '../../common/constants';
 import { QueryWorkflowStage, WORKFLOW_STAGE_TEXT } from './workflow';
@@ -20,6 +21,8 @@ const QueryStageStatus: React.FC<Props> = ({ stage }) => {
   const icon =
     stage === 'completed' ? (
       <CheckCircleOutlined />
+    ) : stage === 'clarifying' ? (
+      <QuestionCircleOutlined />
     ) : stage === 'forbidden' ? (
       <LockOutlined />
     ) : stage === 'timeout' ? (

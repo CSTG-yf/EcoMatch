@@ -1,4 +1,8 @@
-import { mergeHistoryMessages, selectInitialConversation } from './conversationState';
+import {
+  buildContinuationDraft,
+  mergeHistoryMessages,
+  selectInitialConversation,
+} from './conversationState';
 import { MessageTypeEnum } from './type';
 
 describe('conversation state', () => {
@@ -38,5 +42,11 @@ describe('conversation state', () => {
       2
     );
     expect(result.map(item => item.id)).toEqual([1, 2, 3]);
+  });
+
+  it('builds a continuation draft without retyping the historical question', () => {
+    expect(buildContinuationDraft('查询南京分行贷款余额')).toBe(
+      '基于“查询南京分行贷款余额”继续提问：'
+    );
   });
 });

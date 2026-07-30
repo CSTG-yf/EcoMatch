@@ -35,7 +35,7 @@ import {
   Switch,
   Tooltip,
 } from 'antd';
-import { mergeHistoryMessages } from './conversationState';
+import { buildContinuationDraft, mergeHistoryMessages } from './conversationState';
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
@@ -524,6 +524,11 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                           setPageNo(historyFailedPage);
                         }
                       });
+                    }}
+                    onContinueQuestion={question => {
+                      setInputMsg(buildContinuationDraft(question));
+                      inputFocus();
+                      updateMessageContainerScroll();
                     }}
                   />
                   {!noInput && (

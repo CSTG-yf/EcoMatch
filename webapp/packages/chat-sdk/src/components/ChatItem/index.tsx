@@ -5,6 +5,7 @@ import {
   EntityInfoType,
   FilterItemType,
   MsgDataType,
+  MultiTurnContextType,
   ParseStateEnum,
   ParseTimeCostType,
   RangeValue,
@@ -21,7 +22,8 @@ import {
   recognizeBankIntent,
 } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
-import { message, Spin } from 'antd';
+import { Button, message, Spin } from 'antd';
+import { HistoryOutlined } from '@ant-design/icons';
 import IconFont from '../IconFont';
 import ExpandParseTip from './ExpandParseTip';
 import ParseTip from './ParseTip';
@@ -37,11 +39,10 @@ import { exportCsvFile } from '../../utils/utils';
 import { useMethodRegister } from '../../hooks';
 import BankQueryOverview from './BankQueryOverview';
 import QueryStageStatus from './QueryStageStatus';
-import {
-  QueryWorkflowStage,
-  stageFromRequestError,
-  stageFromResponseCode,
-} from './workflow';
+import BankClarificationPanel from './BankClarificationPanel';
+import MultiTurnContextBar from './MultiTurnContextBar';
+import { shouldAwaitClarification } from './contextModel';
+import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
 const SUMMARY_POLL_MAX_ATTEMPTS = 60;
@@ -69,6 +70,7 @@ type Props = {
   onMsgDataLoaded?: (data: MsgDataType, valid: boolean, isRefresh?: boolean) => void;
   onUpdateMessageScroll?: () => void;
   onSendMsg?: (msg: string) => void;
+  onContinueQuestion?: (question: string) => void;
 };
 
 export const ChartItemContext = createContext({
@@ -99,6 +101,7 @@ const ChatItem: React.FC<Props> = ({
   onMsgDataLoaded,
   onUpdateMessageScroll,
   onSendMsg,
+  onContinueQuestion,
 }) => {
   const [parseLoading, setParseLoading] = useState(false);
   const [parseTimeCost, setParseTimeCost] = useState<ParseTimeCostType>();
@@ -122,6 +125,7 @@ const ChatItem: React.FC<Props> = ({
   );
   const [isParserError, setIsParseError] = useState<boolean>(false);
   const [bankIntent, setBankIntent] = useState<BankIntentResultType>();
+  const [multiTurnContext, setMultiTurnContext] = useState<MultiTurnContextType>();
   const [workflowStage, setWorkflowStage] = useState<QueryWorkflowStage>('idle');
   const summaryPollToken = useRef(0);
 
@@ -144,6 +148,7 @@ const ChatItem: React.FC<Props> = ({
     setDataCache({});
     setIsParseError(false);
     setBankIntent(undefined);
+    setMultiTurnContext(undefined);
     setWorkflowStage('idle');
   };
 
@@ -188,10 +193,12 @@ const ChatItem: React.FC<Props> = ({
       const intent = response?.data || response;
       if (intent && typeof intent === 'object') {
         setBankIntent(intent);
+        return intent as BankIntentResultType;
       }
     } catch {
       setBankIntent(undefined);
     }
+    return undefined;
   };
 
   const pollExecuteSummary = async (
@@ -301,8 +308,13 @@ const ChatItem: React.FC<Props> = ({
     setWorkflowStage('parsing');
     setIsParseError(false);
     setParseLoading(true);
-    void loadBankIntent(msg);
     try {
+      const intent = await loadBankIntent(msg);
+      if (shouldAwaitClarification(intent)) {
+        setWorkflowStage('clarifying');
+        onUpdateMessageScroll?.();
+        return;
+      }
       const parseData: any = await chatParse({
         queryText: msg,
         chatId: conversationId,
@@ -311,7 +323,16 @@ const ChatItem: React.FC<Props> = ({
         filters: filter,
       });
       const { code, data } = parseData || {};
-      const { state, selectedParses, candidateParses, queryId, parseTimeCost, errorMsg } = data || {};
+      const {
+        state,
+        selectedParses,
+        candidateParses,
+        queryId,
+        parseTimeCost,
+        errorMsg,
+        multiTurnContext,
+      } = data || {};
+      setMultiTurnContext(multiTurnContext);
       const parses = selectedParses?.concat(candidateParses || []) || [];
       if (
         code !== 200 ||
@@ -554,8 +575,8 @@ const ChatItem: React.FC<Props> = ({
 
   const { register, call } = useMethodRegister(() => message.error('该条消息暂不支持该操作'));
 
-  let actualQueryText=parseInfo?.properties?.CONTEXT?.queryText //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
-  actualQueryText=actualQueryText==null?msg:actualQueryText
+  let actualQueryText = parseInfo?.properties?.CONTEXT?.queryText; //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
+  actualQueryText = actualQueryText == null ? msg : actualQueryText;
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>
@@ -569,6 +590,8 @@ const ChatItem: React.FC<Props> = ({
           <div className={contentClass}>
             <QueryStageStatus stage={workflowStage} />
             <BankQueryOverview intent={bankIntent} parseInfo={parseInfo} />
+            <BankClarificationPanel intent={bankIntent} question={msg} onApply={onSendMsg} />
+            <MultiTurnContextBar context={multiTurnContext} question={msg} onSendMsg={onSendMsg} />
             <>
               {currentAgent?.enableFeedback === 1 && !questionId && showExpandParseTip && (
                 <div style={{ marginBottom: 10 }}>
@@ -665,6 +688,17 @@ const ChatItem: React.FC<Props> = ({
                   onSelectQuestion={onSelectQuestion}
                 />
               )}
+            {onContinueQuestion && (
+              <Button
+                className={`${prefixCls}-continue-question`}
+                type="link"
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={() => onContinueQuestion(msg)}
+              >
+                从此问题继续
+              </Button>
+            )}
           </div>
           {(parseTip !== '' || (executeMode && !executeLoading)) &&
             parseInfo?.queryMode !== 'PLAIN_TEXT' && (

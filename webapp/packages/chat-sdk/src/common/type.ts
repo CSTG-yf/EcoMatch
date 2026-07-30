@@ -172,6 +172,7 @@ export type ParseDataType = {
   selectedParses: ChatContextType[];
   candidateParses: ChatContextType[];
   similarSolvedQuery: SimilarQuestionType[];
+  multiTurnContext?: MultiTurnContextType;
 };
 
 export type BankIntentMetricType = {
@@ -195,6 +196,11 @@ export type BankIntentResultType = {
   intent?: string;
   confidence?: number;
   clarificationRequired?: boolean;
+  intentCandidates?: Array<{
+    intent?: string;
+    confidence?: number;
+    reason?: string;
+  }>;
   metrics?: BankIntentMetricType[];
   organizations?: BankIntentOrganizationType[];
   time?: {
@@ -210,7 +216,38 @@ export type BankIntentResultType = {
     value?: string;
     sourceText?: string;
   }>;
+  clarifications?: BankClarificationType[];
   reasons?: string[];
+};
+
+export type BankClarificationType = {
+  type?: string;
+  question?: string;
+  options?: string[];
+  reason?: string;
+};
+
+export type MultiTurnContextTurnType = {
+  queryId?: number;
+  question?: string;
+  s2sql?: string;
+  metrics?: string[];
+  dimensions?: string[];
+  filters?: string[];
+  dateInfo?: string;
+  orders?: string[];
+  granularity?: string;
+};
+
+export type MultiTurnContextType = {
+  maxRounds?: number;
+  usedRounds?: number;
+  operation?: 'NONE' | 'APPEND' | 'REMOVE' | 'REPLACE' | 'DRILL_DOWN' | 'RESET' | string;
+  expired?: boolean;
+  truncated?: boolean;
+  rewrittenQuery?: string;
+  sourceQueryIds?: number[];
+  turns?: MultiTurnContextTurnType[];
 };
 
 export type ChartRecommendationType = {
