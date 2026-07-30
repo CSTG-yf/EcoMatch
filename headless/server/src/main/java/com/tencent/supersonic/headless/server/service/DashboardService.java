@@ -15,6 +15,10 @@ public interface DashboardService {
 
     DashboardResp get(Long id, User user);
 
+    DashboardResp getManageable(Long id, User user);
+
+    DashboardResp getPublishedShared(Long id, User user);
+
     DashboardResp create(DashboardCreateReq request, User user);
 
     DashboardResp update(Long id, DashboardUpdateReq request, User user);

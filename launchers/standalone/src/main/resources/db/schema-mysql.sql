@@ -403,6 +403,58 @@ CREATE TABLE IF NOT EXISTS `s2_dashboard`
     KEY `idx_dashboard_org` (`organization_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `s2_export_task`
+(
+    `id`              bigint(20)   NOT NULL AUTO_INCREMENT,
+    `task_id`         varchar(64)  NOT NULL,
+    `resource_type`   varchar(20)  NOT NULL,
+    `resource_id`     varchar(100) DEFAULT NULL,
+    `format`          varchar(10)  NOT NULL,
+    `status`          varchar(20)  NOT NULL,
+    `owner`           varchar(100) NOT NULL,
+    `organization_id` varchar(200) DEFAULT NULL,
+    `storage_key`     varchar(100) DEFAULT NULL,
+    `file_name`       varchar(255) DEFAULT NULL,
+    `file_size`       bigint(20)   DEFAULT NULL,
+    `row_count`       bigint(20)   DEFAULT NULL,
+    `masking_summary` varchar(255) DEFAULT NULL,
+    `failure_code`    varchar(100) DEFAULT NULL,
+    `expires_at`      datetime     NOT NULL,
+    `created_at`      datetime     NOT NULL,
+    `completed_at`    datetime     DEFAULT NULL,
+    `updated_at`      datetime     NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_export_task_id` (`task_id`),
+    KEY `idx_export_owner_created` (`owner`, `created_at`),
+    KEY `idx_export_expires` (`expires_at`)
+) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `s2_share`
+(
+    `id`                bigint(20)   NOT NULL AUTO_INCREMENT,
+    `share_id`          varchar(64)  NOT NULL,
+    `token_hash`        varchar(64)  NOT NULL,
+    `dashboard_id`      bigint(20)   NOT NULL,
+    `owner`             varchar(100) NOT NULL,
+    `organization_id`   varchar(200) DEFAULT NULL,
+    `identity_policy`   varchar(30)  NOT NULL,
+    `allowed_users`     text         NOT NULL,
+    `status`            varchar(20)  NOT NULL,
+    `max_access_count`  int          DEFAULT NULL,
+    `access_count`      int          NOT NULL DEFAULT 0,
+    `watermark_enabled` tinyint(1)   NOT NULL DEFAULT 1,
+    `expires_at`        datetime     NOT NULL,
+    `created_at`        datetime     NOT NULL,
+    `updated_at`        datetime     NOT NULL,
+    `revoked_at`        datetime     DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_share_id` (`share_id`),
+    UNIQUE KEY `uk_share_token_hash` (`token_hash`),
+    KEY `idx_share_owner_created` (`owner`, `created_at`),
+    KEY `idx_share_dashboard_status` (`dashboard_id`, `status`),
+    KEY `idx_share_expires` (`expires_at`)
+) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS s2_user
 (
     id       int(11) NOT NULL AUTO_INCREMENT,

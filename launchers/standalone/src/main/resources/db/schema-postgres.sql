@@ -478,6 +478,53 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_domain_status
 CREATE INDEX IF NOT EXISTS idx_dashboard_owner ON s2_dashboard(owner);
 CREATE INDEX IF NOT EXISTS idx_dashboard_org ON s2_dashboard(organization_id);
 
+CREATE TABLE IF NOT EXISTS s2_export_task (
+    id BIGSERIAL PRIMARY KEY,
+    task_id varchar(64) NOT NULL UNIQUE,
+    resource_type varchar(20) NOT NULL,
+    resource_id varchar(100),
+    format varchar(10) NOT NULL,
+    status varchar(20) NOT NULL,
+    owner varchar(100) NOT NULL,
+    organization_id varchar(200),
+    storage_key varchar(100),
+    file_name varchar(255),
+    file_size bigint,
+    row_count bigint,
+    masking_summary varchar(255),
+    failure_code varchar(100),
+    expires_at timestamp NOT NULL,
+    created_at timestamp NOT NULL,
+    completed_at timestamp,
+    updated_at timestamp NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_export_owner_created
+    ON s2_export_task(owner, created_at);
+CREATE INDEX IF NOT EXISTS idx_export_expires ON s2_export_task(expires_at);
+
+CREATE TABLE IF NOT EXISTS s2_share (
+    id BIGSERIAL PRIMARY KEY,
+    share_id varchar(64) NOT NULL UNIQUE,
+    token_hash varchar(64) NOT NULL UNIQUE,
+    dashboard_id bigint NOT NULL,
+    owner varchar(100) NOT NULL,
+    organization_id varchar(200),
+    identity_policy varchar(30) NOT NULL,
+    allowed_users text NOT NULL,
+    status varchar(20) NOT NULL,
+    max_access_count integer,
+    access_count integer NOT NULL DEFAULT 0,
+    watermark_enabled boolean NOT NULL DEFAULT true,
+    expires_at timestamp NOT NULL,
+    created_at timestamp NOT NULL,
+    updated_at timestamp NOT NULL,
+    revoked_at timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_share_owner_created ON s2_share(owner, created_at);
+CREATE INDEX IF NOT EXISTS idx_share_dashboard_status
+    ON s2_share(dashboard_id, status);
+CREATE INDEX IF NOT EXISTS idx_share_expires ON s2_share(expires_at);
+
 CREATE TABLE IF NOT EXISTS s2_system_config (
     id SERIAL PRIMARY KEY,
     admin varchar(500),

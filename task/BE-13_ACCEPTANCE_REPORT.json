@@ -1,0 +1,61 @@
+{
+  "task": "BE-13",
+  "status": "PASS",
+  "completedAt": "2026-07-31",
+  "scope": {
+    "export": [
+      "QUERY_XLSX",
+      "QUERY_PDF",
+      "DASHBOARD_XLSX",
+      "DASHBOARD_PDF",
+      "BAR_CHART",
+      "LINE_CHART"
+    ],
+    "sharing": [
+      "AUTHENTICATED",
+      "ORGANIZATION",
+      "USERS",
+      "EXPIRATION",
+      "REVOCATION",
+      "ACCESS_LIMIT",
+      "WATERMARK"
+    ]
+  },
+  "securityControls": {
+    "serverSideRequery": true,
+    "rawSqlAccepted": false,
+    "resultSnapshotPersisted": false,
+    "authorizationForced": true,
+    "requiredAudit": true,
+    "rawTokenPersisted": false,
+    "tokenEntropyBits": 256,
+    "tokenHash": "SHA-256",
+    "formulaInjectionEscaped": true,
+    "failedFileCleanup": true
+  },
+  "limits": {
+    "maxQueries": 20,
+    "maxRows": 10000,
+    "maxPdfRows": 500,
+    "maxFileBytes": 26214400,
+    "maxConcurrentExports": 4,
+    "retentionHours": 24,
+    "maxShareLifetimeDays": 30,
+    "maxShareAccessCount": 100000
+  },
+  "verification": {
+    "targetedTests": {
+      "total": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "backendRegression": {
+      "total": 218,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "h2FullSchema": "PASS"
+  }
+}

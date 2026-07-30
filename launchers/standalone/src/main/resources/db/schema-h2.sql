@@ -313,6 +313,56 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_owner ON s2_dashboard(owner);
 CREATE INDEX IF NOT EXISTS idx_dashboard_org ON s2_dashboard(organization_id);
 COMMENT ON TABLE s2_dashboard IS 'secured analytical dashboard';
 
+create table IF NOT EXISTS `s2_export_task` (
+    id              BIGINT auto_increment,
+    task_id         varchar(64)  not null,
+    resource_type   varchar(20)  not null,
+    resource_id     varchar(100) null,
+    format          varchar(10)  not null,
+    status          varchar(20)  not null,
+    owner           varchar(100) not null,
+    organization_id varchar(200) null,
+    storage_key     varchar(100) null,
+    file_name       varchar(255) null,
+    file_size       BIGINT       null,
+    row_count       BIGINT       null,
+    masking_summary varchar(255) null,
+    failure_code    varchar(100) null,
+    expires_at      TIMESTAMP    not null,
+    created_at      TIMESTAMP    not null,
+    completed_at    TIMESTAMP    null,
+    updated_at      TIMESTAMP    not null,
+    PRIMARY KEY (`id`),
+    UNIQUE (`task_id`)
+);
+CREATE INDEX IF NOT EXISTS idx_export_owner_created ON s2_export_task(owner, created_at);
+CREATE INDEX IF NOT EXISTS idx_export_expires ON s2_export_task(expires_at);
+
+create table IF NOT EXISTS `s2_share` (
+    id                BIGINT auto_increment,
+    share_id          varchar(64)  not null,
+    token_hash        varchar(64)  not null,
+    dashboard_id      BIGINT       not null,
+    owner             varchar(100) not null,
+    organization_id   varchar(200) null,
+    identity_policy   varchar(30)  not null,
+    allowed_users     LONGVARCHAR  not null,
+    status            varchar(20)  not null,
+    max_access_count  INT          null,
+    access_count      INT          default 0 not null,
+    watermark_enabled BOOLEAN      default true not null,
+    expires_at        TIMESTAMP    not null,
+    created_at        TIMESTAMP    not null,
+    updated_at        TIMESTAMP    not null,
+    revoked_at        TIMESTAMP    null,
+    PRIMARY KEY (`id`),
+    UNIQUE (`share_id`),
+    UNIQUE (`token_hash`)
+);
+CREATE INDEX IF NOT EXISTS idx_share_owner_created ON s2_share(owner, created_at);
+CREATE INDEX IF NOT EXISTS idx_share_dashboard_status ON s2_share(dashboard_id, status);
+CREATE INDEX IF NOT EXISTS idx_share_expires ON s2_share(expires_at);
+
 
 CREATE TABLE IF NOT EXISTS `s2_query_stat_info` (
   `id` INT NOT NULL AUTO_INCREMENT,

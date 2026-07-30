@@ -112,6 +112,23 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
+    public DashboardResp getManageable(Long id, User user) {
+        return toResponse(requireEditable(id, user));
+    }
+
+    @Override
+    public DashboardResp getPublishedShared(Long id, User user) {
+        DashboardDO dashboard = requireExisting(id);
+        requireDomainAccess(dashboard.getDomainId(), user, AuthType.VIEWER);
+        if (!DashboardStatus.PUBLISHED.name().equals(dashboard.getStatus())) {
+            deny(user, dashboard, "DASHBOARD_SHARE_TARGET_UNAVAILABLE");
+        }
+        audit(AuditEventType.DASHBOARD_ACCESSED, dashboard, user,
+                metadata -> metadata.put("entryPoint", "share"));
+        return toResponse(dashboard);
+    }
+
+    @Override
     public DashboardResp create(DashboardCreateReq request, User user) {
         requireAuthenticated(user);
         if (request == null) {
