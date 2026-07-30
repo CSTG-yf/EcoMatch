@@ -28,6 +28,14 @@ python evaluation/run_qa02a.py
 
 控制项和报告说明见 `evaluation/QA-02A_README.md`。
 
+QA-02B 聚合审计完整性、哈希链、异常规则、告警去重、机构隔离和告警处置测试：
+
+```powershell
+python evaluation/run_qa02b.py
+```
+
+控制项和报告说明见 `evaluation/QA-02B_README.md`。
+
 # 原有 DuSQL 评测流程
 
 1. 正常启动项目(必须包括LLM服务)

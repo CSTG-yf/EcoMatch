@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "task": "QA-02B",
+  "tests": [
+    {
+      "id": "audit-sanitization",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditSanitizerTest"
+    },
+    {
+      "id": "audit-event-integrity",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditEventServiceTest"
+    },
+    {
+      "id": "semantic-query-audit",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.facade.service.impl.S2SemanticLayerServiceAuditTest"
+    },
+    {
+      "id": "audit-rule-validation",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditRuleServiceTest"
+    },
+    {
+      "id": "audit-rule-initialization",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditRuleInitializerTest"
+    },
+    {
+      "id": "anomaly-engine",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditAnomalyEngineTest"
+    },
+    {
+      "id": "security-alert-lifecycle",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.SecurityAlertServiceTest"
+    },
+    {
+      "id": "audit-access-guard",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditAccessGuardTest"
+    },
+    {
+      "id": "audit-management-api",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.audit.rest.AuditManagementControllerTest"
+    },
+    {
+      "id": "download-audit",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.impl.DownloadServiceAuditTest"
+    }
+  ],
+  "controls": [
+    {
+      "id": "audit-completeness-and-sanitization",
+      "description": "Query and export outcomes are audited without persisting raw SQL, credentials or financial identifiers.",
+      "tests": [
+        "audit-sanitization",
+        "audit-event-integrity",
+        "semantic-query-audit",
+        "download-audit"
+      ]
+    },
+    {
+      "id": "hash-chain-integrity",
+      "description": "Audit events form a concurrency-safe hash chain and modified records fail integrity validation.",
+      "tests": [
+        "audit-event-integrity"
+      ]
+    },
+    {
+      "id": "anomaly-rule-triggering",
+      "description": "Validated anomaly rules initialize safely and trigger only when configured conditions are met.",
+      "tests": [
+        "audit-rule-validation",
+        "audit-rule-initialization",
+        "anomaly-engine"
+      ]
+    },
+    {
+      "id": "alert-deduplication-and-evidence",
+      "description": "Equivalent alerts are deduplicated while each new evidence event increments occurrence data.",
+      "tests": [
+        "anomaly-engine",
+        "security-alert-lifecycle"
+      ]
+    },
+    {
+      "id": "organization-isolation",
+      "description": "Audit and alert reads, writes and administration are restricted to the trusted organization scope.",
+      "tests": [
+        "audit-access-guard",
+        "audit-management-api"
+      ]
+    },
+    {
+      "id": "alert-disposition",
+      "description": "Alert transitions follow the state machine and create immutable, sanitized disposition actions.",
+      "tests": [
+        "security-alert-lifecycle",
+        "audit-management-api"
+      ]
+    }
+  ]
+}

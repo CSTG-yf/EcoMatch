@@ -38,11 +38,14 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validate_manifest(value: dict[str, Any]) -> dict[str, Any]:
+def _validate_manifest(
+    value: dict[str, Any],
+    expected_task: str = "QA-02A",
+) -> dict[str, Any]:
     tests = value.get("tests")
     controls = value.get("controls")
-    if value.get("task") != "QA-02A":
-        raise SecurityGateError("manifest.task must be QA-02A")
+    if value.get("task") != expected_task:
+        raise SecurityGateError(f"manifest.task must be {expected_task}")
     if not isinstance(tests, list) or not tests:
         raise SecurityGateError("manifest.tests must be a non-empty array")
     if not isinstance(controls, list) or not controls:
@@ -209,8 +212,9 @@ def build_report(
     command_exit_code: int,
     command_duration_ms: int,
     diagnostic: str = "",
+    task: str = "QA-02A",
 ) -> dict[str, Any]:
-    manifest = _validate_manifest(manifest)
+    manifest = _validate_manifest(manifest, task)
     tests: list[dict[str, Any]] = []
     results_by_id: dict[str, dict[str, Any]] = {}
     failures: list[dict[str, str]] = []
@@ -289,7 +293,7 @@ def build_report(
     )
     return {
         "schemaVersion": "1.0",
-        "task": "QA-02A",
+        "task": task,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "status": status,
         "summary": {

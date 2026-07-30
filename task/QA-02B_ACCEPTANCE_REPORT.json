@@ -1,0 +1,175 @@
+{
+  "command": {
+    "durationMs": 53940,
+    "exitCode": 0
+  },
+  "controls": [
+    {
+      "caseCount": 12,
+      "description": "Query and export outcomes are audited without persisting raw SQL, credentials or financial identifiers.",
+      "id": "audit-completeness-and-sanitization",
+      "status": "PASS",
+      "testCount": 4
+    },
+    {
+      "caseCount": 2,
+      "description": "Audit events form a concurrency-safe hash chain and modified records fail integrity validation.",
+      "id": "hash-chain-integrity",
+      "status": "PASS",
+      "testCount": 1
+    },
+    {
+      "caseCount": 13,
+      "description": "Validated anomaly rules initialize safely and trigger only when configured conditions are met.",
+      "id": "anomaly-rule-triggering",
+      "status": "PASS",
+      "testCount": 3
+    },
+    {
+      "caseCount": 9,
+      "description": "Equivalent alerts are deduplicated while each new evidence event increments occurrence data.",
+      "id": "alert-deduplication-and-evidence",
+      "status": "PASS",
+      "testCount": 2
+    },
+    {
+      "caseCount": 19,
+      "description": "Audit and alert reads, writes and administration are restricted to the trusted organization scope.",
+      "id": "organization-isolation",
+      "status": "PASS",
+      "testCount": 2
+    },
+    {
+      "caseCount": 17,
+      "description": "Alert transitions follow the state machine and create immutable, sanitized disposition actions.",
+      "id": "alert-disposition",
+      "status": "PASS",
+      "testCount": 2
+    }
+  ],
+  "failures": [],
+  "generatedAt": "2026-07-30T13:50:57.130174+00:00",
+  "schemaVersion": "1.0",
+  "status": "PASS",
+  "summary": {
+    "caseCount": 50,
+    "controlCount": 6,
+    "failureCount": 0,
+    "passedControlCount": 6,
+    "passedTestClassCount": 10,
+    "testClassCount": 10
+  },
+  "task": "QA-02B",
+  "tests": [
+    {
+      "caseCount": 6,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditSanitizerTest",
+      "durationMs": 49,
+      "failed": 0,
+      "id": "audit-sanitization",
+      "module": "headless/server",
+      "passed": 6,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditEventServiceTest",
+      "durationMs": 48,
+      "failed": 0,
+      "id": "audit-event-integrity",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.facade.service.impl.S2SemanticLayerServiceAuditTest",
+      "durationMs": 8971,
+      "failed": 0,
+      "id": "semantic-query-audit",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 9,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditRuleServiceTest",
+      "durationMs": 123,
+      "failed": 0,
+      "id": "audit-rule-validation",
+      "module": "headless/server",
+      "passed": 9,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 1,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditRuleInitializerTest",
+      "durationMs": 7,
+      "failed": 0,
+      "id": "audit-rule-initialization",
+      "module": "headless/server",
+      "passed": 1,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditAnomalyEngineTest",
+      "durationMs": 38,
+      "failed": 0,
+      "id": "anomaly-engine",
+      "module": "headless/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 6,
+      "className": "com.tencent.supersonic.headless.server.security.audit.SecurityAlertServiceTest",
+      "durationMs": 62,
+      "failed": 0,
+      "id": "security-alert-lifecycle",
+      "module": "headless/server",
+      "passed": 6,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 8,
+      "className": "com.tencent.supersonic.headless.server.security.audit.AuditAccessGuardTest",
+      "durationMs": 30,
+      "failed": 0,
+      "id": "audit-access-guard",
+      "module": "headless/server",
+      "passed": 8,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 11,
+      "className": "com.tencent.supersonic.headless.server.security.audit.rest.AuditManagementControllerTest",
+      "durationMs": 88,
+      "failed": 0,
+      "id": "audit-management-api",
+      "module": "headless/server",
+      "passed": 11,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.service.impl.DownloadServiceAuditTest",
+      "durationMs": 2278,
+      "failed": 0,
+      "id": "download-audit",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    }
+  ]
+}
