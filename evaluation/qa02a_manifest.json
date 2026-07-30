@@ -1,0 +1,211 @@
+{
+  "schemaVersion": "1.0",
+  "task": "QA-02A",
+  "tests": [
+    {
+      "id": "user-token-access",
+      "module": "auth/authentication",
+      "className": "com.tencent.supersonic.auth.authentication.rest.UserControllerTokenAccessTest"
+    },
+    {
+      "id": "authorization-api-access",
+      "module": "auth/authorization",
+      "className": "com.tencent.supersonic.auth.authorization.rest.AuthControllerAccessTest"
+    },
+    {
+      "id": "authorization-policy-validation",
+      "module": "auth/authorization",
+      "className": "com.tencent.supersonic.auth.authorization.service.AuthServiceImplValidationTest"
+    },
+    {
+      "id": "dataset-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.DataSetServiceAccessTest"
+    },
+    {
+      "id": "database-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.DatabaseServicePermissionTest"
+    },
+    {
+      "id": "model-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.ModelServiceAccessBoundaryTest"
+    },
+    {
+      "id": "semantic-mutation-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.SemanticItemMutationAccessTest"
+    },
+    {
+      "id": "tag-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.TagMetaServiceAccessTest"
+    },
+    {
+      "id": "term-access",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.TermServiceAccessTest"
+    },
+    {
+      "id": "chat-object-policy",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicyTest"
+    },
+    {
+      "id": "chat-history-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest"
+    },
+    {
+      "id": "chat-query-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatQueryServiceAccessTest"
+    },
+    {
+      "id": "agent-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.AgentServiceAccessTest"
+    },
+    {
+      "id": "config-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.ConfigServiceAccessTest"
+    },
+    {
+      "id": "memory-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.MemoryServiceAccessTest"
+    },
+    {
+      "id": "plugin-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.PluginServiceAccessTest"
+    },
+    {
+      "id": "chat-model-access",
+      "module": "common",
+      "className": "com.tencent.supersonic.common.service.impl.ChatModelServiceAccessTest"
+    },
+    {
+      "id": "row-column-permission",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.aspect.S2DataPermissionMaskingTest"
+    },
+    {
+      "id": "dynamic-masking",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.DataMaskingServiceTest"
+    },
+    {
+      "id": "masking-idempotence",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.DataMaskingIdempotenceTest"
+    },
+    {
+      "id": "secure-query-cache",
+      "module": "headless/core",
+      "className": "com.tencent.supersonic.headless.core.cache.DefaultQueryCacheTest"
+    },
+    {
+      "id": "insight-controller-access",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.rest.BusinessInsightControllerSecurityTest"
+    },
+    {
+      "id": "masked-insight",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.BusinessInsightServiceTest"
+    },
+    {
+      "id": "result-projection",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.processor.execute.BankResultProjectionHandlerTest"
+    },
+    {
+      "id": "sensitive-common-logging",
+      "module": "common",
+      "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest"
+    },
+    {
+      "id": "sensitive-query-logging",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest"
+    }
+  ],
+  "controls": [
+    {
+      "id": "identity-and-vertical-access",
+      "description": "Authentication, administration and semantic object APIs reject anonymous or unauthorized callers.",
+      "tests": [
+        "user-token-access",
+        "authorization-api-access",
+        "authorization-policy-validation",
+        "dataset-access",
+        "database-access",
+        "model-access",
+        "semantic-mutation-access",
+        "tag-access",
+        "term-access",
+        "chat-model-access"
+      ]
+    },
+    {
+      "id": "horizontal-object-access",
+      "description": "Users cannot read another user's chat, query, agent, memory, plugin or configuration data.",
+      "tests": [
+        "chat-object-policy",
+        "chat-history-access",
+        "chat-query-access",
+        "agent-access",
+        "config-access",
+        "memory-access",
+        "plugin-access"
+      ]
+    },
+    {
+      "id": "row-and-column-permission",
+      "description": "Row filters and sensitive column grants are scoped by model and fail closed.",
+      "tests": [
+        "authorization-policy-validation",
+        "row-column-permission"
+      ]
+    },
+    {
+      "id": "dynamic-masking",
+      "description": "Sensitive values use configured masking and preserve trustworthy masking metadata.",
+      "tests": [
+        "dynamic-masking",
+        "masking-idempotence",
+        "row-column-permission"
+      ]
+    },
+    {
+      "id": "cache-isolation",
+      "description": "Cache keys isolate security scopes and cached results retain masked snapshots.",
+      "tests": [
+        "secure-query-cache",
+        "chat-query-access"
+      ]
+    },
+    {
+      "id": "history-and-insight-leakage",
+      "description": "History and business insight paths enforce ownership and exclude masked evidence.",
+      "tests": [
+        "chat-history-access",
+        "chat-query-access",
+        "insight-controller-access",
+        "masked-insight",
+        "result-projection"
+      ]
+    },
+    {
+      "id": "sensitive-log-leakage",
+      "description": "Security-sensitive values do not appear in common or query logs.",
+      "tests": [
+        "sensitive-common-logging",
+        "sensitive-query-logging"
+      ]
+    }
+  ]
+}

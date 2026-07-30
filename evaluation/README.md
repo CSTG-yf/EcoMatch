@@ -20,6 +20,14 @@ python evaluation/run_qa01b.py compare `
 
 准确率或通过率下降、响应时间超出容差、评测源不一致以及当前评测失败都会阻断发布。基线命令、策略和退出码说明见 `evaluation/QA-01B_README.md`。
 
+QA-02A 聚合后端权限、越权、脱敏、缓存、历史、模型解释和敏感日志测试：
+
+```powershell
+python evaluation/run_qa02a.py
+```
+
+控制项和报告说明见 `evaluation/QA-02A_README.md`。
+
 # 原有 DuSQL 评测流程
 
 1. 正常启动项目(必须包括LLM服务)

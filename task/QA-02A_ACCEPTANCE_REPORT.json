@@ -1,0 +1,358 @@
+{
+  "command": {
+    "durationMs": 218347,
+    "exitCode": 0
+  },
+  "controls": [
+    {
+      "caseCount": 48,
+      "description": "Authentication, administration and semantic object APIs reject anonymous or unauthorized callers.",
+      "id": "identity-and-vertical-access",
+      "status": "PASS",
+      "testCount": 10
+    },
+    {
+      "caseCount": 24,
+      "description": "Users cannot read another user's chat, query, agent, memory, plugin or configuration data.",
+      "id": "horizontal-object-access",
+      "status": "PASS",
+      "testCount": 7
+    },
+    {
+      "caseCount": 23,
+      "description": "Row filters and sensitive column grants are scoped by model and fail closed.",
+      "id": "row-and-column-permission",
+      "status": "PASS",
+      "testCount": 2
+    },
+    {
+      "caseCount": 28,
+      "description": "Sensitive values use configured masking and preserve trustworthy masking metadata.",
+      "id": "dynamic-masking",
+      "status": "PASS",
+      "testCount": 3
+    },
+    {
+      "caseCount": 13,
+      "description": "Cache keys isolate security scopes and cached results retain masked snapshots.",
+      "id": "cache-isolation",
+      "status": "PASS",
+      "testCount": 2
+    },
+    {
+      "caseCount": 35,
+      "description": "History and business insight paths enforce ownership and exclude masked evidence.",
+      "id": "history-and-insight-leakage",
+      "status": "PASS",
+      "testCount": 5
+    },
+    {
+      "caseCount": 13,
+      "description": "Security-sensitive values do not appear in common or query logs.",
+      "id": "sensitive-log-leakage",
+      "status": "PASS",
+      "testCount": 2
+    }
+  ],
+  "failures": [],
+  "generatedAt": "2026-07-30T13:45:58.720870+00:00",
+  "schemaVersion": "1.0",
+  "status": "PASS",
+  "summary": {
+    "caseCount": 142,
+    "controlCount": 7,
+    "failureCount": 0,
+    "passedControlCount": 7,
+    "passedTestClassCount": 26,
+    "testClassCount": 26
+  },
+  "task": "QA-02A",
+  "tests": [
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.auth.authentication.rest.UserControllerTokenAccessTest",
+      "durationMs": 134,
+      "failed": 0,
+      "id": "user-token-access",
+      "module": "auth/authentication",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.auth.authorization.rest.AuthControllerAccessTest",
+      "durationMs": 147,
+      "failed": 0,
+      "id": "authorization-api-access",
+      "module": "auth/authorization",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 9,
+      "className": "com.tencent.supersonic.auth.authorization.service.AuthServiceImplValidationTest",
+      "durationMs": 454,
+      "failed": 0,
+      "id": "authorization-policy-validation",
+      "module": "auth/authorization",
+      "passed": 9,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.service.DataSetServiceAccessTest",
+      "durationMs": 169,
+      "failed": 0,
+      "id": "dataset-access",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.headless.server.service.DatabaseServicePermissionTest",
+      "durationMs": 899,
+      "failed": 0,
+      "id": "database-access",
+      "module": "headless/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.service.ModelServiceAccessBoundaryTest",
+      "durationMs": 1207,
+      "failed": 0,
+      "id": "model-access",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 4,
+      "className": "com.tencent.supersonic.headless.server.service.SemanticItemMutationAccessTest",
+      "durationMs": 316,
+      "failed": 0,
+      "id": "semantic-mutation-access",
+      "module": "headless/server",
+      "passed": 4,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 5,
+      "className": "com.tencent.supersonic.headless.server.service.TagMetaServiceAccessTest",
+      "durationMs": 20,
+      "failed": 0,
+      "id": "tag-access",
+      "module": "headless/server",
+      "passed": 5,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 5,
+      "className": "com.tencent.supersonic.headless.server.service.TermServiceAccessTest",
+      "durationMs": 63,
+      "failed": 0,
+      "id": "term-access",
+      "module": "headless/server",
+      "passed": 5,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicyTest",
+      "durationMs": 11,
+      "failed": 0,
+      "id": "chat-object-policy",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 5,
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest",
+      "durationMs": 334,
+      "failed": 0,
+      "id": "chat-history-access",
+      "module": "chat/server",
+      "passed": 5,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatQueryServiceAccessTest",
+      "durationMs": 335,
+      "failed": 0,
+      "id": "chat-query-access",
+      "module": "chat/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.service.impl.AgentServiceAccessTest",
+      "durationMs": 819,
+      "failed": 0,
+      "id": "agent-access",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.chat.server.service.impl.ConfigServiceAccessTest",
+      "durationMs": 81,
+      "failed": 0,
+      "id": "config-access",
+      "module": "chat/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.chat.server.service.impl.MemoryServiceAccessTest",
+      "durationMs": 222,
+      "failed": 0,
+      "id": "memory-access",
+      "module": "chat/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.service.impl.PluginServiceAccessTest",
+      "durationMs": 157,
+      "failed": 0,
+      "id": "plugin-access",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.common.service.impl.ChatModelServiceAccessTest",
+      "durationMs": 632,
+      "failed": 0,
+      "id": "chat-model-access",
+      "module": "common",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 14,
+      "className": "com.tencent.supersonic.headless.server.aspect.S2DataPermissionMaskingTest",
+      "durationMs": 623,
+      "failed": 0,
+      "id": "row-column-permission",
+      "module": "headless/server",
+      "passed": 14,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 13,
+      "className": "com.tencent.supersonic.headless.server.security.DataMaskingServiceTest",
+      "durationMs": 30,
+      "failed": 0,
+      "id": "dynamic-masking",
+      "module": "headless/server",
+      "passed": 13,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 1,
+      "className": "com.tencent.supersonic.headless.server.security.DataMaskingIdempotenceTest",
+      "durationMs": 26,
+      "failed": 0,
+      "id": "masking-idempotence",
+      "module": "headless/server",
+      "passed": 1,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 6,
+      "className": "com.tencent.supersonic.headless.core.cache.DefaultQueryCacheTest",
+      "durationMs": 6959,
+      "failed": 0,
+      "id": "secure-query-cache",
+      "module": "headless/core",
+      "passed": 6,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.rest.BusinessInsightControllerSecurityTest",
+      "durationMs": 8045,
+      "failed": 0,
+      "id": "insight-controller-access",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 19,
+      "className": "com.tencent.supersonic.chat.server.service.BusinessInsightServiceTest",
+      "durationMs": 180,
+      "failed": 0,
+      "id": "masked-insight",
+      "module": "chat/server",
+      "passed": 19,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.processor.execute.BankResultProjectionHandlerTest",
+      "durationMs": 1029,
+      "failed": 0,
+      "id": "result-projection",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 6,
+      "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest",
+      "durationMs": 10342,
+      "failed": 0,
+      "id": "sensitive-common-logging",
+      "module": "common",
+      "passed": 6,
+      "skipped": 0,
+      "status": "PASS"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest",
+      "durationMs": 2318,
+      "failed": 0,
+      "id": "sensitive-query-logging",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS"
+    }
+  ]
+}
