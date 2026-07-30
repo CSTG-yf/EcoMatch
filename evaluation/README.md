@@ -9,6 +9,17 @@ evaluation/.venv/Scripts/python.exe evaluation/run_qa01a.py `
 
 执行器生成 CI 可读 JSON 报告，并在命令失败、套件缺失或阈值不达标时返回退出码 `1`。完整参数、预测文件模式和真实 SuperSonic 模式见 `evaluation/QA-01A_README.md`。
 
+QA-01B 将通过的 QA-01A 报告固化为版本基线，并比较当前版本的核心指标、阶段耗时和失败案例：
+
+```powershell
+python evaluation/run_qa01b.py compare `
+  --baseline .local-dev/bank-evaluation/qa01b-baseline.json `
+  --current .local-dev/bank-evaluation/qa01a-report.json `
+  --current-version v1.1.0
+```
+
+准确率或通过率下降、响应时间超出容差、评测源不一致以及当前评测失败都会阻断发布。基线命令、策略和退出码说明见 `evaluation/QA-01B_README.md`。
+
 # 原有 DuSQL 评测流程
 
 1. 正常启动项目(必须包括LLM服务)

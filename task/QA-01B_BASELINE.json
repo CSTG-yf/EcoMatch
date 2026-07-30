@@ -1,0 +1,73 @@
+{
+  "report": {
+    "evaluatedAt": "2026-07-30",
+    "evaluationMode": "gold",
+    "negativeGate": {
+      "actualIntentAccuracy": 0.9808,
+      "exitCode": 1,
+      "failureCategory": "THRESHOLD_VIOLATION",
+      "minimumIntentAccuracy": 1.0,
+      "status": "FAIL"
+    },
+    "schemaVersion": "1.0",
+    "sensitivePayloadCheck": {
+      "containsCredentials": false,
+      "containsResultRows": false,
+      "containsSourceAbsolutePath": false,
+      "containsSql": false
+    },
+    "source": {
+      "databaseSha256": "f84c9b38845a7af34e542b161836971dc333aeaf7016ef0b40060eaecd55753d",
+      "datasetVersion": "0.1.0",
+      "workbookSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c"
+    },
+    "status": "PASS",
+    "suites": {
+      "chartRecommendation": {
+        "caseCount": 30,
+        "chartAccuracy": 1.0,
+        "explanationCoverage": 1.0,
+        "status": "PASS"
+      },
+      "intent": {
+        "caseCount": 52,
+        "clarificationAccuracy": 0.9231,
+        "intentAccuracy": 0.9808,
+        "metricSetAccuracy": 0.9615,
+        "status": "PASS"
+      },
+      "multiTurn": {
+        "maxContextRounds": 10,
+        "passRate": 1.0,
+        "status": "PASS",
+        "testCount": 5
+      },
+      "resultConsistency": {
+        "caseCount": 200,
+        "resultConsistencyRate": 1.0,
+        "status": "PASS"
+      },
+      "sqlExecution": {
+        "averageResponseTimeMs": 2.502,
+        "caseCount": 200,
+        "executionSuccessRate": 1.0,
+        "p95ResponseTimeMs": 5.203,
+        "status": "PASS"
+      }
+    },
+    "summary": {
+      "failedSuites": [],
+      "missingSuites": [],
+      "passedSuiteCount": 5,
+      "requiredSuiteCount": 5,
+      "stageFailures": []
+    },
+    "task": "QA-01A"
+  },
+  "reportSha256": "44dce130ae286dcc11509ba461f597ced7206497568086d7b42b8b3fe3325f3e",
+  "savedAt": "2026-07-30T13:36:19.594716+00:00",
+  "schemaVersion": "1.0",
+  "sourceReportSha256": "09d0de50602e04376b05896d8c071ba0bb82c7bfa82b2b0116385210aead3930",
+  "task": "QA-01B-BASELINE",
+  "version": "qa01a-2026-07-30"
+}

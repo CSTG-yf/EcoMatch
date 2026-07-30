@@ -1,0 +1,84 @@
+{
+  "schemaVersion": "1.0",
+  "requiredSuites": [
+    "intent",
+    "sqlExecution",
+    "resultConsistency",
+    "multiTurn",
+    "chartRecommendation"
+  ],
+  "sourceIdentityFields": [
+    "datasetVersion",
+    "workbookSha256"
+  ],
+  "metrics": [
+    {
+      "suite": "intent",
+      "metric": "intentAccuracy",
+      "direction": "higher",
+      "minimum": 0.94,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "intent",
+      "metric": "metricSetAccuracy",
+      "direction": "higher",
+      "minimum": 0.94,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "intent",
+      "metric": "clarificationAccuracy",
+      "direction": "higher",
+      "minimum": 0.9,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "sqlExecution",
+      "metric": "executionSuccessRate",
+      "direction": "higher",
+      "minimum": 0.9,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "resultConsistency",
+      "metric": "resultConsistencyRate",
+      "direction": "higher",
+      "minimum": 0.9,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "multiTurn",
+      "metric": "passRate",
+      "direction": "higher",
+      "minimum": 1.0,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "chartRecommendation",
+      "metric": "chartAccuracy",
+      "direction": "higher",
+      "minimum": 0.9,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "chartRecommendation",
+      "metric": "explanationCoverage",
+      "direction": "higher",
+      "minimum": 0.9,
+      "maxRegression": 0.0
+    },
+    {
+      "suite": "sqlExecution",
+      "metric": "averageResponseTimeMs",
+      "direction": "lower",
+      "maxRegressionRatio": 0.2
+    },
+    {
+      "suite": "sqlExecution",
+      "metric": "p95ResponseTimeMs",
+      "direction": "lower",
+      "maxRegressionRatio": 0.2
+    }
+  ]
+}

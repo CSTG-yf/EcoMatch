@@ -1,0 +1,151 @@
+{
+  "errorCases": [],
+  "generatedAt": "2026-07-30T13:36:19.843492+00:00",
+  "metricComparison": [
+    {
+      "baseline": 0.9808,
+      "current": 0.9808,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.94,
+      "path": "intent.intentAccuracy",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 0.9615,
+      "current": 0.9615,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.94,
+      "path": "intent.metricSetAccuracy",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 0.9231,
+      "current": 0.9231,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.9,
+      "path": "intent.clarificationAccuracy",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.9,
+      "path": "sqlExecution.executionSuccessRate",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.9,
+      "path": "resultConsistency.resultConsistencyRate",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 1.0,
+      "path": "multiTurn.passRate",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.9,
+      "path": "chartRecommendation.chartAccuracy",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 1.0,
+      "current": 1.0,
+      "delta": 0.0,
+      "direction": "higher",
+      "maxRegression": 0.0,
+      "minimum": 0.9,
+      "path": "chartRecommendation.explanationCoverage",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 2.502,
+      "current": 2.502,
+      "delta": 0.0,
+      "direction": "lower",
+      "maxRegressionRatio": 0.2,
+      "path": "sqlExecution.averageResponseTimeMs",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    },
+    {
+      "baseline": 5.203,
+      "current": 5.203,
+      "delta": 0.0,
+      "direction": "lower",
+      "maxRegressionRatio": 0.2,
+      "path": "sqlExecution.p95ResponseTimeMs",
+      "relativeChange": 0.0,
+      "status": "PASS"
+    }
+  ],
+  "releaseDecision": "ALLOW",
+  "schemaVersion": "1.0",
+  "sourceComparison": [
+    {
+      "baseline": "0.1.0",
+      "current": "0.1.0",
+      "field": "datasetVersion",
+      "status": "PASS"
+    },
+    {
+      "baseline": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+      "current": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+      "field": "workbookSha256",
+      "status": "PASS"
+    },
+    {
+      "baseline": "gold",
+      "current": "gold",
+      "field": "evaluationMode",
+      "status": "PASS"
+    }
+  ],
+  "stageTimingComparison": [],
+  "status": "PASS",
+  "summary": {
+    "errorCaseCount": 0,
+    "metricCount": 10,
+    "passedMetricCount": 10,
+    "regressionCount": 0,
+    "violationCount": 0
+  },
+  "task": "QA-01B",
+  "versions": {
+    "baseline": "qa01a-2026-07-30",
+    "current": "qa01b-implementation"
+  },
+  "violations": []
+}
