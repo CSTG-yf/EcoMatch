@@ -1,5 +1,6 @@
 import axios from './axiosInstance';
 import {
+  BankIntentResultType,
   ChatContextType,
   HistoryMsgItemType,
   HistoryType,
@@ -72,6 +73,12 @@ export function chatParse({
           filters,
         }
       : undefined,
+  });
+}
+
+export function recognizeBankIntent(queryText: string) {
+  return axios.post<BankIntentResultType>('/api/semantic/bank/intent/recognize', {
+    queryText,
   });
 }
 

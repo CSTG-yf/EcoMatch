@@ -9,6 +9,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { solarizedlight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import React, { ReactNode, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import BusinessInsightPanel from './BusinessInsightPanel';
 
 type Props = {
   queryId?: number;
@@ -151,7 +152,11 @@ const ExecuteItem: React.FC<Props> = ({
           {data.queryAuthorization?.message && (
             <div className={`${prefixCls}-auth-tip`}>提示：{data.queryAuthorization.message}</div>
           )}
-          {data.textSummary && (
+          <BusinessInsightPanel
+            explanation={data.businessExplanation}
+            recommendation={data.recommendedChart}
+          />
+          {data.textSummary && !data.businessExplanation?.summary && (
             <p className={`${prefixCls}-step-title`}>
               <span style={{ marginRight: 5 }}>总结:</span>
               <ReactMarkdown>{data.textSummary}</ReactMarkdown>

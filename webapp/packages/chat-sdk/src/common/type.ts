@@ -151,6 +151,11 @@ export type MsgDataType = {
   textResult: string;
   errorMsg: string;
   textSummary: string;
+  dataMasked?: boolean;
+  maskedColumns?: string[];
+  recommendedChart?: ChartRecommendationType;
+  candidateCharts?: ChartRecommendationType[];
+  businessExplanation?: BusinessExplanationType;
 };
 
 export enum ParseStateEnum {
@@ -167,6 +172,62 @@ export type ParseDataType = {
   selectedParses: ChatContextType[];
   candidateParses: ChatContextType[];
   similarSolvedQuery: SimilarQuestionType[];
+};
+
+export type BankIntentMetricType = {
+  code?: string;
+  name?: string;
+  matchedText?: string;
+  confidence?: number;
+};
+
+export type BankIntentOrganizationType = {
+  code?: string;
+  name?: string;
+  matchedText?: string;
+  confidence?: number;
+};
+
+export type BankIntentResultType = {
+  originalText?: string;
+  normalizedText?: string;
+  scene?: string;
+  intent?: string;
+  confidence?: number;
+  clarificationRequired?: boolean;
+  metrics?: BankIntentMetricType[];
+  organizations?: BankIntentOrganizationType[];
+  time?: {
+    expression?: string;
+    startDate?: string;
+    endDate?: string;
+    granularity?: string;
+    ambiguous?: boolean;
+  };
+  filters?: Array<{
+    field?: string;
+    operator?: string;
+    value?: string;
+    sourceText?: string;
+  }>;
+  reasons?: string[];
+};
+
+export type ChartRecommendationType = {
+  chartType?: string;
+  confidence?: number;
+  reason?: string;
+  dimensionFields?: string[];
+  metricFields?: string[];
+};
+
+export type BusinessExplanationType = {
+  summary?: string;
+  confidence?: number;
+  timeRange?: string;
+  evidence?: string[];
+  warnings?: string[];
+  metricDefinitions?: Record<string, string>;
 };
 
 export type QueryDataType = {

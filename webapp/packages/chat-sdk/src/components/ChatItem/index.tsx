@@ -1,5 +1,6 @@
 import {
   ChatContextType,
+  BankIntentResultType,
   DateInfoType,
   EntityInfoType,
   FilterItemType,
@@ -17,6 +18,7 @@ import {
   deleteQuery,
   switchEntity,
   getExecuteSummary,
+  recognizeBankIntent,
 } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
 import { message, Spin } from 'antd';
@@ -33,6 +35,16 @@ import { AgentType } from '../../Chat/type';
 import dayjs, { Dayjs } from 'dayjs';
 import { exportCsvFile } from '../../utils/utils';
 import { useMethodRegister } from '../../hooks';
+import BankQueryOverview from './BankQueryOverview';
+import QueryStageStatus from './QueryStageStatus';
+import {
+  QueryWorkflowStage,
+  stageFromRequestError,
+  stageFromResponseCode,
+} from './workflow';
+
+const SUMMARY_POLL_INTERVAL_MS = 500;
+const SUMMARY_POLL_MAX_ATTEMPTS = 60;
 
 type Props = {
   msg: string;
@@ -109,7 +121,12 @@ const ChatItem: React.FC<Props> = ({
     {}
   );
   const [isParserError, setIsParseError] = useState<boolean>(false);
+  const [bankIntent, setBankIntent] = useState<BankIntentResultType>();
+  const [workflowStage, setWorkflowStage] = useState<QueryWorkflowStage>('idle');
+  const summaryPollToken = useRef(0);
+
   const resetState = () => {
+    summaryPollToken.current += 1;
     setParseLoading(false);
     setParseTimeCost(undefined);
     setParseInfo(undefined);
@@ -126,6 +143,8 @@ const ChatItem: React.FC<Props> = ({
     setEntityInfo({} as EntityInfoType);
     setDataCache({});
     setIsParseError(false);
+    setBankIntent(undefined);
+    setWorkflowStage('idle');
   };
 
   const prefixCls = `${PREFIX_CLS}-item`;
@@ -136,7 +155,7 @@ const ChatItem: React.FC<Props> = ({
     const { queryColumns, queryResults, queryState, queryMode, response, chatContext, errorMsg } =
       res.data || {};
     setExecuteErrorMsg(errorMsg);
-    if (res.code === 400 || res.code === 401 || res.code === 412) {
+    if (res.code === 400 || res.code === 401 || res.code === 403 || res.code === 412) {
       tip = res.msg;
     } else if (res.code !== 200) {
       tip = SEARCH_EXCEPTION_TIP;
@@ -163,12 +182,64 @@ const ChatItem: React.FC<Props> = ({
     return false;
   };
 
+  const loadBankIntent = async (queryText: string) => {
+    try {
+      const response: any = await recognizeBankIntent(queryText);
+      const intent = response?.data || response;
+      if (intent && typeof intent === 'object') {
+        setBankIntent(intent);
+      }
+    } catch {
+      setBankIntent(undefined);
+    }
+  };
+
+  const pollExecuteSummary = async (
+    baseData: MsgDataType,
+    queryId: number,
+    attempt: number,
+    token: number
+  ) => {
+    if (token !== summaryPollToken.current) {
+      return;
+    }
+    if (attempt >= SUMMARY_POLL_MAX_ATTEMPTS) {
+      setWorkflowStage('timeout');
+      return;
+    }
+    try {
+      const response: any = await getExecuteSummary(queryId);
+      if (token !== summaryPollToken.current) {
+        return;
+      }
+      if (response?.code !== 200 || !response?.data) {
+        setWorkflowStage(stageFromResponseCode(response?.code));
+        return;
+      }
+      if (response.data.queryMode == null) {
+        setData({ ...baseData, textSummary: response.data.textSummary });
+        window.setTimeout(
+          () => pollExecuteSummary(baseData, queryId, attempt + 1, token),
+          SUMMARY_POLL_INTERVAL_MS
+        );
+        return;
+      }
+      setData(response.data);
+      setWorkflowStage('completed');
+    } catch (error) {
+      setWorkflowStage(stageFromRequestError(error));
+    }
+  };
+
   const onExecute = async (
     parseInfoValue: ChatContextType,
     parseInfos?: ChatContextType[],
     isSwitchParseInfo?: boolean,
     isRefresh = false
   ) => {
+    summaryPollToken.current += 1;
+    const pollToken = summaryPollToken.current;
+    setWorkflowStage('executing');
     setExecuteMode(true);
     if (isSwitchParseInfo) {
       setEntitySwitchLoading(true);
@@ -187,24 +258,23 @@ const ChatItem: React.FC<Props> = ({
         valid,
         isRefresh
       );
-      const queryId = parseInfoValue.queryId; // 伪流式 大模型输出
-      if (queryId != undefined && res.data.queryState != 'INVALID') {
-        const getSummary = async (data: any, queryId: number) => {
-          const res2: any = await getExecuteSummary(queryId);
-          if (res2.data.queryMode == null) {
-            res2.data = { ...data, textSummary: res2.data.textSummary };
-            setData(res2.data);
-            setTimeout(() => getSummary(data, queryId), 500);
-          } else {
-            setData(res2.data);
-          }
-        };
-        setTimeout(() => getSummary(res.data, queryId), 500);
+      const queryId = parseInfoValue.queryId;
+      if (!valid) {
+        setWorkflowStage(stageFromResponseCode(res?.code));
+      } else if (queryId != undefined && res.data.queryState != 'INVALID') {
+        setWorkflowStage('explaining');
+        window.setTimeout(
+          () => pollExecuteSummary(res.data, queryId, 0, pollToken),
+          SUMMARY_POLL_INTERVAL_MS
+        );
+      } else {
+        setWorkflowStage('completed');
       }
-    } catch (e) {
+    } catch (error) {
       const tip = SEARCH_EXCEPTION_TIP;
       setExecuteTip(SEARCH_EXCEPTION_TIP);
       setDataCache({ ...dataCache, [parseInfoValue!.id!]: { tip } });
+      setWorkflowStage(stageFromRequestError(error));
     }
     if (isSwitchParseInfo) {
       setEntitySwitchLoading(false);
@@ -228,55 +298,67 @@ const ChatItem: React.FC<Props> = ({
   };
 
   const sendMsg = async () => {
+    setWorkflowStage('parsing');
+    setIsParseError(false);
     setParseLoading(true);
-    const parseData: any = await chatParse({
-      queryText: msg,
-      chatId: conversationId,
-      modelId,
-      agentId,
-      filters: filter,
-    });
-    setParseLoading(false);
-    const { code, data } = parseData || {};
-    const { state, selectedParses, candidateParses, queryId, parseTimeCost, errorMsg } = data || {};
-    const parses = selectedParses?.concat(candidateParses || []) || [];
-    if (
-      code !== 200 ||
-      state === ParseStateEnum.FAILED ||
-      !parses.length ||
-      (!parses[0]?.properties?.type && !parses[0]?.queryMode)
-    ) {
-      setParseTip(state === ParseStateEnum.FAILED && errorMsg ? errorMsg : PARSE_ERROR_TIP);
-
-      setParseInfo({ queryId } as any);
-      return;
-    }
-    onUpdateMessageScroll?.();
-    const parseInfos = parses.slice(0, 5).map((item: any) => ({
-      ...item,
-      queryId,
-    }));
-    if (parseInfos.length > 1) {
-      setPreParseInfoOptions(parseInfos);
-      setShowExpandParseTip(true);
-      setPreParseMode(true);
-    }
-    setParseInfoOptions(parseInfos || []);
-    const parseInfoValue = parseInfos[0];
-    if (!(currentAgent?.enableFeedback === 1 && parseInfos.length > 1)) {
-      setParseInfo(parseInfoValue);
-    }
-    setParseTimeCost(parseTimeCost);
-    setEntityInfo(parseInfoValue.entityInfo || {});
-    updateDimensionFitlers(parseInfoValue?.dimensionFilters || []);
-    setDateInfo(parseInfoValue?.dateInfo);
-    if (parseInfos.length === 1) {
-      onExecute(parseInfoValue, parseInfos);
+    void loadBankIntent(msg);
+    try {
+      const parseData: any = await chatParse({
+        queryText: msg,
+        chatId: conversationId,
+        modelId,
+        agentId,
+        filters: filter,
+      });
+      const { code, data } = parseData || {};
+      const { state, selectedParses, candidateParses, queryId, parseTimeCost, errorMsg } = data || {};
+      const parses = selectedParses?.concat(candidateParses || []) || [];
+      if (
+        code !== 200 ||
+        state === ParseStateEnum.FAILED ||
+        !parses.length ||
+        (!parses[0]?.properties?.type && !parses[0]?.queryMode)
+      ) {
+        setParseTip(state === ParseStateEnum.FAILED && errorMsg ? errorMsg : PARSE_ERROR_TIP);
+        setParseInfo({ queryId } as any);
+        setIsParseError(true);
+        setWorkflowStage(stageFromResponseCode(code));
+        return;
+      }
+      onUpdateMessageScroll?.();
+      const parseInfos = parses.slice(0, 5).map((item: any) => ({
+        ...item,
+        queryId,
+      }));
+      if (parseInfos.length > 1) {
+        setPreParseInfoOptions(parseInfos);
+        setShowExpandParseTip(true);
+        setPreParseMode(true);
+      }
+      setParseInfoOptions(parseInfos || []);
+      const parseInfoValue = parseInfos[0];
+      if (!(currentAgent?.enableFeedback === 1 && parseInfos.length > 1)) {
+        setParseInfo(parseInfoValue);
+      }
+      setParseTimeCost(parseTimeCost);
+      setEntityInfo(parseInfoValue.entityInfo || {});
+      updateDimensionFitlers(parseInfoValue?.dimensionFilters || []);
+      setDateInfo(parseInfoValue?.dateInfo);
+      if (parseInfos.length === 1) {
+        onExecute(parseInfoValue, parseInfos);
+      }
+    } catch (error) {
+      setParseTip(PARSE_ERROR_TIP);
+      setIsParseError(true);
+      setWorkflowStage(stageFromRequestError(error));
+    } finally {
+      setParseLoading(false);
     }
   };
 
   const initChatItem = (msg, msgData) => {
     if (msgData) {
+      void loadBankIntent(msg);
       const parseInfoOptionsValue =
         parseInfos && parseInfos.length > 0
           ? parseInfos.map(item => ({ ...item, queryId: msgData.queryId }))
@@ -289,6 +371,7 @@ const ChatItem: React.FC<Props> = ({
       setDateInfo(parseInfoValue.dateInfo);
       setExecuteMode(true);
       updateData({ code: 200, data: msgData, msg: 'success' });
+      setWorkflowStage('completed');
     } else if (msg) {
       sendMsg();
     }
@@ -300,6 +383,13 @@ const ChatItem: React.FC<Props> = ({
     }
     initChatItem(msg, msgData);
   }, [msg, msgData]);
+
+  useEffect(
+    () => () => {
+      summaryPollToken.current += 1;
+    },
+    []
+  );
 
   const onSwitchEntity = async (entityId: string) => {
     setEntitySwitchLoading(true);
@@ -477,6 +567,8 @@ const ChatItem: React.FC<Props> = ({
               : ''}
           </div>
           <div className={contentClass}>
+            <QueryStageStatus stage={workflowStage} />
+            <BankQueryOverview intent={bankIntent} parseInfo={parseInfo} />
             <>
               {currentAgent?.enableFeedback === 1 && !questionId && showExpandParseTip && (
                 <div style={{ marginBottom: 10 }}>
