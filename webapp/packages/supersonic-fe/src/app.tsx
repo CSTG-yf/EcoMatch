@@ -15,6 +15,7 @@ export { request } from './services/request';
 import { BASE_TITLE } from '@/common/constants';
 import { ROUTE_AUTH_CODES } from '../config/routes';
 import AppPage from './pages/index';
+import { canViewDeveloperDiagnostics } from '@/utils/developerAccess';
 
 const replaceRoute = '/';
 
@@ -155,7 +156,10 @@ export const layout: RunTimeLayoutConfig = (params) => {
             {/* <AppPage dom={dom} /> */}
             {dom}
             {history.location.pathname !== '/chat' && !isMobile && (
-              <Copilot token={getToken() || ''} isDeveloper />
+              <Copilot
+                token={getToken() || ''}
+                isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
+              />
             )}
           </div>
         </ConfigProvider>

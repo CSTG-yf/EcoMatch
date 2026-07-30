@@ -4,6 +4,20 @@ import BankClarificationPanel from './BankClarificationPanel';
 import BusinessInsightPanel from './BusinessInsightPanel';
 import MultiTurnContextBar from './MultiTurnContextBar';
 import QueryStageStatus from './QueryStageStatus';
+import TrustExplanationPanel from './TrustExplanationPanel';
+
+beforeEach(() => {
+  window.matchMedia = jest.fn().mockImplementation(query => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  }));
+});
 
 describe('bank query presentation', () => {
   it('renders the normalized intent and query context', () => {
@@ -154,5 +168,57 @@ describe('bank query presentation', () => {
       />
     );
     expect(screen.getByText(/已超过 30 分钟/)).toBeInTheDocument();
+  });
+
+  it('shows business trust evidence and gates technical diagnostics', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      metrics: [{ id: 1, name: '不良贷款率', description: '不良贷款余额除以贷款余额' }],
+      dimensions: [{ id: 2, name: '机构' }],
+      dimensionFilters: [{ name: '机构', operator: '=', value: '南京分行' }],
+      dateInfo: { text: '2026年一季度' },
+      elementMatches: [
+        {
+          detectWord: '不良贷款率',
+          similarity: 0.9,
+          element: { id: 1, name: '不良贷款率', type: 'METRIC' },
+        },
+      ],
+      sqlInfo: {
+        parsedS2SQL: 'SELECT 不良贷款率 FROM 风险主题',
+        correctedS2SQL: 'SELECT 不良贷款率 FROM 风险主题',
+        querySQL: 'SELECT bad_loan_rate FROM risk_fact',
+      },
+      sqlEvaluation: {
+        isValidated: true,
+        semanticScore: 1,
+        errorType: 'NONE',
+        features: ['SINGLE_TABLE'],
+      },
+    } as any;
+    const { rerender } = render(
+      <TrustExplanationPanel
+        question="查询南京分行不良贷款率"
+        parseInfo={parseInfo}
+        workflowStage="completed"
+      />
+    );
+
+    expect(screen.getByRole('region', { name: '查询可信度' })).toHaveTextContent('映射 90.0%');
+    expect(screen.getByText('不良贷款余额除以贷款余额')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /诊断/ })).not.toBeInTheDocument();
+
+    rerender(
+      <TrustExplanationPanel
+        question="查询南京分行不良贷款率"
+        parseInfo={parseInfo}
+        workflowStage="completed"
+        isDeveloper
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /诊断/ }));
+    expect(screen.getByText('SQL 解释与诊断')).toBeInTheDocument();
+    expect(screen.getByText('Schema 映射证据')).toBeInTheDocument();
+    expect(screen.getByText('转换与修正记录')).toBeInTheDocument();
   });
 });

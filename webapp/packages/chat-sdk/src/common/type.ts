@@ -19,6 +19,8 @@ export type FieldType = {
   model: number;
   type: string;
   value: string;
+  description?: string;
+  defaultAgg?: string;
 };
 
 export type ModelInfoType = {
@@ -82,6 +84,26 @@ export type SqlInfoType = {
   correctedQuerySQL?: string;
 };
 
+export type SqlEvaluationType = {
+  isValidated?: boolean;
+  validateMsg?: string;
+  errorType?: string;
+  retryable?: boolean;
+  semanticScore?: number;
+  features?: string[];
+};
+
+export type SchemaElementMatchType = {
+  element?: FieldType & { type?: string };
+  offset?: number;
+  similarity?: number;
+  detectWord?: string;
+  word?: string;
+  frequency?: number;
+  inherited?: boolean;
+  llmMatched?: boolean;
+};
+
 export type ChatContextType = {
   id: number;
   queryId?: number;
@@ -94,13 +116,14 @@ export type ChatContextType = {
   metrics: FieldType[];
   entity: { alias: string[]; id: number };
   entityInfo: EntityInfoType;
-  elementMatches: any[];
+  elementMatches: SchemaElementMatchType[];
   nativeQuery: boolean;
   queryMode: string;
   queryType: ChatContextTypeQueryTypeEnum;
   dimensionFilters: FilterItemType[];
   properties: any;
   sqlInfo: SqlInfoType;
+  sqlEvaluation?: SqlEvaluationType;
   textInfo: string;
 };
 

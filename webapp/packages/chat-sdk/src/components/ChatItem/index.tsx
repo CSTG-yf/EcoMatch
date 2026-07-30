@@ -42,6 +42,7 @@ import QueryStageStatus from './QueryStageStatus';
 import BankClarificationPanel from './BankClarificationPanel';
 import MultiTurnContextBar from './MultiTurnContextBar';
 import { shouldAwaitClarification } from './contextModel';
+import TrustExplanationPanel from './TrustExplanationPanel';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
@@ -592,6 +593,14 @@ const ChatItem: React.FC<Props> = ({
             <BankQueryOverview intent={bankIntent} parseInfo={parseInfo} />
             <BankClarificationPanel intent={bankIntent} question={msg} onApply={onSendMsg} />
             <MultiTurnContextBar context={multiTurnContext} question={msg} onSendMsg={onSendMsg} />
+            <TrustExplanationPanel
+              question={msg}
+              parseInfo={parseInfo}
+              workflowStage={workflowStage}
+              isDeveloper={isDeveloper}
+              parseError={parseTip}
+              executeError={executeErrorMsg}
+            />
             <>
               {currentAgent?.enableFeedback === 1 && !questionId && showExpandParseTip && (
                 <div style={{ marginBottom: 10 }}>

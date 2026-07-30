@@ -23,6 +23,7 @@ declare global {
       access?: 'user' | 'guest' | 'admin';
       name?: string;
       superAdmin?: boolean;
+      isAdmin?: number;
       roles?: string[];
       attributes?: Record<string, string>;
     };
