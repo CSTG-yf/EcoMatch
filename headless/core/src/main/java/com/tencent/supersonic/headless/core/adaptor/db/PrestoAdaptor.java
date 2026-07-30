@@ -45,6 +45,7 @@ public class PrestoAdaptor extends BaseDbAdaptor {
 
     @Override
     public List<String> getDBs(ConnectInfo connectionInfo, String catalog) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
         List<String> dbs = Lists.newArrayList();
         final StringBuilder sql = new StringBuilder("SHOW SCHEMAS");
         if (StringUtils.isNotBlank(catalog)) {
@@ -64,6 +65,8 @@ public class PrestoAdaptor extends BaseDbAdaptor {
     @Override
     public List<String> getTables(ConnectInfo connectInfo, String catalog, String schemaName)
             throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
         List<String> tablesAndViews = new ArrayList<>();
         final StringBuilder sql = new StringBuilder("SHOW TABLES");
         if (StringUtils.isNotBlank(catalog)) {

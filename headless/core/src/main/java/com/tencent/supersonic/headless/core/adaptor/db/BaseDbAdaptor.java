@@ -12,12 +12,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.regex.Pattern;
 
 @Slf4j
 public abstract class BaseDbAdaptor implements DbAdaptor {
 
     protected static final int MAX_METADATA_ROWS = 10_000;
     protected static final int METADATA_QUERY_TIMEOUT_SECONDS = 30;
+    private static final Pattern SAFE_METADATA_IDENTIFIER =
+            Pattern.compile("^[\\p{L}\\p{N}_$-]+(?:\\.[\\p{L}\\p{N}_$-]+)*$");
 
     @Override
     public List<String> getCatalogs(ConnectInfo connectInfo) throws SQLException {
@@ -36,11 +39,14 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
     public List<String> getDBs(ConnectInfo connectionInfo, String catalog) throws SQLException {
         // Except for special types implemented separately, the generic logic catalog does not take
         // effect.
+        validateMetadataIdentifier(catalog, false);
         return getDBs(connectionInfo);
     }
 
     protected List<String> getDBs(ConnectInfo connectionInfo) throws SQLException {
         List<String> dbs = Lists.newArrayList();
+        Exception schemaFailure = null;
+        Exception catalogFailure = null;
         try (Connection connection = getConnection(connectionInfo)) {
             DatabaseMetaData metadata = connection.getMetaData();
             try (ResultSet schemaSet = metadata.getSchemas()) {
@@ -52,6 +58,7 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
             } catch (MetadataLimitExceededException e) {
                 throw e;
             } catch (Exception e) {
+                schemaFailure = e;
                 log.warn("Get metadata schemas failed: type={}, error=[{}]",
                         e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
                 log.warn("get meta schemas failed, try to get catalogs");
@@ -65,10 +72,17 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
             } catch (MetadataLimitExceededException e) {
                 throw e;
             } catch (Exception e) {
+                catalogFailure = e;
                 log.warn("Get metadata catalogs failed: type={}, error=[{}]",
                         e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-                log.warn("get meta catalogs failed, try to get schemas");
+                log.warn("metadata catalog fallback failed");
             }
+        }
+        if (schemaFailure != null && catalogFailure != null) {
+            SQLException failure = new SQLException(
+                    "Database schema and catalog metadata reads failed", schemaFailure);
+            failure.addSuppressed(catalogFailure);
+            throw failure;
         }
         return dbs;
     }
@@ -78,11 +92,14 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
             throws SQLException {
         // Except for special types implemented separately, the generic logic catalog does not take
         // effect.
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
         return getTables(connectInfo, schemaName);
     }
 
     protected List<String> getTables(ConnectInfo connectionInfo, String schemaName)
             throws SQLException {
+        validateMetadataIdentifier(schemaName, true);
         List<String> tablesAndViews = new ArrayList<>();
 
         try (Connection connection = getConnection(connectionInfo)) {
@@ -103,25 +120,31 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
 
     protected ResultSet getResultSet(String schemaName, DatabaseMetaData metaData)
             throws SQLException {
-        return metaData.getTables(schemaName, schemaName, null, new String[] {"TABLE", "VIEW"});
+        String schemaPattern = escapeMetadataPattern(metaData, schemaName);
+        return metaData.getTables(schemaName, schemaPattern, null, new String[] {"TABLE", "VIEW"});
     }
-
-
 
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
+        validateMetadataIdentifier(tableName, true);
         List<DBColumn> dbColumns = new ArrayList<>();
         // 确保连接会自动关闭
-        try (Connection connection = getConnection(connectInfo);
-                ResultSet columns =
-                        connection.getMetaData().getColumns(catalog, schemaName, tableName, null)) {
-            while (columns.next()) {
-                checkMetadataRowLimit(dbColumns.size() + 1);
-                String columnName = columns.getString("COLUMN_NAME");
-                String dataType = columns.getString("TYPE_NAME");
-                String remarks = columns.getString("REMARKS");
-                FieldType fieldType = classifyColumnType(dataType);
-                dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+        try (Connection connection = getConnection(connectInfo)) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metadata, schemaName);
+            String tablePattern = escapeMetadataPattern(metadata, tableName);
+            try (ResultSet columns =
+                    metadata.getColumns(catalog, schemaPattern, tablePattern, null)) {
+                while (columns.next()) {
+                    checkMetadataRowLimit(dbColumns.size() + 1);
+                    String columnName = columns.getString("COLUMN_NAME");
+                    String dataType = columns.getString("TYPE_NAME");
+                    String remarks = columns.getString("REMARKS");
+                    FieldType fieldType = classifyColumnType(dataType);
+                    dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+                }
             }
         }
         return dbColumns;
@@ -148,6 +171,29 @@ public abstract class BaseDbAdaptor implements DbAdaptor {
             throw new MetadataLimitExceededException(
                     "Metadata result row limit exceeded: " + MAX_METADATA_ROWS);
         }
+    }
+
+    protected void validateMetadataIdentifier(String identifier, boolean required)
+            throws SQLException {
+        if (identifier == null || identifier.isBlank()) {
+            if (required) {
+                throw new SQLException("Database metadata identifier is required");
+            }
+            return;
+        }
+        if (!SAFE_METADATA_IDENTIFIER.matcher(identifier).matches()) {
+            throw new SQLException("Invalid database metadata identifier");
+        }
+    }
+
+    protected String escapeMetadataPattern(DatabaseMetaData metadata, String identifier)
+            throws SQLException {
+        String escape = metadata.getSearchStringEscape();
+        if (escape == null || escape.isEmpty()) {
+            throw new SQLException("Database metadata pattern escape is unavailable");
+        }
+        return identifier.replace(escape, escape + escape).replace("_", escape + "_").replace("%",
+                escape + "%");
     }
 
     protected static class MetadataLimitExceededException extends SQLException {

@@ -13,6 +13,7 @@ import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -86,14 +87,18 @@ public class PostgresqlAdaptor extends BaseDbAdaptor {
 
     public List<String> getTables(ConnectInfo connectionInfo, String schemaName)
             throws SQLException {
+        validateMetadataIdentifier(schemaName, true);
         List<String> tablesAndViews = Lists.newArrayList();
-        try (Connection connection = getConnection(connectionInfo);
-                ResultSet resultSet = connection.getMetaData().getTables(null, schemaName, null,
-                        new String[] {"TABLE", "VIEW"})) {
-            while (resultSet.next()) {
-                checkMetadataRowLimit(tablesAndViews.size() + 1);
-                String name = resultSet.getString("TABLE_NAME");
-                tablesAndViews.add(name);
+        try (Connection connection = getConnection(connectionInfo)) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metadata, schemaName);
+            try (ResultSet resultSet =
+                    metadata.getTables(null, schemaPattern, null, new String[] {"TABLE", "VIEW"})) {
+                while (resultSet.next()) {
+                    checkMetadataRowLimit(tablesAndViews.size() + 1);
+                    String name = resultSet.getString("TABLE_NAME");
+                    tablesAndViews.add(name);
+                }
             }
         } catch (SQLException e) {
             log.error("Get PostgreSQL tables and views failed: type={}, error=[{}]",
@@ -105,17 +110,23 @@ public class PostgresqlAdaptor extends BaseDbAdaptor {
 
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
+        validateMetadataIdentifier(tableName, true);
         List<DBColumn> dbColumns = Lists.newArrayList();
-        try (Connection connection = getConnection(connectInfo);
-                ResultSet columns =
-                        connection.getMetaData().getColumns(null, schemaName, tableName, null)) {
-            while (columns.next()) {
-                checkMetadataRowLimit(dbColumns.size() + 1);
-                String columnName = columns.getString("COLUMN_NAME");
-                String dataType = columns.getString("TYPE_NAME");
-                String remarks = columns.getString("REMARKS");
-                FieldType fieldType = classifyColumnType(dataType);
-                dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+        try (Connection connection = getConnection(connectInfo)) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metadata, schemaName);
+            String tablePattern = escapeMetadataPattern(metadata, tableName);
+            try (ResultSet columns = metadata.getColumns(null, schemaPattern, tablePattern, null)) {
+                while (columns.next()) {
+                    checkMetadataRowLimit(dbColumns.size() + 1);
+                    String columnName = columns.getString("COLUMN_NAME");
+                    String dataType = columns.getString("TYPE_NAME");
+                    String remarks = columns.getString("REMARKS");
+                    FieldType fieldType = classifyColumnType(dataType);
+                    dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+                }
             }
         }
         return dbColumns;

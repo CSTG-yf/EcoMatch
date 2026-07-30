@@ -4,7 +4,7 @@
 
 - 默认危险函数集合补充 H2、SQLite、PostgreSQL、SQL Server 和 DuckDB 的跨库/外部文件入口，包括 `CSVREAD`、`readfile`、`dblink`、`OPENROWSET`、`read_xlsx` 等，避免只读 `SELECT` 绕过数据边界。
 - 默认拒绝集进一步覆盖 SQLite 扩展加载、H2 远程 Schema 链接、PostgreSQL 后端/配置/WAL 状态函数、DuckDB 动态查询及 PostgreSQL/MySQL/SQLite 扫描器、ClickHouse/StarRocks 外部 URL、对象存储、集群和文件表函数，以及 SQL Server 命令扩展；合法 `SELECT` 不能借数据库函数绕过数据源边界或只读约束。
-- 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符仅接受安全字符，阻断通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
+- 数据库 catalog、schema、table 和 SQL 字段探测入口在访问适配器前统一校验数据源对象权限；动态元数据标识符在 Controller 和数据库适配器信任边界均仅接受安全分段字符，内部建模调用也不能绕过校验并通过 `SHOW TABLES`、`SET CATALOG` 等适配器语句注入额外 SQL。
 - 数据库连接测试、新增和更新仅允许超级管理员执行，阻断普通登录用户通过自定义 JDBC 地址触发服务端任意连接；不存在的数据源统一 fail-closed。
 - 语义模型 Schema 构建仅允许超级管理员执行，避免未授权请求借助模型构建流程连接数据源或调用外部模型。
 - 结构化查询的普通比较、集合、区间和模糊过滤值统一规范化为转义后的 SQL 字符串字面量，不再信任客户端预先添加的首尾引号，阻断通过过滤值闭合字面量并注入布尔表达式。
@@ -43,6 +43,7 @@
 - JDBC 驱动解析、连接测试、重试和资源关闭日志不再记录完整 URL、驱动异常正文或堆栈；不支持的数据源类型和连接失败响应统一使用通用消息。
 - JDBC 连接池初始化、连接有效性检查和数据库元数据适配器仅记录 URL/异常不可逆摘要；Flight SQL 的查询、预编译句柄和关闭句柄仅记录摘要，创建或执行失败统一返回固定错误，避免回显 SQL、认证头及驱动细节。
 - catalog、schema、table 和 column 元数据读取统一绑定 JDBC 连接生命周期并自动关闭 `Connection`/`Statement`/`ResultSet`；Statement 型元数据查询设置 30 秒超时和 10,001 行驱动探针，所有适配器在应用层以 10,000 行上限 fail-closed，覆盖 PostgreSQL、DuckDB、H2、Presto、StarRocks 和 Kyuubi 等方言。
+- JDBC `DatabaseMetaData` 的 schema/table pattern 使用驱动声明的搜索转义符处理合法下划线，拒绝 `%` 等调用方通配符及缺失转义能力，避免内部调用扩大到非目标 Schema 或表；schema 与 catalog 两条兼容读取路径均失败时不再返回伪装的空列表。
 - 语义查询解析、改写、纠错和翻译日志统一记录不可逆摘要；翻译失败响应不再回显 S2SQL 或底层异常消息。
 - 复用现有语义结果缓存、Schema 元数据缓存和语义模型缓存，并将查询结果缓存键隔离到用户粒度、鉴权开关和内部原生执行模式，避免权限结果跨用户或跨安全模式复用。
 - 结果缓存写入和读取均使用响应快照，隔离结果行、列定义、授权信息和脱敏元数据，防止调用方修改共享缓存对象。
@@ -75,7 +76,8 @@
 - `DatabaseServiceGatewayCoverageTest`：校验数据库管理查询接口不能绕过统一网关，且 JDBC 原始异常不会泄露给调用方。
 - `SensitiveQueryLoggingTest`：校验 JDBC URL、结构化查询、语义纠错 SQL、Flight 查询与预编译句柄和异常正文仅以摘要进入日志，且不附带异常堆栈；Flight 创建或查找预编译语句失败时对外仅返回固定错误。
 - `DatabaseServicePermissionTest`：校验普通用户不能测试或变更数据库连接，VIEWER 读取数据源详情时不返回密码，数据源管理员仍可读取受控凭据。
-- `BaseDbAdaptorMetadataSafetyTest`：校验元数据读取完成、配置失败或迭代异常时连接、Statement 和结果集均关闭，Statement 型查询下发超时及溢出探针，并在驱动持续返回超量元数据时 fail-closed。
+- `BaseDbAdaptorMetadataSafetyTest`：校验元数据读取完成、配置失败或迭代异常时连接、Statement 和结果集均关闭，Statement 型查询下发超时及溢出探针，并覆盖 schema→catalog 回退、双重失败传播、JDBC pattern 转义和驱动缺少转义能力时 fail-closed。
+- `DbAdaptorMetadataIdentifierSafetyTest`：覆盖通用、Presto、StarRocks、Kyuubi、DuckDB、H2 和 PostgreSQL 元数据入口，验证 SQL 分隔符、注释和 JDBC 通配符在建立连接前被拒绝，合法 Unicode、下划线和分段名称仍可使用。
 - `ModelControllerAccessTest`：校验语义模型详情、批量读取、关联数据源和 Schema 构建均按模型权限或超级管理员身份 fail-closed。
 - `SqlFilterUtilsSecurityTest`：校验比较、IN、LIKE 和普通含撇号值均被规范化到单一字符串字面量，不能通过预加引号逃逸过滤条件。
 - `QueryStructReqSecurityTest`：校验 WHERE/HAVING 的语法与词法解析失败均转换为通用参数错误并 fail-closed。
@@ -94,7 +96,7 @@
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
 - `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 605 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 613 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
 
 ## 本地性能基线
 

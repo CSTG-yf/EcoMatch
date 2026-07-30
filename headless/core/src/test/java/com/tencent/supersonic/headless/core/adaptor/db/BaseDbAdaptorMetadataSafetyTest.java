@@ -8,6 +8,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -33,6 +34,48 @@ class BaseDbAdaptorMetadataSafetyTest {
 
         assertEquals(1, new TestAdaptor(connection).getDBs(new ConnectInfo()).size());
 
+        verify(schemas).close();
+        verify(catalogs).close();
+        verify(connection).close();
+    }
+
+    @Test
+    void fallsBackToCatalogsWhenSchemaMetadataFails() throws Exception {
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metadata = mock(DatabaseMetaData.class);
+        ResultSet schemas = mock(ResultSet.class);
+        ResultSet catalogs = mock(ResultSet.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getSchemas()).thenReturn(schemas);
+        when(metadata.getCatalogs()).thenReturn(catalogs);
+        when(schemas.next()).thenThrow(new SQLException("schemas unsupported"));
+        when(catalogs.next()).thenReturn(true, false);
+        when(catalogs.getString("TABLE_CAT")).thenReturn("bank");
+
+        assertEquals(List.of("bank"), new TestAdaptor(connection).getDBs(new ConnectInfo()));
+
+        verify(schemas).close();
+        verify(catalogs).close();
+        verify(connection).close();
+    }
+
+    @Test
+    void rejectsMetadataReadWhenSchemasAndCatalogsBothFail() throws Exception {
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metadata = mock(DatabaseMetaData.class);
+        ResultSet schemas = mock(ResultSet.class);
+        ResultSet catalogs = mock(ResultSet.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getSchemas()).thenReturn(schemas);
+        when(metadata.getCatalogs()).thenReturn(catalogs);
+        when(schemas.next()).thenThrow(new SQLException("schemas failed"));
+        when(catalogs.next()).thenThrow(new SQLException("catalogs failed"));
+
+        SQLException failure = assertThrows(SQLException.class,
+                () -> new TestAdaptor(connection).getDBs(new ConnectInfo()));
+
+        assertEquals("Database schema and catalog metadata reads failed", failure.getMessage());
+        assertEquals(1, failure.getSuppressed().length);
         verify(schemas).close();
         verify(catalogs).close();
         verify(connection).close();
@@ -94,6 +137,7 @@ class BaseDbAdaptorMetadataSafetyTest {
         DatabaseMetaData metadata = mock(DatabaseMetaData.class);
         ResultSet columns = mock(ResultSet.class);
         when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getSearchStringEscape()).thenReturn("\\");
         when(metadata.getColumns(null, "bank", "account", null)).thenReturn(columns);
         when(columns.next()).thenThrow(new SQLException("driver failed"));
 
@@ -101,6 +145,39 @@ class BaseDbAdaptorMetadataSafetyTest {
                 .getColumns(new ConnectInfo(), null, "bank", "account"));
 
         verify(columns).close();
+        verify(connection).close();
+    }
+
+    @Test
+    void escapesJdbcMetadataWildcardsInExactIdentifiers() throws Exception {
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metadata = mock(DatabaseMetaData.class);
+        ResultSet columns = mock(ResultSet.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getSearchStringEscape()).thenReturn("\\");
+        when(metadata.getColumns(null, "bank\\_core", "account\\_ledger", null))
+                .thenReturn(columns);
+        when(columns.next()).thenReturn(false);
+
+        new TestAdaptor(connection).getColumns(new ConnectInfo(), null, "bank_core",
+                "account_ledger");
+
+        verify(metadata).getColumns(null, "bank\\_core", "account\\_ledger", null);
+        verify(columns).close();
+        verify(connection).close();
+    }
+
+    @Test
+    void rejectsMissingJdbcMetadataPatternEscapeAndClosesConnection() throws Exception {
+        Connection connection = mock(Connection.class);
+        DatabaseMetaData metadata = mock(DatabaseMetaData.class);
+        when(connection.getMetaData()).thenReturn(metadata);
+        when(metadata.getSearchStringEscape()).thenReturn("");
+
+        SQLException failure = assertThrows(SQLException.class, () -> new TestAdaptor(connection)
+                .getColumns(new ConnectInfo(), null, "bank_core", "account_ledger"));
+
+        assertEquals("Database metadata pattern escape is unavailable", failure.getMessage());
         verify(connection).close();
     }
 

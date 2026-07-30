@@ -18,22 +18,29 @@ public class DuckdbAdaptor extends DefaultDbAdaptor {
 
     protected ResultSet getResultSet(String schemaName, DatabaseMetaData metaData)
             throws SQLException {
+        validateMetadataIdentifier(schemaName, true);
         return metaData.getTables(schemaName, null, null, new String[] {"TABLE", "VIEW"});
     }
 
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
+        validateMetadataIdentifier(tableName, true);
         List<DBColumn> dbColumns = Lists.newArrayList();
-        try (Connection connection = getConnection(connectInfo);
-                ResultSet columns =
-                        connection.getMetaData().getColumns(null, schemaName, tableName, null)) {
-            while (columns.next()) {
-                checkMetadataRowLimit(dbColumns.size() + 1);
-                String columnName = columns.getString("COLUMN_NAME");
-                String dataType = columns.getString("TYPE_NAME");
-                String remarks = columns.getString("REMARKS");
-                FieldType fieldType = classifyColumnType(dataType);
-                dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+        try (Connection connection = getConnection(connectInfo)) {
+            DatabaseMetaData metadata = connection.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metadata, schemaName);
+            String tablePattern = escapeMetadataPattern(metadata, tableName);
+            try (ResultSet columns = metadata.getColumns(null, schemaPattern, tablePattern, null)) {
+                while (columns.next()) {
+                    checkMetadataRowLimit(dbColumns.size() + 1);
+                    String columnName = columns.getString("COLUMN_NAME");
+                    String dataType = columns.getString("TYPE_NAME");
+                    String remarks = columns.getString("REMARKS");
+                    FieldType fieldType = classifyColumnType(dataType);
+                    dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+                }
             }
         }
         return dbColumns;

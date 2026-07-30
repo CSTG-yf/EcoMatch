@@ -18,6 +18,7 @@ public class StarrocksAdaptor extends MysqlAdaptor {
 
     @Override
     public List<String> getDBs(ConnectInfo connectionInfo, String catalog) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
         List<String> dbs = Lists.newArrayList();
         final StringBuilder sql = new StringBuilder("SHOW DATABASES");
         if (StringUtils.isNotBlank(catalog)) {
@@ -37,6 +38,8 @@ public class StarrocksAdaptor extends MysqlAdaptor {
     @Override
     public List<String> getTables(ConnectInfo connectInfo, String catalog, String schemaName)
             throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
         List<String> tablesAndViews = new ArrayList<>();
         final StringBuilder sql = new StringBuilder("SHOW TABLES");
         if (StringUtils.isNotBlank(catalog)) {
@@ -59,6 +62,9 @@ public class StarrocksAdaptor extends MysqlAdaptor {
     @Override
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
+        validateMetadataIdentifier(tableName, true);
         List<DBColumn> dbColumns = new ArrayList<>();
 
         try (Connection con = getConnection(connectInfo);
@@ -71,9 +77,12 @@ public class StarrocksAdaptor extends MysqlAdaptor {
 
             // 获取 DatabaseMetaData; 需要注意调用此方法的位置（在 USE 之后）
             DatabaseMetaData metaData = con.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metaData, schemaName);
+            String tablePattern = escapeMetadataPattern(metaData, tableName);
 
             // 获取特定表的列信息
-            try (ResultSet columns = metaData.getColumns(schemaName, schemaName, tableName, null)) {
+            try (ResultSet columns =
+                    metaData.getColumns(schemaName, schemaPattern, tablePattern, null)) {
                 while (columns.next()) {
                     checkMetadataRowLimit(dbColumns.size() + 1);
                     String columnName = columns.getString("COLUMN_NAME");

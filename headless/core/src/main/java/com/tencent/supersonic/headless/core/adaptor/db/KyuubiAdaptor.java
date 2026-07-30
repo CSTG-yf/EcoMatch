@@ -46,6 +46,7 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
 
     @Override
     public List<String> getDBs(ConnectInfo connectionInfo, String catalog) throws SQLException {
+        validateMetadataIdentifier(catalog, false);
         List<String> dbs = Lists.newArrayList();
         final StringBuilder sql = new StringBuilder("SHOW DATABASES");
         if (StringUtils.isNotBlank(catalog)) {
@@ -65,10 +66,14 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
     @Override
     public List<String> getTables(ConnectInfo connectInfo, String catalog, String schemaName)
             throws SQLException {
+        validateMetadataIdentifier(catalog, false);
+        validateMetadataIdentifier(schemaName, true);
         List<String> tablesAndViews = new ArrayList<>();
 
         try (Connection connection = getConnection(connectInfo)) {
-            try (ResultSet resultSet = connection.getMetaData().getTables(catalog, schemaName, null,
+            DatabaseMetaData metadata = connection.getMetaData();
+            String schemaPattern = escapeMetadataPattern(metadata, schemaName);
+            try (ResultSet resultSet = metadata.getTables(catalog, schemaPattern, null,
                     new String[] {"TABLE", "VIEW"})) {
                 while (resultSet.next()) {
                     checkMetadataRowLimit(tablesAndViews.size() + 1);
