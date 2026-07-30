@@ -10,6 +10,7 @@ import { TransType } from '../../enum';
 import DimensionMetricVisibleTransfer from '../Entity/DimensionMetricVisibleTransfer';
 import { wrapperTransTypeAndId } from '../../utils';
 import styles from '../style.less';
+import PermissionScopePreview from './PermissionScopePreview';
 
 type Props = {
   permissonData: any;
@@ -38,11 +39,32 @@ const PermissionCreateDrawer: React.FC<Props> = ({
   const [selectedDimensionKeyList, setSelectedDimensionKeyList] = useState<string[]>([]);
   const [selectedMetricKeyList, setSelectedMetricKeyList] = useState<string[]>([]);
   const [selectedKeyList, setSelectedKeyList] = useState<string[]>([]);
+  const [basicInfoValues, setBasicInfoValues] = useState<Record<string, any>>({});
+  const watchedRowFilter = Form.useWatch('dimensionFilters', form);
 
   const saveAuth = async () => {
     const basicInfoFormValues = await basicInfoFormRef.current.formRef.validateFields();
     const values = await form.validateFields();
     const { dimensionFilters, dimensionFilterDescription } = values;
+    const { attributeConditionEntries = [], ...basicValues } = basicInfoFormValues;
+    const hasSubject =
+      basicValues.authorizedDepartmentIds?.length ||
+      basicValues.authorizedUsers?.length ||
+      basicValues.authorizedRoles?.length ||
+      attributeConditionEntries.length;
+    if (!hasSubject) {
+      message.error('至少配置一个用户、组织、角色或属性条件');
+      return;
+    }
+    const attributeConditions = attributeConditionEntries.reduce(
+      (result: Record<string, string>, item: { key?: string; value?: string }) => {
+        if (item.key?.trim() && item.value?.trim()) {
+          result[item.key.trim()] = item.value.trim();
+        }
+        return result;
+      },
+      {},
+    );
 
     const { authRules = [] } = permissonData;
     let target = authRules?.[0];
@@ -58,8 +80,9 @@ const PermissionCreateDrawer: React.FC<Props> = ({
       saveAuthQuery = updateGroupAuth;
     }
     const { code, msg } = await saveAuthQuery({
-      ...basicInfoFormValues,
-      dimensionFilters: [dimensionFilters],
+      ...basicValues,
+      attributeConditions,
+      dimensionFilters: dimensionFilters ? [dimensionFilters] : [],
       dimensionFilterDescription,
       authRules: [
         {
@@ -138,7 +161,11 @@ const PermissionCreateDrawer: React.FC<Props> = ({
         <div style={{ overflow: 'auto', margin: '0 auto', width: '1200px' }}>
           <Space direction="vertical" style={{ width: '100%' }} size={20}>
             <ProCard title="基本信息" bordered>
-              <PermissionCreateForm ref={basicInfoFormRef} permissonData={permissonData} />
+              <PermissionCreateForm
+                ref={basicInfoFormRef}
+                permissonData={permissonData}
+                onValuesChange={(_, values) => setBasicInfoValues(values)}
+              />
             </ProCard>
 
             <ProCard title="列权限" bordered tooltip="仅对敏感度为高的指标/维度进行授权">
@@ -214,6 +241,14 @@ const PermissionCreateDrawer: React.FC<Props> = ({
                   </FormItem>
                 </Form>
               </div>
+            </ProCard>
+            <ProCard bordered title="生效范围预览">
+              <PermissionScopePreview
+                values={basicInfoValues}
+                dimensionCount={selectedDimensionKeyList.length}
+                metricCount={selectedMetricKeyList.length}
+                rowFilter={watchedRowFilter}
+              />
             </ProCard>
           </Space>
         </div>

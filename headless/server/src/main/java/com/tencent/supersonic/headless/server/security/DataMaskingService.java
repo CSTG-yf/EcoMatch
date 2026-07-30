@@ -9,7 +9,6 @@ import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Arrays;
@@ -27,27 +26,29 @@ import java.util.stream.Stream;
 @Component
 public class DataMaskingService {
 
-    private final Set<String> rawUsers;
-    private final Set<String> rawRoles;
-    private final Map<String, MaskingStrategy> fieldStrategies;
+    private final MaskingParameterConfig parameterConfig;
+    private final MaskingPolicy fixedPolicy;
+    private volatile String cachedPolicyKey;
+    private volatile MaskingPolicy cachedPolicy;
 
     @Autowired
-    public DataMaskingService(@Value("${s2.security.masking.raw-users:}") String rawUsers,
-            @Value("${s2.security.masking.raw-roles:}") String rawRoles,
-            @Value("${s2.security.masking.field-strategies:}") String fieldStrategies) {
-        this.rawUsers = Arrays.stream(StringUtils.defaultString(rawUsers).split(","))
-                .map(String::trim).filter(StringUtils::isNotBlank).collect(Collectors.toSet());
-        this.rawRoles = Arrays.stream(StringUtils.defaultString(rawRoles).split(","))
-                .map(String::trim).filter(StringUtils::isNotBlank).collect(Collectors.toSet());
-        this.fieldStrategies = parseFieldStrategies(fieldStrategies);
+    public DataMaskingService(MaskingParameterConfig parameterConfig) {
+        this.parameterConfig = parameterConfig;
+        this.fixedPolicy = null;
     }
 
     public DataMaskingService(String rawUsers, String rawRoles) {
         this(rawUsers, rawRoles, "");
     }
 
+    public DataMaskingService(String rawUsers, String rawRoles, String fieldStrategies) {
+        this.parameterConfig = null;
+        this.fixedPolicy = parsePolicy(rawUsers, rawRoles, fieldStrategies);
+    }
+
     public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user) {
-        if (response == null || canViewRawData(user) || response.getResultList() == null
+        MaskingPolicy policy = currentPolicy();
+        if (response == null || canViewRawData(user, policy) || response.getResultList() == null
                 || response.getResultList().isEmpty()) {
             return;
         }
@@ -93,7 +94,7 @@ public class DataMaskingService {
                     maskedColumns.add(key);
                     if (row.get(key) != null) {
                         row.put(key, unknownLineage ? "****"
-                                : maskValue(key, sensitiveField, row.get(key)));
+                                : maskValue(key, sensitiveField, row.get(key), policy));
                     }
                 }
             }
@@ -130,17 +131,19 @@ public class DataMaskingService {
         }
     }
 
-    private Object maskValue(String resultField, String sensitiveField, Object value) {
-        MaskingStrategy aliasStrategy = fieldStrategies.get(resultField.toLowerCase(Locale.ROOT));
+    private Object maskValue(String resultField, String sensitiveField, Object value,
+            MaskingPolicy policy) {
+        MaskingStrategy aliasStrategy =
+                policy.fieldStrategies.get(resultField.toLowerCase(Locale.ROOT));
         if (aliasStrategy != null) {
             return applyStrategy(aliasStrategy, String.valueOf(value));
         }
-        return maskValue(StringUtils.defaultIfBlank(sensitiveField, resultField), value);
+        return maskValue(StringUtils.defaultIfBlank(sensitiveField, resultField), value, policy);
     }
 
-    private boolean canViewRawData(User user) {
-        return user != null && (user.isSuperAdmin() || rawUsers.contains(user.getName())
-                || !Collections.disjoint(rawRoles,
+    private boolean canViewRawData(User user, MaskingPolicy policy) {
+        return user != null && (user.isSuperAdmin() || policy.rawUsers.contains(user.getName())
+                || !Collections.disjoint(policy.rawRoles,
                         user.getRoles() == null ? Collections.emptySet() : user.getRoles()));
     }
 
@@ -181,7 +184,11 @@ public class DataMaskingService {
     }
 
     Object maskValue(String fieldName, Object value) {
-        MaskingStrategy strategy = fieldStrategies.get(fieldName.toLowerCase(Locale.ROOT));
+        return maskValue(fieldName, value, currentPolicy());
+    }
+
+    private Object maskValue(String fieldName, Object value, MaskingPolicy policy) {
+        MaskingStrategy strategy = policy.fieldStrategies.get(fieldName.toLowerCase(Locale.ROOT));
         if (strategy != null) {
             return applyStrategy(strategy, String.valueOf(value));
         }
@@ -223,6 +230,38 @@ public class DataMaskingService {
         }
     }
 
+    private MaskingPolicy currentPolicy() {
+        if (parameterConfig == null) {
+            return fixedPolicy;
+        }
+        String rawUsers = StringUtils.defaultString(parameterConfig.rawUsers());
+        String rawRoles = StringUtils.defaultString(parameterConfig.rawRoles());
+        String fieldStrategies = StringUtils.defaultString(parameterConfig.fieldStrategies());
+        String policyKey = rawUsers + '\u0000' + rawRoles + '\u0000' + fieldStrategies;
+        MaskingPolicy policy = cachedPolicy;
+        if (policy != null && policyKey.equals(cachedPolicyKey)) {
+            return policy;
+        }
+        synchronized (this) {
+            if (cachedPolicy == null || !policyKey.equals(cachedPolicyKey)) {
+                cachedPolicy = parsePolicy(rawUsers, rawRoles, fieldStrategies);
+                cachedPolicyKey = policyKey;
+            }
+            return cachedPolicy;
+        }
+    }
+
+    private MaskingPolicy parsePolicy(String rawUsers, String rawRoles, String fieldStrategies) {
+        return new MaskingPolicy(parseIdentifiers(rawUsers), parseIdentifiers(rawRoles),
+                parseFieldStrategies(fieldStrategies));
+    }
+
+    private Set<String> parseIdentifiers(String configuredIdentifiers) {
+        return Arrays.stream(StringUtils.defaultString(configuredIdentifiers).split(","))
+                .map(String::trim).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
     private Map<String, MaskingStrategy> parseFieldStrategies(String configuredStrategies) {
         Map<String, MaskingStrategy> strategies = new LinkedHashMap<>();
         for (String item : StringUtils.defaultString(configuredStrategies).split(",")) {
@@ -237,7 +276,7 @@ public class DataMaskingService {
             strategies.put(pair[0].trim().toLowerCase(Locale.ROOT),
                     MaskingStrategy.valueOf(pair[1].trim().toUpperCase(Locale.ROOT)));
         }
-        return strategies;
+        return Collections.unmodifiableMap(strategies);
     }
 
     private String maskRange(String value, int prefixLength, int suffixStart) {
@@ -248,5 +287,18 @@ public class DataMaskingService {
 
     private enum MaskingStrategy {
         FULL, LAST4, FIRST_LAST
+    }
+
+    private static final class MaskingPolicy {
+        private final Set<String> rawUsers;
+        private final Set<String> rawRoles;
+        private final Map<String, MaskingStrategy> fieldStrategies;
+
+        private MaskingPolicy(Set<String> rawUsers, Set<String> rawRoles,
+                Map<String, MaskingStrategy> fieldStrategies) {
+            this.rawUsers = rawUsers;
+            this.rawRoles = rawRoles;
+            this.fieldStrategies = fieldStrategies;
+        }
     }
 }

@@ -142,6 +142,23 @@ const PermissionTable: React.FC<Props> = ({}) => {
       },
     },
     {
+      dataIndex: 'authorizedRoles',
+      title: '授权角色',
+      ellipsis: true,
+      render: (_, record: any) => record.authorizedRoles?.join('、') || '-',
+    },
+    {
+      dataIndex: 'attributeConditions',
+      title: '属性条件',
+      ellipsis: true,
+      render: (_, record: any) => {
+        const words = Object.entries(record.attributeConditions || {})
+          .map(([key, value]) => `${key}=${value}`)
+          .join('、');
+        return words || '-';
+      },
+    },
+    {
       dataIndex: 'columnPermission',
       title: '列权限',
       // width: 400,
@@ -182,6 +199,12 @@ const PermissionTable: React.FC<Props> = ({}) => {
         }
         return <> - </>;
       },
+    },
+    {
+      dataIndex: 'dimensionFilters',
+      title: '行权限',
+      ellipsis: true,
+      render: (_, record: any) => record.dimensionFilters?.join(' OR ') || '不限制',
     },
     {
       title: '操作',

@@ -18,6 +18,16 @@
       "className": "com.tencent.supersonic.auth.authorization.service.AuthServiceImplValidationTest"
     },
     {
+      "id": "system-config-controller-access",
+      "module": "common",
+      "className": "com.tencent.supersonic.common.rest.SystemConfigControllerAccessTest"
+    },
+    {
+      "id": "system-config-admin-guard",
+      "module": "auth/authorization",
+      "className": "com.tencent.supersonic.auth.authorization.service.SystemConfigAccessGuardImplTest"
+    },
+    {
       "id": "dataset-access",
       "module": "headless/server",
       "className": "com.tencent.supersonic.headless.server.service.DataSetServiceAccessTest"
@@ -141,6 +151,8 @@
         "user-token-access",
         "authorization-api-access",
         "authorization-policy-validation",
+        "system-config-controller-access",
+        "system-config-admin-guard",
         "dataset-access",
         "database-access",
         "model-access",

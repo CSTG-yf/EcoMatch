@@ -1,10 +1,11 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react';
-import { Form, Input } from 'antd';
+import { Form, Input, Select } from 'antd';
 import type { ForwardRefRenderFunction } from 'react';
 import SelectPartner from '@/components/SelectPartner';
 import SelectTMEPerson from '@/components/SelectTMEPerson';
 import { formLayout } from '@/components/FormHelper/utils';
 import styles from '../style.less';
+import AttributeConditionEditor from './AttributeConditionEditor';
 type Props = {
   permissonData: any;
   onSubmit?: (data?: any) => void;
@@ -29,7 +30,12 @@ const PermissionCreateForm: ForwardRefRenderFunction<any, Props> = (
     };
     fieldsValue.authorizedDepartmentIds = permissonData.authorizedDepartmentIds || [];
     fieldsValue.authorizedUsers = permissonData.authorizedUsers || [];
+    fieldsValue.authorizedRoles = permissonData.authorizedRoles || [];
+    fieldsValue.attributeConditionEntries = Object.entries(
+      permissonData.attributeConditions || {},
+    ).map(([key, value]) => ({ key, value }));
     form.setFieldsValue(fieldsValue);
+    onValuesChange?.({}, fieldsValue);
   }, [permissonData]);
 
   return (
@@ -61,6 +67,19 @@ const PermissionCreateForm: ForwardRefRenderFunction<any, Props> = (
 
         <FormItem name="authorizedUsers" label="按个人">
           <SelectTMEPerson placeholder="请选择需要授权的个人" />
+        </FormItem>
+        <FormItem
+          name="authorizedRoles"
+          label="按角色"
+          tooltip="角色名称必须与登录令牌中的角色声明完全一致"
+        >
+          <Select mode="tags" tokenSeparators={[',']} placeholder="输入角色后回车" />
+        </FormItem>
+        <FormItem
+          label="按用户属性"
+          tooltip="所有属性条件同时满足时策略才会生效"
+        >
+          <AttributeConditionEditor />
         </FormItem>
       </Form>
     </>

@@ -18,8 +18,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DataMaskingServiceTest {
+
+    @Test
+    void reloadsPersistedMaskingPolicyWhenConfigurationChanges() {
+        MaskingParameterConfig config = mock(MaskingParameterConfig.class);
+        when(config.rawUsers()).thenReturn("");
+        when(config.rawRoles()).thenReturn("");
+        when(config.fieldStrategies()).thenReturn("account_no=FULL");
+        DataMaskingService service = new DataMaskingService(config);
+
+        assertEquals("****", service.maskValue("account_no", "622200001234"));
+
+        when(config.fieldStrategies()).thenReturn("account_no=LAST4");
+
+        assertEquals("****1234", service.maskValue("account_no", "622200001234"));
+    }
 
     @Test
     void masksSensitiveValuesForRegularUser() {
