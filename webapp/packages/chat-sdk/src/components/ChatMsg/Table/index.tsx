@@ -44,11 +44,7 @@ const Table: React.FC<Props> = ({ data, size, loading, question, onApplyAuth }) 
           if (dataFormatType === 'percent') {
             return (
               <div className={`${prefixCls}-formatted-value`}>
-                {`${
-                  value
-                    ? formatByDataFormatType(value, dataFormatType, dataFormat)
-                    : '0%'
-                }`}
+                {`${value ? formatByDataFormatType(value, dataFormatType, dataFormat) : '0%'}`}
               </div>
             );
           }
@@ -77,9 +73,13 @@ const Table: React.FC<Props> = ({ data, size, loading, question, onApplyAuth }) 
     return index % 2 !== 0 ? `${prefixCls}-even-row` : '';
   };
 
-  const dateColumn = queryColumns.find(column => column.type === 'DATE' || column.showType === 'DATE');
+  const dateColumn = queryColumns.find(
+    column => column.type === 'DATE' || column.showType === 'DATE'
+  );
   const dataSource = dateColumn
-    ? queryResults.sort((a, b) => moment(a[dateColumn.bizName]).diff(moment(b[dateColumn.bizName])))
+    ? [...queryResults].sort((a, b) =>
+        moment(a[dateColumn.bizName]).diff(moment(b[dateColumn.bizName]))
+      )
     : queryResults;
 
   return (

@@ -3,9 +3,15 @@ import MetricCard from './MetricCard';
 import MetricTrend from './MetricTrend';
 import MarkDown from './MarkDown';
 import Table from './Table';
-import { ColumnType, DrillDownDimensionType, FieldType, MsgDataType } from '../../common/type';
-import { useEffect, useState } from 'react';
-import { queryData } from '../../service';
+import {
+  ColumnType,
+  DrillDownDimensionType,
+  FieldType,
+  FilterItemType,
+  MsgDataType,
+} from '../../common/type';
+import { useEffect, useRef, useState } from 'react';
+import { queryData, recordChartFeedback } from '../../service';
 import classNames from 'classnames';
 import { PREFIX_CLS, MsgContentTypeEnum } from '../../common/constants';
 import Text from './Text';
@@ -13,23 +19,63 @@ import DrillDownDimensions from '../DrillDownDimensions';
 import MetricOptions from '../MetricOptions';
 import { isMobile } from '../../utils/utils';
 import Pie from './Pie';
+import { Segmented, Tag, Tooltip, message } from 'antd';
+import {
+  BarChartOutlined,
+  DashboardOutlined,
+  FundProjectionScreenOutlined,
+  LineChartOutlined,
+  PieChartOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
+import {
+  inferVisualizationType,
+  isVisualizationCompatible,
+  mergeDimensionFilters,
+  normalizeVisualizationType,
+  resolveVisualizationType,
+  VisualizationType,
+  visualizationOptions,
+} from './visualizationModel';
 
 type Props = {
   queryId?: number;
   question: string;
   data: MsgDataType;
-  chartIndex: number;
   triggerResize?: boolean;
   forceShowTable?: boolean;
   isSimpleMode?: boolean;
-  onMsgContentTypeChange: (msgContentType: MsgContentTypeEnum) => void;
+  onMsgContentTypeChange?: (msgContentType: MsgContentTypeEnum) => void;
+};
+
+const VISUALIZATION_META: Record<
+  VisualizationType,
+  { label: string; icon: React.ReactNode; contentType: MsgContentTypeEnum }
+> = {
+  KPI_CARD: {
+    label: '指标卡',
+    icon: <DashboardOutlined />,
+    contentType: MsgContentTypeEnum.METRIC_CARD,
+  },
+  TABLE: { label: '表格', icon: <TableOutlined />, contentType: MsgContentTypeEnum.TABLE },
+  LINE: {
+    label: '折线图',
+    icon: <LineChartOutlined />,
+    contentType: MsgContentTypeEnum.METRIC_TREND,
+  },
+  BAR: { label: '柱状图', icon: <BarChartOutlined />, contentType: MsgContentTypeEnum.METRIC_BAR },
+  PIE: { label: '饼图', icon: <PieChartOutlined />, contentType: MsgContentTypeEnum.METRIC_PIE },
+  COMBO: {
+    label: '组合图',
+    icon: <FundProjectionScreenOutlined />,
+    contentType: MsgContentTypeEnum.METRIC_COMBO,
+  },
 };
 
 const ChatMsg: React.FC<Props> = ({
   queryId,
   question,
   data,
-  chartIndex,
   triggerResize,
   forceShowTable = false,
   isSimpleMode,
@@ -49,6 +95,11 @@ const ChatMsg: React.FC<Props> = ({
   const [activeMetricField, setActiveMetricField] = useState<FieldType>();
   const [dateModeValue, setDateModeValue] = useState<any>();
   const [currentDateOption, setCurrentDateOption] = useState<number>();
+  const [activeVisualization, setActiveVisualization] = useState<VisualizationType>(() =>
+    resolveVisualizationType(data?.recommendedChart, queryColumns || [], queryResults || [])
+  );
+  const [linkedFilters, setLinkedFilters] = useState<FilterItemType[]>([]);
+  const drillRequestId = useRef(0);
 
   const prefixCls = `${PREFIX_CLS}-chat-msg`;
 
@@ -67,15 +118,15 @@ const ChatMsg: React.FC<Props> = ({
     setCurrentDateOption(chatContext?.dateInfo?.unit);
     setDrillDownDimension(undefined);
     setSecondDrillDownDimension(undefined);
+    setActiveVisualization(
+      resolveVisualizationType(data?.recommendedChart, queryColumns || [], queryResults || [])
+    );
+    setLinkedFilters([]);
   }, [data]);
 
   const metricFields = columns.filter(item => item.showType === 'NUMBER');
 
   const getMsgContentType = () => {
-    const singleData = dataSource.length === 1;
-    const dateField = columns.find(item => item.showType === 'DATE' || item.type === 'DATE');
-    const categoryField = columns.filter(item => item.showType === 'CATEGORY');
-    const metricFields = columns.filter(item => item.showType === 'NUMBER');
     if (!columns) {
       return;
     }
@@ -85,80 +136,19 @@ const ChatMsg: React.FC<Props> = ({
     if (forceShowTable) {
       return MsgContentTypeEnum.TABLE;
     }
-    const isDslMetricCard =
-      queryMode === 'LLM_S2SQL' && singleData && metricFields.length === 1 && columns.length === 1;
-    const isMetricCard = (queryMode.includes('METRIC') || isDslMetricCard) && singleData;
     const isText = !queryColumns?.length;
 
     if (isText) {
       return MsgContentTypeEnum.TEXT;
     }
-
-    if (isMetricCard) {
-      return MsgContentTypeEnum.METRIC_CARD;
-    }
-
-    const isTable =
-      !isText &&
-      !isMetricCard &&
-      (categoryField.length > 1 ||
-        queryMode === 'TAG_DETAIL' ||
-        queryMode === 'ENTITY_DIMENSION' ||
-        dataSource?.length === 1 ||
-        (categoryField.length === 1 && metricFields.length === 0));
-
-    if (isTable) {
-      return MsgContentTypeEnum.TABLE;
-    }
-    const isMetricTrend =
-      dateField &&
-      metricFields.length > 0 &&
-      categoryField.length <= 1 &&
-      !(metricFields.length > 1 && categoryField.length > 0) &&
-      dataSource.some(item => item[dateField.bizName] !== dataSource[0][dateField.bizName]);
-
-    if (isMetricTrend) {
-      return MsgContentTypeEnum.METRIC_TREND;
-    }
-
-    /**
-     * For Pie Chart:
-     * 1. There should be at least one category field.
-     * 2. There should be exactly one metric field.
-     * 3. All metric values should be non-negative.
-     * 4. limit the number of data points based on device type:
-     *   - For mobile devices, limit to 5 data points.
-     *   - For desktop devices, limit to 10 data points.
-     */
-    const isMetricPie =
-      categoryField.length > 0 &&
-      metricFields?.length === 1 &&
-      (isMobile ? dataSource?.length <= 5 : dataSource?.length <= 10) &&
-      dataSource.every(item => item[metricFields[0].bizName] >= 0);
-
-    if (isMetricPie) {
-      return MsgContentTypeEnum.METRIC_PIE;
-    }
-
-    /**
-     * For Bar Chart:
-     * 1. There should be at least one category field.
-     * 2. There should be exactly one metric field.
-     * 3. The number of data points should be limited based on device type:
-     *  - For mobile devices, limit to 5 data points.
-     *  - For desktop devices, limit to 50 data points.
-     * 4. All metric values should be finite numbers.
-     */
-    const isMetricBar =
-      categoryField?.length > 0 &&
-      metricFields?.length === 1 &&
-      (isMobile ? dataSource?.length <= 5 : dataSource?.length <= 50) &&
-      dataSource.every(item => isFinite(Number(item[metricFields[0].bizName])));
-
-    if (isMetricBar) {
-      return MsgContentTypeEnum.METRIC_BAR;
-    }
-    return MsgContentTypeEnum.TABLE;
+    const compatibleVisualization = isVisualizationCompatible(
+      activeVisualization,
+      columns,
+      dataSource
+    )
+      ? activeVisualization
+      : inferVisualizationType(columns, dataSource);
+    return VISUALIZATION_META[compatibleVisualization].contentType;
   };
 
   const getMsgStyle = (type: MsgContentTypeEnum) => {
@@ -178,7 +168,11 @@ const ChatMsg: React.FC<Props> = ({
         [queryColumns.length > 5 ? 'width' : 'minWidth']: queryColumns.length * 150,
       };
     }
-    if (type === MsgContentTypeEnum.METRIC_TREND || type === MsgContentTypeEnum.METRIC_PIE) {
+    if (
+      type === MsgContentTypeEnum.METRIC_TREND ||
+      type === MsgContentTypeEnum.METRIC_PIE ||
+      type === MsgContentTypeEnum.METRIC_COMBO
+    ) {
       return { width: 'calc(100vw - 410px)' };
     }
   };
@@ -225,12 +219,12 @@ const ChatMsg: React.FC<Props> = ({
             }}
             question={question}
             loading={loading}
-            chartIndex={chartIndex}
             triggerResize={triggerResize}
             activeMetricField={activeMetricField}
             drillDownDimension={drillDownDimension}
             currentDateOption={currentDateOption}
             onSelectDateOption={selectDateOption}
+            visualizationType="LINE"
           />
         );
       case MsgContentTypeEnum.METRIC_BAR:
@@ -241,6 +235,7 @@ const ChatMsg: React.FC<Props> = ({
             triggerResize={triggerResize}
             loading={loading}
             metricField={metricFields[0]}
+            onCategorySelect={applyLinkedFilter}
           />
         );
       case MsgContentTypeEnum.METRIC_PIE:
@@ -253,6 +248,25 @@ const ChatMsg: React.FC<Props> = ({
             loading={loading}
             metricField={metricFields[0]}
             categoryField={categoryField!}
+            onCategorySelect={applyLinkedFilter}
+          />
+        );
+      case MsgContentTypeEnum.METRIC_COMBO:
+        return (
+          <MetricTrend
+            data={{
+              ...data,
+              queryColumns: columns,
+              queryResults: dataSource,
+            }}
+            question={question}
+            loading={loading}
+            triggerResize={triggerResize}
+            activeMetricField={activeMetricField}
+            drillDownDimension={drillDownDimension}
+            currentDateOption={currentDateOption}
+            onSelectDateOption={selectDateOption}
+            visualizationType="COMBO"
           />
         );
       case MsgContentTypeEnum.MARKDOWN:
@@ -273,24 +287,89 @@ const ChatMsg: React.FC<Props> = ({
   };
 
   const onLoadData = async (value: any) => {
+    const requestId = ++drillRequestId.current;
     setLoading(true);
-    const res: any = await queryData({
-      ...chatContext,
-      ...value,
-      queryId,
-      parseId: chatContext.id,
+    try {
+      const res: any = await queryData({
+        ...chatContext,
+        dimensionFilters: mergeDimensionFilters(chatContext.dimensionFilters, linkedFilters),
+        ...value,
+        queryId,
+        parseId: chatContext.id,
+      });
+      if (requestId !== drillRequestId.current) {
+        return false;
+      }
+      if (res.code === 200) {
+        const nextColumns = res.data?.queryColumns || [];
+        const nextRows = res.data?.queryResults || [];
+        updateColumns(nextColumns);
+        setDataSource(nextRows);
+        setActiveVisualization(
+          resolveVisualizationType(res.data?.recommendedChart, nextColumns, nextRows)
+        );
+        return true;
+      }
+      message.error(res.message || '下钻查询失败');
+      return false;
+    } catch {
+      if (requestId === drillRequestId.current) {
+        message.error('下钻查询失败，请稍后重试');
+      }
+      return false;
+    } finally {
+      if (requestId === drillRequestId.current) {
+        setLoading(false);
+      }
+    }
+  };
+
+  async function applyLinkedFilter(column: ColumnType, value: any) {
+    const dimension = [
+      ...(chatContext.dimensions || []),
+      ...(data.recommendedDimensions || []),
+    ].find(item => item.bizName === column.bizName || item.name === column.name);
+    if (!dimension?.id) {
+      message.warning('当前字段未配置可联动的语义维度');
+      return;
+    }
+    const previous = linkedFilters;
+    const next = [
+      ...linkedFilters.filter(filter => filter.bizName !== dimension.bizName),
+      {
+        elementID: dimension.id,
+        name: dimension.name,
+        bizName: dimension.bizName,
+        operator: '=',
+        value,
+      },
+    ];
+    setLinkedFilters(next);
+    const succeeded = await onLoadData({
+      dimensionFilters: mergeDimensionFilters(chatContext.dimensionFilters, next),
     });
-    setLoading(false);
-    if (res.code === 200) {
-      updateColumns(res.data?.queryColumns || []);
-      setDataSource(res.data?.queryResults || []);
+    if (!succeeded) {
+      setLinkedFilters(previous);
+    }
+  }
+
+  const removeLinkedFilter = async (bizName: string) => {
+    const previous = linkedFilters;
+    const next = linkedFilters.filter(filter => filter.bizName !== bizName);
+    setLinkedFilters(next);
+    const succeeded = await onLoadData({
+      dimensionFilters: mergeDimensionFilters(chatContext.dimensionFilters, next),
+    });
+    if (!succeeded) {
+      setLinkedFilters(previous);
     }
   };
 
   const onSelectDimension = async (dimension?: DrillDownDimensionType) => {
-    setLoading(true);
+    const previous = drillDownDimension;
     setDrillDownDimension(dimension);
-    onLoadData({
+    setSecondDrillDownDimension(undefined);
+    const succeeded = await onLoadData({
       dateInfo: {
         ...chatContext.dateInfo,
         dateMode: dateModeValue,
@@ -301,11 +380,15 @@ const ChatMsg: React.FC<Props> = ({
         : chatContext.dimensions,
       metrics: [activeMetricField || defaultMetricField],
     });
+    if (!succeeded) {
+      setDrillDownDimension(previous);
+    }
   };
 
-  const onSelectSecondDimension = (dimension?: DrillDownDimensionType) => {
+  const onSelectSecondDimension = async (dimension?: DrillDownDimensionType) => {
+    const previous = secondDrillDownDimension;
     setSecondDrillDownDimension(dimension);
-    onLoadData({
+    const succeeded = await onLoadData({
       dateInfo: {
         ...chatContext.dateInfo,
         dateMode: dateModeValue,
@@ -318,6 +401,9 @@ const ChatMsg: React.FC<Props> = ({
       ],
       metrics: [activeMetricField || defaultMetricField],
     });
+    if (!succeeded) {
+      setSecondDrillDownDimension(previous);
+    }
   };
 
   const onSwitchMetric = (metricField?: FieldType) => {
@@ -367,7 +453,7 @@ const ChatMsg: React.FC<Props> = ({
     entityName !== undefined;
 
   const existDrillDownDimension =
-  (queryMode.includes('METRIC') || queryMode === 'LLM_S2SQL')&&
+    (queryMode.includes('METRIC') || queryMode === 'LLM_S2SQL') &&
     getMsgContentType() !== MsgContentTypeEnum.TEXT &&
     !isEntityMode;
 
@@ -382,6 +468,31 @@ const ChatMsg: React.FC<Props> = ({
 
   const type = getMsgContentType();
   const style = type ? getMsgStyle(type) : undefined;
+  const availableVisualizations = visualizationOptions(
+    data.recommendedChart,
+    data.candidateCharts,
+    columns,
+    dataSource
+  );
+  const recommendedVisualization =
+    normalizeVisualizationType(data.recommendedChart?.chartType) ||
+    inferVisualizationType(columns, dataSource);
+  const selectedVisualization = forceShowTable
+    ? 'TABLE'
+    : isVisualizationCompatible(activeVisualization, columns, dataSource)
+    ? activeVisualization
+    : inferVisualizationType(columns, dataSource);
+
+  const switchVisualization = (next: string | number) => {
+    const visualization = next as VisualizationType;
+    setActiveVisualization(visualization);
+    onMsgContentTypeChange?.(VISUALIZATION_META[visualization].contentType);
+    if (queryId && visualization !== activeVisualization) {
+      recordChartFeedback(queryId, recommendedVisualization, visualization, 'CHART_SELECTOR').catch(
+        () => message.warning('图表已切换，反馈记录失败')
+      );
+    }
+  };
 
   return (
     <div className={chartMsgClass} style={style}>
@@ -389,6 +500,44 @@ const ChatMsg: React.FC<Props> = ({
         <div>暂无数据</div>
       ) : (
         <div>
+          {!isSimpleMode && availableVisualizations.length > 1 && (
+            <div className={`${prefixCls}-visualization-toolbar`}>
+              <span>视图</span>
+              <Segmented
+                size="small"
+                value={selectedVisualization}
+                onChange={switchVisualization}
+                options={availableVisualizations.map(visualization => ({
+                  value: visualization,
+                  label: (
+                    <Tooltip title={VISUALIZATION_META[visualization].label}>
+                      <span className={`${prefixCls}-visualization-option`}>
+                        {VISUALIZATION_META[visualization].icon}
+                        <span>{VISUALIZATION_META[visualization].label}</span>
+                      </span>
+                    </Tooltip>
+                  ),
+                }))}
+              />
+            </div>
+          )}
+          {linkedFilters.length > 0 && (
+            <div className={`${prefixCls}-linked-filters`} aria-label="联动筛选">
+              <span>联动筛选</span>
+              {linkedFilters.map(filter => (
+                <Tag
+                  key={filter.bizName}
+                  closable
+                  onClose={event => {
+                    event.preventDefault();
+                    removeLinkedFilter(filter.bizName);
+                  }}
+                >
+                  {filter.name}：{String(filter.value)}
+                </Tag>
+              ))}
+            </div>
+          )}
           {getMsgContent()}
           {(isMultipleMetric || existDrillDownDimension) && !isSimpleMode && (
             <div

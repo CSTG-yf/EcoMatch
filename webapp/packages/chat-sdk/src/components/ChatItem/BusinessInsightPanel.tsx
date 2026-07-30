@@ -11,6 +11,7 @@ type Props = {
 const CHART_LABELS: Record<string, string> = {
   TABLE: '表格',
   METRIC_CARD: '指标卡',
+  KPI_CARD: '指标卡',
   LINE: '折线图',
   BAR: '柱状图',
   PIE: '饼图',

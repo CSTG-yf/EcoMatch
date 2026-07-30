@@ -42,7 +42,7 @@ const DrillDownDimensions: React.FC<Props> = ({
 
   useEffect(() => {
     initData();
-  }, []);
+  }, [drillDownDimensions, dimensionFilters, originDimensions]);
 
   const cancelDrillDown = () => {
     onSelectDimension(undefined);

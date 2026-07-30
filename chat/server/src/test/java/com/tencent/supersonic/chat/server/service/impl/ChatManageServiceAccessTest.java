@@ -1,5 +1,6 @@
 package com.tencent.supersonic.chat.server.service.impl;
 
+import com.tencent.supersonic.chat.api.pojo.request.ChartFeedbackReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
@@ -132,6 +133,51 @@ class ChatManageServiceAccessTest {
         assertEquals("CHAT_ACCESS_ALLOWED", event.getReasonCode());
         assertEquals(10L, event.getChatId());
         verify(publisher, never()).publishRequired(any(), eq(user));
+    }
+
+    @Test
+    void recordsAuthorizedChartSelectionAsRequiredAudit() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AuditEventPublisher publisher = mock(AuditEventPublisher.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, publisher);
+        User user = User.get(2L, "alice");
+        ChatQueryDO query = new ChatQueryDO();
+        query.setQuestionId(20L);
+        query.setUserName("alice");
+        when(queryRepository.getChatQueryDO(20L)).thenReturn(query);
+        ChartFeedbackReq request = new ChartFeedbackReq();
+        request.setQueryId(20L);
+        request.setRecommendedChart("BAR");
+        request.setSelectedChart("TABLE");
+        request.setSource("CHART_SELECTOR");
+
+        service.recordChartFeedback(request, user);
+
+        ArgumentCaptor<AuditEvent> events = ArgumentCaptor.forClass(AuditEvent.class);
+        verify(publisher).publishRequired(events.capture(), eq(user));
+        AuditEvent feedback = events.getValue();
+        assertEquals(AuditEventType.CHART_VISUALIZATION_CHANGED, feedback.getEventType());
+        assertEquals("BAR", feedback.getMetadata().get("recommendedChart"));
+        assertEquals("TABLE", feedback.getMetadata().get("selectedChart"));
+    }
+
+    @Test
+    void rejectsUnsupportedChartFeedbackBeforeAudit() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AuditEventPublisher publisher = mock(AuditEventPublisher.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, publisher);
+        ChartFeedbackReq request = new ChartFeedbackReq();
+        request.setQueryId(20L);
+        request.setRecommendedChart("BAR");
+        request.setSelectedChart("SCRIPT");
+        request.setSource("CHART_SELECTOR");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.recordChartFeedback(request, User.get(2L, "alice")));
+        verify(queryRepository, never()).getChatQueryDO(any());
+        verify(publisher, never()).publishRequired(any(), any());
     }
 
     private ChatManageServiceImpl service(ChatRepository chatRepository,

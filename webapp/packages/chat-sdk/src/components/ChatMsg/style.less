@@ -9,6 +9,44 @@
   background: #f5f8fb;
   max-width: calc(100vw - 410px);
 
+  &-visualization-toolbar {
+    display: flex;
+    min-height: 32px;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    > span {
+      color: var(--text-color-third);
+      font-size: 13px;
+    }
+
+    .ant-segmented-item {
+      min-width: 74px;
+    }
+  }
+
+  &-visualization-option {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+
+  &-linked-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+
+    > span:first-child {
+      color: var(--text-color-third);
+      font-size: 13px;
+    }
+  }
+
   &-bottom-tools {
     display: flex;
     align-items: center;
@@ -24,5 +62,21 @@
 
   &-metric-card-tools {
     margin-top: 0;
+  }
+
+  @media (max-width: 767px) {
+    &-visualization-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+
+      .ant-segmented {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      .ant-segmented-item {
+        min-width: 64px;
+      }
+    }
   }
 }

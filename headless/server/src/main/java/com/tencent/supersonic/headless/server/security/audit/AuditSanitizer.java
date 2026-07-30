@@ -42,10 +42,10 @@ public class AuditSanitizer {
     private static final Pattern LEADING_SQL_COMMENT =
             Pattern.compile("(?is)^\\s*(?:(?:--[^\\r\\n]*(?:\\r?\\n|$))|(?:/\\*.*?\\*/))*\\s*");
     private static final Pattern SQL_VERB = Pattern.compile("(?i)^([a-z]+)");
-    private static final Set<String> SAFE_METADATA_KEYS =
-            Set.of("stage", "modelIds", "dataSetId", "rowCount", "columnCount", "maskedFields",
-                    "cacheHit", "queryState", "queryMode", "filterCount", "policyCount",
-                    "batchSize", "sheetCount", "exceptionType", "entryPoint", "needAuth");
+    private static final Set<String> SAFE_METADATA_KEYS = Set.of("stage", "modelIds", "dataSetId",
+            "rowCount", "columnCount", "maskedFields", "cacheHit", "queryState", "queryMode",
+            "filterCount", "policyCount", "batchSize", "sheetCount", "exceptionType", "entryPoint",
+            "needAuth", "recommendedChart", "selectedChart", "feedbackSource");
 
     private final ObjectMapper objectMapper;
 

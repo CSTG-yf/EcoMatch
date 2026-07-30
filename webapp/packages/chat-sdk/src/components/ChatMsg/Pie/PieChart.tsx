@@ -11,6 +11,7 @@ type Props = {
   metricField: ColumnType;
   categoryField: ColumnType;
   triggerResize?: boolean;
+  onCategorySelect?: (column: ColumnType, value: any) => void;
 };
 
 const PieChart: React.FC<Props> = ({
@@ -18,6 +19,7 @@ const PieChart: React.FC<Props> = ({
   metricField,
   categoryField,
   triggerResize,
+  onCategorySelect,
 }) => {
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
@@ -99,6 +101,12 @@ const PieChart: React.FC<Props> = ({
         },
       ],
     });
+    instanceObj.off('click');
+    if (onCategorySelect) {
+      instanceObj.on('click', (params: any) => {
+        onCategorySelect(categoryField, params.name);
+      });
+    }
     instanceObj.resize();
   };
 
@@ -106,7 +114,7 @@ const PieChart: React.FC<Props> = ({
     if (queryResults && queryResults.length > 0) {
       renderChart();
     }
-  }, [queryResults, metricField, categoryField]);
+  }, [queryResults, metricField, categoryField, onCategorySelect]);
 
   useEffect(() => {
     if (triggerResize && instanceRef.current) {

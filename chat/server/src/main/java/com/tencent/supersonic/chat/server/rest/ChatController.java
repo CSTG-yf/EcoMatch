@@ -2,6 +2,7 @@ package com.tencent.supersonic.chat.server.rest;
 
 import com.github.pagehelper.PageInfo;
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
+import com.tencent.supersonic.chat.api.pojo.request.ChartFeedbackReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.ShowCaseResp;
@@ -10,6 +11,7 @@ import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.common.pojo.User;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -59,6 +61,12 @@ public class ChatController {
             HttpServletRequest request, HttpServletResponse response) {
         return chatService.updateFeedback(id, score, feedback,
                 UserHolder.findUser(request, response));
+    }
+
+    @PostMapping("/chartFeedback")
+    public void recordChartFeedback(@RequestBody @Valid ChartFeedbackReq feedback,
+            HttpServletRequest request, HttpServletResponse response) {
+        chatService.recordChartFeedback(feedback, UserHolder.findUser(request, response));
     }
 
     @PostMapping("/updateChatIsTop")

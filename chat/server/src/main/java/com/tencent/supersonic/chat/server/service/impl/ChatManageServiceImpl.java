@@ -42,6 +42,11 @@ import java.util.stream.Collectors;
 @Service
 public class ChatManageServiceImpl implements ChatManageService {
 
+    private static final Set<String> SUPPORTED_CHART_TYPES =
+            Set.of("KPI_CARD", "TABLE", "LINE", "BAR", "PIE", "COMBO");
+    private static final Set<String> CHART_FEEDBACK_SOURCES =
+            Set.of("CHART_SELECTOR", "DATA_VIEW_TOGGLE");
+
     @Autowired
     private ChatRepository chatRepository;
     @Autowired
@@ -101,6 +106,33 @@ public class ChatManageServiceImpl implements ChatManageService {
         }
 
         return chatRepository.updateFeedback(intelligentQueryDO);
+    }
+
+    @Override
+    public void recordChartFeedback(ChartFeedbackReq feedback, User user) {
+        String recommended = normalizeChartType(feedback.getRecommendedChart());
+        String selected = normalizeChartType(feedback.getSelectedChart());
+        String source = StringUtils.upperCase(StringUtils.trim(feedback.getSource()));
+        if (!SUPPORTED_CHART_TYPES.contains(recommended)
+                || !SUPPORTED_CHART_TYPES.contains(selected)) {
+            throw new IllegalArgumentException("Unsupported chart type");
+        }
+        if (!CHART_FEEDBACK_SOURCES.contains(source)) {
+            throw new IllegalArgumentException("Unsupported chart feedback source");
+        }
+        checkQueryAccess(feedback.getQueryId(), user);
+        auditEventPublisher.publishRequired(AuditEvent.builder()
+                .eventType(AuditEventType.CHART_VISUALIZATION_CHANGED).outcome(AuditOutcome.SUCCESS)
+                .reasonCode("USER_CHART_SELECTION").queryId(feedback.getQueryId())
+                .resourceType("CHAT_QUERY").resourceId(String.valueOf(feedback.getQueryId()))
+                .metadata(Map.of("recommendedChart", recommended, "selectedChart", selected,
+                        "feedbackSource", source))
+                .build(), user);
+    }
+
+    private String normalizeChartType(String chartType) {
+        String normalized = StringUtils.upperCase(StringUtils.trim(chartType));
+        return "METRIC_CARD".equals(normalized) ? "KPI_CARD" : normalized;
     }
 
     @Override

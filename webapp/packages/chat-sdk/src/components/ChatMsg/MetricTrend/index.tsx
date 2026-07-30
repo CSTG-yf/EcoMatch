@@ -2,28 +2,15 @@ import { CLS_PREFIX } from '../../../common/constants';
 import { DrillDownDimensionType, FieldType, MsgDataType } from '../../../common/type';
 import { isMobile } from '../../../utils/utils';
 import MetricTrendChart from './MetricTrendChart';
-import { Spin, Select } from 'antd';
+import { Spin } from 'antd';
 import Table from '../Table';
 import MetricInfo from './MetricInfo';
 import DateOptions from '../DateOptions';
 import MultiMetricsTrendChart from './MultiMetricsTrendChart';
-import { useState } from 'react';
-
-const metricChartSelectOptions = [
-  {
-    value: 'line',
-    label: '折线图',
-  },
-  {
-    value: 'bar',
-    label: '柱状图',
-  },
-];
 
 type Props = {
   data: MsgDataType;
   question: string;
-  chartIndex: number;
   triggerResize?: boolean;
   loading: boolean;
   activeMetricField?: FieldType;
@@ -31,12 +18,12 @@ type Props = {
   currentDateOption?: number;
   onApplyAuth?: (model: string) => void;
   onSelectDateOption: (value: number) => void;
+  visualizationType?: 'LINE' | 'COMBO';
 };
 
 const MetricTrend: React.FC<Props> = ({
   data,
   question,
-  chartIndex,
   triggerResize,
   loading,
   activeMetricField,
@@ -44,9 +31,9 @@ const MetricTrend: React.FC<Props> = ({
   currentDateOption,
   onApplyAuth,
   onSelectDateOption,
+  visualizationType = 'LINE',
 }) => {
   const { queryColumns, queryResults, aggregateInfo, entityInfo, chatContext } = data;
-  const [chartType, setChartType] = useState('line');
 
   const dateField: any = queryColumns?.find(
     (column: any) => column.showType === 'DATE' || column.type === 'DATE'
@@ -85,16 +72,8 @@ const MetricTrend: React.FC<Props> = ({
                 currentDateOption={currentDateOption}
                 onSelectDateOption={onSelectDateOption}
               />
-              <div>
-                <Select
-                  defaultValue="line"
-                  bordered={false}
-                  options={metricChartSelectOptions}
-                  onChange={(value: string) => setChartType(value)}
-                />
-              </div>
             </div>
-            {queryResults?.length === 1 || chartIndex % 2 === 1 ? (
+            {queryResults?.length === 1 ? (
               <Table data={{ ...data, queryResults }} onApplyAuth={onApplyAuth} />
             ) : metricFields.length > 1 ? (
               <MultiMetricsTrendChart
@@ -103,7 +82,7 @@ const MetricTrend: React.FC<Props> = ({
                 question={question}
                 resultList={queryResults}
                 triggerResize={triggerResize}
-                chartType={chartType}
+                chartType={visualizationType === 'COMBO' ? 'combo' : 'line'}
               />
             ) : (
               <MetricTrendChart
@@ -114,7 +93,7 @@ const MetricTrend: React.FC<Props> = ({
                 resultList={queryResults}
                 triggerResize={triggerResize}
                 onApplyAuth={onApplyAuth}
-                chartType={chartType}
+                chartType="line"
               />
             )}
           </div>

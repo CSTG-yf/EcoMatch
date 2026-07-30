@@ -94,12 +94,14 @@ class AuditSanitizerTest {
 
     @Test
     void dropsUnapprovedMetadataAndSanitizesApprovedValues() {
-        String json = sanitizer
-                .safeMetadataJson(Map.of("rowCount", 3, "maskedFields", List.of("account_no"),
-                        "sql", "select secret", "token", "raw-token", "stage", "账号622200001234"));
+        String json = sanitizer.safeMetadataJson(Map.of("rowCount", 3, "maskedFields",
+                List.of("account_no"), "sql", "select secret", "token", "raw-token", "stage",
+                "账号622200001234", "recommendedChart", "BAR", "selectedChart", "TABLE"));
 
         assertTrue(json.contains("rowCount"));
         assertTrue(json.contains("maskedFields"));
+        assertTrue(json.contains("\"recommendedChart\":\"BAR\""));
+        assertTrue(json.contains("\"selectedChart\":\"TABLE\""));
         assertFalse(json.contains("select secret"));
         assertFalse(json.contains("raw-token"));
         assertFalse(json.contains("622200001234"));

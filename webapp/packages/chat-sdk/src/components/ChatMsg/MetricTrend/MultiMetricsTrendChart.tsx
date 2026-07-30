@@ -73,19 +73,37 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
         },
         data: xData,
       },
-      yAxis: {
-        type: 'value',
-        splitLine: {
-          lineStyle: {
-            opacity: 0.3,
-          },
-        },
-        axisLabel: {
-          formatter: function (value: any) {
-            return value === 0 ? 0 : getFormattedValue(value);
-          },
-        },
-      },
+      yAxis:
+        chartType === 'combo'
+          ? [
+              {
+                type: 'value',
+                splitLine: { lineStyle: { opacity: 0.3 } },
+                axisLabel: {
+                  formatter: (value: any) => (value === 0 ? 0 : getFormattedValue(value)),
+                },
+              },
+              {
+                type: 'value',
+                splitLine: { show: false },
+                axisLabel: {
+                  formatter: (value: any) => (value === 0 ? 0 : getFormattedValue(value)),
+                },
+              },
+            ]
+          : {
+              type: 'value',
+              splitLine: {
+                lineStyle: {
+                  opacity: 0.3,
+                },
+              },
+              axisLabel: {
+                formatter: function (value: any) {
+                  return value === 0 ? 0 : getFormattedValue(value);
+                },
+              },
+            },
       tooltip: {
         trigger: 'axis',
         formatter: function (params: any[]) {
@@ -115,7 +133,8 @@ const MultiMetricsTrendChart: React.FC<Props> = ({
       },
       series: metricFields.map((metricField, index) => {
         return {
-          type: chartType,
+          type: chartType === 'combo' ? (index === 0 ? 'bar' : 'line') : chartType,
+          yAxisIndex: chartType === 'combo' && index > 0 ? 1 : 0,
           name: metricField.name,
           symbol: 'circle',
           showSymbol: resultList.length === 1,

@@ -1,11 +1,9 @@
 import { PREFIX_CLS } from '../../../common/constants';
 import { MsgDataType } from '../../../common/type';
-import { useRef, useState } from 'react';
 import NoPermissionChart from '../NoPermissionChart';
 import { ColumnType } from '../../../common/type';
-import { Spin, Select } from 'antd';
+import { Spin } from 'antd';
 import PieChart from './PieChart';
-import Bar from '../Bar';
 
 type Props = {
   data: MsgDataType;
@@ -15,18 +13,8 @@ type Props = {
   metricField: ColumnType;
   categoryField: ColumnType;
   onApplyAuth?: (model: string) => void;
+  onCategorySelect?: (column: ColumnType, value: any) => void;
 };
-
-const metricChartSelectOptions = [
-  {
-    value: 'pie',
-    label: '饼图',
-  },
-  {
-    value: 'bar',
-    label: '柱状图',
-  },
-];
 
 const Pie: React.FC<Props> = ({
   data,
@@ -36,8 +24,8 @@ const Pie: React.FC<Props> = ({
   metricField,
   categoryField,
   onApplyAuth,
+  onCategorySelect,
 }) => {
-  const [chartType, setChartType] = useState('pie');
   const { entityInfo } = data;
 
   if (metricField && !metricField?.authorized) {
@@ -57,30 +45,15 @@ const Pie: React.FC<Props> = ({
       <div className={`${prefixCls}-metric-fields ${prefixCls}-metric-field-single`}>
         {question}
       </div>
-      <div className={`${prefixCls}-select-options`}>
-        <Select
-          defaultValue="pie"
-          bordered={false}
-          options={metricChartSelectOptions}
-          onChange={(value: string) => setChartType(value)}
-        />
-      </div>
-      {chartType === 'pie' ? (
+      <Spin spinning={loading}>
         <PieChart
           data={data}
           metricField={metricField}
           categoryField={categoryField}
           triggerResize={triggerResize}
+          onCategorySelect={onCategorySelect}
         />
-      ) : (
-        <Bar
-          data={data}
-          triggerResize={triggerResize}
-          loading={loading}
-          metricField={metricField}
-          onApplyAuth={onApplyAuth}
-        />
-      )}
+      </Spin>
     </div>
   );
 };

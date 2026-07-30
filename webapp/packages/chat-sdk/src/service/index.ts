@@ -87,7 +87,7 @@ export function chatExecute(
   chatId: number,
   parseInfo: ChatContextType,
   agentId?: number,
-  streamingResult?:boolean
+  streamingResult?: boolean
 ) {
   return axios.post<MsgDataType>(`${prefix}/chat/query/execute`, {
     queryText,
@@ -95,13 +95,11 @@ export function chatExecute(
     chatId: chatId || DEFAULT_CHAT_ID,
     queryId: parseInfo.queryId,
     parseId: parseInfo.id,
-    streamingResult:streamingResult
+    streamingResult: streamingResult,
   });
 }
 
-export function getExecuteSummary(
-    queryId: number
-) {
+export function getExecuteSummary(queryId: number) {
   return axios.post<MsgDataType>(`${prefix}/chat/query/getExecuteSummary`, {
     queryId: queryId,
   });
@@ -149,6 +147,20 @@ export function updateQAFeedback(questionId: number, score: number) {
   return axios.post<any>(
     `${prefix}/chat/manage/updateQAFeedback?id=${questionId}&score=${score}&feedback=`
   );
+}
+
+export function recordChartFeedback(
+  queryId: number,
+  recommendedChart: string,
+  selectedChart: string,
+  source: 'CHART_SELECTOR' | 'DATA_VIEW_TOGGLE'
+) {
+  return axios.post<any>(`${prefix}/chat/manage/chartFeedback`, {
+    queryId,
+    recommendedChart,
+    selectedChart,
+    source,
+  });
 }
 
 export function queryDimensionValues(

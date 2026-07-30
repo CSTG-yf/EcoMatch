@@ -1,6 +1,6 @@
-import { Space, Spin, Switch, Tooltip, message } from 'antd';
+import { Space, Spin, Tooltip, message } from 'antd';
 import { CheckCircleFilled, InfoCircleOutlined } from '@ant-design/icons';
-import { PREFIX_CLS, MsgContentTypeEnum } from '../../common/constants';
+import { PREFIX_CLS } from '../../common/constants';
 import { MsgDataType } from '../../common/type';
 import ChatMsg from '../ChatMsg';
 import WebPage from '../ChatMsg/WebPage';
@@ -45,8 +45,6 @@ const ExecuteItem: React.FC<Props> = ({
   isSimpleMode,
 }) => {
   const prefixCls = `${PREFIX_CLS}-item`;
-  const [showMsgContentTable, setShowMsgContentTable] = useState<boolean>(false);
-  const [msgContentType, setMsgContentType] = useState<MsgContentTypeEnum>();
   const [showErrMsg, setShowErrMsg] = useState<boolean>(false);
   const titlePrefix = queryMode === 'PLAIN_TEXT' || queryMode === 'WEB_SERVICE' ? '问答' : '数据';
 
@@ -123,21 +121,6 @@ const ExecuteItem: React.FC<Props> = ({
                 <span className={`${prefixCls}-title-tip`}>(耗时: {data.queryTimeCost}ms)</span>
               )}
             </div>
-            <div>
-              {[
-                MsgContentTypeEnum.METRIC_TREND,
-                MsgContentTypeEnum.METRIC_BAR,
-                MsgContentTypeEnum.METRIC_PIE,
-              ].includes(msgContentType as MsgContentTypeEnum) && (
-                <Switch
-                  checkedChildren="表格"
-                  unCheckedChildren="表格"
-                  onChange={checked => {
-                    setShowMsgContentTable(checked);
-                  }}
-                />
-              )}
-            </div>
           </div>
         </div>
       )}
@@ -172,13 +155,10 @@ const ExecuteItem: React.FC<Props> = ({
           ) : (
             <ChatMsg
               isSimpleMode={isSimpleMode}
-              forceShowTable={showMsgContentTable}
               queryId={queryId}
               question={question}
               data={data}
-              chartIndex={chartIndex}
               triggerResize={triggerResize}
-              onMsgContentTypeChange={setMsgContentType}
             />
           )}
         </Spin>

@@ -38,7 +38,7 @@ const DimensionSection: React.FC<Props> = ({
             [`${prefixCls}-content-item-active`]: drillDownDimension?.id === dimension.id,
           });
           return (
-            <div>
+            <div key={dimension.id}>
               <span
                 className={itemNameClass}
                 onClick={() => {

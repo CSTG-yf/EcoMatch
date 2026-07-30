@@ -1,6 +1,7 @@
 package com.tencent.supersonic.chat.server.service;
 
 import com.github.pagehelper.PageInfo;
+import com.tencent.supersonic.chat.api.pojo.request.ChartFeedbackReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
@@ -24,6 +25,8 @@ public interface ChatManageService {
     boolean updateChatName(Long chatId, String chatName, String userName);
 
     boolean updateFeedback(Long id, Integer score, String feedback, User user);
+
+    void recordChartFeedback(ChartFeedbackReq feedback, User user);
 
     boolean updateChatIsTop(Long chatId, int isTop, User user);
 

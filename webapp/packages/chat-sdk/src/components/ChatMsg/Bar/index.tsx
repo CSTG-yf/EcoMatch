@@ -28,25 +28,28 @@ type Props = {
   loading: boolean;
   metricField: ColumnType;
   onApplyAuth?: (model: string) => void;
+  onCategorySelect?: (column: ColumnType, value: any) => void;
 };
 
 const BarChart: React.FC<Props> = ({
   data,
-  question="",
+  question = '',
   triggerResize,
   loading,
   metricField,
   onApplyAuth,
+  onCategorySelect,
 }) => {
   const chartRef = useRef<any>();
   const instanceRef = useRef<ECharts>();
 
   const { queryColumns, queryResults, entityInfo } = data;
 
-  const categoryColumnName =
-    queryColumns?.find(column => column.showType === 'CATEGORY')?.bizName || '';
-  const metricColumn = queryColumns?.find(column => column.showType === 'NUMBER');
-  const metricColumnName = metricColumn?.bizName || '';
+  const categoryColumn = queryColumns?.find(
+    column => column.showType === 'CATEGORY' || column.showType === 'DATE'
+  );
+  const categoryColumnName = categoryColumn?.bizName || '';
+  const metricColumns = queryColumns?.filter(column => column.showType === 'NUMBER') || [];
 
   const renderChart = () => {
     let instanceObj: any;
@@ -56,7 +59,7 @@ const BarChart: React.FC<Props> = ({
     } else {
       instanceObj = instanceRef.current;
     }
-    const data = (queryResults || []);
+    const data = queryResults || [];
     const xData = data.map(item =>
       item[categoryColumnName] !== undefined ? item[categoryColumnName] : '未知'
     );
@@ -115,7 +118,11 @@ const BarChart: React.FC<Props> = ({
                     ? '-'
                     : metricField.dataFormatType === 'percent' ||
                       metricField.dataFormatType === 'decimal'
-                    ? formatByDataFormatType(item.value, metricField.dataFormatType, metricField.dataFormat)
+                    ? formatByDataFormatType(
+                        item.value,
+                        metricField.dataFormatType,
+                        metricField.dataFormat
+                      )
                     : getFormattedValue(item.value)
                 }</span></div>`
             )
@@ -130,41 +137,61 @@ const BarChart: React.FC<Props> = ({
         top: 20,
         containLabel: true,
       },
-      series: {
+      legend:
+        metricColumns.length > 1
+          ? {
+              left: 0,
+              top: 0,
+              type: 'scroll',
+            }
+          : undefined,
+      series: metricColumns.map((column, index) => ({
         type: 'bar',
-        name: metricColumn?.name,
-        barWidth: 20,
+        name: column.name,
+        barMaxWidth: 24,
         itemStyle: {
-          borderRadius: [10, 10, 0, 0],
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: CHART_BLUE_COLOR },
-            { offset: 1, color: getChartLightenColor(CHART_BLUE_COLOR) },
-          ]),
+          borderRadius: [4, 4, 0, 0],
+          color:
+            index === 0
+              ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                  { offset: 0, color: CHART_BLUE_COLOR },
+                  { offset: 1, color: getChartLightenColor(CHART_BLUE_COLOR) },
+                ])
+              : undefined,
         },
         label: {
-          show: true,
+          show: metricColumns.length === 1,
           position: 'top',
           formatter: function ({ value }: any) {
             return value === 0
               ? 0
-              : metricField.dataFormatType === 'percent'
-              ? formatByDataFormatType(value, metricField.dataFormatType, metricField.dataFormat)
+              : column.dataFormatType === 'percent'
+              ? formatByDataFormatType(value, column.dataFormatType, column.dataFormat)
               : getFormattedValue(value);
           },
         },
-        data: data.map(item => {
-          return item[metricColumn?.bizName || ''];
-        }),
-      },
+        data: data.map(item => item[column.bizName]),
+      })),
     });
+    instanceObj.off('click');
+    if (categoryColumn && onCategorySelect) {
+      instanceObj.on('click', (params: any) => {
+        onCategorySelect(categoryColumn, params.name);
+      });
+    }
     instanceObj.resize();
   };
 
   useEffect(() => {
-    if (queryResults && queryResults.length > 0 && metricColumn?.authorized) {
+    if (
+      queryResults &&
+      queryResults.length > 0 &&
+      metricColumns.length > 0 &&
+      metricColumns.every(column => column.authorized)
+    ) {
       renderChart();
     }
-  }, [queryResults]);
+  }, [queryResults, onCategorySelect]);
 
   useEffect(() => {
     if (triggerResize && instanceRef.current) {
@@ -172,7 +199,7 @@ const BarChart: React.FC<Props> = ({
     }
   }, [triggerResize]);
 
-  if (metricColumn && !metricColumn?.authorized) {
+  if (metricColumns.some(column => !column.authorized)) {
     return (
       <NoPermissionChart
         model={entityInfo?.dataSetInfo.name || ''}
