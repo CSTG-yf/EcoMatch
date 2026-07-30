@@ -96,7 +96,10 @@
 - `QueryGatewayH2IntegrationTest`：1 秒超时取消长查询，取消后立即执行轻量查询验证资源释放。
 - `QueryGatewayTargetDatabaseIT`：显式连接目标数据库，验证真实驱动延迟分位数、长时间并发稳定性、超时取消、连接恢复和数据库端取消探针；默认测试不会连接外部数据库。
 - `test_run_supersonic_eval.py`、`test_run_qa03_cache_eval.py`：验证真实 NL2SQL 链路分位数、成功链路隔离、唯一冷缓存键、连续热命中、监控计数和无 SQL/结果数据报告。
-- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 613 项默认测试（3 项按环境条件跳过），无失败或错误；另有 1 项显式 QA-03 工具运行时自测通过。
+- `common`、`auth/authentication`、`auth/authorization`、`headless/core`、`headless/chat`、`headless/server`、`chat/server` 七个目标模块及其上游依赖在 JDK 21 下回归通过，共执行 613 项默认测试（3 项按环境条件跳过），无失败或错误。
+- `QueryGatewayTargetDatabaseIT` 已在 H2 2.2.224 上完成 300 秒显式验收：平均 `5.26 ms`、P95 `7.38 ms`、P99 `9.59 ms`，295,541 次稳定性查询零失败，取消耗时 1,007 ms，数据库端残留语句为 0；报告见 `task/BE-06_QA03_H2_ACCEPTANCE_REPORT.json`。
+- `H2DistributionConfigTest` 两项用例验证发行配置强制初始化文件库，并验证完整建表脚本可保存超过旧 6,000 字符限制的 Agent 模型配置。
+- 生产发行包已通过空 H2 文件库首次启动、已有文件库重复启动和核心 HTTP API 冒烟验证；OpenAPI 返回 HTTP 200，网关监控入口可达并执行登录鉴权。
 
 ## 本地性能基线
 
@@ -109,4 +112,4 @@
 
 ## 待环境验收
 
-目标数据库下的 P95/P99、长时间稳定性和对应 JDBC 驱动的超时取消效果依赖稳定压测环境，继续纳入 QA-03 执行。仓库已提供可复现验收工具，但在取得目标 JDBC 地址、只读压测账号、代表性查询和数据库活动会话读取权限前，不将工具存在视为验收通过。
+本地 H2 的 P95/P99、五分钟稳定性、JDBC 超时取消、残留语句和资源释放已经验收通过。比赛实际目标数据库的同项复测仍依赖目标 JDBC 地址、只读压测账号、代表性查询和数据库活动会话读取权限；在这些配置提供前，不将 H2 结果等同于目标数据库验收。

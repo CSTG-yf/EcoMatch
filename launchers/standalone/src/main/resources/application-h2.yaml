@@ -6,6 +6,8 @@ spring:
     password: semantic
   sql:
     init:
+      continue-on-error: true
+      mode: always
       schema-locations: classpath:db/schema-h2.sql,classpath:db/schema-h2-demo.sql
       data-locations: classpath:db/data-h2.sql,classpath:db/data-h2-demo.sql
   h2:

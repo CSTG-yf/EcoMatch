@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-07-30T07:45:42.249763700Z",
+  "scenario": "h2-local-acceptance",
+  "database": {
+    "productName": "H2",
+    "productVersion": "2.2.224 (2023-09-17)",
+    "driverName": "H2 JDBC Driver",
+    "driverVersion": "2.2.224 (2023-09-17)"
+  },
+  "configuration": {
+    "warmupQueries": 10,
+    "concurrency": 4,
+    "maxAverageMs": 3000.0,
+    "latencySamples": 100,
+    "maxResultRows": 100,
+    "cancelTimeoutSeconds": 1,
+    "queryTimeoutSeconds": 30,
+    "stabilitySeconds": 300
+  },
+  "latency": {
+    "samples": 100,
+    "averageMs": 5.259238,
+    "p50Ms": 5.1482,
+    "p95Ms": 7.3803,
+    "p99Ms": 9.5898,
+    "maxMs": 10.245
+  },
+  "stability": {
+    "durationSeconds": 300,
+    "successes": 295541,
+    "failures": 0,
+    "firstFailureType": null,
+    "resources": {
+      "initialHeapBytes": 96360320,
+      "finalHeapBytes": 570913368,
+      "maxHeapBytes": 742946464,
+      "initialThreadCount": 11,
+      "finalThreadCount": 12,
+      "maxThreadCount": 20,
+      "processCpuPercent": 32.72545505871651
+    }
+  },
+  "cancellation": {
+    "elapsedMs": 1007,
+    "exceptionType": "JdbcSQLTimeoutException",
+    "sqlState": "57014",
+    "vendorCode": 57014,
+    "remainingStatements": 0
+  },
+  "gateway": {
+    "maxConcurrency": 4,
+    "availablePermits": 4,
+    "activeQueries": 0,
+    "acceptedQueries": 295651,
+    "rejectedQueries": 0,
+    "completedQueries": 295651,
+    "failedQueries": 0,
+    "averageExecutionTimeMs": 3.369634800152883
+  }
+}

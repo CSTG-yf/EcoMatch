@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS s2_agent
     examples    varchar(500) null,
     tool_config varchar(2000)  null,
     llm_config varchar(2000)  null,
-    chat_model_config varchar(6000) null,
+    chat_model_config CLOB null,
     visual_config varchar(2000)  null,
     created_by  varchar(100) null,
     created_at  TIMESTAMP  null,
@@ -399,6 +399,9 @@ CREATE TABLE IF NOT EXISTS `s2_dictionary_conf` (
    `created_by` varchar(100) NOT NULL ,
    PRIMARY KEY (`id`)
 );
+
+-- Keep existing file-based H2 installations compatible with larger agent model configs.
+ALTER TABLE s2_agent ALTER COLUMN chat_model_config CLOB;
 COMMENT ON TABLE s2_dictionary_conf IS 'dictionary conf information table';
 
 CREATE TABLE IF NOT EXISTS `s2_dictionary_task` (
