@@ -334,12 +334,10 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
           <IconFont type="icon-c003xiaoxiduihua" className={styles.toolIcon} />
           <div>新对话</div>
         </div>
-        {!isMobile && (
-          <div className={styles.toolItem} onClick={onToggleHistoryVisible}>
-            <IconFont type="icon-lishi" className={styles.toolIcon} />
-            <div>历史对话</div>
-          </div>
-        )}
+        <div className={styles.toolItem} onClick={onToggleHistoryVisible}>
+          <IconFont type="icon-lishi" className={styles.toolIcon} />
+          <div>历史对话</div>
+        </div>
         {agentList?.length > 1 && (
           <div className={styles.toolItem} onClick={onOpenAgents}>
             <IconFont type="icon-zhinengzhuli" className={styles.toolIcon} />

@@ -21,7 +21,10 @@ declare global {
       staffName: string | undefined;
       orgName: string;
       access?: 'user' | 'guest' | 'admin';
-      name?:string;
+      name?: string;
+      superAdmin?: boolean;
+      roles?: string[];
+      attributes?: Record<string, string>;
     };
 
     export interface UserItem {

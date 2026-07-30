@@ -22,7 +22,20 @@ import { HistoryMsgItemType, MsgDataType, SendMsgParamsType } from '../common/ty
 import { getHistoryMsg } from '../service';
 import ShowCase from '../ShowCase';
 import { jsonParse } from '../utils/utils';
-import { ConfigProvider, Drawer, Modal, Row, Col, Space, Switch, Tooltip } from 'antd';
+import {
+  Alert,
+  Button,
+  ConfigProvider,
+  Drawer,
+  Modal,
+  Row,
+  Col,
+  Space,
+  Spin,
+  Switch,
+  Tooltip,
+} from 'antd';
+import { mergeHistoryMessages } from './conversationState';
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
@@ -62,9 +75,12 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [pageNo, setPageNo] = useState(1);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [historyInited, setHistoryInited] = useState(false);
-  const [currentConversation, setCurrentConversation] = useState<
-    ConversationDetailType | undefined
-  >(isMobile ? { chatId: 0, chatName: '问答' } : undefined);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyFailedPage, setHistoryFailedPage] = useState(1);
+  const [currentConversation, setCurrentConversation] = useState<ConversationDetailType>();
+  const [conversationInitializing, setConversationInitializing] = useState(false);
+  const [conversationError, setConversationError] = useState('');
   const [historyVisible, setHistoryVisible] = useState(false);
   const [agentList, setAgentList] = useState<AgentType[]>([]);
   const [currentAgent, setCurrentAgent] = useState<AgentType>();
@@ -77,6 +93,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
 
   const conversationRef = useRef<any>();
   const chatFooterRef = useRef<any>();
+  const historyRequestRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     sendCopilotMsg,
@@ -110,6 +127,10 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   };
 
   const updateCurrentAgent = (agent?: AgentType) => {
+    historyRequestRef.current += 1;
+    setCurrentConversation(undefined);
+    setMessageList([]);
+    setConversationError('');
     setCurrentAgent(agent);
     onCurrentAgentChange?.(agent);
     localStorage.setItem('AGENT_ID', `${agent?.id}`);
@@ -159,6 +180,13 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     if (!currentConversation) {
       return;
     }
+    historyRequestRef.current += 1;
+    setMessageList([]);
+    setHistoryLoading(false);
+    setHistoryError('');
+    setHistoryInited(false);
+    setHasNextPage(false);
+    setPageNo(1);
     const { initialMsgParams, isAdd } = currentConversation;
     if (isAdd) {
       inputFocus();
@@ -170,7 +198,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
       return;
     }
     updateHistoryMsg(1);
-    setPageNo(1);
   }, [currentConversation]);
 
   useEffect(() => {
@@ -212,29 +239,61 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   };
 
   const updateHistoryMsg = async (page: number) => {
-    const res = await getHistoryMsg(page, currentConversation!.chatId, 3);
-    const { hasNextPage, list } = res?.data || { hasNextPage: false, list: [] };
-    const msgList = [...convertHistoryMsg(list), ...(page === 1 ? [] : messageList)];
-    setMessageList(msgList);
-    setHasNextPage(hasNextPage);
-    if (page === 1) {
-      if (list.length === 0) {
-        sendHelloRsp();
+    if (!currentConversation) {
+      return false;
+    }
+    const requestId = ++historyRequestRef.current;
+    const chatId = currentConversation.chatId;
+    const firstVisibleMessageId = page > 1 ? messageList[0]?.id : undefined;
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const res = await getHistoryMsg(page, chatId, 3);
+      if (requestId !== historyRequestRef.current) {
+        return false;
       }
-      updateMessageContainerScroll();
-      setHistoryInited(true);
-      inputFocus();
-    } else {
-      const msgEle = document.getElementById(`${messageList[0]?.id}`);
-      msgEle?.scrollIntoView();
+      const { hasNextPage: nextPageAvailable, list } = res?.data || {
+        hasNextPage: false,
+        list: [],
+      };
+      const historyMessages = convertHistoryMsg(list);
+      setMessageList(current => mergeHistoryMessages(current, historyMessages, page));
+      setHasNextPage(nextPageAvailable);
+      if (page === 1) {
+        if (list.length === 0) {
+          sendHelloRsp();
+        }
+        updateMessageContainerScroll();
+        setHistoryInited(true);
+        inputFocus();
+      } else if (firstVisibleMessageId !== undefined) {
+        setTimeout(() => {
+          document.getElementById(`${firstVisibleMessageId}`)?.scrollIntoView();
+        });
+      }
+      return true;
+    } catch (error) {
+      if (requestId === historyRequestRef.current) {
+        setHistoryFailedPage(page);
+        setHistoryError(page === 1 ? '历史消息加载失败，请重试' : '更早的消息加载失败，请重试');
+      }
+      return false;
+    } finally {
+      if (requestId === historyRequestRef.current) {
+        setHistoryLoading(false);
+      }
     }
   };
 
   const { run: handleScroll } = useThrottleFn(
     e => {
-      if (e.target.scrollTop === 0 && hasNextPage) {
-        updateHistoryMsg(pageNo + 1);
-        setPageNo(pageNo + 1);
+      if (e.target.scrollTop === 0 && hasNextPage && !historyLoading) {
+        const nextPage = pageNo + 1;
+        updateHistoryMsg(nextPage).then(success => {
+          if (success) {
+            setPageNo(nextPage);
+          }
+        });
       }
     },
     {
@@ -319,6 +378,9 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
       isAdd,
     });
     saveConversationToLocal(conversation);
+    if (isMobile) {
+      setHistoryVisible(false);
+    }
   };
 
   const onMsgDataLoaded = (
@@ -394,6 +456,24 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             />
           )}
           <div className={styles.chatApp}>
+            {!currentConversation && (conversationInitializing || conversationError) && (
+              <div className={styles.conversationState}>
+                {conversationInitializing ? (
+                  <Spin tip="正在加载会话" />
+                ) : (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={conversationError}
+                    action={
+                      <Button size="small" onClick={() => conversationRef.current?.initData()}>
+                        重试
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+            )}
             {currentConversation && (
               <div className={styles.chatBody}>
                 <div className={styles.chatContent}>
@@ -430,12 +510,21 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                     messageList={messageList}
                     chatId={currentConversation?.chatId}
                     historyVisible={historyVisible}
+                    historyLoading={historyLoading}
+                    historyError={historyError}
                     currentAgent={currentAgent}
                     chatVisible={chatVisible}
                     isDeveloper={isDeveloper}
                     integrateSystem={integrateSystem}
                     onMsgDataLoaded={onMsgDataLoaded}
                     onSendMsg={onSendMsg}
+                    onRetryHistory={() => {
+                      updateHistoryMsg(historyFailedPage).then(success => {
+                        if (success && historyFailedPage > pageNo) {
+                          setPageNo(historyFailedPage);
+                        }
+                      });
+                    }}
                   />
                   {!noInput && (
                     <ChatFooter
@@ -471,6 +560,10 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             historyVisible={historyVisible}
             onSelectConversation={onSelectConversation}
             onCloseConversation={onCloseConversation}
+            onInitializationChange={(loading, error) => {
+              setConversationInitializing(loading);
+              setConversationError(error || '');
+            }}
             ref={conversationRef}
           />
           {currentAgent &&

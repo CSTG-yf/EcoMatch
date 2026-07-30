@@ -1,4 +1,4 @@
-import { Dropdown, Input, Menu, message } from 'antd';
+import { Alert, Button, Dropdown, Empty, Input, Menu, Spin, message } from 'antd';
 import classNames from 'classnames';
 import {
   useEffect,
@@ -7,6 +7,7 @@ import {
   ForwardRefRenderFunction,
   useImperativeHandle,
   memo,
+  useRef,
 } from 'react';
 import ConversationModal from '../components/ConversationModal';
 import { deleteConversation, getAllConversations, saveConversation } from '../service';
@@ -15,6 +16,7 @@ import { AgentType, ConversationDetailType } from '../type';
 import { DEFAULT_CONVERSATION_NAME } from '../constants';
 import moment from 'moment';
 import { CloseOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { selectInitialConversation } from '../conversationState';
 
 type Props = {
   currentAgent?: AgentType;
@@ -26,20 +28,32 @@ type Props = {
     isAdd?: boolean
   ) => void;
   onCloseConversation: () => void;
+  onInitializationChange: (loading: boolean, error?: string) => void;
 };
 
 const Conversation: ForwardRefRenderFunction<any, Props> = (
-  { currentAgent, currentConversation, historyVisible, onSelectConversation, onCloseConversation },
+  {
+    currentAgent,
+    currentConversation,
+    historyVisible,
+    onSelectConversation,
+    onCloseConversation,
+    onInitializationChange,
+  },
   ref
 ) => {
   const [conversations, setConversations] = useState<ConversationDetailType[]>([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editConversation, setEditConversation] = useState<ConversationDetailType>();
   const [searchValue, setSearchValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const requestIdRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     updateData,
     onAddConversation,
+    initData,
   }));
 
   const updateData = async (agentId?: number) => {
@@ -48,23 +62,54 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
       setConversations([]);
       return [];
     }
-    const { data } = await getAllConversations(resolvedAgentId);
-    const conversationList = data || [];
-    setConversations(conversationList.slice(0, 200));
-    return conversationList;
+    const requestId = ++requestIdRef.current;
+    setLoading(true);
+    setLoadError('');
+    try {
+      const { data } = await getAllConversations(resolvedAgentId);
+      const conversationList = (data || []).slice(0, 200);
+      if (requestId === requestIdRef.current) {
+        setConversations(conversationList);
+      }
+      return conversationList;
+    } catch (error) {
+      if (requestId === requestIdRef.current) {
+        setLoadError('历史会话加载失败，请重试');
+      }
+      throw error;
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
+    }
   };
 
   const initData = async () => {
-    const data = await updateData();
-    if (data.length > 0) {
-      onSelectConversation(data[0]);
-    } else {
-      onAddConversation();
+    onInitializationChange(true);
+    try {
+      const data = await updateData();
+      if (data.length > 0) {
+        const conversation = selectInitialConversation(
+          data,
+          localStorage.getItem('CONVERSATION_ID')
+        );
+        if (conversation) {
+          onSelectConversation(conversation);
+        }
+      } else {
+        await onAddConversation();
+      }
+    } catch (error) {
+      onInitializationChange(false, '会话初始化失败，请重试');
+      return;
     }
+    onInitializationChange(false);
   };
 
   useEffect(() => {
     if (currentAgent) {
+      setConversations([]);
+      setSearchValue('');
       if (currentAgent.initialSendMsgParams) {
         onAddConversation(currentAgent.initialSendMsgParams);
       } else {
@@ -84,8 +129,12 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   };
 
   const onDeleteConversation = async (id: number) => {
-    await deleteConversation(id);
-    initData();
+    try {
+      await deleteConversation(id);
+      await initData();
+    } catch (error) {
+      message.error('删除会话失败，请重试');
+    }
   };
 
   const onAddConversation = async (sendMsgParams?: any) => {
@@ -155,65 +204,82 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
           />
         </div>
         <div className={styles.conversationList}>
-          {conversations
-            .filter(
-              conversation =>
-                searchValue === '' ||
-                conversation.chatName.toLowerCase().includes(searchValue.toLowerCase())
-            )
-            .map(item => {
-              const conversationItemClass = classNames(styles.conversationItem, {
-                [styles.activeConversationItem]: currentConversation?.chatId === item.chatId,
-              });
-              return (
-                <Dropdown
-                  key={item.chatId}
-                  overlay={
-                    <Menu
-                      items={[
-                        { label: '修改对话名称', key: 'editName' },
-                        { label: '删除', key: 'delete' },
-                      ]}
-                      onClick={({ key }) => {
-                        onOperate(key, item);
-                      }}
-                    />
-                  }
-                  trigger={['contextMenu']}
-                >
-                  <div
-                    className={conversationItemClass}
-                    onClick={() => {
-                      onSelectConversation(item);
-                    }}
+          {loadError && (
+            <Alert
+              type="error"
+              showIcon
+              message={loadError}
+              action={
+                <Button size="small" onClick={initData}>
+                  重试
+                </Button>
+              }
+            />
+          )}
+          <Spin spinning={loading}>
+            {!loading && !loadError && conversations.length === 0 && (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史会话" />
+            )}
+            {conversations
+              .filter(
+                conversation =>
+                  searchValue === '' ||
+                  conversation.chatName.toLowerCase().includes(searchValue.toLowerCase())
+              )
+              .map(item => {
+                const conversationItemClass = classNames(styles.conversationItem, {
+                  [styles.activeConversationItem]: currentConversation?.chatId === item.chatId,
+                });
+                return (
+                  <Dropdown
+                    key={item.chatId}
+                    overlay={
+                      <Menu
+                        items={[
+                          { label: '修改对话名称', key: 'editName' },
+                          { label: '删除', key: 'delete' },
+                        ]}
+                        onClick={({ key }) => {
+                          onOperate(key, item);
+                        }}
+                      />
+                    }
+                    trigger={['contextMenu']}
                   >
-                    <div className={styles.conversationContent}>
-                      <div className={styles.topTitleBar}>
-                        <div className={styles.conversationTitleBar}>
-                          <div className={styles.conversationName}>{item.chatName}</div>
-                          {currentConversation?.chatId === item.chatId && (
-                            <div className={styles.currentConversation}>当前对话</div>
-                          )}
+                    <div
+                      className={conversationItemClass}
+                      onClick={() => {
+                        onSelectConversation(item);
+                      }}
+                    >
+                      <div className={styles.conversationContent}>
+                        <div className={styles.topTitleBar}>
+                          <div className={styles.conversationTitleBar}>
+                            <div className={styles.conversationName}>{item.chatName}</div>
+                            {currentConversation?.chatId === item.chatId && (
+                              <div className={styles.currentConversation}>当前对话</div>
+                            )}
+                          </div>
+                          <div className={styles.conversationTime}>
+                            {convertTime(item.lastTime || '')}
+                          </div>
                         </div>
-                        <div className={styles.conversationTime}>
-                          {convertTime(item.lastTime || '')}
+                        <div className={styles.bottomSection}>
+                          <div className={styles.subTitle}>{item.lastQuestion}</div>
+                          <DeleteOutlined
+                            className={styles.deleteIcon}
+                            onClick={e => {
+                              e.stopPropagation();
+                              onDeleteConversation(item.chatId);
+                            }}
+                          />
                         </div>
-                      </div>
-                      <div className={styles.bottomSection}>
-                        <div className={styles.subTitle}>{item.lastQuestion}</div>
-                        <DeleteOutlined
-                          className={styles.deleteIcon}
-                          onClick={e => {
-                            e.stopPropagation();
-                            onDeleteConversation(item.chatId);
-                          }}
-                        />
                       </div>
                     </div>
-                  </div>
-                </Dropdown>
-              );
-            })}
+                  </Dropdown>
+                );
+              })}
+          </Spin>
         </div>
       </div>
       <ConversationModal
@@ -235,7 +301,8 @@ function areEqual(prevProps: Props, nextProps: Props) {
   if (
     prevProps.currentAgent?.id === nextProps.currentAgent?.id &&
     prevProps.currentConversation?.chatId === nextProps.currentConversation?.chatId &&
-    prevProps.historyVisible === nextProps.historyVisible
+    prevProps.historyVisible === nextProps.historyVisible &&
+    prevProps.onInitializationChange === nextProps.onInitializationChange
   ) {
     return true;
   }

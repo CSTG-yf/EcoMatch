@@ -1,4 +1,7 @@
-export const ROUTE_AUTH_CODES = { SYSTEM_ADMIN: 'SYSTEM_ADMIN' };
+export const ROUTE_AUTH_CODES = {
+  SYSTEM_ADMIN: 'SYSTEM_ADMIN',
+  SECURITY_AUDIT: 'SECURITY_AUDIT',
+};
 
 const ENV_KEY = {
   CHAT: 'chat',
@@ -222,6 +225,12 @@ const ROUTES = [
     name: 'evaluation',
     component: './Evaluation',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
+  },
+  {
+    path: '/security',
+    name: 'security',
+    component: './SecurityOperations',
+    access: ROUTE_AUTH_CODES.SECURITY_AUDIT,
   },
   {
     path: '/',

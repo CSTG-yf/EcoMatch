@@ -37,6 +37,11 @@ const getAuthCodes = (params: any) => {
   const codes = [];
   if (currentUser?.superAdmin) {
     codes.push(ROUTE_AUTH_CODES.SYSTEM_ADMIN);
+    codes.push(ROUTE_AUTH_CODES.SECURITY_AUDIT);
+  }
+  const roles = new Set<string>(currentUser?.roles || []);
+  if (['SECURITY_ADMIN', 'SECURITY_AUDITOR', 'RISK_AUDITOR'].some((role) => roles.has(role))) {
+    codes.push(ROUTE_AUTH_CODES.SECURITY_AUDIT);
   }
   return codes;
 };

@@ -1,11 +1,13 @@
 .conversation {
   position: relative;
-  width: 248px;
+  flex: 0 0 0;
+  width: 0;
   height: 100%;
   background: #f9f9f9;
-  padding: 10px 10px;
-  border-right: 1px solid #f1f1f1;
-
+  padding: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: width 0.2s ease, flex-basis 0.2s ease;
 
   .rightSection {
     width: 100%;
@@ -101,11 +103,12 @@
 
             .conversationTitleBar {
               display: flex;
+              min-width: 0;
               align-items: center;
               column-gap: 6px;
 
               .conversationName {
-                max-width: 300px;
+                max-width: 240px;
                 margin-right: 2px;
                 overflow: hidden;
                 color: var(--text-color);
@@ -137,7 +140,8 @@
             margin-top: 4px;
 
             .subTitle {
-              width: 350px;
+              min-width: 0;
+              max-width: 320px;
               overflow: hidden;
               color: var(--text-color-six);
               font-size: 12px;
@@ -166,9 +170,33 @@
   }
 
   &.historyVisible {
+    flex: 0 0 min(400px, 36vw);
     width: 400px;
     padding: 10px 16px;
     border-left: 1px solid #f1f1f1;
     z-index: 99;
+    visibility: visible;
+  }
+}
+
+@media (max-width: 768px) {
+  .conversation {
+    &.historyVisible {
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      flex-basis: 100%;
+      width: 100%;
+      padding: 12px;
+      border-left: 0;
+
+      .conversationName {
+        max-width: 55vw !important;
+      }
+
+      .subTitle {
+        max-width: 76vw !important;
+      }
+    }
   }
 }

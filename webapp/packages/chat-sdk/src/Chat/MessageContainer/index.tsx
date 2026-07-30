@@ -8,6 +8,7 @@ import AgentTip from '../components/AgentTip';
 import classNames from 'classnames';
 import { MsgDataType } from '../../common/type';
 import ChatItem from '../../components/ChatItem';
+import { Alert, Button, Spin } from 'antd';
 
 type Props = {
   id: string;
@@ -20,6 +21,8 @@ type Props = {
   integrateSystem?: string;
   isSimpleMode?: boolean;
   isDebugMode?: boolean;
+  historyLoading?: boolean;
+  historyError?: string;
   onMsgDataLoaded: (
     data: MsgDataType,
     questionId: string | number,
@@ -28,6 +31,7 @@ type Props = {
     isRefresh?: boolean
   ) => void;
   onSendMsg: (value: string) => void;
+  onRetryHistory: () => void;
 };
 
 const MessageContainer: React.FC<Props> = ({
@@ -41,8 +45,11 @@ const MessageContainer: React.FC<Props> = ({
   integrateSystem,
   isSimpleMode,
   isDebugMode,
+  historyLoading,
+  historyError,
   onMsgDataLoaded,
   onSendMsg,
+  onRetryHistory,
 }) => {
   const [triggerResize, setTriggerResize] = useState(false);
   const onResize = useCallback(() => {
@@ -67,6 +74,24 @@ const MessageContainer: React.FC<Props> = ({
   return (
     <div id={id} className={messageContainerClass}>
       <div className={styles.messageList}>
+        {(historyLoading || historyError) && (
+          <div className={styles.historyState}>
+            {historyLoading ? (
+              <Spin size="small" tip="正在加载历史消息" />
+            ) : (
+              <Alert
+                type="error"
+                showIcon
+                message={historyError}
+                action={
+                  <Button size="small" onClick={onRetryHistory}>
+                    重试
+                  </Button>
+                }
+              />
+            )}
+          </div>
+        )}
         {messageList.map((msgItem: MessageItem, index: number) => {
           const {
             id: msgId,
@@ -135,7 +160,9 @@ function areEqual(prevProps: Props, nextProps: Props) {
     prevProps.historyVisible === nextProps.historyVisible &&
     prevProps.currentAgent === nextProps.currentAgent &&
     prevProps.chatVisible === nextProps.chatVisible &&
-    prevProps.isSimpleMode === nextProps.isSimpleMode
+    prevProps.isSimpleMode === nextProps.isSimpleMode &&
+    prevProps.historyLoading === nextProps.historyLoading &&
+    prevProps.historyError === nextProps.historyError
   ) {
     return true;
   }
