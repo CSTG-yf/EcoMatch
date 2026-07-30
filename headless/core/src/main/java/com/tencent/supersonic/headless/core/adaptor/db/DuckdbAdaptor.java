@@ -6,6 +6,7 @@ import com.tencent.supersonic.headless.api.pojo.enums.FieldType;
 import com.tencent.supersonic.headless.core.pojo.ConnectInfo;
 import lombok.extern.slf4j.Slf4j;
 
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -23,14 +24,17 @@ public class DuckdbAdaptor extends DefaultDbAdaptor {
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
         List<DBColumn> dbColumns = Lists.newArrayList();
-        DatabaseMetaData metaData = getDatabaseMetaData(connectInfo);
-        ResultSet columns = metaData.getColumns(null, schemaName, tableName, null);
-        while (columns.next()) {
-            String columnName = columns.getString("COLUMN_NAME");
-            String dataType = columns.getString("TYPE_NAME");
-            String remarks = columns.getString("REMARKS");
-            FieldType fieldType = classifyColumnType(dataType);
-            dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+        try (Connection connection = getConnection(connectInfo);
+                ResultSet columns =
+                        connection.getMetaData().getColumns(null, schemaName, tableName, null)) {
+            while (columns.next()) {
+                checkMetadataRowLimit(dbColumns.size() + 1);
+                String columnName = columns.getString("COLUMN_NAME");
+                String dataType = columns.getString("TYPE_NAME");
+                String remarks = columns.getString("REMARKS");
+                FieldType fieldType = classifyColumnType(dataType);
+                dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+            }
         }
         return dbColumns;
     }

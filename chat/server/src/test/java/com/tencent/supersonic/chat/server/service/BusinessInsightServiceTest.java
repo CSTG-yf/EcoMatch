@@ -120,6 +120,46 @@ class BusinessInsightServiceTest {
     }
 
     @Test
+    void normalizesMaskedDisplayAliasBeforeInsightProcessing() {
+        BusinessInsightReq request = request();
+        request.getQueryColumns().get(1).setName("loan_balance");
+        request.setDataMasked(true);
+        request.setMaskedColumns(Set.of("LOAN_BALANCE"));
+
+        BusinessInsightService service =
+                new BusinessInsightService(BusinessInsightConfig.defaults());
+        ChartInsightResp chart = service.recommend(request);
+        BusinessExplanation explanation = service.explain(request);
+
+        assertEquals("TABLE", chart.getRecommendedChart().getChartType());
+        assertTrue(explanation.getEvidence().isEmpty());
+        assertTrue(
+                explanation.getWarnings().stream().anyMatch(warning -> warning.contains("脱敏字段")));
+    }
+
+    @Test
+    void rejectsDuplicateAliasesForOneMaskedField() {
+        BusinessInsightReq request = request();
+        request.getQueryColumns().get(1).setName("loan_balance");
+        request.setDataMasked(true);
+        request.setMaskedColumns(Set.of("metric_value", "loan_balance"));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .recommend(request));
+    }
+
+    @Test
+    void rejectsContradictoryMaskingState() {
+        BusinessInsightReq request = request();
+        request.setMaskedColumns(Set.of("metric_value"));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .recommend(request));
+    }
+
+    @Test
     void rejectsUnknownMaskedColumnMetadata() {
         BusinessInsightReq request = request();
         request.setDataMasked(true);
@@ -135,6 +175,17 @@ class BusinessInsightServiceTest {
         BusinessInsightReq request = request();
         request.setQueryResults(
                 List.of(Map.of("category_name", "A", "metric_value", 10, "hidden_value", 99)));
+
+        assertThrows(RuntimeException.class,
+                () -> new BusinessInsightService(BusinessInsightConfig.defaults())
+                        .explain(request));
+    }
+
+    @Test
+    void rejectsSparseResultRows() {
+        BusinessInsightReq request = request();
+        request.setQueryResults(List.of(Map.of("category_name", "A", "metric_value", 10),
+                Map.of("category_name", "B")));
 
         assertThrows(RuntimeException.class,
                 () -> new BusinessInsightService(BusinessInsightConfig.defaults())

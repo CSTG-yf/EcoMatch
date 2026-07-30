@@ -17,8 +17,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -61,15 +63,14 @@ public class BusinessInsightService {
         if (request.getQueryResults().stream().anyMatch(Objects::isNull)) {
             throw new InvalidArgumentException("queryResults contains a null row");
         }
-        Set<String> declaredFields = validateColumns(request);
-        validateMaskedColumns(request, declaredFields);
+        Map<String, String> declaredFields = validateColumns(request);
+        Set<String> maskedColumns = validateMaskedColumns(request, declaredFields);
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
         result.setQueryColumns(request.getQueryColumns());
         result.setQueryResults(request.getQueryResults());
         result.setDataMasked(request.isDataMasked());
-        result.setMaskedColumns(request.getMaskedColumns() == null ? Collections.emptySet()
-                : new HashSet<>(request.getMaskedColumns()));
+        result.setMaskedColumns(maskedColumns);
 
         ExecuteContext context = new ExecuteContext(
                 ChatExecuteReq.builder().queryText(request.getQueryText()).build());
@@ -82,10 +83,10 @@ public class BusinessInsightService {
         return result;
     }
 
-    private Set<String> validateColumns(BusinessInsightReq request) {
+    private Map<String, String> validateColumns(BusinessInsightReq request) {
         Set<String> fields = new HashSet<>();
         Set<String> canonicalFields = new HashSet<>();
-        Set<String> declaredFields = new HashSet<>();
+        Map<String, String> declaredFields = new HashMap<>();
         for (QueryColumn column : request.getQueryColumns()) {
             String field = column == null ? null
                     : StringUtils.firstNonBlank(column.getBizName(), column.getNameEn(),
@@ -102,15 +103,17 @@ public class BusinessInsightService {
                     .of(column.getBizName(), column.getNameEn(), column.getName())
                     .filter(StringUtils::isNotBlank).map(value -> value.toLowerCase(Locale.ROOT))
                     .collect(java.util.stream.Collectors.toSet());
-            if (aliases.stream().anyMatch(declaredFields::contains)) {
-                throw new InvalidArgumentException(
-                        "queryColumns contains a duplicate field alias: " + field);
+            for (String alias : aliases) {
+                String previous = declaredFields.putIfAbsent(alias, field);
+                if (previous != null && !previous.equals(field)) {
+                    throw new InvalidArgumentException(
+                            "queryColumns contains a duplicate field alias: " + field);
+                }
             }
-            declaredFields.addAll(aliases);
             if (!request.getQueryResults().isEmpty() && request.getQueryResults().stream()
-                    .noneMatch(row -> row != null && row.containsKey(field))) {
+                    .anyMatch(row -> row == null || !row.containsKey(field))) {
                 throw new InvalidArgumentException(
-                        "queryResults does not contain declared field: " + field);
+                        "queryResults row does not contain declared field: " + field);
             }
         }
         request.getQueryResults()
@@ -138,14 +141,28 @@ public class BusinessInsightService {
         }
     }
 
-    private void validateMaskedColumns(BusinessInsightReq request, Set<String> declaredFields) {
+    private Set<String> validateMaskedColumns(BusinessInsightReq request,
+            Map<String, String> declaredFields) {
         Set<String> maskedColumns = request.getMaskedColumns() == null ? Collections.emptySet()
                 : request.getMaskedColumns();
-        if (maskedColumns.stream().anyMatch(StringUtils::isBlank)
-                || maskedColumns.stream().map(value -> value.toLowerCase(Locale.ROOT))
-                        .anyMatch(value -> !declaredFields.contains(value))) {
-            throw new InvalidArgumentException("maskedColumns contains an unknown or blank field");
+        if (request.isDataMasked() != !maskedColumns.isEmpty()) {
+            throw new InvalidArgumentException(
+                    "dataMasked and maskedColumns must describe the same masking state");
         }
+        Set<String> canonicalMaskedColumns = new HashSet<>();
+        for (String maskedColumn : maskedColumns) {
+            String canonical = StringUtils.isBlank(maskedColumn) ? null
+                    : declaredFields.get(maskedColumn.toLowerCase(Locale.ROOT));
+            if (canonical == null) {
+                throw new InvalidArgumentException(
+                        "maskedColumns contains an unknown or blank field");
+            }
+            if (!canonicalMaskedColumns.add(canonical)) {
+                throw new InvalidArgumentException(
+                        "maskedColumns contains duplicate aliases for one field");
+            }
+        }
+        return canonicalMaskedColumns;
     }
 
 }

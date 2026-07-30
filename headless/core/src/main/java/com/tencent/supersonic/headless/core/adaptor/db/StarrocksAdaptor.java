@@ -24,9 +24,10 @@ public class StarrocksAdaptor extends MysqlAdaptor {
             sql.append(" IN ").append(catalog);
         }
         try (Connection con = getConnection(connectionInfo);
-                Statement st = con.createStatement();
+                Statement st = createMetadataStatement(con);
                 ResultSet rs = st.executeQuery(sql.toString())) {
             while (rs.next()) {
+                checkMetadataRowLimit(dbs.size() + 1);
                 dbs.add(rs.getString(1));
             }
         }
@@ -45,9 +46,10 @@ public class StarrocksAdaptor extends MysqlAdaptor {
         }
 
         try (Connection con = getConnection(connectInfo);
-                Statement st = con.createStatement();
+                Statement st = createMetadataStatement(con);
                 ResultSet rs = st.executeQuery(sql.toString())) {
             while (rs.next()) {
+                checkMetadataRowLimit(tablesAndViews.size() + 1);
                 tablesAndViews.add(rs.getString(1));
             }
         }
@@ -59,7 +61,8 @@ public class StarrocksAdaptor extends MysqlAdaptor {
             String tableName) throws SQLException {
         List<DBColumn> dbColumns = new ArrayList<>();
 
-        try (Connection con = getConnection(connectInfo); Statement st = con.createStatement()) {
+        try (Connection con = getConnection(connectInfo);
+                Statement st = createMetadataStatement(con)) {
 
             // 切换到指定的 catalog（或 database/schema），这在某些 SQL 方言中很重要
             if (StringUtils.isNotBlank(catalog)) {
@@ -72,6 +75,7 @@ public class StarrocksAdaptor extends MysqlAdaptor {
             // 获取特定表的列信息
             try (ResultSet columns = metaData.getColumns(schemaName, schemaName, tableName, null)) {
                 while (columns.next()) {
+                    checkMetadataRowLimit(dbColumns.size() + 1);
                     String columnName = columns.getString("COLUMN_NAME");
                     String dataType = columns.getString("TYPE_NAME");
                     String remarks = columns.getString("REMARKS");

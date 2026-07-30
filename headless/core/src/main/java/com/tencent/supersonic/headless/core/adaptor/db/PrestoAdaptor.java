@@ -51,9 +51,10 @@ public class PrestoAdaptor extends BaseDbAdaptor {
             sql.append(" IN ").append(catalog);
         }
         try (Connection con = getConnection(connectionInfo);
-                Statement st = con.createStatement();
+                Statement st = createMetadataStatement(con);
                 ResultSet rs = st.executeQuery(sql.toString())) {
             while (rs.next()) {
+                checkMetadataRowLimit(dbs.size() + 1);
                 dbs.add(rs.getString(1));
             }
         }
@@ -72,9 +73,10 @@ public class PrestoAdaptor extends BaseDbAdaptor {
         }
 
         try (Connection con = getConnection(connectInfo);
-                Statement st = con.createStatement();
+                Statement st = createMetadataStatement(con);
                 ResultSet rs = st.executeQuery(sql.toString())) {
             while (rs.next()) {
+                checkMetadataRowLimit(tablesAndViews.size() + 1);
                 tablesAndViews.add(rs.getString(1));
             }
         }

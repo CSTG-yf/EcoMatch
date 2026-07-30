@@ -12,7 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 
-import java.sql.DatabaseMetaData;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -87,16 +87,18 @@ public class PostgresqlAdaptor extends BaseDbAdaptor {
     public List<String> getTables(ConnectInfo connectionInfo, String schemaName)
             throws SQLException {
         List<String> tablesAndViews = Lists.newArrayList();
-        DatabaseMetaData metaData = getDatabaseMetaData(connectionInfo);
-        try (ResultSet resultSet =
-                metaData.getTables(null, schemaName, null, new String[] {"TABLE", "VIEW"})) {
+        try (Connection connection = getConnection(connectionInfo);
+                ResultSet resultSet = connection.getMetaData().getTables(null, schemaName, null,
+                        new String[] {"TABLE", "VIEW"})) {
             while (resultSet.next()) {
+                checkMetadataRowLimit(tablesAndViews.size() + 1);
                 String name = resultSet.getString("TABLE_NAME");
                 tablesAndViews.add(name);
             }
         } catch (SQLException e) {
             log.error("Get PostgreSQL tables and views failed: type={}, error=[{}]",
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw e;
         }
         return tablesAndViews;
     }
@@ -104,14 +106,17 @@ public class PostgresqlAdaptor extends BaseDbAdaptor {
     public List<DBColumn> getColumns(ConnectInfo connectInfo, String catalog, String schemaName,
             String tableName) throws SQLException {
         List<DBColumn> dbColumns = Lists.newArrayList();
-        DatabaseMetaData metaData = getDatabaseMetaData(connectInfo);
-        ResultSet columns = metaData.getColumns(null, schemaName, tableName, null);
-        while (columns.next()) {
-            String columnName = columns.getString("COLUMN_NAME");
-            String dataType = columns.getString("TYPE_NAME");
-            String remarks = columns.getString("REMARKS");
-            FieldType fieldType = classifyColumnType(dataType);
-            dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+        try (Connection connection = getConnection(connectInfo);
+                ResultSet columns =
+                        connection.getMetaData().getColumns(null, schemaName, tableName, null)) {
+            while (columns.next()) {
+                checkMetadataRowLimit(dbColumns.size() + 1);
+                String columnName = columns.getString("COLUMN_NAME");
+                String dataType = columns.getString("TYPE_NAME");
+                String remarks = columns.getString("REMARKS");
+                FieldType fieldType = classifyColumnType(dataType);
+                dbColumns.add(new DBColumn(columnName, dataType, remarks, fieldType));
+            }
         }
         return dbColumns;
     }

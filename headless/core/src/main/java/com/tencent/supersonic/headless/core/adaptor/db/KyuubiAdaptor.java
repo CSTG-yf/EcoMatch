@@ -52,9 +52,10 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
             sql.append(" IN ").append(catalog);
         }
         try (Connection con = getConnection(connectionInfo);
-                Statement st = con.createStatement();
+                Statement st = createMetadataStatement(con);
                 ResultSet rs = st.executeQuery(sql.toString())) {
             while (rs.next()) {
+                checkMetadataRowLimit(dbs.size() + 1);
                 dbs.add(rs.getString(1));
             }
         }
@@ -66,10 +67,11 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
             throws SQLException {
         List<String> tablesAndViews = new ArrayList<>();
 
-        try {
-            try (ResultSet resultSet = getDatabaseMetaData(connectInfo).getTables(catalog,
-                    schemaName, null, new String[] {"TABLE", "VIEW"})) {
+        try (Connection connection = getConnection(connectInfo)) {
+            try (ResultSet resultSet = connection.getMetaData().getTables(catalog, schemaName, null,
+                    new String[] {"TABLE", "VIEW"})) {
                 while (resultSet.next()) {
+                    checkMetadataRowLimit(tablesAndViews.size() + 1);
                     String name = resultSet.getString("TABLE_NAME");
                     tablesAndViews.add(name);
                 }
@@ -77,6 +79,7 @@ public class KyuubiAdaptor extends BaseDbAdaptor {
         } catch (SQLException e) {
             log.error("Get Kyuubi tables and views failed: type={}, error=[{}]",
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            throw e;
         }
         return tablesAndViews;
     }
