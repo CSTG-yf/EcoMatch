@@ -18,9 +18,13 @@ public interface DataSetService {
 
     DataSetResp getDataSet(Long id);
 
+    DataSetResp getDataSet(Long id, User user);
+
     List<DataSetResp> getDataSetList(MetaFilter metaFilter);
 
     List<DataSetResp> getDataSetList(Long domainId, List<Integer> statuCodesList);
+
+    List<DataSetResp> getDataSetList(Long domainId, List<Integer> statuCodesList, User user);
 
     void delete(Long id, User user);
 

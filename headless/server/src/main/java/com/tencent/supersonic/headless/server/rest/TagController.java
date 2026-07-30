@@ -125,8 +125,10 @@ public class TagController {
      * @return
      */
     @PostMapping("/queryTag")
-    public List<TagDO> queryPage(@RequestBody TagFilter tagFilter) {
-        return tagMetaService.getTagDOList(tagFilter);
+    public List<TagDO> queryPage(@RequestBody TagFilter tagFilter, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return tagMetaService.getTagDOList(tagFilter, user);
     }
 
     /**

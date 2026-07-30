@@ -252,7 +252,7 @@ public class BankSemanticImportService {
 
     private void upsertTerms(BankWorkbookData workbook, Long domainId,
             Map<String, MetricResp> metrics, User user, BankSemanticImportReport report) {
-        Map<String, TermResp> existing = termService.getTerms(domainId, null).stream()
+        Map<String, TermResp> existing = termService.getTerms(domainId, null, user).stream()
                 .collect(Collectors.toMap(TermResp::getName, Function.identity(),
                         (left, right) -> left, LinkedHashMap::new));
         List<TermReq> terms = new ArrayList<>();

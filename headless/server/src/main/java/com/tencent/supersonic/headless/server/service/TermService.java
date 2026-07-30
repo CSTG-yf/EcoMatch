@@ -13,11 +13,11 @@ public interface TermService {
 
     void saveOrUpdate(TermReq termSetReq, User user);
 
-    void delete(Long id);
+    void delete(Long id, User user);
 
-    void deleteBatch(MetaBatchReq metaBatchReq);
+    void deleteBatch(MetaBatchReq metaBatchReq, User user);
 
-    List<TermResp> getTerms(Long domainId, String queryKey);
+    List<TermResp> getTerms(Long domainId, String queryKey, User user);
 
     Map<Long, List<TermResp>> getTermSets(Set<Long> domainIds);
 }

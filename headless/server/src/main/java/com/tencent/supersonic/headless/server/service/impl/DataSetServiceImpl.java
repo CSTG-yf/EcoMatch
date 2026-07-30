@@ -11,6 +11,7 @@ import com.tencent.supersonic.common.pojo.enums.QueryType;
 import com.tencent.supersonic.common.pojo.enums.StatusEnum;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.BeanMapper;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetDetail;
@@ -56,6 +57,7 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
 
     @Override
     public DataSetResp save(DataSetReq dataSetReq, User user) {
+        requireDomainAdmin(dataSetReq == null ? null : dataSetReq.getDomainId(), user);
         dataSetReq.createdBy(user.getName());
         DataSetDO dataSetDO = convert(dataSetReq);
         dataSetDO.setStatus(dataSetReq.getStatus() != null ? dataSetReq.getStatus()
@@ -68,8 +70,19 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
 
     @Override
     public DataSetResp update(DataSetReq dataSetReq, User user) {
+        if (dataSetReq == null || dataSetReq.getId() == null) {
+            throw new InvalidArgumentException("Data set id is required");
+        }
+        DataSetDO existingDO = getRequiredDataSetDO(dataSetReq.getId());
+        DataSetResp existing = convert(existingDO);
+        requireDataSetAdmin(existing, user);
+        if (!Objects.equals(existing.getDomainId(), dataSetReq.getDomainId())) {
+            requireDomainAdmin(dataSetReq.getDomainId(), user);
+        }
         dataSetReq.updatedBy(user.getName());
         DataSetDO dataSetDO = convert(dataSetReq);
+        dataSetDO.setCreatedBy(existingDO.getCreatedBy());
+        dataSetDO.setCreatedAt(existingDO.getCreatedAt());
         DataSetResp dataSetResp = convert(dataSetDO);
         // conflictCheck(dataSetResp);
         updateById(dataSetDO);
@@ -78,13 +91,19 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
 
     @Override
     public DataSetResp getDataSet(Long id) {
-        DataSetDO dataSetDO = getById(id);
-        DataSetResp dataSetResp = convert(dataSetDO);
+        DataSetResp dataSetResp = convert(getRequiredDataSetDO(id));
 
         if (dataSetResp.getDataSetDetail() != null) {
             expandIncludesAllModels(dataSetResp);
         }
 
+        return dataSetResp;
+    }
+
+    @Override
+    public DataSetResp getDataSet(Long id, User user) {
+        DataSetResp dataSetResp = getDataSet(id);
+        requireDataSetAdmin(dataSetResp, user);
         return dataSetResp;
     }
 
@@ -125,8 +144,21 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
     }
 
     @Override
+    public List<DataSetResp> getDataSetList(Long domainId, List<Integer> statuCodesList,
+            User user) {
+        if (user != null && user.isSuperAdmin()) {
+            return getDataSetList(domainId, statuCodesList);
+        }
+        Set<Long> adminDomainIds = getAdminDomainIds(user);
+        return getDataSetList(domainId, statuCodesList).stream()
+                .filter(dataSet -> hasDataSetAdminPermission(dataSet, user, adminDomainIds))
+                .collect(Collectors.toList());
+    }
+
+    @Override
     public void delete(Long id, User user) {
-        DataSetDO dataSetDO = getById(id);
+        DataSetDO dataSetDO = getRequiredDataSetDO(id);
+        requireDataSetAdmin(convert(dataSetDO), user);
         dataSetDO.setStatus(StatusEnum.DELETED.getCode());
         dataSetDO.setUpdatedBy(user.getName());
         dataSetDO.setUpdatedAt(new Date());
@@ -226,12 +258,68 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
     }
 
     public static boolean checkAdminPermission(User user, DataSetResp dataSetResp) {
+        if (!isAuthenticatedUser(user) || dataSetResp == null) {
+            return false;
+        }
         List<String> admins = dataSetResp.getAdmins();
         if (user.isSuperAdmin()) {
             return true;
         }
         String userName = user.getName();
-        return admins.contains(userName) || dataSetResp.getCreatedBy().equals(userName);
+        return StringUtils.isNotBlank(userName) && ((admins != null && admins.contains(userName))
+                || userName.equals(dataSetResp.getCreatedBy()));
+    }
+
+    private DataSetDO getRequiredDataSetDO(Long id) {
+        if (id == null || id <= 0) {
+            throw new InvalidArgumentException("Data set id must be positive");
+        }
+        DataSetDO dataSetDO = getById(id);
+        if (dataSetDO == null
+                || Objects.equals(dataSetDO.getStatus(), StatusEnum.DELETED.getCode())) {
+            throw new InvalidArgumentException("Data set does not exist");
+        }
+        return dataSetDO;
+    }
+
+    private void requireDataSetAdmin(DataSetResp dataSetResp, User user) {
+        if (checkAdminPermission(user, dataSetResp)) {
+            return;
+        }
+        if (!hasDataSetAdminPermission(dataSetResp, user, getAdminDomainIds(user))) {
+            throw new InvalidPermissionException("No permission to manage data set");
+        }
+    }
+
+    private boolean hasDataSetAdminPermission(DataSetResp dataSetResp, User user,
+            Set<Long> adminDomainIds) {
+        return checkAdminPermission(user, dataSetResp)
+                || (dataSetResp != null && adminDomainIds.contains(dataSetResp.getDomainId()));
+    }
+
+    private void requireDomainAdmin(Long domainId, User user) {
+        if (domainId == null || domainId <= 0) {
+            throw new InvalidArgumentException("Data set domain id must be positive");
+        }
+        if (user != null && user.isSuperAdmin()) {
+            return;
+        }
+        if (!getAdminDomainIds(user).contains(domainId)) {
+            throw new InvalidPermissionException("No permission to manage data set domain");
+        }
+    }
+
+    private Set<Long> getAdminDomainIds(User user) {
+        if (!isAuthenticatedUser(user)) {
+            return Collections.emptySet();
+        }
+        return domainService.getDomainAuthSet(user, AuthType.ADMIN).stream().map(DomainResp::getId)
+                .collect(Collectors.toSet());
+    }
+
+    private static boolean isAuthenticatedUser(User user) {
+        return user != null && StringUtils.isNotBlank(user.getName())
+                && !User.getVisitUser().getName().equals(user.getName());
     }
 
     @Override

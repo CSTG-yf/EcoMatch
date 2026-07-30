@@ -37,20 +37,26 @@ public class TermController {
 
     @GetMapping
     public List<TermResp> getTerms(@RequestParam("domainId") Long domainId,
-            @RequestParam(name = "queryKey", required = false) String queryKey) {
-        return termService.getTerms(domainId, queryKey);
+            @RequestParam(name = "queryKey", required = false) String queryKey,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return termService.getTerms(domainId, queryKey, user);
     }
 
     @Deprecated
     @DeleteMapping("/{id}")
-    public boolean delete(@PathVariable("id") Long id) {
-        termService.delete(id);
+    public boolean delete(@PathVariable("id") Long id, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        termService.delete(id, user);
         return true;
     }
 
     @PostMapping("/deleteBatch")
-    public boolean deleteBatch(@RequestBody MetaBatchReq metaBatchReq) {
-        termService.deleteBatch(metaBatchReq);
+    public boolean deleteBatch(@RequestBody MetaBatchReq metaBatchReq, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        termService.deleteBatch(metaBatchReq, user);
         return true;
     }
 }

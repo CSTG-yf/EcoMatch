@@ -45,15 +45,19 @@ public class DataSetController {
     }
 
     @GetMapping("/{id}")
-    public DataSetResp getDataSet(@PathVariable("id") Long id) {
-        return dataSetService.getDataSet(id);
+    public DataSetResp getDataSet(@PathVariable("id") Long id, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return dataSetService.getDataSet(id, user);
     }
 
     @GetMapping("/getDataSetList")
-    public List<DataSetResp> getDataSetList(@RequestParam("domainId") Long domainId) {
+    public List<DataSetResp> getDataSetList(@RequestParam("domainId") Long domainId,
+            HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
         List<Integer> statuCodeList =
                 Arrays.asList(StatusEnum.ONLINE.getCode(), StatusEnum.OFFLINE.getCode());
-        return dataSetService.getDataSetList(domainId, statuCodeList);
+        return dataSetService.getDataSetList(domainId, statuCodeList, user);
     }
 
     @DeleteMapping("/{id}")

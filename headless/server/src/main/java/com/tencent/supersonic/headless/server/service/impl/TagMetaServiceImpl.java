@@ -6,7 +6,9 @@ import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.TypeEnums;
-import com.tencent.supersonic.common.util.SensitiveLogUtils;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.enums.TagDefineType;
 import com.tencent.supersonic.headless.api.pojo.request.TagDeleteReq;
@@ -32,24 +34,26 @@ import com.tencent.supersonic.headless.server.service.MetricService;
 import com.tencent.supersonic.headless.server.service.ModelService;
 import com.tencent.supersonic.headless.server.service.TagMetaService;
 import com.tencent.supersonic.headless.server.service.TagObjectService;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
-@Slf4j
 public class TagMetaServiceImpl implements TagMetaService {
+
+    private static final int MAX_BATCH_TAGS = 1_000;
 
     private final TagRepository tagRepository;
     private final ModelService modelService;
@@ -74,6 +78,7 @@ public class TagMetaServiceImpl implements TagMetaService {
 
     @Override
     public TagResp create(TagReq tagReq, User user) {
+        requireModelAdmin(resolveModelId(tagReq), user);
         checkExist(tagReq);
         checkTagObject(tagReq);
         TagDO tagDO = convert(tagReq);
@@ -88,43 +93,54 @@ public class TagMetaServiceImpl implements TagMetaService {
     }
 
     @Override
+    @Transactional
     public Integer createBatch(List<TagReq> tagReqList, User user) {
+        if (CollectionUtils.isEmpty(tagReqList)) {
+            throw new InvalidArgumentException("Tag requests must not be empty");
+        }
+        if (tagReqList.size() > MAX_BATCH_TAGS) {
+            throw new InvalidArgumentException(
+                    "Tag request count exceeds maximum: " + MAX_BATCH_TAGS);
+        }
+        tagReqList.forEach(tagReq -> requireModelAdmin(resolveModelId(tagReq), user));
         for (TagReq tagReq : tagReqList) {
-            try {
-                create(tagReq, user);
-            } catch (Exception e) {
-                log.warn("Failed to create tag in batch: type={}, error=[{}]",
-                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-            }
+            create(tagReq, user);
         }
         return tagReqList.size();
     }
 
     @Override
     public Boolean delete(Long id, User user) {
+        TagDO tag = getRequiredTag(id);
+        requireModelAdmin(resolveModelId(tag), user);
         tagRepository.delete(id);
         return true;
     }
 
     @Override
+    @Transactional
     public Boolean deleteBatch(List<TagDeleteReq> tagDeleteReqList, User user) {
+        if (CollectionUtils.isEmpty(tagDeleteReqList)) {
+            throw new InvalidArgumentException("Tag delete requests must not be empty");
+        }
+        if (tagDeleteReqList.size() > MAX_BATCH_TAGS) {
+            throw new InvalidArgumentException(
+                    "Tag delete request count exceeds maximum: " + MAX_BATCH_TAGS);
+        }
+        List<List<TagDO>> tagsByRequest =
+                tagDeleteReqList.stream().map(this::getRequiredTags).collect(Collectors.toList());
+        tagsByRequest.stream().flatMap(List::stream)
+                .forEach(tag -> requireModelAdmin(resolveModelId(tag), user));
         for (TagDeleteReq tagDeleteReq : tagDeleteReqList) {
-            try {
-                tagRepository.deleteBatch(tagDeleteReq);
-            } catch (Exception e) {
-                log.warn("Failed to delete tag in batch: type={}, error=[{}]",
-                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-            }
+            tagRepository.deleteBatch(tagDeleteReq);
         }
         return true;
     }
 
     @Override
     public TagResp getTag(Long id, User user) {
-        TagDO tagDO = tagRepository.getTagById(id);
-        if (Objects.isNull(tagDO)) {
-            return null;
-        }
+        TagDO tagDO = getRequiredTag(id);
+        requireModelAdmin(resolveModelId(tagDO), user);
         TagResp tagResp = convert2Resp(tagDO);
         List<TagResp> tagRespList = Arrays.asList(tagResp);
         fillModelInfo(tagRespList);
@@ -142,6 +158,18 @@ public class TagMetaServiceImpl implements TagMetaService {
     @Override
     public List<TagDO> getTagDOList(TagFilter tagFilter) {
         return tagRepository.getTagDOList(tagFilter);
+    }
+
+    @Override
+    public List<TagDO> getTagDOList(TagFilter tagFilter, User user) {
+        requireAuthenticatedUser(user);
+        Set<Long> adminModelIds = getAdminModelIds(user);
+        if (adminModelIds.isEmpty()) {
+            return List.of();
+        }
+        return tagRepository.getTagDOList(tagFilter).stream()
+                .filter(tag -> adminModelIds.contains(resolveModelId(tag)))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -412,5 +440,110 @@ public class TagMetaServiceImpl implements TagMetaService {
             tagItem.setItemId(entry);
             return tagItem;
         }).collect(Collectors.toList());
+    }
+
+    private TagDO getRequiredTag(Long id) {
+        if (id == null || id <= 0) {
+            throw new InvalidArgumentException("Tag id must be positive");
+        }
+        TagDO tag = tagRepository.getTagById(id);
+        if (tag == null) {
+            throw new InvalidArgumentException("Tag does not exist");
+        }
+        return tag;
+    }
+
+    private List<TagDO> getRequiredTags(TagDeleteReq request) {
+        if (request == null || request.getTagDefineType() == null) {
+            throw new InvalidArgumentException("Tag delete type is required");
+        }
+        Set<Long> ids = positiveIds(request.getIds(), "Tag ids");
+        Set<Long> itemIds = positiveIds(request.getItemIds(), "Tag item ids");
+        if (ids.isEmpty() && itemIds.isEmpty()) {
+            throw new InvalidArgumentException("Tag ids or item ids must not be empty");
+        }
+        TagFilter filter = new TagFilter();
+        filter.setIds(new ArrayList<>(ids));
+        filter.setItemIds(new ArrayList<>(itemIds));
+        filter.setTagDefineType(request.getTagDefineType());
+        List<TagDO> tags = tagRepository.getTagDOList(filter);
+        Set<Long> foundIds = tags.stream().map(TagDO::getId).collect(Collectors.toSet());
+        Set<Long> foundItemIds = tags.stream().map(TagDO::getItemId).collect(Collectors.toSet());
+        if (!foundIds.containsAll(ids) || !foundItemIds.containsAll(itemIds)) {
+            throw new InvalidArgumentException("One or more tags do not exist");
+        }
+        return tags;
+    }
+
+    private Set<Long> positiveIds(List<Long> values, String field) {
+        if (CollectionUtils.isEmpty(values)) {
+            return Set.of();
+        }
+        if (values.stream().anyMatch(value -> value == null || value <= 0)) {
+            throw new InvalidArgumentException(field + " must be positive");
+        }
+        return Set.copyOf(values);
+    }
+
+    private Long resolveModelId(TagReq request) {
+        if (request == null || request.getTagDefineType() == null || request.getItemId() == null
+                || request.getItemId() <= 0) {
+            throw new InvalidArgumentException("Tag type and positive item id are required");
+        }
+        return resolveModelId(request.getTagDefineType(), request.getItemId());
+    }
+
+    private Long resolveModelId(TagDO tag) {
+        if (tag == null || tag.getType() == null || tag.getItemId() == null) {
+            throw new InvalidArgumentException("Tag model ownership is incomplete");
+        }
+        try {
+            return resolveModelId(TagDefineType.valueOf(tag.getType().toUpperCase(Locale.ROOT)),
+                    tag.getItemId());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidArgumentException("Tag type is unsupported");
+        }
+    }
+
+    private Long resolveModelId(TagDefineType type, Long itemId) {
+        Long modelId;
+        if (TagDefineType.METRIC.equals(type)) {
+            MetricResp metric = metricService.getMetric(itemId);
+            modelId = metric == null ? null : metric.getModelId();
+        } else if (TagDefineType.DIMENSION.equals(type)) {
+            DimensionResp dimension = dimensionService.getDimension(itemId);
+            modelId = dimension == null ? null : dimension.getModelId();
+        } else {
+            throw new InvalidArgumentException("Tag type is unsupported");
+        }
+        if (modelId == null || modelId <= 0) {
+            throw new InvalidArgumentException("Tag model ownership is missing");
+        }
+        return modelId;
+    }
+
+    private void requireModelAdmin(Long modelId, User user) {
+        if (!getAdminModelIds(user).contains(modelId)) {
+            throw new InvalidPermissionException("No permission to manage tag model");
+        }
+    }
+
+    private Set<Long> getAdminModelIds(User user) {
+        requireAuthenticatedUser(user);
+        if (user.isSuperAdmin()) {
+            List<ModelResp> models = modelService.getModelList(new MetaFilter());
+            return CollectionUtils.isEmpty(models) ? Set.of()
+                    : models.stream().map(ModelResp::getId).collect(Collectors.toSet());
+        }
+        List<ModelResp> models = modelService.getModelListWithAuth(user, null, AuthType.ADMIN);
+        return CollectionUtils.isEmpty(models) ? Set.of()
+                : models.stream().map(ModelResp::getId).collect(Collectors.toSet());
+    }
+
+    private void requireAuthenticatedUser(User user) {
+        if (user == null || user.getName() == null || user.getName().isBlank()
+                || User.getVisitUser().getName().equals(user.getName())) {
+            throw new InvalidPermissionException("Authentication is required to manage tags");
+        }
     }
 }
