@@ -101,9 +101,16 @@ const sanitizeSemanticQuery = (query: any = {}) => ({
     : [],
 });
 
+const normalizeDashboardFilterOperator = (operator: unknown) => {
+  const normalized = String(operator || '=')
+    .trim()
+    .toUpperCase();
+  return ['=', 'EQ', 'EQUALS'].includes(normalized) ? '=' : String(operator || '=');
+};
+
 const sanitizeGlobalFilter = (filter: any): DashboardGlobalFilter => ({
   field: String(filter?.field || ''),
-  operator: String(filter?.operator || 'EQ'),
+  operator: normalizeDashboardFilterOperator(filter?.operator),
   value: safeJsonValue(filter?.value),
 });
 
@@ -174,6 +181,17 @@ export const parseDashboardConfig = (value: unknown): DashboardConfig => {
 export const serializeDashboardConfig = (config: DashboardConfig): DashboardConfig =>
   buildDashboardConfig(config);
 
+export const serializeDashboardWriteConfig = (config: DashboardConfig): string =>
+  JSON.stringify(serializeDashboardConfig(config));
+
+export const requireDashboardSourceDomain = (source: DashboardQuerySource): number => {
+  const domainId = Number(source.domainId);
+  if (!Number.isInteger(domainId) || domainId <= 0) {
+    throw new Error('无法确认问数结果所属主题域');
+  }
+  return domainId;
+};
+
 export const normalizeDashboardPage = (response: any) => {
   const page = response?.data?.list ? response.data : response || {};
   return {
@@ -241,6 +259,19 @@ export const classifyDashboardError = (error: any): DashboardErrorKind => {
 
 export const canEditDashboard = (status: DashboardStatus) => status !== 'DISABLED';
 
+export const canManageDashboard = (
+  owner: string | undefined,
+  currentUser: { name?: string; staffName?: string; superAdmin?: boolean } | undefined,
+  domainHasEditPermission: boolean,
+) => {
+  const currentUserName = currentUser?.name || currentUser?.staffName;
+  return Boolean(
+    currentUser?.superAdmin ||
+      domainHasEditPermission ||
+      (owner && currentUserName && owner === currentUserName),
+  );
+};
+
 export const applyDashboardGlobalFilters = (
   query: Record<string, any>,
   filters: DashboardGlobalFilter[],
@@ -253,7 +284,7 @@ export const applyDashboardGlobalFilters = (
       .map((filter) => ({
         name: filter.field,
         bizName: filter.field,
-        operator: filter.operator,
+        operator: normalizeDashboardFilterOperator(filter.operator),
         value: filter.value,
       })),
   ],

@@ -29,7 +29,6 @@ import {
 } from '@ant-design/icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  applyDashboardGlobalFilters,
   canEditDashboard,
   classifyDashboardError,
   moveComponent,
@@ -51,6 +50,7 @@ import styles from '../style.less';
 
 type Props = {
   dashboard: Dashboard;
+  editable: boolean;
   onBack: () => void;
   onUpdated: (dashboard: Dashboard) => void;
   onCopied: (dashboard: Dashboard) => void;
@@ -69,7 +69,7 @@ const statusLabel = {
   DISABLED: '已停用',
 };
 
-const DashboardEditor: React.FC<Props> = ({ dashboard, onBack, onUpdated, onCopied }) => {
+const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdated, onCopied }) => {
   const screens = Grid.useBreakpoint();
   const mobile = !screens.md;
   const [draft, setDraft] = useState<Dashboard>(dashboard);
@@ -84,7 +84,7 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, onBack, onUpdated, onCopi
   const [runtime, setRuntime] = useState<Record<string, any>>({});
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
   const [refreshingIds, setRefreshingIds] = useState<string[]>([]);
-  const readOnly = !canEditDashboard(draft.status);
+  const readOnly = !editable || !canEditDashboard(draft.status);
 
   useEffect(() => {
     setDraft(dashboard);
@@ -116,9 +116,7 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, onBack, onUpdated, onCopi
   const refreshComponent = async (component: DashboardComponent) => {
     setRefreshingIds((ids) => [...ids, component.id]);
     try {
-      const response: any = await refreshDashboardQuery(
-        applyDashboardGlobalFilters(component.query, config.globalFilters),
-      );
+      const response: any = await refreshDashboardQuery(draft.id, component.id);
       if (response?.code != null && Number(response.code) !== 200) {
         throw response;
       }
@@ -504,7 +502,10 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, onBack, onUpdated, onCopi
               <Button
                 icon={<SendOutlined />}
                 disabled={
-                  config.components.length === 0 || !draft.name.trim() || saveState === 'dirty'
+                  readOnly ||
+                  config.components.length === 0 ||
+                  !draft.name.trim() ||
+                  saveState === 'dirty'
                 }
               >
                 发布
@@ -512,7 +513,9 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, onBack, onUpdated, onCopi
             </Popconfirm>
           ) : draft.status === 'PUBLISHED' ? (
             <Popconfirm title="确认停用当前看板？" onConfirm={() => changeStatus('disable')}>
-              <Button icon={<PauseCircleOutlined />}>停用</Button>
+              <Button icon={<PauseCircleOutlined />} disabled={readOnly}>
+                停用
+              </Button>
             </Popconfirm>
           ) : (
             <Tag>停用后只读</Tag>

@@ -192,6 +192,7 @@ export type DashboardSemanticQuery = {
 };
 
 export type DashboardQuerySource = {
+  domainId?: number;
   queryId?: number;
   parseId?: number;
   question: string;

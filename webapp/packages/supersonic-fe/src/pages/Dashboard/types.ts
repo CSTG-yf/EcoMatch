@@ -3,6 +3,7 @@ export type DashboardAccessScope = 'PRIVATE' | 'ORGANIZATION' | 'DOMAIN';
 export type DashboardErrorKind = 'FORBIDDEN' | 'CONFLICT' | 'FAILED';
 
 export type DashboardQuerySource = {
+  domainId?: number;
   queryId?: number;
   parseId?: number;
   question: string;

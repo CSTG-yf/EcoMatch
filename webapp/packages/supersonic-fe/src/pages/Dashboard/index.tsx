@@ -14,13 +14,15 @@ import {
   message,
 } from 'antd';
 import { DashboardOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
-import { history, useLocation } from '@umijs/max';
+import { history, useLocation, useModel } from '@umijs/max';
 import { useEffect, useMemo, useState } from 'react';
 import {
   addDashboardQueryComponent,
+  canManageDashboard,
   createEmptyDashboardConfig,
   normalizeDashboardPage,
   parseDashboardConfig,
+  requireDashboardSourceDomain,
 } from './model';
 import {
   createDashboard,
@@ -46,6 +48,7 @@ type CreateForm = {
 type DomainOption = {
   label: string;
   value: number;
+  hasEditPermission: boolean;
 };
 
 const unwrapDashboard = (response: any): Dashboard => {
@@ -63,6 +66,7 @@ const statusLabel: Record<DashboardStatus, string> = {
 
 const DashboardPage = () => {
   const location = useLocation();
+  const { initialState } = useModel('@@initialState');
   const routeSource = (location.state as { source?: DashboardQuerySource } | undefined)?.source;
   const [form] = Form.useForm<CreateForm>();
   const targetDashboardId = Form.useWatch('targetDashboardId', form);
@@ -87,9 +91,10 @@ const DashboardPage = () => {
         .map((item: any) => ({
           value: Number(item.id),
           label: item.bizName || item.name || `主题域 ${item.id}`,
+          hasEditPermission: Boolean(item.hasEditPermission),
         }));
       setDomainOptions(options);
-      setSelectedDomainId((current) => current || options[0]?.value);
+      setSelectedDomainId((current) => current || (routeSource ? undefined : options[0]?.value));
     } catch {
       setDomainOptions([]);
     }
@@ -139,17 +144,25 @@ const DashboardPage = () => {
 
   useEffect(() => {
     if (routeSource) {
-      setCreateOpen(true);
-      form.setFieldsValue({
-        domainId: selectedDomainId,
-        targetDashboardId: 'NEW',
-        name: `${routeSource.question.slice(0, 60)}看板`,
-        componentTitle: routeSource.question.slice(0, 120),
-        refreshIntervalSeconds: 0,
-        accessScope: 'PRIVATE',
-      });
+      try {
+        const sourceDomainId = requireDashboardSourceDomain(routeSource);
+        setSelectedDomainId(sourceDomainId);
+        setCreateOpen(true);
+        form.setFieldsValue({
+          domainId: sourceDomainId,
+          targetDashboardId: 'NEW',
+          name: `${routeSource.question.slice(0, 60)}看板`,
+          componentTitle: routeSource.question.slice(0, 120),
+          refreshIntervalSeconds: 0,
+          accessScope: 'PRIVATE',
+        });
+      } catch (error: any) {
+        setCreateOpen(false);
+        message.error(error.message);
+        history.replace('/dashboard');
+      }
     }
-  }, [routeSource, selectedDomainId]);
+  }, [routeSource]);
 
   const filtered = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -243,9 +256,15 @@ const DashboardPage = () => {
   };
 
   if (active) {
+    const editable = canManageDashboard(
+      active.owner,
+      initialState?.currentUser,
+      Boolean(domainOptions.find((option) => option.value === active.domainId)?.hasEditPermission),
+    );
     return (
       <DashboardEditor
         dashboard={active}
+        editable={editable}
         onBack={() => {
           setActive(undefined);
           loadList();
@@ -434,6 +453,7 @@ const DashboardPage = () => {
             rules={[{ required: true, message: '请选择主题域' }]}
           >
             <Select
+              disabled={Boolean(routeSource)}
               showSearch
               optionFilterProp="label"
               placeholder={domainOptions.length ? '选择有权使用的主题域' : '暂无可用主题域'}

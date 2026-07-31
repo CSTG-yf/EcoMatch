@@ -3,6 +3,7 @@ import {
   addDashboardQueryComponent,
   buildDashboardConfig,
   canEditDashboard,
+  canManageDashboard,
   classifyDashboardError,
   createDashboardComponent,
   createEmptyDashboardConfig,
@@ -10,7 +11,9 @@ import {
   moveComponent,
   normalizeDashboardPage,
   parseDashboardConfig,
+  requireDashboardSourceDomain,
   serializeDashboardConfig,
+  serializeDashboardWriteConfig,
 } from './model';
 
 describe('dashboard model', () => {
@@ -106,6 +109,9 @@ describe('dashboard model', () => {
     expect(JSON.stringify(serialized).toLowerCase()).not.toContain('sql');
     expect(JSON.stringify(serialized).toLowerCase()).not.toContain('token');
     expect(serialized.globalFilters[0].value).toEqual({ safe: '对公' });
+    expect(serialized.globalFilters[0].operator).toBe('=');
+    expect(typeof serializeDashboardWriteConfig(config)).toBe('string');
+    expect(JSON.parse(serializeDashboardWriteConfig(config))).toEqual(serialized);
   });
 
   it('classifies permissions and optimistic lock conflicts separately', () => {
@@ -140,9 +146,16 @@ describe('dashboard model', () => {
       queryId: 29,
       dimensionFilters: [
         { bizName: '机构', operator: 'EQ', value: 'B市' },
-        { name: '客户类型', bizName: '客户类型', operator: 'EQ', value: '对公' },
+        { name: '客户类型', bizName: '客户类型', operator: '=', value: '对公' },
       ],
     });
+  });
+
+  it('keeps shared dashboards read-only unless the viewer can manage them', () => {
+    expect(canManageDashboard('owner', { name: 'viewer' }, false)).toBe(false);
+    expect(canManageDashboard('owner', { name: 'owner' }, false)).toBe(true);
+    expect(canManageDashboard('owner', { name: 'domain-admin' }, true)).toBe(true);
+    expect(canManageDashboard('owner', { name: 'root', superAdmin: true }, false)).toBe(true);
   });
 
   it('appends a query result with the confirmed title and refresh policy', () => {
@@ -178,5 +191,21 @@ describe('dashboard model', () => {
         0,
       ),
     ).toThrow('看板组件已达到 100 个上限');
+  });
+
+  it('requires a trusted source domain before opening the save flow', () => {
+    expect(
+      requireDashboardSourceDomain({
+        domainId: 10,
+        question: '存款余额是多少？',
+        semanticQuery: {},
+      }),
+    ).toBe(10);
+    expect(() =>
+      requireDashboardSourceDomain({
+        question: '存款余额是多少？',
+        semanticQuery: {},
+      }),
+    ).toThrow('无法确认问数结果所属主题域');
   });
 });
