@@ -24,4 +24,5 @@ export default {
   'menu.security': '安全运营',
   'menu.chat': '问答对话',
   'menu.agent': '助理管理',
+  'menu.dashboard': '分析看板',
 };

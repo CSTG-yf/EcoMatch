@@ -43,7 +43,8 @@ const responseInterceptor = async (response: Response) => {
   } else {
     try {
       const data: Result<any> = await response?.clone()?.json?.();
-      if (Number(data.code) === 403) {
+      const isDashboardObjectRequest = response.url.includes('/api/semantic/dashboard');
+      if (Number(data.code) === 403 && !isDashboardObjectRequest) {
         history.push('/login');
         return response;
       }

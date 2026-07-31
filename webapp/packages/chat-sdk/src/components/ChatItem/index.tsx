@@ -2,6 +2,7 @@ import {
   ChatContextType,
   BankIntentResultType,
   DateInfoType,
+  DashboardQuerySource,
   EntityInfoType,
   FilterItemType,
   MsgDataType,
@@ -72,6 +73,7 @@ type Props = {
   onUpdateMessageScroll?: () => void;
   onSendMsg?: (msg: string) => void;
   onContinueQuestion?: (question: string) => void;
+  onSaveToDashboard?: (source: DashboardQuerySource) => void;
 };
 
 export const ChartItemContext = createContext({
@@ -103,6 +105,7 @@ const ChatItem: React.FC<Props> = ({
   onUpdateMessageScroll,
   onSendMsg,
   onContinueQuestion,
+  onSaveToDashboard,
 }) => {
   const [parseLoading, setParseLoading] = useState(false);
   const [parseTimeCost, setParseTimeCost] = useState<ParseTimeCostType>();
@@ -682,6 +685,8 @@ const ChatItem: React.FC<Props> = ({
                     executeItemNode={executeItemNode}
                     isDeveloper={isDeveloper}
                     renderCustomExecuteNode={renderCustomExecuteNode}
+                    dashboardContext={parseInfo}
+                    onSaveToDashboard={onSaveToDashboard}
                   />
                 </div>
               </Spin>

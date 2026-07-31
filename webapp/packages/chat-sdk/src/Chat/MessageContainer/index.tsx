@@ -6,7 +6,7 @@ import { isMobile, updateMessageContainerScroll } from '../../utils/utils';
 import styles from './style.module.less';
 import AgentTip from '../components/AgentTip';
 import classNames from 'classnames';
-import { MsgDataType } from '../../common/type';
+import { DashboardQuerySource, MsgDataType } from '../../common/type';
 import ChatItem from '../../components/ChatItem';
 import { Alert, Button, Spin } from 'antd';
 
@@ -33,6 +33,7 @@ type Props = {
   onSendMsg: (value: string) => void;
   onRetryHistory: () => void;
   onContinueQuestion: (question: string) => void;
+  onSaveToDashboard?: (source: DashboardQuerySource) => void;
 };
 
 const MessageContainer: React.FC<Props> = ({
@@ -52,6 +53,7 @@ const MessageContainer: React.FC<Props> = ({
   onSendMsg,
   onRetryHistory,
   onContinueQuestion,
+  onSaveToDashboard,
 }) => {
   const [triggerResize, setTriggerResize] = useState(false);
   const onResize = useCallback(() => {
@@ -144,6 +146,7 @@ const MessageContainer: React.FC<Props> = ({
                     onUpdateMessageScroll={updateMessageContainerScroll}
                     onSendMsg={onSendMsg}
                     onContinueQuestion={onContinueQuestion}
+                    onSaveToDashboard={onSaveToDashboard}
                     isLastMessage={index === messageList.length - 1}
                   />
                 </>
@@ -165,7 +168,8 @@ function areEqual(prevProps: Props, nextProps: Props) {
     prevProps.chatVisible === nextProps.chatVisible &&
     prevProps.isSimpleMode === nextProps.isSimpleMode &&
     prevProps.historyLoading === nextProps.historyLoading &&
-    prevProps.historyError === nextProps.historyError
+    prevProps.historyError === nextProps.historyError &&
+    prevProps.onSaveToDashboard === nextProps.onSaveToDashboard
   ) {
     return true;
   }

@@ -1,7 +1,7 @@
-import { Space, Spin, Tooltip, message } from 'antd';
-import { CheckCircleFilled, InfoCircleOutlined } from '@ant-design/icons';
+import { Button, Space, Spin, Tooltip, message } from 'antd';
+import { CheckCircleFilled, DashboardOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { PREFIX_CLS } from '../../common/constants';
-import { MsgDataType } from '../../common/type';
+import { ChatContextType, DashboardQuerySource, MsgDataType } from '../../common/type';
 import ChatMsg from '../ChatMsg';
 import WebPage from '../ChatMsg/WebPage';
 import Loading from './Loading';
@@ -10,6 +10,7 @@ import { solarizedlight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import React, { ReactNode, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import BusinessInsightPanel from './BusinessInsightPanel';
+import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
 
 type Props = {
   queryId?: number;
@@ -26,6 +27,8 @@ type Props = {
   triggerResize?: boolean;
   isDeveloper?: boolean;
   isSimpleMode?: boolean;
+  dashboardContext?: ChatContextType;
+  onSaveToDashboard?: (source: DashboardQuerySource) => void;
 };
 
 const ExecuteItem: React.FC<Props> = ({
@@ -43,6 +46,8 @@ const ExecuteItem: React.FC<Props> = ({
   triggerResize,
   isDeveloper,
   isSimpleMode,
+  dashboardContext,
+  onSaveToDashboard,
 }) => {
   const prefixCls = `${PREFIX_CLS}-item`;
   const [showErrMsg, setShowErrMsg] = useState<boolean>(false);
@@ -106,6 +111,31 @@ const ExecuteItem: React.FC<Props> = ({
     return null;
   }
 
+  const saveCapability = canSaveDashboardResult(data);
+  const saveAction = onSaveToDashboard ? (
+    <Tooltip title={saveCapability.reason || '将当前语义查询保存为看板组件'}>
+      <span>
+        <Button
+          size="small"
+          type="link"
+          icon={<DashboardOutlined />}
+          disabled={!saveCapability.enabled}
+          onClick={() =>
+            onSaveToDashboard(
+              buildDashboardQuerySource({
+                question,
+                context: dashboardContext,
+                data,
+              })
+            )
+          }
+        >
+          保存到看板
+        </Button>
+      </span>
+    </Tooltip>
+  ) : null;
+
   return (
     <>
       {!isSimpleMode && (
@@ -121,8 +151,12 @@ const ExecuteItem: React.FC<Props> = ({
                 <span className={`${prefixCls}-title-tip`}>(耗时: {data.queryTimeCost}ms)</span>
               )}
             </div>
+            {saveAction}
           </div>
         </div>
+      )}
+      {isSimpleMode && saveAction && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{saveAction}</div>
       )}
 
       <div

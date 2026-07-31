@@ -35,6 +35,7 @@ export type {
   HistoryType,
   HistoryMsgItemType,
   SendMsgParamsType,
+  DashboardQuerySource,
 } from './common/type';
 
 export { searchRecommend } from './service';

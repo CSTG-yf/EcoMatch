@@ -181,6 +181,29 @@ export type MsgDataType = {
   businessExplanation?: BusinessExplanationType;
 };
 
+export type DashboardSemanticQuery = {
+  queryId?: number;
+  parseId?: number;
+  modelId?: number;
+  dimensions?: FieldType[];
+  metrics?: FieldType[];
+  dateInfo?: DateInfoType;
+  dimensionFilters?: FilterItemType[];
+};
+
+export type DashboardQuerySource = {
+  queryId?: number;
+  parseId?: number;
+  question: string;
+  modelId?: number;
+  dataSetId?: number;
+  modelName?: string;
+  dataSetName?: string;
+  masked?: boolean;
+  chartType?: string;
+  semanticQuery: DashboardSemanticQuery;
+};
+
 export enum ParseStateEnum {
   COMPLETED = 'COMPLETED',
   PENDING = 'PENDING',

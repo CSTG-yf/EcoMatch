@@ -301,11 +301,11 @@ const TrustExplanationPanel: React.FC<Props> = ({
             </>
           )}
 
-          {parseInfo.sqlEvaluation?.features?.length > 0 && (
+          {(parseInfo.sqlEvaluation?.features?.length || 0) > 0 && (
             <>
               <h3>复杂 SQL 特征</h3>
               <Space wrap>
-                {parseInfo.sqlEvaluation.features.map(feature => (
+                {parseInfo.sqlEvaluation?.features?.map(feature => (
                   <Tag key={feature}>{FEATURE_LABELS[feature] || feature}</Tag>
                 ))}
               </Space>

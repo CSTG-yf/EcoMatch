@@ -1,4 +1,4 @@
-import { useLocation, useModel } from '@umijs/max';
+import { history, useLocation, useModel } from '@umijs/max';
 import { getToken } from '@/utils/utils';
 import queryString from 'query-string';
 import { Chat } from 'supersonic-chat-sdk';
@@ -15,6 +15,7 @@ const ChatPage = () => {
       initialAgentId={agentId ? +agentId : undefined}
       token={getToken() || ''}
       isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
+      onSaveToDashboard={(source) => history.push('/dashboard', { source })}
     />
   );
 };

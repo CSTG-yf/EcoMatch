@@ -46,6 +46,12 @@ const ROUTES = [
     envEnableList: [ENV_KEY.CHAT],
   },
   {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: './Dashboard',
+    envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
+  },
+  {
     path: '/plugin',
     name: 'plugin',
     component: './ChatPlugin',
