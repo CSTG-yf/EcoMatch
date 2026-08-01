@@ -13,6 +13,7 @@ const {
   createExportTask,
   downloadExportFile,
   fileNameFromDisposition,
+  getExportTasks,
   getExportTask,
   saveDownload,
 } = require('./service');
@@ -58,6 +59,17 @@ describe('export service contracts', () => {
     await expect(getExportTask(task.taskId)).resolves.toEqual(task);
     expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/export/task%2Fwith%20spaces', {
       method: 'GET',
+    });
+  });
+
+  it('lists the current user export history through the formal paginated endpoint', async () => {
+    const page = { list: [task], pageNum: 2, pageSize: 10, total: 11 };
+    mockedRequest.mockResolvedValue({ code: 200, data: page, msg: 'ok' } as any);
+
+    await expect(getExportTasks({ pageNum: 2, pageSize: 10 })).resolves.toEqual(page);
+    expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/export', {
+      method: 'GET',
+      params: { pageNum: 2, pageSize: 10 },
     });
   });
 
