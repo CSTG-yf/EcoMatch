@@ -44,6 +44,7 @@ import MultiTurnContextBar from './MultiTurnContextBar';
 import { shouldAwaitClarification } from './contextModel';
 import TrustExplanationPanel from './TrustExplanationPanel';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
+import { DashboardQueryDraft } from '../../dashboardDraft';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
 const SUMMARY_POLL_MAX_ATTEMPTS = 60;
@@ -72,6 +73,7 @@ type Props = {
   onUpdateMessageScroll?: () => void;
   onSendMsg?: (msg: string) => void;
   onContinueQuestion?: (question: string) => void;
+  onSaveToDashboard?: (draft: DashboardQueryDraft) => void;
 };
 
 export const ChartItemContext = createContext({
@@ -103,6 +105,7 @@ const ChatItem: React.FC<Props> = ({
   onUpdateMessageScroll,
   onSendMsg,
   onContinueQuestion,
+  onSaveToDashboard,
 }) => {
   const [parseLoading, setParseLoading] = useState(false);
   const [parseTimeCost, setParseTimeCost] = useState<ParseTimeCostType>();
@@ -723,6 +726,9 @@ const ChatItem: React.FC<Props> = ({
                 onReExecute={queryId => {
                   deleteQueryInfo(queryId);
                 }}
+                question={msg}
+                data={data}
+                onSaveToDashboard={onSaveToDashboard}
               />
             )}
         </div>

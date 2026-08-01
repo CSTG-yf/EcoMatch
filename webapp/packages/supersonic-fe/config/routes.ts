@@ -227,6 +227,21 @@ const ROUTES = [
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
   },
   {
+    path: '/dashboard/:id/edit',
+    component: './Dashboard',
+    hideInMenu: true,
+  },
+  {
+    path: '/dashboard/:id/view',
+    component: './Dashboard',
+    hideInMenu: true,
+  },
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: './Dashboard',
+  },
+  {
     path: '/security',
     name: 'security',
     component: './SecurityOperations',

@@ -23,5 +23,6 @@ export default {
   'menu.evaluation': '评测分析',
   'menu.security': '安全运营',
   'menu.chat': '问答对话',
+  'menu.dashboard': '分析看板',
   'menu.agent': '助理管理',
 };

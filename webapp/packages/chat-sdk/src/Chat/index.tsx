@@ -39,6 +39,7 @@ import { buildContinuationDraft, mergeHistoryMessages } from './conversationStat
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
+import { DashboardQueryDraft } from '../dashboardDraft';
 
 dayjs.locale('zh-cn');
 
@@ -53,6 +54,7 @@ type Props = {
   isCopilot?: boolean;
   onCurrentAgentChange?: (agent?: AgentType) => void;
   onReportMsgEvent?: (msg: string, valid: boolean) => void;
+  onSaveToDashboard?: (draft: DashboardQueryDraft) => void;
 };
 
 const Chat: ForwardRefRenderFunction<any, Props> = (
@@ -67,6 +69,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     isCopilot,
     onCurrentAgentChange,
     onReportMsgEvent,
+    onSaveToDashboard,
   },
   ref
 ) => {
@@ -530,6 +533,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                       inputFocus();
                       updateMessageContainerScroll();
                     }}
+                    onSaveToDashboard={onSaveToDashboard}
                   />
                   {!noInput && (
                     <ChatFooter

@@ -42,3 +42,5 @@ export { searchRecommend } from './service';
 export { saveConversation, getAllConversations } from './Chat/service';
 
 export { setToken } from './utils/utils';
+
+export type { DashboardQueryDraft, DashboardSemanticQuery } from './dashboardDraft';
