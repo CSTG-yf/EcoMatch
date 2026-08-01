@@ -2,6 +2,7 @@ import {
   ClockCircleOutlined,
   FileProtectOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Empty, Input, Space, Spin, Typography } from 'antd';
@@ -23,12 +24,14 @@ const ExportCenter = () => {
     tasks,
     pageError,
     creating,
+    loadingList,
     activeTaskIds,
     create,
     refresh,
     addByTaskId,
     download,
     retry,
+    loadList,
     clearError,
   } = useExportTasks();
 
@@ -100,29 +103,39 @@ const ExportCenter = () => {
       <section className={styles.taskSection}>
         <div className={styles.sectionHeader}>
           <div>
-            <Typography.Title level={4}>本次会话任务</Typography.Title>
-            <Typography.Text type="secondary">等待中和生成中的任务每 2 秒自动刷新</Typography.Text>
+            <Typography.Title level={4}>导出任务</Typography.Title>
+            <Typography.Text type="secondary">
+              已加载当前账号最近 20 个任务；等待中和生成中的任务每 2 秒自动刷新
+            </Typography.Text>
           </div>
-          <Space.Compact className={styles.restoreControl}>
-            <Input
-              value={taskId}
-              placeholder="输入已有任务 ID"
-              aria-label="已有导出任务 ID"
-              onChange={(event) => setTaskId(event.target.value)}
-              onPressEnter={() => void restoreTask()}
-            />
-            <Button
-              icon={<PlusOutlined />}
-              disabled={!taskId.trim()}
-              loading={activeTaskIds.includes(taskId.trim())}
-              onClick={() => void restoreTask()}
-            >
-              查询
+          <Space wrap>
+            <Space.Compact className={styles.restoreControl}>
+              <Input
+                value={taskId}
+                placeholder="输入已有任务 ID"
+                aria-label="已有导出任务 ID"
+                onChange={(event) => setTaskId(event.target.value)}
+                onPressEnter={() => void restoreTask()}
+              />
+              <Button
+                icon={<PlusOutlined />}
+                disabled={!taskId.trim()}
+                loading={activeTaskIds.includes(taskId.trim())}
+                onClick={() => void restoreTask()}
+              >
+                查询
+              </Button>
+            </Space.Compact>
+            <Button icon={<ReloadOutlined />} loading={loadingList} onClick={() => void loadList()}>
+              刷新列表
             </Button>
-          </Space.Compact>
+          </Space>
         </div>
 
-        <Spin spinning={creating} tip="正在创建并生成导出文件">
+        <Spin
+          spinning={creating || loadingList}
+          tip={creating ? '正在创建并生成导出文件' : '正在加载导出任务'}
+        >
           {tasks.length ? (
             <div className={styles.taskList}>
               {tasks.map((task) => (

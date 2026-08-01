@@ -7,6 +7,7 @@ export const useExportTasks = () => {
   const [tasks, setTasks] = useState<ExportTaskItem[]>([]);
   const [pageError, setPageError] = useState<ExportError>();
   const [creating, setCreating] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
   const [activeTaskIds, setActiveTaskIds] = useState<string[]>([]);
   const tasksRef = useRef(tasks);
   const refreshingRef = useRef(new Set<string>());
@@ -17,6 +18,28 @@ export const useExportTasks = () => {
 
   const setTask = useCallback((task: ExportTaskItem) => {
     setTasks((current) => upsertTask(current, task));
+  }, []);
+
+  const loadList = useCallback(async () => {
+    setLoadingList(true);
+    try {
+      const page = await exportApi.list({ pageNum: 1, pageSize: 20 });
+      setTasks((current) =>
+        (page.list || []).map((task) => {
+          const previous = current.find((item) => item.taskId === task.taskId);
+          return {
+            ...task,
+            request: previous?.request,
+            actionError: previous?.actionError,
+          };
+        }),
+      );
+      setPageError(undefined);
+    } catch (error) {
+      setPageError(classifyExportError(error));
+    } finally {
+      setLoadingList(false);
+    }
   }, []);
 
   const withTaskAction = useCallback(
@@ -114,16 +137,22 @@ export const useExportTasks = () => {
     return () => window.clearInterval(timer);
   }, [refresh, tasks]);
 
+  useEffect(() => {
+    void loadList();
+  }, [loadList]);
+
   return {
     tasks,
     pageError,
     creating,
+    loadingList,
     activeTaskIds,
     create,
     refresh,
     addByTaskId,
     download,
     retry,
+    loadList,
     clearError: () => setPageError(undefined),
   };
 };
