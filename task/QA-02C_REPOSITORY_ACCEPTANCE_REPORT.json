@@ -1,0 +1,227 @@
+{
+  "controls": [
+    {
+      "description": "Identity, object access, row and column permission, masking and cache isolation pass the current backend gate.",
+      "evidenceCount": 1,
+      "id": "identity-permission-and-masking",
+      "status": "PASS"
+    },
+    {
+      "description": "Audit integrity, alert lifecycle and organization isolation pass the current backend gate.",
+      "evidenceCount": 1,
+      "id": "audit-alert-and-organization-isolation",
+      "status": "PASS"
+    },
+    {
+      "description": "Exports re-query with current permissions, preserve dashboard definitions and remain covered by audit controls.",
+      "evidenceCount": 5,
+      "id": "controlled-export",
+      "status": "PASS"
+    },
+    {
+      "description": "Share lifecycle, viewer identity, expiry, revocation, access limits, masking and watermark paths fail closed.",
+      "evidenceCount": 5,
+      "id": "controlled-sharing",
+      "status": "PASS"
+    },
+    {
+      "description": "History ownership and public model input boundaries reject unauthorized or unsafe requests.",
+      "evidenceCount": 5,
+      "id": "history-and-model-input-boundary",
+      "status": "PASS"
+    },
+    {
+      "description": "Logs, exports, shared responses and client error states do not expose protected data or credentials.",
+      "evidenceCount": 5,
+      "id": "sensitive-data-egress",
+      "status": "PASS"
+    },
+    {
+      "description": "FE-06 and FE-08 security models pass regression and the production client bundle compiles.",
+      "evidenceCount": 2,
+      "id": "security-client-release-artifact",
+      "status": "PASS"
+    }
+  ],
+  "environmentGateRequired": true,
+  "evidence": [
+    {
+      "durationMs": 104211,
+      "id": "qa02a-permission-masking",
+      "status": "PASS",
+      "summary": {
+        "caseCount": 166,
+        "controlCount": 7,
+        "failureCount": 0,
+        "passedControlCount": 7,
+        "passedTestClassCount": 32,
+        "testClassCount": 32
+      },
+      "task": "QA-02A",
+      "type": "gate"
+    },
+    {
+      "durationMs": 51207,
+      "id": "qa02b-audit-alert",
+      "status": "PASS",
+      "summary": {
+        "caseCount": 50,
+        "controlCount": 6,
+        "failureCount": 0,
+        "passedControlCount": 6,
+        "passedTestClassCount": 10,
+        "testClassCount": 10
+      },
+      "task": "QA-02B",
+      "type": "gate"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.service.impl.ExportTaskServiceImplTest",
+      "durationMs": 2582,
+      "failed": 0,
+      "id": "export-task-security",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.headless.server.service.impl.DashboardExportQueryValidatorTest",
+      "durationMs": 94,
+      "failed": 0,
+      "id": "dashboard-export-integrity",
+      "module": "headless/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 10,
+      "className": "com.tencent.supersonic.headless.server.service.impl.ShareServiceImplTest",
+      "durationMs": 137,
+      "failed": 0,
+      "id": "share-policy-security",
+      "module": "headless/server",
+      "passed": 10,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.chat.server.service.impl.SharedDashboardDataServiceTest",
+      "durationMs": 28,
+      "failed": 0,
+      "id": "shared-dashboard-security",
+      "module": "chat/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest",
+      "durationMs": 8385,
+      "failed": 0,
+      "id": "history-object-access",
+      "module": "chat/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 1,
+      "className": "com.tencent.supersonic.headless.server.facade.rest.ChatQueryApiControllerSecurityTest",
+      "durationMs": 7032,
+      "failed": 0,
+      "id": "chat-query-input-security",
+      "module": "headless/server",
+      "passed": 1,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.facade.rest.SemanticQueryRequestSecurityTest",
+      "durationMs": 324,
+      "failed": 0,
+      "id": "semantic-query-input-security",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 4,
+      "className": "com.tencent.supersonic.headless.server.facade.rest.SqlQueryApiControllerSecurityTest",
+      "durationMs": 124,
+      "failed": 0,
+      "id": "sql-query-input-security",
+      "module": "headless/server",
+      "passed": 4,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 6,
+      "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest",
+      "durationMs": 5853,
+      "failed": 0,
+      "id": "common-sensitive-logging",
+      "module": "common",
+      "passed": 6,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 7,
+      "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest",
+      "durationMs": 1930,
+      "failed": 0,
+      "id": "query-sensitive-logging",
+      "module": "headless/server",
+      "passed": 7,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "durationMs": 11769,
+      "exitCode": 0,
+      "id": "frontend-security-regression",
+      "status": "PASS",
+      "type": "command"
+    },
+    {
+      "durationMs": 90515,
+      "exitCode": 0,
+      "id": "frontend-production-build",
+      "status": "PASS",
+      "type": "command"
+    }
+  ],
+  "failures": [],
+  "generatedAt": "2026-08-01T13:41:14.636021+00:00",
+  "schemaVersion": "1.0",
+  "scope": "REPOSITORY",
+  "status": "PASS",
+  "summary": {
+    "controlCount": 7,
+    "evidenceCount": 14,
+    "failureCount": 0,
+    "javaCaseCount": 54,
+    "passedControlCount": 7,
+    "passedEvidenceCount": 14
+  },
+  "task": "QA-02C"
+}

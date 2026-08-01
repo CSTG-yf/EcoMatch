@@ -36,6 +36,14 @@ python evaluation/run_qa02b.py
 
 控制项和报告说明见 `evaluation/QA-02B_README.md`。
 
+QA-02C 每次重新执行 QA-02A、QA-02B，并聚合导出、分享、历史、模型输入、敏感日志、FE-06、FE-08 和生产构建：
+
+```powershell
+python evaluation/run_qa02c.py
+```
+
+仓库门禁通过后仍需在正式身份属性和生产权限规则下执行环境验收。完整说明见 `evaluation/QA-02C_README.md`。
+
 # 原有 DuSQL 评测流程
 
 1. 正常启动项目(必须包括LLM服务)

@@ -1,0 +1,151 @@
+{
+  "schemaVersion": "1.0",
+  "task": "QA-02C",
+  "evidence": [
+    {
+      "id": "qa02a-permission-masking",
+      "type": "gate",
+      "script": "evaluation/run_qa02a.py",
+      "reportTask": "QA-02A"
+    },
+    {
+      "id": "qa02b-audit-alert",
+      "type": "gate",
+      "script": "evaluation/run_qa02b.py",
+      "reportTask": "QA-02B"
+    },
+    {
+      "id": "export-task-security",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.impl.ExportTaskServiceImplTest"
+    },
+    {
+      "id": "dashboard-export-integrity",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.impl.DashboardExportQueryValidatorTest"
+    },
+    {
+      "id": "share-policy-security",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.service.impl.ShareServiceImplTest"
+    },
+    {
+      "id": "shared-dashboard-security",
+      "type": "java",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.SharedDashboardDataServiceTest"
+    },
+    {
+      "id": "history-object-access",
+      "type": "java",
+      "module": "chat/server",
+      "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest"
+    },
+    {
+      "id": "chat-query-input-security",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.facade.rest.ChatQueryApiControllerSecurityTest"
+    },
+    {
+      "id": "semantic-query-input-security",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.facade.rest.SemanticQueryRequestSecurityTest"
+    },
+    {
+      "id": "sql-query-input-security",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.facade.rest.SqlQueryApiControllerSecurityTest"
+    },
+    {
+      "id": "common-sensitive-logging",
+      "type": "java",
+      "module": "common",
+      "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest"
+    },
+    {
+      "id": "query-sensitive-logging",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest"
+    },
+    {
+      "id": "frontend-security-regression",
+      "type": "command",
+      "cwd": "webapp/packages/supersonic-fe",
+      "command": ["pnpm", "test:contest"]
+    },
+    {
+      "id": "frontend-production-build",
+      "type": "command",
+      "cwd": "webapp",
+      "command": ["pnpm", "--filter", "supersonic-fe", "build:os"]
+    }
+  ],
+  "controls": [
+    {
+      "id": "identity-permission-and-masking",
+      "description": "Identity, object access, row and column permission, masking and cache isolation pass the current backend gate.",
+      "evidence": ["qa02a-permission-masking"]
+    },
+    {
+      "id": "audit-alert-and-organization-isolation",
+      "description": "Audit integrity, alert lifecycle and organization isolation pass the current backend gate.",
+      "evidence": ["qa02b-audit-alert"]
+    },
+    {
+      "id": "controlled-export",
+      "description": "Exports re-query with current permissions, preserve dashboard definitions and remain covered by audit controls.",
+      "evidence": [
+        "qa02a-permission-masking",
+        "qa02b-audit-alert",
+        "export-task-security",
+        "dashboard-export-integrity",
+        "frontend-security-regression"
+      ]
+    },
+    {
+      "id": "controlled-sharing",
+      "description": "Share lifecycle, viewer identity, expiry, revocation, access limits, masking and watermark paths fail closed.",
+      "evidence": [
+        "qa02a-permission-masking",
+        "qa02b-audit-alert",
+        "share-policy-security",
+        "shared-dashboard-security",
+        "frontend-security-regression"
+      ]
+    },
+    {
+      "id": "history-and-model-input-boundary",
+      "description": "History ownership and public model input boundaries reject unauthorized or unsafe requests.",
+      "evidence": [
+        "qa02a-permission-masking",
+        "history-object-access",
+        "chat-query-input-security",
+        "semantic-query-input-security",
+        "sql-query-input-security"
+      ]
+    },
+    {
+      "id": "sensitive-data-egress",
+      "description": "Logs, exports, shared responses and client error states do not expose protected data or credentials.",
+      "evidence": [
+        "common-sensitive-logging",
+        "query-sensitive-logging",
+        "export-task-security",
+        "shared-dashboard-security",
+        "frontend-security-regression"
+      ]
+    },
+    {
+      "id": "security-client-release-artifact",
+      "description": "FE-06 and FE-08 security models pass regression and the production client bundle compiles.",
+      "evidence": ["frontend-security-regression", "frontend-production-build"]
+    }
+  ]
+}

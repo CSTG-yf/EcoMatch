@@ -5,6 +5,7 @@ module.exports = {
     '<rootDir>/src/pages/Dashboard/*.test.ts',
     '<rootDir>/src/pages/ExportCenter/*.test.ts',
     '<rootDir>/src/pages/ControlledShare/*.test.ts',
+    '<rootDir>/src/pages/SecurityOperations/*.test.ts',
   ],
   transform: {
     '^.+\\.(js|jsx|mjs|cjs|ts|tsx)$': '<rootDir>/../chat-sdk/config/jest/babelTransform.js',
