@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1.0",
+  "task": "BE-07",
+  "scope": "ENVIRONMENT",
+  "requiredEnvironmentVariables": [
+    "BE07_JDBC_URL",
+    "BE07_SOURCE_A",
+    "BE07_SOURCE_B",
+    "BE07_FEDERATED_SQL",
+    "BE07_VALIDATION_SQL",
+    "BE07_DENIED_JDBC_USER",
+    "BE07_DENIED_SQL",
+    "BE07_DENIED_ERROR_CONTAINS",
+    "BE07_RESOURCE_LIMIT_SQL",
+    "BE07_RESOURCE_LIMIT_ERROR_CONTAINS",
+    "BE07_EXPECTED_COLUMN_COUNT"
+  ],
+  "secretEnvironmentVariables": [
+    "BE07_JDBC_PASSWORD",
+    "BE07_DENIED_JDBC_PASSWORD"
+  ],
+  "optionalEnvironmentVariables": {
+    "BE07_JDBC_USER": "",
+    "BE07_DENIED_JDBC_URL": "BE07_JDBC_URL",
+    "BE07_HEALTH_SQL": "SELECT 1",
+    "BE07_QUERY_TIMEOUT_SECONDS": 60,
+    "BE07_RESOURCE_LIMIT_TIMEOUT_SECONDS": 120,
+    "BE07_MAX_RESULT_ROWS": 10000,
+    "BE07_EXPECTED_MIN_ROWS": 1
+  },
+  "controls": [
+    "federation-engine",
+    "cross-catalog-plan-and-query",
+    "supersonic-physical-query-gateway",
+    "bounded-result",
+    "semantic-consistency",
+    "server-resource-group-limit",
+    "restricted-account-isolation"
+  ],
+  "report": "headless/server/target/be07-federated-report.json"
+}
