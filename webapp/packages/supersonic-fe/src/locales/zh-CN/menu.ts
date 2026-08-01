@@ -25,4 +25,5 @@ export default {
   'menu.chat': '问答对话',
   'menu.dashboard': '分析看板',
   'menu.agent': '助理管理',
+  'menu.dashboard': '分析看板',
 };

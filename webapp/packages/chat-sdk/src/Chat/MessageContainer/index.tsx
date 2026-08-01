@@ -6,10 +6,9 @@ import { isMobile, updateMessageContainerScroll } from '../../utils/utils';
 import styles from './style.module.less';
 import AgentTip from '../components/AgentTip';
 import classNames from 'classnames';
-import { MsgDataType } from '../../common/type';
+import { DashboardQuerySource, MsgDataType } from '../../common/type';
 import ChatItem from '../../components/ChatItem';
 import { Alert, Button, Spin } from 'antd';
-import { DashboardQueryDraft } from '../../dashboardDraft';
 
 type Props = {
   id: string;
@@ -34,7 +33,7 @@ type Props = {
   onSendMsg: (value: string) => void;
   onRetryHistory: () => void;
   onContinueQuestion: (question: string) => void;
-  onSaveToDashboard?: (draft: DashboardQueryDraft) => void;
+  onSaveToDashboard?: (source: DashboardQuerySource) => void;
 };
 
 const MessageContainer: React.FC<Props> = ({

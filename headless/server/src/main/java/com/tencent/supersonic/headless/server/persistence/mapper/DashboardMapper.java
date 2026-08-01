@@ -2,8 +2,10 @@ package com.tencent.supersonic.headless.server.persistence.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.tencent.supersonic.headless.server.persistence.dataobject.DashboardDO;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Update;
 
+@Mapper
 public interface DashboardMapper extends BaseMapper<DashboardDO> {
 
     @Update("UPDATE s2_dashboard SET name = #{name}, description = #{description}, "

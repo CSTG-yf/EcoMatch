@@ -5,7 +5,6 @@ import {
   DownloadOutlined,
   RedoOutlined,
   FileJpgOutlined,
-  DashboardOutlined,
 } from '@ant-design/icons';
 import { Button } from 'antd';
 import { CLS_PREFIX } from '../../common/constants';
@@ -14,8 +13,6 @@ import classNames from 'classnames';
 import { updateQAFeedback } from '../../service';
 import { useMethodRegister } from '../../hooks';
 import { ChartItemContext } from '../ChatItem';
-import { DashboardQueryDraft, buildDashboardQueryDraft } from '../../dashboardDraft';
-import { MsgDataType } from '../../common/type';
 
 type Props = {
   queryId: number;
@@ -25,9 +22,6 @@ type Props = {
   isSimpleMode?: boolean;
   onExportData?: () => void;
   onReExecute?: (queryId: number) => void;
-  question?: string;
-  data?: MsgDataType;
-  onSaveToDashboard?: (draft: DashboardQueryDraft) => void;
 };
 
 const Tools: React.FC<Props> = ({
@@ -38,9 +32,6 @@ const Tools: React.FC<Props> = ({
   isSimpleMode = false,
   onExportData,
   onReExecute,
-  question,
-  data,
-  onSaveToDashboard,
 }) => {
   const [score, setScore] = useState(scoreValue || 0);
   const [exportLoading, setExportLoading] = useState<boolean>(false);
@@ -99,23 +90,6 @@ const Tools: React.FC<Props> = ({
                   >
                     <FileJpgOutlined />
                     <span className={`${prefixCls}-font-style`}>导出图片</span>
-                  </Button>
-                )}
-                {!isSimpleMode && onSaveToDashboard && (
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<DashboardOutlined />}
-                    onClick={() => {
-                      const draft =
-                        data && buildDashboardQueryDraft(question || data.question || '', data);
-                      if (!draft) {
-                        return;
-                      }
-                      onSaveToDashboard(draft);
-                    }}
-                  >
-                    <span className={`${prefixCls}-font-style`}>保存到看板</span>
                   </Button>
                 )}
                 {isLastMessage && (

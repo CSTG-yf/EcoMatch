@@ -4,9 +4,11 @@ import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatQueryDataReq;
+import com.tencent.supersonic.chat.api.pojo.request.DashboardQueryDataReq;
 import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.service.ChatQueryService;
+import com.tencent.supersonic.chat.server.service.impl.DashboardQueryService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -29,6 +31,9 @@ public class ChatQueryController {
 
     @Autowired
     private ChatQueryService chatQueryService;
+
+    @Autowired
+    private DashboardQueryService dashboardQueryService;
 
     @PostMapping("search")
     public Object search(@RequestBody ChatParseReq chatParseReq, HttpServletRequest request,
@@ -82,6 +87,13 @@ public class ChatQueryController {
             HttpServletRequest request, HttpServletResponse response) throws Exception {
         chatQueryDataReq.setUser(UserHolder.findUser(request, response));
         return chatQueryService.queryData(chatQueryDataReq, UserHolder.findUser(request, response));
+    }
+
+    @PostMapping("dashboardQueryData")
+    public Object dashboardQueryData(@RequestBody DashboardQueryDataReq dashboardQueryDataReq,
+            HttpServletRequest request, HttpServletResponse response) throws Exception {
+        return dashboardQueryService.queryData(dashboardQueryDataReq,
+                UserHolder.findUser(request, response));
     }
 
     @PostMapping("queryDimensionValue")

@@ -1,37 +1,54 @@
-import type { DashboardSemanticQuery } from 'supersonic-chat-sdk';
-
 export type DashboardStatus = 'DRAFT' | 'PUBLISHED' | 'DISABLED';
 export type DashboardAccessScope = 'PRIVATE' | 'ORGANIZATION' | 'DOMAIN';
-export type DashboardChartType = 'KPI_CARD' | 'TABLE' | 'LINE' | 'BAR' | 'PIE' | 'COMBO';
+export type DashboardErrorKind = 'FORBIDDEN' | 'CONFLICT' | 'FAILED';
 
-export type DashboardLayout = {
-  order: number;
-  span: 1 | 2;
+export type DashboardQuerySource = {
+  domainId?: number;
+  queryId?: number;
+  parseId?: number;
+  question: string;
+  modelId?: number;
+  dataSetId?: number;
+  modelName?: string;
+  dataSetName?: string;
+  masked?: boolean;
+  chartType?: string;
+  semanticQuery: Record<string, any>;
+};
+
+export type DashboardComponentLayout = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 };
 
 export type DashboardComponent = {
   id: string;
+  type: 'chart' | 'table' | 'number';
   title: string;
-  question?: string;
-  sourceQueryId?: number;
-  sourceParseId?: number;
-  chartType: DashboardChartType;
-  query: DashboardSemanticQuery;
-  layout: DashboardLayout;
+  layout: DashboardComponentLayout;
+  visualization: {
+    chartType: string;
+  };
+  query: Record<string, any>;
+  masked?: boolean;
 };
 
 export type DashboardGlobalFilter = {
-  id: string;
-  label: string;
-  bizName: string;
+  field: string;
   operator: string;
-  value: string[];
+  value: any;
 };
 
 export type DashboardConfig = {
-  schemaVersion: 1;
-  refreshInterval: number;
+  schemaVersion: '1.0';
+  layout: {
+    columns: 12;
+    rowHeight: number;
+  };
   globalFilters: DashboardGlobalFilter[];
+  refreshIntervalSeconds: number;
   components: DashboardComponent[];
 };
 
@@ -42,9 +59,9 @@ export type Dashboard = {
   description?: string;
   status: DashboardStatus;
   accessScope: DashboardAccessScope;
-  owner: string;
+  owner?: string;
   organizationId?: string;
-  config?: string;
+  config: DashboardConfig | string | Record<string, any>;
   version: number;
   publishedAt?: string;
   disabledAt?: string;
@@ -56,12 +73,7 @@ export type Dashboard = {
 
 export type DashboardPage = {
   list: Dashboard[];
-  pageNum: number;
-  pageSize: number;
   total: number;
-};
-
-export type DashboardQueryResult = {
-  resultList: Record<string, unknown>[];
-  totalCount?: number;
+  pageNum?: number;
+  pageSize?: number;
 };

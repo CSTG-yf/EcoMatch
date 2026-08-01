@@ -318,6 +318,14 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     @Override
     public Object queryData(ChatQueryDataReq chatQueryDataReq, User user) throws Exception {
         chatManageService.checkQueryAccess(chatQueryDataReq.getQueryId(), user);
+        return executeQueryData(chatQueryDataReq, user);
+    }
+
+    Object queryDataForDashboard(ChatQueryDataReq chatQueryDataReq, User user) throws Exception {
+        return executeQueryData(chatQueryDataReq, user);
+    }
+
+    private Object executeQueryData(ChatQueryDataReq chatQueryDataReq, User user) throws Exception {
         Integer parseId = chatQueryDataReq.getParseId();
         SemanticParseInfo parseInfo =
                 chatManageService.getParseInfo(chatQueryDataReq.getQueryId(), parseId);

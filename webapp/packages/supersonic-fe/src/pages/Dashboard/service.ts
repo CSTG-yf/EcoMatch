@@ -1,30 +1,34 @@
 import request from '@/services/request';
-import type {
-  Dashboard,
-  DashboardAccessScope,
-  DashboardPage,
-  DashboardQueryResult,
-  DashboardStatus,
-} from './types';
+import { serializeDashboardWriteConfig } from './model';
+import { Dashboard, DashboardAccessScope, DashboardConfig, DashboardStatus } from './types';
 
-const base = `${process.env.API_BASE_URL || '/api/semantic/'}dashboard`;
+const dashboardBase = `${process.env.API_BASE_URL}dashboard`;
 
-export const listDashboards = (params: {
+export const getDashboards = (params: {
   domainId: number;
   status?: DashboardStatus;
-  pageNum: number;
-  pageSize: number;
-}) => request<Result<DashboardPage>>(base, { method: 'GET', params });
+  pageNum?: number;
+  pageSize?: number;
+}) =>
+  request(`${dashboardBase}`, {
+    method: 'GET',
+    params,
+  });
 
-export const getDashboard = (id: number) => request<Result<Dashboard>>(`${base}/${id}`);
+export const getDashboard = (id: number) =>
+  request<Dashboard>(`${dashboardBase}/${id}`, { method: 'GET' });
 
 export const createDashboard = (data: {
   domainId: number;
   name: string;
   description?: string;
   accessScope: DashboardAccessScope;
-  config: string;
-}) => request<Result<Dashboard>>(base, { method: 'POST', data });
+  config: DashboardConfig;
+}) =>
+  request<Dashboard>(dashboardBase, {
+    method: 'POST',
+    data: { ...data, config: serializeDashboardWriteConfig(data.config) },
+  });
 
 export const updateDashboard = (
   id: number,
@@ -33,27 +37,42 @@ export const updateDashboard = (
     name: string;
     description?: string;
     accessScope: DashboardAccessScope;
-    config: string;
+    config: DashboardConfig;
   },
-) => request<Result<Dashboard>>(`${base}/${id}`, { method: 'PUT', data });
+) =>
+  request<Dashboard>(`${dashboardBase}/${id}`, {
+    method: 'PUT',
+    data: { ...data, config: serializeDashboardWriteConfig(data.config) },
+  });
 
-export const copyDashboard = (id: number, name?: string) =>
-  request<Result<Dashboard>>(`${base}/${id}/copy`, { method: 'POST', data: name ? { name } : {} });
+export const copyDashboard = (id: number) =>
+  request<Dashboard>(`${dashboardBase}/${id}/copy`, { method: 'POST' });
 
 export const publishDashboard = (id: number, version: number) =>
-  request<Result<Dashboard>>(`${base}/${id}/publish`, { method: 'POST', data: { version } });
+  request<Dashboard>(`${dashboardBase}/${id}/publish`, {
+    method: 'POST',
+    data: { version },
+  });
 
 export const disableDashboard = (id: number, version: number) =>
-  request<Result<Dashboard>>(`${base}/${id}/disable`, { method: 'POST', data: { version } });
+  request<Dashboard>(`${dashboardBase}/${id}/disable`, {
+    method: 'POST',
+    data: { version },
+  });
 
 export const deleteDashboard = (id: number) =>
-  request<Result<void>>(`${base}/${id}`, { method: 'DELETE' });
+  request(`${dashboardBase}/${id}`, { method: 'DELETE' });
 
-export const queryDashboardComponent = (data: Record<string, unknown>) =>
-  request<Result<DashboardQueryResult>>(
-    `${process.env.API_BASE_URL || '/api/semantic/'}query/dataSet`,
-    {
-      method: 'POST',
-      data,
-    },
-  );
+export const refreshDashboardQuery = (dashboardId: number, componentId: string) =>
+  request('/api/chat/query/dashboardQueryData', {
+    method: 'POST',
+    data: { dashboardId, componentId },
+  });
+
+export const getDashboardModel = (modelId: number) =>
+  request(`${process.env.API_BASE_URL}model/getModelListByIds/${modelId}`, {
+    method: 'GET',
+  });
+
+export const getDashboardDomains = () =>
+  request(`${process.env.API_BASE_URL}domain/getDomainList`, { method: 'GET' });
