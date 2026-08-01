@@ -33,4 +33,4 @@ python evaluation/run_qa02c.py `
 
 报告只保留控制项、证据状态、用例数、耗时和脱敏失败摘要，不保留原始 SQL、Token、凭据、JDBC URL 或金融数据。
 
-`scope=REPOSITORY` 只证明仓库回归通过。最终发布前必须在正式身份属性、生产权限/脱敏/审计规则和目标部署环境下执行环境门禁。
+`scope=REPOSITORY` 只证明仓库回归通过。正式环境执行器、无密钥配置模板和本地黑盒验证已交付；最终发布前必须按 `evaluation/QA-02C_ENVIRONMENT_README.md` 在正式身份属性、生产权限/脱敏/审计规则和目标部署环境下执行环境门禁。

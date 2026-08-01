@@ -42,7 +42,7 @@ QA-02C 每次重新执行 QA-02A、QA-02B，并聚合导出、分享、历史、
 python evaluation/run_qa02c.py
 ```
 
-仓库门禁通过后仍需在正式身份属性和生产权限规则下执行环境验收。完整说明见 `evaluation/QA-02C_README.md`。
+仓库门禁通过后，使用 `evaluation/run_qa02c_environment.py` 在正式身份属性和生产权限规则下执行环境验收。仓库门禁说明见 `evaluation/QA-02C_README.md`，环境准备与执行清单见 `evaluation/QA-02C_ENVIRONMENT_README.md`。
 
 # 原有 DuSQL 评测流程
 

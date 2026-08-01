@@ -3,7 +3,7 @@
 ## 1. 状态
 
 - 仓库级门禁：已完成（2026-08-01）。
-- 最终环境门禁：待正式身份属性、生产权限/脱敏/审计规则和目标部署环境。
+- 最终环境门禁：执行器、无密钥模板和本地黑盒验证已完成；待正式身份属性、生产权限/脱敏/审计规则和目标部署环境执行。
 - 机器可读报告：`task/QA-02C_REPOSITORY_ACCEPTANCE_REPORT.json`。
 
 ## 2. 交付
@@ -15,6 +15,10 @@
 | 执行说明 | `evaluation/QA-02C_README.md` |
 | 执行器单元测试 | `evaluation/tests/test_run_qa02c.py` |
 | 仓库验收报告 | `task/QA-02C_REPOSITORY_ACCEPTANCE_REPORT.json` |
+| 环境门禁执行器 | `evaluation/run_qa02c_environment.py` |
+| 环境配置模板 | `evaluation/qa02c_environment.template.json` |
+| 环境执行说明 | `evaluation/QA-02C_ENVIRONMENT_README.md` |
+| 环境执行器测试 | `evaluation/tests/test_run_qa02c_environment.py` |
 
 ## 3. 执行链
 
@@ -63,4 +67,5 @@ python evaluation/run_qa02c.py `
 
 - 可以证明当前仓库安全回归和发布产物已通过。
 - 不能提前声明比赛部署环境的正式身份、机构、岗位、脱敏规则和审计告警规则已验收。
-- 上述环境配置到位后，执行 QA-02C 环境门禁才能关闭 BE-09 最终验收。
+- 环境门禁已通过本机 14 场景黑盒模拟，泄漏和重定向负向用例均能阻断。
+- 上述环境配置到位后，按环境执行说明生成 8/8 控制项通过的正式报告，才能关闭 BE-09 最终验收。
