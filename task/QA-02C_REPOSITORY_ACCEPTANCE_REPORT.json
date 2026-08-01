@@ -32,7 +32,7 @@
     },
     {
       "description": "Logs, exports, shared responses and client error states do not expose protected data or credentials.",
-      "evidenceCount": 5,
+      "evidenceCount": 10,
       "id": "sensitive-data-egress",
       "status": "PASS"
     },
@@ -46,7 +46,7 @@
   "environmentGateRequired": true,
   "evidence": [
     {
-      "durationMs": 104211,
+      "durationMs": 89416,
       "id": "qa02a-permission-masking",
       "status": "PASS",
       "summary": {
@@ -61,7 +61,7 @@
       "type": "gate"
     },
     {
-      "durationMs": 51207,
+      "durationMs": 46028,
       "id": "qa02b-audit-alert",
       "status": "PASS",
       "summary": {
@@ -78,7 +78,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.service.impl.ExportTaskServiceImplTest",
-      "durationMs": 2582,
+      "durationMs": 2396,
       "failed": 0,
       "id": "export-task-security",
       "module": "headless/server",
@@ -90,7 +90,7 @@
     {
       "caseCount": 3,
       "className": "com.tencent.supersonic.headless.server.service.impl.DashboardExportQueryValidatorTest",
-      "durationMs": 94,
+      "durationMs": 50,
       "failed": 0,
       "id": "dashboard-export-integrity",
       "module": "headless/server",
@@ -102,7 +102,7 @@
     {
       "caseCount": 10,
       "className": "com.tencent.supersonic.headless.server.service.impl.ShareServiceImplTest",
-      "durationMs": 137,
+      "durationMs": 115,
       "failed": 0,
       "id": "share-policy-security",
       "module": "headless/server",
@@ -114,7 +114,7 @@
     {
       "caseCount": 2,
       "className": "com.tencent.supersonic.chat.server.service.impl.SharedDashboardDataServiceTest",
-      "durationMs": 28,
+      "durationMs": 19,
       "failed": 0,
       "id": "shared-dashboard-security",
       "module": "chat/server",
@@ -126,7 +126,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.chat.server.service.impl.ChatManageServiceAccessTest",
-      "durationMs": 8385,
+      "durationMs": 6810,
       "failed": 0,
       "id": "history-object-access",
       "module": "chat/server",
@@ -138,7 +138,7 @@
     {
       "caseCount": 1,
       "className": "com.tencent.supersonic.headless.server.facade.rest.ChatQueryApiControllerSecurityTest",
-      "durationMs": 7032,
+      "durationMs": 4971,
       "failed": 0,
       "id": "chat-query-input-security",
       "module": "headless/server",
@@ -150,7 +150,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.facade.rest.SemanticQueryRequestSecurityTest",
-      "durationMs": 324,
+      "durationMs": 247,
       "failed": 0,
       "id": "semantic-query-input-security",
       "module": "headless/server",
@@ -162,7 +162,7 @@
     {
       "caseCount": 4,
       "className": "com.tencent.supersonic.headless.server.facade.rest.SqlQueryApiControllerSecurityTest",
-      "durationMs": 124,
+      "durationMs": 122,
       "failed": 0,
       "id": "sql-query-input-security",
       "module": "headless/server",
@@ -174,7 +174,7 @@
     {
       "caseCount": 6,
       "className": "com.tencent.supersonic.common.security.SensitiveLoggingTest",
-      "durationMs": 5853,
+      "durationMs": 6086,
       "failed": 0,
       "id": "common-sensitive-logging",
       "module": "common",
@@ -186,7 +186,7 @@
     {
       "caseCount": 7,
       "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest",
-      "durationMs": 1930,
+      "durationMs": 1097,
       "failed": 0,
       "id": "query-sensitive-logging",
       "module": "headless/server",
@@ -196,14 +196,74 @@
       "type": "java"
     },
     {
-      "durationMs": 11769,
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.integration.ExternalIntegrationGatewayContractTest",
+      "durationMs": 311,
+      "failed": 0,
+      "id": "integration-outbound-contract",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 3,
+      "className": "com.tencent.supersonic.headless.server.integration.InboundIntegrationServiceContractTest",
+      "durationMs": 221,
+      "failed": 0,
+      "id": "integration-inbound-contract",
+      "module": "headless/server",
+      "passed": 3,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.integration.IntegrationSecurityTest",
+      "durationMs": 7,
+      "failed": 0,
+      "id": "integration-signature-and-idempotency",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 1,
+      "className": "com.tencent.supersonic.headless.server.integration.JdkIntegrationTransportTest",
+      "durationMs": 129,
+      "failed": 0,
+      "id": "integration-transport-boundary",
+      "module": "headless/server",
+      "passed": 1,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "caseCount": 2,
+      "className": "com.tencent.supersonic.headless.server.integration.IntegrationConfigurationTest",
+      "durationMs": 1164,
+      "failed": 0,
+      "id": "integration-configuration-boundary",
+      "module": "headless/server",
+      "passed": 2,
+      "skipped": 0,
+      "status": "PASS",
+      "type": "java"
+    },
+    {
+      "durationMs": 10076,
       "exitCode": 0,
       "id": "frontend-security-regression",
       "status": "PASS",
       "type": "command"
     },
     {
-      "durationMs": 90515,
+      "durationMs": 80954,
       "exitCode": 0,
       "id": "frontend-production-build",
       "status": "PASS",
@@ -211,17 +271,17 @@
     }
   ],
   "failures": [],
-  "generatedAt": "2026-08-01T13:41:14.636021+00:00",
+  "generatedAt": "2026-08-01T15:03:22.935467+00:00",
   "schemaVersion": "1.0",
   "scope": "REPOSITORY",
   "status": "PASS",
   "summary": {
     "controlCount": 7,
-    "evidenceCount": 14,
+    "evidenceCount": 19,
     "failureCount": 0,
-    "javaCaseCount": 54,
+    "javaCaseCount": 64,
     "passedControlCount": 7,
-    "passedEvidenceCount": 14
+    "passedEvidenceCount": 19
   },
   "task": "QA-02C"
 }

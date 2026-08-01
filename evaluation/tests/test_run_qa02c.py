@@ -25,7 +25,7 @@ class Qa02cSecurityGateTest(unittest.TestCase):
         manifest = json.loads((ROOT / "qa02c_manifest.json").read_text(encoding="utf-8"))
         validated = validate_manifest(manifest)
         control_ids = {control["id"] for control in validated["controls"]}
-        self.assertEqual(len(validated["evidence"]), 14)
+        self.assertEqual(len(validated["evidence"]), 19)
         self.assertEqual(len(control_ids), 7)
         self.assertIn("controlled-export", control_ids)
         self.assertIn("controlled-sharing", control_ids)

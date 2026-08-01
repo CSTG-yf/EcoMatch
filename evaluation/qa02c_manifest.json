@@ -75,6 +75,36 @@
       "className": "com.tencent.supersonic.headless.server.security.SensitiveQueryLoggingTest"
     },
     {
+      "id": "integration-outbound-contract",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.integration.ExternalIntegrationGatewayContractTest"
+    },
+    {
+      "id": "integration-inbound-contract",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.integration.InboundIntegrationServiceContractTest"
+    },
+    {
+      "id": "integration-signature-and-idempotency",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.integration.IntegrationSecurityTest"
+    },
+    {
+      "id": "integration-transport-boundary",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.integration.JdkIntegrationTransportTest"
+    },
+    {
+      "id": "integration-configuration-boundary",
+      "type": "java",
+      "module": "headless/server",
+      "className": "com.tencent.supersonic.headless.server.integration.IntegrationConfigurationTest"
+    },
+    {
       "id": "frontend-security-regression",
       "type": "command",
       "cwd": "webapp/packages/supersonic-fe",
@@ -137,6 +167,11 @@
       "evidence": [
         "common-sensitive-logging",
         "query-sensitive-logging",
+        "integration-outbound-contract",
+        "integration-inbound-contract",
+        "integration-signature-and-idempotency",
+        "integration-transport-boundary",
+        "integration-configuration-boundary",
         "export-task-security",
         "shared-dashboard-security",
         "frontend-security-regression"

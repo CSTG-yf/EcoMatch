@@ -1,0 +1,28 @@
+s2:
+  integration:
+    enabled: true
+    allow-http-local: false
+    connect-timeout-seconds: 10
+    request-timeout-seconds: 30
+    maximum-response-bytes: 2097152
+    signature-skew-seconds: 300
+    replay-maximum-entries: 100000
+    idempotency-maximum-entries: 100000
+    idempotency-ttl-seconds: 86400
+    rate-limit-capacity: 100
+    rate-limit-refill-per-second: 20
+    systems:
+      data-platform:
+        endpoint: ${BE11_DATA_PLATFORM_ENDPOINT}
+        signing-secret: ${BE11_DATA_PLATFORM_SIGNING_SECRET}
+        organization-id: ${BE11_DATA_PLATFORM_ORGANIZATION_ID}
+        operations:
+          - FETCH_METRICS
+          - METRIC_CHANGED
+      marketing-platform:
+        endpoint: ${BE11_MARKETING_PLATFORM_ENDPOINT}
+        signing-secret: ${BE11_MARKETING_PLATFORM_SIGNING_SECRET}
+        organization-id: ${BE11_MARKETING_PLATFORM_ORGANIZATION_ID}
+        operations:
+          - PUSH_SEGMENT
+          - CAMPAIGN_RESULT
