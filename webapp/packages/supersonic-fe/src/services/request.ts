@@ -43,8 +43,12 @@ const responseInterceptor = async (response: Response) => {
   } else {
     try {
       const data: Result<any> = await response?.clone()?.json?.();
-      const isDashboardObjectRequest = response.url.includes('/api/semantic/dashboard');
-      if (Number(data.code) === 403 && !isDashboardObjectRequest) {
+      const isHandledObjectRequest = [
+        '/api/semantic/dashboard',
+        '/api/semantic/export',
+        '/api/semantic/share',
+      ].some((path) => response.url.includes(path));
+      if (Number(data.code) === 403 && !isHandledObjectRequest) {
         history.push('/login');
         return response;
       }

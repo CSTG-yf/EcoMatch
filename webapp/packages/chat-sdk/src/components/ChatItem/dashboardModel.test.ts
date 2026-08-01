@@ -40,6 +40,7 @@ describe('dashboard query source', () => {
       semanticQuery: {
         queryId: 29,
         parseId: 17,
+        dataSetId: 5,
         modelId: 3,
       },
     });

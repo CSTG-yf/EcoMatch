@@ -87,16 +87,19 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     private final ExportTaskMapper exportTaskMapper;
     private final SemanticLayerService semanticLayerService;
     private final DashboardService dashboardService;
+    private final DashboardExportQueryValidator dashboardExportQueryValidator;
     private final AuditEventPublisher auditEventPublisher;
     private final Path exportRoot;
 
     public ExportTaskServiceImpl(ExportTaskMapper exportTaskMapper,
             SemanticLayerService semanticLayerService, DashboardService dashboardService,
+            DashboardExportQueryValidator dashboardExportQueryValidator,
             AuditEventPublisher auditEventPublisher,
             @Value("${s2.export.storage-dir:${java.io.tmpdir}/supersonic-exports}") String storageDirectory) {
         this.exportTaskMapper = exportTaskMapper;
         this.semanticLayerService = semanticLayerService;
         this.dashboardService = dashboardService;
+        this.dashboardExportQueryValidator = dashboardExportQueryValidator;
         this.auditEventPublisher = auditEventPublisher;
         this.exportRoot = Path.of(storageDirectory).toAbsolutePath().normalize();
     }
@@ -109,6 +112,9 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         DashboardResp dashboard = request.getResourceType() == ExportResourceType.DASHBOARD
                 ? dashboardService.get(request.getDashboardId(), user)
                 : null;
+        if (dashboard != null) {
+            dashboardExportQueryValidator.validate(dashboard, request.getQueries());
+        }
         String resourceId = dashboard == null ? taskId : String.valueOf(dashboard.getId());
         ExportTaskDO task = newTask(taskId, request, resourceId, user);
         exportTaskMapper.insert(task);

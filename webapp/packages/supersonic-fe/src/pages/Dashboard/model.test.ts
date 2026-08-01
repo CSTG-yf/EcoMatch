@@ -11,12 +11,26 @@ import {
   moveComponent,
   normalizeDashboardPage,
   parseDashboardConfig,
+  parseDashboardRouteId,
+  dashboardRouteParamFromPath,
   requireDashboardSourceDomain,
   serializeDashboardConfig,
   serializeDashboardWriteConfig,
 } from './model';
 
 describe('dashboard model', () => {
+  it('accepts only positive integer dashboard route ids', () => {
+    expect(parseDashboardRouteId('7')).toBe(7);
+    expect(parseDashboardRouteId('0')).toBeUndefined();
+    expect(parseDashboardRouteId('-1')).toBeUndefined();
+    expect(parseDashboardRouteId('7x')).toBeUndefined();
+  });
+
+  it('extracts dashboard ids from editor and viewer paths', () => {
+    expect(dashboardRouteParamFromPath('/dashboard/7/edit')).toBe('7');
+    expect(dashboardRouteParamFromPath('/webapp/dashboard/8/view')).toBe('8');
+    expect(dashboardRouteParamFromPath('/dashboard')).toBeUndefined();
+  });
   it('normalizes wrapped and direct page responses', () => {
     expect(normalizeDashboardPage({ data: { list: [{ id: 1 }], total: 1 } })).toEqual({
       data: [{ id: 1 }],
@@ -165,7 +179,7 @@ describe('dashboard model', () => {
         queryId: 29,
         parseId: 17,
         question: '存款余额是多少？',
-        semanticQuery: { queryId: 29, parseId: 17, modelId: 3 },
+        semanticQuery: { queryId: 29, parseId: 17, dataSetId: 5, modelId: 3 },
       },
       '存款余额趋势',
       300,

@@ -38,6 +38,7 @@
     "start:test": "cross-env REACT_APP_ENV=test MOCK=none max dev",
     "pretest": "node ./tests/beforeTest",
     "test": "max test",
+    "test:contest": "node ../chat-sdk/node_modules/jest/bin/jest.js --config jest.contest.config.js --runInBand",
     "test:dashboard": "node ../chat-sdk/node_modules/jest/bin/jest.js --config jest.dashboard.config.js --runInBand",
     "test:all": "node ./tests/run-tests.js",
     "test:component": "max test ./src/components",

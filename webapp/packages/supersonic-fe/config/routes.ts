@@ -46,9 +46,34 @@ const ROUTES = [
     envEnableList: [ENV_KEY.CHAT],
   },
   {
+    path: '/dashboard/:id/edit',
+    component: './Dashboard',
+    hideInMenu: true,
+    envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
+  },
+  {
+    path: '/dashboard/:id/view',
+    component: './Dashboard',
+    hideInMenu: true,
+    envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
+  },
+  {
     path: '/dashboard',
     name: 'dashboard',
     component: './Dashboard',
+    envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
+  },
+  {
+    path: '/exports',
+    name: 'exports',
+    component: './ExportCenter',
+    envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
+  },
+  {
+    path: '/share/:token',
+    component: './ControlledShare/ControlledShareAccessPage',
+    hideInMenu: true,
+    layout: false,
     envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
   },
   {
@@ -231,21 +256,6 @@ const ROUTES = [
     name: 'evaluation',
     component: './Evaluation',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
-  },
-  {
-    path: '/dashboard/:id/edit',
-    component: './Dashboard',
-    hideInMenu: true,
-  },
-  {
-    path: '/dashboard/:id/view',
-    component: './Dashboard',
-    hideInMenu: true,
-  },
-  {
-    path: '/dashboard',
-    name: 'dashboard',
-    component: './Dashboard',
   },
   {
     path: '/security',

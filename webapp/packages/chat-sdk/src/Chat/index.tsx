@@ -55,6 +55,7 @@ type Props = {
   onCurrentAgentChange?: (agent?: AgentType) => void;
   onReportMsgEvent?: (msg: string, valid: boolean) => void;
   onSaveToDashboard?: (source: DashboardQuerySource) => void;
+  onExportQuery?: (source: DashboardQuerySource) => void;
 };
 
 const Chat: ForwardRefRenderFunction<any, Props> = (
@@ -70,6 +71,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     onCurrentAgentChange,
     onReportMsgEvent,
     onSaveToDashboard,
+    onExportQuery,
   },
   ref
 ) => {
@@ -520,6 +522,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                     isDeveloper={isDeveloper}
                     integrateSystem={integrateSystem}
                     onSaveToDashboard={onSaveToDashboard}
+                    onExportQuery={onExportQuery}
                     onMsgDataLoaded={onMsgDataLoaded}
                     onSendMsg={onSendMsg}
                     onRetryHistory={() => {

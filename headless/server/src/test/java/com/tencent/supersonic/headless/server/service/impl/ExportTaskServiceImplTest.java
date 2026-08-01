@@ -62,7 +62,8 @@ class ExportTaskServiceImplTest {
         semanticLayerService = mock(SemanticLayerService.class);
         auditPublisher = mock(AuditEventPublisher.class);
         service = new ExportTaskServiceImpl(mapper, semanticLayerService,
-                mock(DashboardService.class), auditPublisher, exportRoot.toString());
+                mock(DashboardService.class), mock(DashboardExportQueryValidator.class),
+                auditPublisher, exportRoot.toString());
         when(mapper.insert(any(ExportTaskDO.class))).thenAnswer(invocation -> {
             persisted = invocation.getArgument(0);
             persisted.setId(1L);

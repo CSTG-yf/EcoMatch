@@ -45,6 +45,7 @@ import MultiTurnContextBar from './MultiTurnContextBar';
 import { shouldAwaitClarification } from './contextModel';
 import TrustExplanationPanel from './TrustExplanationPanel';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
+import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
 const SUMMARY_POLL_MAX_ATTEMPTS = 60;
@@ -74,6 +75,7 @@ type Props = {
   onSendMsg?: (msg: string) => void;
   onContinueQuestion?: (question: string) => void;
   onSaveToDashboard?: (source: DashboardQuerySource) => void;
+  onExportQuery?: (source: DashboardQuerySource) => void;
 };
 
 export const ChartItemContext = createContext({
@@ -106,6 +108,7 @@ const ChatItem: React.FC<Props> = ({
   onSendMsg,
   onContinueQuestion,
   onSaveToDashboard,
+  onExportQuery,
 }) => {
   const [parseLoading, setParseLoading] = useState(false);
   const [parseTimeCost, setParseTimeCost] = useState<ParseTimeCostType>();
@@ -550,7 +553,24 @@ const ChatItem: React.FC<Props> = ({
     }
   };
 
+  const actualQueryText = parseInfo?.properties?.CONTEXT?.queryText ?? msg;
+
   const onExportData = () => {
+    if (onExportQuery) {
+      const capability = canSaveDashboardResult(data);
+      if (!capability.enabled) {
+        message.error(capability.reason || '该条消息暂不支持导出');
+        return;
+      }
+      onExportQuery(
+        buildDashboardQuerySource({
+          question: actualQueryText,
+          context: parseInfo,
+          data,
+        })
+      );
+      return;
+    }
     const { queryColumns, queryResults } = data || {};
     if (!!queryResults && !!queryColumns) {
       const exportData = queryResults.map(item => {
@@ -579,8 +599,6 @@ const ChatItem: React.FC<Props> = ({
 
   const { register, call } = useMethodRegister(() => message.error('该条消息暂不支持该操作'));
 
-  let actualQueryText = parseInfo?.properties?.CONTEXT?.queryText; //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
-  actualQueryText = actualQueryText == null ? msg : actualQueryText;
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>

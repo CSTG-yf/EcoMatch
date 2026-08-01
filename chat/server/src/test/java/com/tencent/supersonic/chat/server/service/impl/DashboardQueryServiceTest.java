@@ -121,4 +121,35 @@ class DashboardQueryServiceTest {
 
         assertThrows(InvalidArgumentException.class, () -> service.queryData(request, viewer));
     }
+
+    @Test
+    void batchesSharedComponentsWithoutFailingTheWholeDashboard() throws Exception {
+        DashboardResp dashboard = new DashboardResp();
+        dashboard.setId(7L);
+        dashboard.setDomainId(10L);
+        dashboard.setConfig("""
+                {
+                  "globalFilters": [],
+                  "components": [
+                    {"id":"ok","query":{"queryId":20,"parseId":1}},
+                    {"id":"invalid","query":{"queryId":21}}
+                  ]
+                }
+                """);
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.setDataSet(com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                .dataSetId(3L).build());
+        when(chatManageService.getParseInfo(20L, 1)).thenReturn(parseInfo);
+        DataSetResp dataSet = new DataSetResp();
+        dataSet.setDomainId(10L);
+        when(dataSetService.getDataSet(3L)).thenReturn(dataSet);
+        when(chatQueryService.queryDataForDashboard(
+                org.mockito.ArgumentMatchers.any(ChatQueryDataReq.class), eq(viewer)))
+                        .thenReturn("result");
+
+        DashboardQueryService.BatchQueryResult batch = service.queryAll(dashboard, viewer);
+
+        assertEquals("result", batch.data().get("ok"));
+        assertEquals("QUERY_FAILED", batch.errors().get("invalid"));
+    }
 }

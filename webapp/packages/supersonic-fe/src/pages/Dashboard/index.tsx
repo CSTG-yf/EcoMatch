@@ -22,6 +22,8 @@ import {
   createEmptyDashboardConfig,
   normalizeDashboardPage,
   parseDashboardConfig,
+  parseDashboardRouteId,
+  dashboardRouteParamFromPath,
   requireDashboardSourceDomain,
 } from './model';
 import {
@@ -66,6 +68,9 @@ const statusLabel: Record<DashboardStatus, string> = {
 
 const DashboardPage = () => {
   const location = useLocation();
+  const dashboardRouteParam = dashboardRouteParamFromPath(location.pathname);
+  const dashboardRouteId = parseDashboardRouteId(dashboardRouteParam);
+  const routeReadOnly = location.pathname.endsWith('/view');
   const { initialState } = useModel('@@initialState');
   const routeSource = (location.state as { source?: DashboardQuerySource } | undefined)?.source;
   const [form] = Form.useForm<CreateForm>();
@@ -137,6 +142,39 @@ const DashboardPage = () => {
   useEffect(() => {
     loadDomains();
   }, []);
+
+  useEffect(() => {
+    if (!dashboardRouteParam) {
+      return;
+    }
+    if (!dashboardRouteId) {
+      message.error('看板地址无效');
+      history.replace('/dashboard');
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    getDashboard(dashboardRouteId)
+      .then((response) => {
+        if (!cancelled) {
+          setActive(unwrapDashboard(response));
+        }
+      })
+      .catch((error: any) => {
+        if (!cancelled) {
+          message.error(error?.msg || '看板详情加载失败');
+          history.replace('/dashboard');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboardRouteId, dashboardRouteParam]);
 
   useEffect(() => {
     loadList();
@@ -264,10 +302,14 @@ const DashboardPage = () => {
     return (
       <DashboardEditor
         dashboard={active}
-        editable={editable}
+        editable={editable && !routeReadOnly}
         onBack={() => {
           setActive(undefined);
-          loadList();
+          if (dashboardRouteId) {
+            history.replace('/dashboard');
+          } else {
+            loadList();
+          }
         }}
         onUpdated={(updated) => {
           setActive(updated);

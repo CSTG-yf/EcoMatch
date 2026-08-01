@@ -184,6 +184,7 @@ export type MsgDataType = {
 export type DashboardSemanticQuery = {
   queryId?: number;
   parseId?: number;
+  dataSetId?: number;
   modelId?: number;
   dimensions?: FieldType[];
   metrics?: FieldType[];

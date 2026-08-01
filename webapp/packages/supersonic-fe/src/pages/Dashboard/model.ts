@@ -92,6 +92,7 @@ const semanticDate = (dateInfo: any) => {
 const sanitizeSemanticQuery = (query: any = {}) => ({
   queryId: query.queryId,
   parseId: query.parseId,
+  dataSetId: query.dataSetId,
   modelId: query.modelId,
   dimensions: Array.isArray(query.dimensions) ? query.dimensions.map(semanticField) : [],
   metrics: Array.isArray(query.metrics) ? query.metrics.map(semanticField) : [],
@@ -147,6 +148,17 @@ export const createEmptyDashboardConfig = (): DashboardConfig => ({
   refreshIntervalSeconds: 0,
   components: [],
 });
+
+export const parseDashboardRouteId = (value?: string): number | undefined => {
+  if (!value || !/^\d+$/.test(value)) {
+    return undefined;
+  }
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+};
+
+export const dashboardRouteParamFromPath = (pathname: string): string | undefined =>
+  pathname.match(/\/dashboard\/([^/]+)\/(?:edit|view)\/?$/)?.[1];
 
 export const buildDashboardConfig = (config: Partial<DashboardConfig>): DashboardConfig => ({
   schemaVersion: '1.0',

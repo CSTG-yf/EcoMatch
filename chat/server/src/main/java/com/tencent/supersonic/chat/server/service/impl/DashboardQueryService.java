@@ -8,6 +8,7 @@ import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.response.DashboardResp;
@@ -17,10 +18,14 @@ import com.tencent.supersonic.headless.server.service.DataSetService;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 @Service
 public class DashboardQueryService {
+
+    private static final int MAX_COMPONENTS = 100;
 
     private final DashboardService dashboardService;
     private final ChatQueryServiceImpl chatQueryService;
@@ -41,8 +46,45 @@ public class DashboardQueryService {
     public Object queryData(DashboardQueryDataReq request, User user) throws Exception {
         validateRequest(request);
         DashboardResp dashboard = dashboardService.get(request.getDashboardId(), user);
+        return queryData(dashboard, request.getComponentId(), user);
+    }
+
+    public Object queryData(DashboardResp dashboard, String componentId, User user)
+            throws Exception {
         JsonNode config = readConfig(dashboard);
-        JsonNode component = findComponent(config.path("components"), request.getComponentId());
+        JsonNode component = findComponent(config.path("components"), componentId);
+        return queryData(dashboard, config, component, user);
+    }
+
+    public BatchQueryResult queryAll(DashboardResp dashboard, User user) {
+        JsonNode config = readConfig(dashboard);
+        Map<String, Object> data = new LinkedHashMap<>();
+        Map<String, String> errors = new LinkedHashMap<>();
+        JsonNode components = config.path("components");
+        if (!components.isArray()) {
+            throw new InvalidArgumentException("dashboard components are invalid");
+        }
+        if (components.size() > MAX_COMPONENTS) {
+            throw new InvalidArgumentException("dashboard contains too many components");
+        }
+        for (JsonNode component : components) {
+            String componentId = component.path("id").asText("").trim();
+            if (componentId.isEmpty()) {
+                continue;
+            }
+            try {
+                data.put(componentId, queryData(dashboard, config, component, user));
+            } catch (InvalidPermissionException e) {
+                errors.put(componentId, "FORBIDDEN");
+            } catch (Exception e) {
+                errors.put(componentId, "QUERY_FAILED");
+            }
+        }
+        return new BatchQueryResult(data, errors);
+    }
+
+    private Object queryData(DashboardResp dashboard, JsonNode config, JsonNode component,
+            User user) throws Exception {
         ChatQueryDataReq query = readQuery(component.path("query"));
         requireMatchingDomain(dashboard, query);
         mergeGlobalFilters(query, config.path("globalFilters"));
@@ -145,4 +187,6 @@ public class DashboardQueryService {
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
+
+    public record BatchQueryResult(Map<String, Object> data, Map<String, String> errors) {}
 }

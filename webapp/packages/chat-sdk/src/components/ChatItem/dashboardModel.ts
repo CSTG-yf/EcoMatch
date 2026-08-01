@@ -127,6 +127,7 @@ export const buildDashboardQuerySource = ({
     semanticQuery: {
       queryId,
       parseId,
+      dataSetId: effectiveContext?.dataSet?.id,
       modelId,
       dimensions,
       metrics,

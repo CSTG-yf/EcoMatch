@@ -5,6 +5,7 @@ import { Chat, DashboardQuerySource } from 'supersonic-chat-sdk';
 import { canViewDeveloperDiagnostics } from '@/utils/developerAccess';
 import { message } from 'antd';
 import { getDashboardModel } from '../Dashboard/service';
+import { buildQueryExportRequest } from '../ExportCenter';
 
 const ChatPage = () => {
   const location = useLocation();
@@ -33,12 +34,23 @@ const ChatPage = () => {
     }
   };
 
+  const exportQuery = (source: DashboardQuerySource) => {
+    try {
+      history.push('/exports', {
+        initialRequest: buildQueryExportRequest(source, 'XLSX'),
+      });
+    } catch (error: any) {
+      message.error(error?.message || '当前问数结果无法安全导出');
+    }
+  };
+
   return (
     <Chat
       initialAgentId={agentId ? +agentId : undefined}
       token={getToken() || ''}
       isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
       onSaveToDashboard={saveToDashboard}
+      onExportQuery={exportQuery}
     />
   );
 };

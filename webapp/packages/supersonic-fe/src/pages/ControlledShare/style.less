@@ -1,0 +1,196 @@
+.createdResult {
+  display: grid;
+  gap: 18px;
+  padding: 8px 0;
+}
+
+.copyField {
+  display: flex !important;
+}
+
+.copyInput {
+  min-width: 0;
+  flex: 1;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.manageToolbar,
+.shareItemHeader,
+.accessHeader,
+.sharedComponentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manageToolbar {
+  margin-bottom: 12px;
+}
+
+.shareItem {
+  gap: 16px;
+  align-items: center !important;
+}
+
+.shareItemBody {
+  min-width: 0;
+  flex: 1;
+}
+
+.shareItemHeader {
+  margin-bottom: 8px;
+}
+
+.shareMetadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 4px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.pagination {
+  margin-top: 18px;
+  text-align: right;
+}
+
+.accessPage {
+  min-height: 100vh;
+  padding: 24px;
+  background: #f2f5f9;
+}
+
+.accessSurface {
+  position: relative;
+  min-height: calc(100vh - 48px);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+  overflow: hidden;
+  border: 1px solid #e3e8ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.accessHeader {
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.accessHeader h2 {
+  margin: 0 0 6px !important;
+}
+
+.watermarkBanner {
+  margin-bottom: 18px;
+}
+
+.sharedGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.sharedComponent {
+  min-height: 240px;
+  overflow: hidden;
+  border: 1px solid #dfe5ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sharedComponentHeader {
+  min-height: 48px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.sharedComponentBody {
+  min-height: 190px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.sharedComponentBody > :global(.ant-empty),
+.sharedComponentBody > :global(.ant-alert) {
+  margin: 42px auto;
+}
+
+.componentTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sharedChart {
+  min-height: 280px;
+}
+
+.numberValue {
+  padding: 48px 12px;
+  color: #182230;
+  font-weight: 700;
+  font-size: 42px;
+  text-align: center;
+}
+
+.watermarkOverlay {
+  position: fixed;
+  right: 18px;
+  bottom: 14px;
+  z-index: 2;
+  max-width: calc(100vw - 36px);
+  padding: 5px 9px;
+  overflow: hidden;
+  color: rgb(30 64 175 / 46%);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .formGrid,
+  .sharedGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .shareItem,
+  .shareItemHeader,
+  .accessHeader,
+  .sharedComponentHeader {
+    align-items: flex-start !important;
+    flex-direction: column;
+  }
+
+  .shareItem > button,
+  .shareItem :global(.ant-popconfirm-popup-content) {
+    align-self: flex-end;
+  }
+
+  .accessPage {
+    padding: 0;
+  }
+
+  .accessSurface {
+    min-height: 100vh;
+    padding: 16px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .sharedComponent {
+    min-height: 210px;
+  }
+}

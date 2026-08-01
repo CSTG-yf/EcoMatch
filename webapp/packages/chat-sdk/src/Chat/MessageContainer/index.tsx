@@ -34,6 +34,7 @@ type Props = {
   onRetryHistory: () => void;
   onContinueQuestion: (question: string) => void;
   onSaveToDashboard?: (source: DashboardQuerySource) => void;
+  onExportQuery?: (source: DashboardQuerySource) => void;
 };
 
 const MessageContainer: React.FC<Props> = ({
@@ -54,6 +55,7 @@ const MessageContainer: React.FC<Props> = ({
   onRetryHistory,
   onContinueQuestion,
   onSaveToDashboard,
+  onExportQuery,
 }) => {
   const [triggerResize, setTriggerResize] = useState(false);
   const onResize = useCallback(() => {
@@ -147,6 +149,7 @@ const MessageContainer: React.FC<Props> = ({
                     onSendMsg={onSendMsg}
                     onContinueQuestion={onContinueQuestion}
                     onSaveToDashboard={onSaveToDashboard}
+                    onExportQuery={onExportQuery}
                     isLastMessage={index === messageList.length - 1}
                   />
                 </>
@@ -169,7 +172,8 @@ function areEqual(prevProps: Props, nextProps: Props) {
     prevProps.isSimpleMode === nextProps.isSimpleMode &&
     prevProps.historyLoading === nextProps.historyLoading &&
     prevProps.historyError === nextProps.historyError &&
-    prevProps.onSaveToDashboard === nextProps.onSaveToDashboard
+    prevProps.onSaveToDashboard === nextProps.onSaveToDashboard &&
+    prevProps.onExportQuery === nextProps.onExportQuery
   ) {
     return true;
   }

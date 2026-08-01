@@ -25,7 +25,9 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SendOutlined,
+  ShareAltOutlined,
   SettingOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -47,6 +49,18 @@ import {
 import { Dashboard, DashboardAccessScope, DashboardComponent, DashboardConfig } from '../types';
 import DashboardCard from './DashboardCard';
 import styles from '../style.less';
+import {
+  ShareCreateDialog,
+  ShareManagementDialog,
+} from '../../ControlledShare';
+import {
+  CreateExport,
+  buildDashboardExportRequest,
+  createExportTask,
+  downloadExportFile,
+  saveDownload,
+} from '../../ExportCenter';
+import { ExportCreateReq } from '../../ExportCenter/types';
 
 type Props = {
   dashboard: Dashboard;
@@ -81,10 +95,19 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
   const [saveState, setSaveState] = useState<'clean' | 'dirty' | 'saved'>('clean');
   const [conflict, setConflict] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareCreateOpen, setShareCreateOpen] = useState(false);
+  const [shareManageOpen, setShareManageOpen] = useState(false);
   const [runtime, setRuntime] = useState<Record<string, any>>({});
   const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({});
   const [refreshingIds, setRefreshingIds] = useState<string[]>([]);
   const readOnly = !editable || !canEditDashboard(draft.status);
+  const exportRequest = useMemo(() => {
+    try {
+      return buildDashboardExportRequest(draft, 'XLSX');
+    } catch {
+      return undefined;
+    }
+  }, [draft.id, draft.version, draft.config]);
 
   useEffect(() => {
     setDraft(dashboard);
@@ -137,6 +160,17 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
   };
 
   const refreshAll = () => config.components.forEach(refreshComponent);
+
+  const createDashboardExport = async (request: ExportCreateReq) => {
+    const task = await createExportTask(request);
+    if (task.downloadable) {
+      saveDownload(await downloadExportFile(task.taskId, task.fileName));
+      message.success('导出文件已生成');
+    } else {
+      message.success(`导出任务已创建：${task.taskId}`);
+    }
+    return task;
+  };
 
   useEffect(() => {
     if (config.components.length > 0) {
@@ -493,6 +527,26 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
           <Button icon={<CopyOutlined />} onClick={copyServerDashboard}>
             复制
           </Button>
+          <CreateExport
+            initialRequest={exportRequest}
+            lockedSource
+            disabled={!exportRequest || saveState === 'dirty'}
+            buttonType="default"
+            buttonText="导出"
+            onCreate={createDashboardExport}
+          />
+          {draft.status === 'PUBLISHED' && (
+            <Button
+              icon={<ShareAltOutlined />}
+              disabled={!editable || saveState === 'dirty'}
+              onClick={() => setShareCreateOpen(true)}
+            >
+              分享
+            </Button>
+          )}
+          <Button icon={<UnorderedListOutlined />} onClick={() => setShareManageOpen(true)}>
+            分享管理
+          </Button>
           {draft.status === 'DRAFT' ? (
             <Popconfirm
               title="确认发布当前看板？"
@@ -555,6 +609,17 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
           }
         />
       )}
+
+      <ShareCreateDialog
+        open={shareCreateOpen}
+        dashboardId={draft.id}
+        dashboardName={draft.name}
+        onClose={() => setShareCreateOpen(false)}
+      />
+      <ShareManagementDialog
+        open={shareManageOpen}
+        onClose={() => setShareManageOpen(false)}
+      />
 
       <div className={styles.editorBody}>
         <aside className={styles.componentRail}>
