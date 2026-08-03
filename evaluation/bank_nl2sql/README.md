@@ -2,12 +2,54 @@
 
 此目录包含 DATA-02 的可复现产物：
 
+- `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
 - `build_dataset.py`：冻结官方题、意图标注和模板隔离后的评测切分；
-- `train.jsonl`、`dev.jsonl`、`test.jsonl`：200 道官方题；
+- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（2.0.0 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
+
+## 正式评估库 2.0.0
+
+`evaluation/bank_nl2sql/official/2.0.0/` 是**唯一正式评分依据**，包含：
+
+- `bank-nl2sql-ground-truth-v2.0.0.xlsx`：正式 ground-truth 工作簿（199 题）；
+- `official-manifest.json`：`datasetVersion=2.0.0`、`canonicalReady=true`、
+  `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
+  源/候选/事实区哈希与变更计数；
+- `contract-change-ledger.json`：全部变更的逐条账本（含文本哈希）；
+- `final-audit-summary.json`：199 条全量 VERIFIED 审查证据摘要；
+- 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
+
+正式库相对冻结原始工作簿（`source.xlsx`，只读、永不修改）只包含账本声明的变更：
+
+- 5 个答案修正（`ANSWER_CORRECTION`）；
+- 10 个题目澄清（`QUESTION_CLARIFICATION`）；
+- 1 个训练题删除（`QUESTION_REMOVAL`）：该训练题因缺失同比基期证据而无法复核，
+  已从正式库移除（`removedIds` 仅含账本声明的这一条）；
+- 0 个契约错误，事实区域哈希不变。
+
+正式统计：`officialCount=199`，来源切分 119/40/40，模板隔离后的评测切分
+114/36/49（test 仍为 49），增强样本 12 条（不参与官方评分）。三个官方评测
+切分之间没有模板重叠。
+
+### 生成正式评估库（promote）
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/promote_ground_truth.py `
+  --candidate-dir .local-dev/gt-audit/codex-hash-contract `
+  --audit-dir .local-dev/gt-audit/codex-hash-audit-two `
+  --version 2.0.0 `
+  --output evaluation/bank_nl2sql/official/2.0.0
+```
+
+promote 对候选 manifest/sidecar、候选工作簿/sidecar、变更账本/sidecar、
+源工作簿哈希、199 条全量 VERIFIED 审查证据、空 correction ledger、事实区
+哈希以及账本声明的变更逐项 fail-closed 验证，输出确定性且不含时间戳；
+任何一项不匹配都不产出任何文件。
+
+## 标准基准库
 
 `db/build_database.py` 将比赛工作簿转换为可重复生成的标准基准库：
 
@@ -36,16 +78,28 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 ## 构建标注数据集
 
+正式版必须使用 2.0.0 官方工作簿与 `official-manifest.json`（manifest 严格
+匹配工作簿名称/SHA-256/题数/来源切分/`canonicalReady` 后，才允许忽略
+`removedIds`；无 manifest 时保持原严格未知意图行为；除 `removedIds` 外
+任何未知/缺失 ID 一律失败）：
+
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py <workbook.xlsx> `
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
+  evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx `
   --intent-root evaluation/bank_intent `
+  --official-manifest evaluation/bank_nl2sql/official/2.0.0/official-manifest.json `
   --output evaluation/bank_nl2sql
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
   evaluation/bank_nl2sql
 ```
 
-当前冻结版本基于源文件 SHA-256 `c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`：官方题来源划分为 train/dev/test = 120/40/40，模板隔离后的实际评测划分为 115/36/49。9 道题的调整可在 `manifest.json` 中逐题追溯，三个官方评测切分之间没有模板重叠。
+正式版基于源文件 SHA-256
+`c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`
+（冻结原始工作簿 `source.xlsx`，只读、永不修改）。官方题来源划分为
+train/dev/test = 119/40/40，模板隔离后的实际评测划分为 114/36/49
+（test 仍为 49），增强样本 12 条。`manifest.json` 记录逐题调整，
+三个官方评测切分之间没有模板重叠。
 
 ## 生成并验证金标
 
@@ -57,7 +111,11 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
   evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
 ```
 
-`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希。物理 SQL 已在 SQLite 与 H2 各执行 200 次且全部通过；`s2sql` 目前保存与物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，需要先在运行环境注册银行 H2 数据源及语义 Dataset。
+`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希与数据集版本
+（2.0.0 从 `manifest.json` 继承；无 manifest 的旧兼容路径仍为 0.1.0）。
+物理 SQL 已在 SQLite 与 H2 各执行 199 次且全部通过；`s2sql` 目前保存与
+物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，
+需要先在运行环境注册银行 H2 数据源及语义 Dataset。
 
 ## 冻结与盲测
 

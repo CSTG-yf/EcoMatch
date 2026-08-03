@@ -3,9 +3,9 @@
   "evaluationSplitCounts": {
     "dev": 36,
     "test": 49,
-    "train": 115
+    "train": 114
   },
-  "officialCount": 200,
+  "officialCount": 199,
   "reassignedForTemplateIsolation": [
     {
       "id": "TRAIN-M-25",
@@ -53,17 +53,17 @@
       "split": "test"
     }
   ],
-  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
-    "train": 120
+    "train": 119
   },
-  "sourceWorkbook": "基于大模型与NL2SQL的银行业智能问数系统构建与应用_数据集.xlsx",
+  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.0.xlsx",
   "templateOverlap": {
     "devTest": [],
     "trainDev": [],
     "trainTest": []
   },
-  "version": "0.1.0"
+  "version": "2.0.0"
 }

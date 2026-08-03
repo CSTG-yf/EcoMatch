@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 import unittest
 from pathlib import Path
@@ -14,17 +15,66 @@ sys.path.insert(0, str(ROOT))
 from gold_sql import GoldSqlError, build_gold_sql  # noqa: E402
 
 
-def record(question: str, intent: str, metrics: list[str], expressions: list[str], organizations: list[str]) -> dict:
+def record(
+    question: str,
+    intent: str,
+    metrics: list[str],
+    expressions: list[str],
+    organizations: list[str],
+    derived_metrics: list[dict] | None = None,
+) -> dict:
+    normalized = {
+        "intent": intent,
+        "metrics": [{"code": code} for code in metrics],
+        "time": {"expressions": expressions},
+        "organizations": [{"code": code} for code in organizations],
+    }
+    if derived_metrics is not None:
+        normalized["derivedMetrics"] = derived_metrics
     return {
         "id": "CASE-01",
         "question": question,
-        "normalizedIntent": {
-            "intent": intent,
-            "metrics": [{"code": code} for code in metrics],
-            "time": {"expressions": expressions},
-            "organizations": [{"code": code} for code in organizations],
-        },
+        "normalizedIntent": normalized,
     }
+
+
+BANK_SCHEMA = """
+CREATE TABLE bank_organization (
+  org_code TEXT PRIMARY KEY,
+  org_name TEXT NOT NULL
+);
+CREATE TABLE bank_metric_daily (
+  data_date TEXT NOT NULL,
+  org_code TEXT NOT NULL,
+  metric_code TEXT NOT NULL,
+  metric_value REAL NOT NULL
+);
+"""
+
+BANK_ORGANIZATIONS = [
+    ("ORG001", "江苏省A市农商行"),
+    ("ORG002", "江苏省B市农商行"),
+    ("ORG003", "江苏省C市农商行"),
+    ("ORG004", "江苏省D市农商行"),
+]
+
+
+def execute_gold_sql(sql: str, daily: list[tuple[str, str, str, float]]) -> list[tuple]:
+    """Run gold SQL against a minimal in-memory SQLite bank schema."""
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript(BANK_SCHEMA)
+        connection.executemany(
+            "INSERT INTO bank_organization (org_code, org_name) VALUES (?, ?)", BANK_ORGANIZATIONS
+        )
+        connection.executemany(
+            "INSERT INTO bank_metric_daily (data_date, org_code, metric_code, metric_value)"
+            " VALUES (?, ?, ?, ?)",
+            daily,
+        )
+        return connection.execute(sql).fetchall()
+    finally:
+        connection.close()
 
 
 class GoldSqlTest(unittest.TestCase):
@@ -203,6 +253,121 @@ class GoldSqlTest(unittest.TestCase):
     def test_unsupported_intent_is_rejected(self) -> None:
         with self.assertRaises(GoldSqlError):
             build_gold_sql(record("未知问题", "UNKNOWN", ["ZB001"], ["2025-01-01"], ["ORG001"]))
+
+    def test_derived_ratio_rank_sqlite_base_plus_derived_returns_six_rows(self) -> None:
+        """5 个声明基础指标 + 1 个派生比率 = 6 行，派生值 = ZB002/ZB001*100。"""
+        daily = [
+            ("2025-11-30", "ORG001", "ZB001", 100.0),
+            ("2025-11-30", "ORG001", "ZB002", 90.0),
+            ("2025-11-30", "ORG001", "ZB011", 10.0),
+            ("2025-11-30", "ORG001", "ZB012", 5.0),
+            ("2025-11-30", "ORG001", "ZB013", 2.0),
+        ]
+        spec = build_gold_sql(
+            record(
+                "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？",
+                "RANKING",
+                ["ZB001", "ZB002", "ZB011", "ZB012", "ZB013"],
+                ["2025-11-30"],
+                [],
+                derived_metrics=[
+                    {
+                        "metricCode": "DERIVED_ZB002_DIV_ZB001",
+                        "numerator": "ZB002",
+                        "denominator": "ZB001",
+                        "name": "存贷比",
+                    }
+                ],
+            )
+        )
+        result = execute_gold_sql(spec.sql, daily)
+
+        self.assertEqual(len(result), 6)
+        # 输出只含 5 个声明基础指标 + 1 个派生指标，无未声明默认指标
+        self.assertEqual(
+            [row[0] for row in result],
+            ["DERIVED_ZB002_DIV_ZB001", "ZB001", "ZB002", "ZB011", "ZB012", "ZB013"],
+        )
+        derived = result[0]
+        self.assertEqual(derived[1], "ORG001")
+        self.assertEqual(derived[2], "江苏省A市农商行")
+        self.assertAlmostEqual(derived[3], 90.0, places=6)
+        self.assertEqual(derived[4], 1)
+
+    def test_derived_ratio_rank_sqlite_without_derived_returns_five_rows(self) -> None:
+        """无派生契约时输出 5 行，且不含未声明的默认基础指标。"""
+        daily = [
+            ("2025-11-30", "ORG001", "ZB001", 100.0),
+            ("2025-11-30", "ORG001", "ZB002", 90.0),
+            ("2025-11-30", "ORG001", "ZB011", 10.0),
+            ("2025-11-30", "ORG001", "ZB012", 5.0),
+            ("2025-11-30", "ORG001", "ZB013", 2.0),
+        ]
+        spec = build_gold_sql(
+            record(
+                "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？",
+                "RANKING",
+                ["ZB001", "ZB002", "ZB011", "ZB012", "ZB013"],
+                ["2025-11-30"],
+                [],
+            )
+        )
+        result = execute_gold_sql(spec.sql, daily)
+
+        self.assertEqual(len(result), 5)
+        self.assertEqual([row[0] for row in result], ["ZB001", "ZB002", "ZB011", "ZB012", "ZB013"])
+
+    def test_derived_ratio_rank_sqlite_orders_desc_stable_and_excludes_zero_denominator(self) -> None:
+        """派生排名按 ratio DESC、org_code 稳定；分母为 0 的机构不产生派生行。
+
+        无有效比率的机构在排名前被过滤，NULL 永不排到有效值之前；请求机构
+        无有效比率时派生查询返回无行。
+        """
+        daily = [
+            ("2025-11-30", "ORG001", "ZB001", 100.0),
+            ("2025-11-30", "ORG001", "ZB002", 90.0),
+            ("2025-11-30", "ORG002", "ZB001", 200.0),
+            ("2025-11-30", "ORG002", "ZB002", 140.0),
+            ("2025-11-30", "ORG003", "ZB001", 0.0),
+            ("2025-11-30", "ORG003", "ZB002", 60.0),
+            ("2025-11-30", "ORG004", "ZB001", 100.0),
+            ("2025-11-30", "ORG004", "ZB002", 70.0),
+        ]
+        derived = [{"metricCode": "DERIVED_ZB002_DIV_ZB001", "numerator": "ZB002", "denominator": "ZB001", "name": "存贷比"}]
+        spec = build_gold_sql(
+            record(
+                "请列出各农商行在2025-11-30的存贷比排名？",
+                "RANKING",
+                ["ZB002", "ZB001"],
+                ["2025-11-30"],
+                [],
+                derived_metrics=derived,
+            )
+        )
+        result = execute_gold_sql(spec.sql, daily)
+        derived_rows = [row for row in result if row[0] == "DERIVED_ZB002_DIV_ZB001"]
+
+        # ratio: ORG001=90, ORG002=70, ORG004=70（tie 按 org_code 稳定），ORG003 分母 0 被排除
+        self.assertEqual([row[1] for row in derived_rows], ["ORG001", "ORG002", "ORG004"])
+        self.assertEqual([row[4] for row in derived_rows], [1, 2, 3])
+        self.assertAlmostEqual(derived_rows[0][3], 90.0, places=6)
+        self.assertAlmostEqual(derived_rows[1][3], 70.0, places=6)
+        self.assertAlmostEqual(derived_rows[2][3], 70.0, places=6)
+        self.assertTrue(all(row[3] is not None for row in derived_rows))
+
+        # 请求机构无有效比率（分母为 0）时，派生查询返回无行
+        org_spec = build_gold_sql(
+            record(
+                "江苏省C市农商行在2025-11-30的存贷比排名？",
+                "RANKING",
+                ["ZB002", "ZB001"],
+                ["2025-11-30"],
+                ["ORG003"],
+                derived_metrics=derived,
+            )
+        )
+        org_result = execute_gold_sql(org_spec.sql, daily)
+        self.assertEqual([row for row in org_result if row[0] == "DERIVED_ZB002_DIV_ZB001"], [])
 
 
 if __name__ == "__main__":

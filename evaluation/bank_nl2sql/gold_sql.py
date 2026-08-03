@@ -149,6 +149,36 @@ def _metric_codes(record: dict[str, Any]) -> list[str]:
     return found
 
 
+def _derived_metrics(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate and return the record's declared derived ratio specs.
+
+    Derived specs come exclusively from the official change ledger projection
+    (``normalizedIntent.derivedMetrics``); nothing is guessed from the
+    question text.  Each spec must declare non-empty numerator/denominator
+    base metric codes and receives the stable metric code
+    ``DERIVED_<numerator>_DIV_<denominator>``.
+    """
+    specs = record.get("normalizedIntent", {}).get("derivedMetrics", [])
+    if not isinstance(specs, list):
+        raise GoldSqlError(f"Invalid derivedMetrics for {record.get('id')}")
+    validated: list[dict[str, Any]] = []
+    for spec in specs:
+        numerator = spec.get("numerator") if isinstance(spec, dict) else None
+        denominator = spec.get("denominator") if isinstance(spec, dict) else None
+        if not isinstance(numerator, str) or not numerator:
+            raise GoldSqlError(f"Invalid derived numerator for {record.get('id')}")
+        if not isinstance(denominator, str) or not denominator:
+            raise GoldSqlError(f"Invalid derived denominator for {record.get('id')}")
+        validated.append(
+            {
+                "metricCode": f"DERIVED_{numerator}_DIV_{denominator}",
+                "numerator": numerator,
+                "denominator": denominator,
+            }
+        )
+    return validated
+
+
 def _organization_codes(record: dict[str, Any]) -> list[str]:
     return [
         str(organization["code"])
@@ -323,12 +353,13 @@ def _is_subset_winner(question: str, organizations: list[str]) -> bool:
 
 
 def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
+    derived_metrics = _derived_metrics(record)
     try:
         metric_codes = _metric_codes(record)
     except GoldSqlError:
         metric_codes = _status_metrics()
-    if len(metric_codes) != 1:
-        return _multi_metric_rank_query(record, metric_codes or _status_metrics())
+    if len(metric_codes) != 1 or derived_metrics:
+        return _multi_metric_rank_query(record, metric_codes or _status_metrics(), derived_metrics)
     metric_code = metric_codes[0]
     direction = _rank_direction(record, metric_code)
     question = str(record.get("question", ""))
@@ -379,7 +410,47 @@ ORDER BY rank_position{" DESC" if _bottom_rank_requested(question) else ""}"""
     return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK"])
 
 
-def _multi_metric_rank_query(record: dict[str, Any], metric_codes: list[str]) -> GoldSqlSpec:
+def _derived_ratio_rank_query(
+    record: dict[str, Any], derived: dict[str, Any], date_value: str, organizations: list[str]
+) -> str:
+    """Rank one declared derived ratio (numerator/denominator*100).
+
+    The stable metric code is ``DERIVED_<numerator>_DIV_<denominator>``, the
+    ratio ranks by ``metric_value DESC, org_code`` (tie-break), and a zero or
+    missing denominator yields NULL via ``NULLIF``.  Rows without a valid
+    ratio are filtered out before ranking, so NULLs can never rank ahead of
+    valid values; when no requested organization has a valid ratio the
+    derived query returns no rows.  Output columns match the existing
+    multi-metric rank contract: ``metric_code, org_code, org_name,
+    metric_value, rank_position``.
+    """
+    numerator = derived["numerator"]
+    denominator = derived["denominator"]
+    metric_code = derived["metricCode"]
+    selected = ""
+    if organizations:
+        selected = " WHERE org_code IN (" + ", ".join(_sql_literal(code) for code in organizations) + ")"
+    return f"""SELECT {_sql_literal(metric_code)} AS metric_code, org_code, org_name, metric_value, rank_position
+FROM (
+  SELECT org_code, org_name, metric_value,
+         ROW_NUMBER() OVER (ORDER BY metric_value DESC, org_code) AS rank_position
+  FROM (
+    SELECT o.org_code, o.org_name,
+           MAX(CASE WHEN d.metric_code = {_sql_literal(numerator)} THEN d.metric_value END) * 100.0 /
+               NULLIF(MAX(CASE WHEN d.metric_code = {_sql_literal(denominator)} THEN d.metric_value END), 0) AS metric_value
+    FROM bank_metric_daily d
+    JOIN bank_organization o ON o.org_code = d.org_code
+    WHERE d.data_date = {_sql_literal(date_value)}
+      AND d.metric_code IN ({_sql_literal(numerator)}, {_sql_literal(denominator)})
+    GROUP BY o.org_code, o.org_name
+  ) ratios
+  WHERE ratios.metric_value IS NOT NULL
+) ranked{selected}"""
+
+
+def _multi_metric_rank_query(
+    record: dict[str, Any], metric_codes: list[str], derived_metrics: list[dict[str, Any]] | None = None
+) -> GoldSqlSpec:
     date_value = _date_from_record(record)
     organizations = _organization_codes(record)
     queries: list[str] = []
@@ -398,8 +469,13 @@ FROM (
   WHERE d.data_date = {_sql_literal(date_value)} AND d.metric_code = {_sql_literal(metric_code)}
 ) ranked{selected}"""
         )
+    for derived in derived_metrics or []:
+        queries.append(_derived_ratio_rank_query(record, derived, date_value, organizations))
     sql = "\nUNION ALL\n".join(queries) + "\nORDER BY metric_code, org_code"
-    return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK", "MULTI_METRIC"])
+    features = ["RANKING", "WINDOW_RANK", "MULTI_METRIC"]
+    if derived_metrics:
+        features.append("DERIVED_METRIC")
+    return GoldSqlSpec(sql, sql, features)
 
 
 def _previous_month(value: date) -> date:

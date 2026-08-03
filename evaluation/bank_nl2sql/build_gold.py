@@ -40,6 +40,23 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     )
 
 
+def _dataset_version(dataset_path: Path) -> str:
+    """Release version derives from the dataset source manifest, never hardcoded.
+
+    Falls back to the legacy ``0.1.0`` only when no manifest exists (partial
+    materialisation into a bare directory must keep working).
+    """
+    manifest_path = dataset_path / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            version = json.loads(manifest_path.read_text(encoding="utf-8")).get("version")
+        except (json.JSONDecodeError, OSError):
+            version = None
+        if isinstance(version, str) and version:
+            return version
+    return "0.1.0"
+
+
 def build_gold_dataset(
     dataset_path: Path | str,
     database_path: Path | str,
@@ -85,7 +102,7 @@ def build_gold_dataset(
     for split, records in records_by_split.items():
         _write_jsonl(dataset_path / f"{split}.jsonl", records)
     report = {
-        "version": "0.1.0",
+        "version": _dataset_version(dataset_path),
         "databaseSha256": _sha256(database_path),
         "officialCount": sum(len(records) for records in records_by_split.values()),
         "splitCounts": {split: len(records) for split, records in records_by_split.items()},

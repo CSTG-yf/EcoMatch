@@ -14,7 +14,66 @@
 - `BE-01`：已约定 `bank_data_date`、`bank_organization`、`bank_indicator` 以及 `zb001`～`zb021` 的语义资源。
 - 源文件 SHA-256：`c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`。
 
-官方核心集严格保留原 200 道题及其 `sourceSplit`（120/40/40）。由于原始分割存在 4 组模板跨越训练/测试或验证/测试，`split` 使用 DATA-01 已冻结的无模板泄漏评测分割（核心集 115/36/49）；被调整的 9 条题保留原 `sourceSplit` 和调整原因。`DATA-01` 的 12 条增强样本单独进入 `augmentation.jsonl`，只用于开发和鲁棒性测试，不计入官方 SQL 准确率，也不进入官方验证集或测试集。
+冻结原始工作簿 `source.xlsx` 只读、永不修改；所有发布产物都以它的哈希链为锚。
+
+## 2.1 正式评估库 2.0.0（唯一正式评分依据）
+
+`evaluation/bank_nl2sql/official/2.0.0/` 是唯一正式评分依据，由
+`promote_ground_truth.py` 对已审查候选做 fail-closed 验证后生成
+（`official/CURRENT.json` 指向当前正式版本）：
+
+- 正式工作簿 `bank-nl2sql-ground-truth-v2.0.0.xlsx`：**199 条**题目；
+- `official-manifest.json`：`datasetVersion=2.0.0`、`canonicalReady=true`、
+  `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`
+  仅含账本声明的删除项、源/候选/事实区哈希、变更计数与审查状态；
+- `contract-change-ledger.json`、`final-audit-summary.json` 及各自
+  SHA-256 sidecar。
+
+正式库相对冻结原始工作簿只包含账本声明的变更：
+
+- 5 个答案修正（`ANSWER_CORRECTION`）；
+- 10 个题目澄清（`QUESTION_CLARIFICATION`）；
+- 1 个训练题删除（`QUESTION_REMOVAL`）：该训练题因缺失同比基期证据而
+  无法复核，已从正式库移除（来源划分相应变为 119/40/40）；
+- 0 个契约错误，事实区域哈希与源一致。
+
+评测切分：模板隔离后 train/dev/test = 114/36/49（test 仍为 49），
+`DATA-01` 的 12 条增强样本单独进入 `augmentation.jsonl`，只用于开发和
+鲁棒性测试，不计入官方 SQL 准确率，也不进入官方验证集或测试集。
+
+生成与验证命令：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/promote_ground_truth.py `
+  --candidate-dir .local-dev/gt-audit/codex-hash-contract `
+  --audit-dir .local-dev/gt-audit/codex-hash-audit-two `
+  --version 2.0.0 `
+  --output evaluation/bank_nl2sql/official/2.0.0
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
+  evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx `
+  --intent-root evaluation/bank_intent `
+  --official-manifest evaluation/bank_nl2sql/official/2.0.0/official-manifest.json `
+  --output evaluation/bank_nl2sql
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_gold.py `
+  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py evaluation/bank_nl2sql
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+```
+
+`build_dataset.py` 只有在 `--official-manifest` 严格匹配工作簿名称、
+SHA-256、题数、来源切分与 `canonicalReady` 时才允许忽略 `removedIds`；
+无 manifest 保持原严格未知意图行为；除 `removedIds` 外任何未知/缺失 ID
+一律失败。`build_gold.py` 与 `freeze_dataset.py` 从数据集 manifest 继承
+版本 2.0.0；无 manifest 的旧兼容路径仍为 0.1.0。
+
+官方核心集在 2.0.0 中为 199 道题（原始 200 道减去上述 1 条删除题），
+`split` 使用 DATA-01 已冻结的无模板泄漏评测分割；被调整的题目保留原
+`sourceSplit` 和调整原因（见 `contract-change-ledger.json` 与
+`manifest.json`）。
 
 ## 3. 标准基准库
 
@@ -68,7 +127,7 @@
 
 关键规则：
 
-- 官方 200 题均已有标准答案，必须标为 `EXECUTE` 并提供可执行 S2SQL、物理 SQL 和预期结果；不得因生成困难静默改成澄清或排除。
+- 官方题（2.0.0 正式库为 199 条）均已有标准答案，必须标为 `EXECUTE` 并提供可执行 S2SQL、物理 SQL 和预期结果；不得因生成困难静默改成澄清或排除。
 - 增强集允许 `expectedAction=CLARIFY`，此时 `s2sql/sql` 为空，并提供结构化澄清原因和候选项。
 - 金额、比率、人数、户数分别声明单位、精度和比较容差；原始值与展示文本分开保存。
 - 排名必须记录升降序口径：不良贷款率、逾期贷款率、成本收入比越低越好，其余指标越高越好。
@@ -101,12 +160,20 @@
 README.md
 schema.json
 manifest.json
+gold_manifest.json
+release_manifest.json
+validation_report.json
+official/            # 版本化正式评估库（2.0.0 + CURRENT.json）
 train.jsonl
 dev.jsonl
 test.jsonl
 augmentation.jsonl
 build_dataset.py
+build_gold.py
+freeze_dataset.py
+promote_ground_truth.py
 validate_dataset.py
+validate_gold.py
 evaluate_gold.py
 db/schema.sql
 db/build_database.py
@@ -133,23 +200,23 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ### Task 2：标注 schema 与划分冻结
 
-- 状态：已完成（2026-07-23）。已生成 `schema.json`、`manifest.json` 和官方/增强 JSONL；官方题来源划分保持 train/dev/test = 120/40/40，模板隔离后的评测划分为 115/36/49，9 道调整均在 manifest 中可追溯，12 条增强题单独存放且三组官方题模板无重叠。
+- 状态：已完成（2026-07-23）；正式评估库 2.0.0 收口后更新为 199 条。已生成 `schema.json`、`manifest.json` 和官方/增强 JSONL；正式库来源划分保持 train/dev/test = 119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），模板隔离后的评测划分为 114/36/49（test 仍为 49），变更（5 修正、10 澄清、1 删除）在 `contract-change-ledger.json` 与 `manifest.json` 中可追溯，12 条增强题单独存放且三组官方题模板无重叠。
 - Owner/Boundary：`schema.json`、基础 JSONL 生成器、manifest；不生成最终 SQL。
 - Dependency：Task 1 的 schema 和 DATA-01 标注。
 - Mode：`BDD_TDD`。
-- Verification/Stop：`sourceSplit` 的 120/40/40 保持不变；模板隔离后的 `split` 为 115/36/49，ID 唯一，官方与增强样本隔离，`split` 的 train/dev/test 模板无泄漏。
+- Verification/Stop：`sourceSplit` 的 119/40/40 保持不变；模板隔离后的 `split` 为 114/36/49，ID 唯一，官方与增强样本隔离，`split` 的 train/dev/test 模板无泄漏。
 
 ### Task 3：S2SQL、物理 SQL 与标准结果
 
-- 状态：物理 SQL 与结构化结果已完成（2026-07-23）。200 条 SQL 在 SQLite 和 H2 各执行 200 次均通过，结果已写入官方 JSONL，`gold_manifest.json` 记录基准库哈希。银行 H2 数据源与语义 Dataset 已在 SuperSonic 注册；运行时冒烟已验证“2026-03-31 各机构的各项存款余额，按余额从高到低取前三名”可解析为银行指标与机构维度并成功执行（查询阶段 203ms）。`s2sql` 当前仍以与物理 SQL 对应的可审计模板为主；全量正式 S2SQL 翻译验证尚未完成，不能据此宣称语义层全量验收已完成。
-- Owner/Boundary：200 道官方题的金标生成、人工复核和执行结果；不调用待评测模型自动充当金标。
+- 状态：物理 SQL 与结构化结果已完成（2026-07-23）。199 条 SQL 在 SQLite 和 H2 各执行 199 次均通过，结果已写入官方 JSONL，`gold_manifest.json` 记录基准库哈希与数据集版本（2.0.0）。银行 H2 数据源与语义 Dataset 已在 SuperSonic 注册；运行时冒烟已验证“2026-03-31 各机构的各项存款余额，按余额从高到低取前三名”可解析为银行指标与机构维度并成功执行（查询阶段 203ms）。`s2sql` 当前仍以与物理 SQL 对应的可审计模板为主；全量正式 S2SQL 翻译验证尚未完成，不能据此宣称语义层全量验收已完成。
+- Owner/Boundary：199 道官方题的金标生成、人工复核和执行结果；不调用待评测模型自动充当金标。
 - Dependency：Task 1 标准库、Task 2 契约、BE-01 语义名称。
 - Mode：`BDD_TDD`，先用代表性失败用例冻结每类口径，再批量生成。
-- Verification/Stop：200 条 SQL 全部可解析、可执行并与工作簿答案一致；任何不一致进入 adjudication 清单，未裁决前不得冻结测试集。
+- Verification/Stop：199 条 SQL 全部可解析、可执行并与工作簿答案一致；任何不一致进入 adjudication 清单，未裁决前不得冻结测试集。
 
 ### Task 4：数据冻结与防泄漏门禁
 
-- 状态：已完成（2026-07-23）。`release_manifest.json` 固化 7 个数据产物哈希；`dataset_access.py` 默认训练范围为 train/dev，测试金标读取需要显式授权，增强样本不进入默认训练或盲测范围。
+- 状态：已完成（2026-07-23）；2.0.0 收口后 `release_manifest.json` 固化 7 个数据产物哈希。`dataset_access.py` 默认训练范围为 train/dev，测试金标读取需要显式授权，增强样本不进入默认训练或盲测范围。
 - Owner/Boundary：JSONL、manifest、哈希、金标访问边界。
 - Dependency：Task 3 的全量执行报告。
 - Mode：`SIMPLE`。
@@ -186,4 +253,4 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ## 10. 完成定义
 
-上述五个 Task 全部通过各自验证，且验收报告记录 200 道官方题的金标执行一致率、能力覆盖、错误分类和产物哈希后，DATA-02 才能标记“已完成”。仅生成 JSONL、仅生成 SQL 或仅跑通少量样例均不算完成。
+上述五个 Task 全部通过各自验证，且验收报告记录 2.0.0 正式评估库 199 道官方题的金标执行一致率、能力覆盖、错误分类和产物哈希后，DATA-02 才能标记“已完成”。仅生成 JSONL、仅生成 SQL 或仅跑通少量样例均不算完成。

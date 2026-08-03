@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -15,7 +16,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from build_dataset import build_dataset  # noqa: E402
+from build_dataset import DatasetBuildError, build_dataset  # noqa: E402
 from validate_dataset import validate_dataset  # noqa: E402
 
 
@@ -84,6 +85,7 @@ class BuildDatasetTest(unittest.TestCase):
             self.assertEqual(report["officialCount"], 3)
             self.assertEqual(report["augmentationCount"], 1)
             self.assertEqual(report["sourceSplitCounts"], {"train": 1, "dev": 1, "test": 1})
+            self.assertEqual(report["version"], "0.1.0")
             self.assertEqual(validation["result"], "PASS")
 
             test_records = [
@@ -98,6 +100,563 @@ class BuildDatasetTest(unittest.TestCase):
             self.assertIsNone(moved["s2sql"])
             self.assertEqual(moved["expected"]["answerText"], "1.10%")
             self.assertEqual(len((output_path / "augmentation.jsonl").read_text(encoding="utf-8").splitlines()), 1)
+
+
+class OfficialManifestTest(BuildDatasetTest):
+    """官方 manifest 只能授权账本声明的删除 ID；无 manifest 保持严格行为。
+
+    复用 BuildDatasetTest 的共享 workbook/intent fixture
+    （create_question_workbook / intent_record / write_intents），
+    全部为合成数据，不依赖真实竞赛题目或真实题号。
+    """
+
+    def create_workbook_and_intents(
+        self, temp_path: Path, include_unknown: bool = False, include_removed_intent: bool = True
+    ) -> tuple[Path, Path]:
+        workbook_path = temp_path / "questions.xlsx"
+        intent_root = temp_path / "bank_intent"
+        self.create_question_workbook(workbook_path)
+        intent_root.mkdir()
+        removed = self.intent_record("TRAIN-S-02", "train", "train")
+        train_entries = [self.intent_record("TRAIN-S-01", "train", "train")]
+        if include_removed_intent:
+            train_entries.append(removed)
+        entries = {
+            "train": train_entries,
+            "dev": [self.intent_record("VAL-S-01", "dev", "test")],
+            "test": [
+                self.intent_record("TEST-S-01", "test", "test"),
+                self.intent_record("AUG-01", None, "test", "curated_augmentation"),
+            ],
+        }
+        if include_unknown:
+            entries["test"].append(self.intent_record("VAL-S-99", "dev", "dev"))
+        for split, records in entries.items():
+            (intent_root / f"{split}.jsonl").write_text(
+                "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
+                encoding="utf-8",
+            )
+        return workbook_path, intent_root
+
+    @staticmethod
+    def official_manifest(workbook_path: Path, removed_ids: list[str], **overrides) -> dict:
+        manifest = {
+            "datasetVersion": "2.0.0",
+            "canonicalReady": True,
+            "officialCount": 3,
+            "sourceSplitCounts": {"train": 1, "dev": 1, "test": 1},
+            "removedIds": removed_ids,
+            "groundTruthWorkbook": workbook_path.name,
+            "generator": {"name": "clarify_ground_truth_contracts", "version": "2.0.0"},
+            "changeLedger": "contract-change-ledger.json",
+            "artifactSha256": {
+                "groundTruthWorkbook": hashlib.sha256(workbook_path.read_bytes()).hexdigest().upper(),
+                "changeLedger": "A" * 64,
+            },
+            "changeCounts": {"answerChanges": 0, "questionClarifications": 0, "questionRemovals": len(removed_ids), "contractErrors": 0},
+            "auditStatus": {"candidateReady": True, "evidenceComplete": 3, "evidenceErrors": 0, "auditErrors": 0},
+        }
+        manifest.update(overrides)
+        return manifest
+
+    def write_manifest(self, path: Path, manifest: dict) -> None:
+        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def write_ledger(
+        self,
+        directory: Path,
+        manifest: dict,
+        clarifications: list[dict] | None = None,
+        removed_ids: list[str] | None = None,
+        answer_changes: list[str] | None = None,
+    ) -> Path:
+        """Write the change ledger referenced by ``manifest`` and anchor its hash.
+
+        ``manifest["changeLedger"]`` stays the relative file name; the ledger
+        lives next to the manifest file.  ``changeCounts`` is recomputed from
+        the written entries so the fixture stays self-consistent.
+        """
+        entries: list[dict] = []
+        for entry_id in answer_changes or []:
+            entries.append(
+                {
+                    "id": entry_id,
+                    "changeType": "ANSWER_CORRECTION",
+                    "category": None,
+                    "split": "train",
+                    "difficulty": "简单",
+                    "oldTextSha256": "A" * 64,
+                    "newTextSha256": "B" * 64,
+                    "metricCodes": None,
+                    "dimensionMapping": None,
+                }
+            )
+        for contract in clarifications or []:
+            entries.append(
+                {
+                    "id": contract["id"],
+                    "changeType": "QUESTION_CLARIFICATION",
+                    "category": "PERFORMANCE",
+                    "split": "train",
+                    "difficulty": "复杂",
+                    "oldTextSha256": "C" * 64,
+                    "newTextSha256": "D" * 64,
+                    "metricCodes": contract["metricCodes"],
+                    "dimensionMapping": None,
+                }
+            )
+        for entry_id in removed_ids or []:
+            entries.append(
+                {
+                    "id": entry_id,
+                    "changeType": "QUESTION_REMOVAL",
+                    "category": None,
+                    "split": "train",
+                    "difficulty": "复杂",
+                    "oldTextSha256": "E" * 64,
+                    "newTextSha256": None,
+                    "removedAnswerSha256": "F" * 64,
+                    "metricCodes": None,
+                    "dimensionMapping": None,
+                }
+            )
+        ledger = {
+            "generatorName": "clarify_ground_truth_contracts",
+            "generatorVersion": "2.0.0",
+            "count": len(entries),
+            "entries": entries,
+            "contractErrors": [],
+        }
+        ledger_path = directory / manifest["changeLedger"]
+        ledger_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        manifest["artifactSha256"]["changeLedger"] = hashlib.sha256(ledger_path.read_bytes()).hexdigest().upper()
+        manifest["changeCounts"] = {
+            "answerChanges": len(answer_changes or []),
+            "questionClarifications": len(clarifications or []),
+            "questionRemovals": len(removed_ids or []),
+            "contractErrors": 0,
+        }
+        return ledger_path
+
+    def create_clarification_fixture(self, temp_path: Path) -> tuple[Path, Path]:
+        """Workbook + intents with one clarify-style RANKING question.
+
+        The clarified record (``TRAIN-C-01``) starts with an empty metric
+        annotation (the pre-projection state) and must be overridden solely by
+        the ledger contract; ``TRAIN-S-01`` is an ordinary record.
+        """
+        workbook_path = temp_path / "questions.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "问题答案清单"
+        sheet.append(["问题编号", "问题类型", "问题难度", "问题描述", "问题结果"])
+        sheet.append(["TRAIN-C-01", "训练集", "复杂", "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？", "存贷比81.21%，不良贷款率0.96%。"])
+        sheet.append(["TRAIN-S-01", "训练集", "简单", "A行存款余额是多少？", "41.76亿元"])
+        workbook.save(workbook_path)
+        intent_root = temp_path / "bank_intent"
+        intent_root.mkdir()
+        clarified = self.intent_record("TRAIN-C-01", "train", "train")
+        clarified["metrics"] = []
+        clarified["intent"] = "RANKING"
+        clarified["question"] = "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？"
+        plain = self.intent_record("TRAIN-S-01", "train", "train")
+        for split, records in (("train", [clarified, plain]), ("dev", []), ("test", [])):
+            (intent_root / f"{split}.jsonl").write_text(
+                "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
+                encoding="utf-8",
+            )
+        return workbook_path, intent_root
+
+    def test_manifest_authorizes_only_ledger_declared_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            self.write_manifest(manifest_path, manifest)
+            output_path = temp_path / "bank_nl2sql"
+
+            report = build_dataset(workbook_path, intent_root, output_path, manifest_path)
+
+            self.assertEqual(report["officialCount"], 3)
+            self.assertEqual(report["version"], "2.0.0")
+            self.assertEqual(report["sourceSplitCounts"], {"train": 1, "dev": 1, "test": 1})
+            self.assertEqual(report["evaluationSplitCounts"], {"train": 1, "dev": 0, "test": 2})
+            ids = {
+                record["id"]
+                for split in ("train", "dev", "test")
+                for record in (
+                    json.loads(line)
+                    for line in (output_path / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()
+                )
+            }
+            self.assertEqual(ids, {"TRAIN-S-01", "VAL-S-01", "TEST-S-01"})
+            self.assertNotIn("TRAIN-S-02", ids)
+            self.assertEqual(validate_dataset(output_path)["result"], "PASS")
+
+    def test_without_manifest_strict_unknown_intent_behavior_remains(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            output_path = temp_path / "bank_nl2sql"
+            with self.assertRaisesRegex(DatasetBuildError, "Official intents absent from workbook"):
+                build_dataset(workbook_path, intent_root, output_path)
+
+    def test_manifest_workbook_hash_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            manifest["artifactSha256"]["groundTruthWorkbook"] = "B" * 64
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "SHA-256 does not match"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_does_not_authorize_other_unknown_intent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_unknown=True)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "VAL-S-99"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_removed_id_requires_intent_annotation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-99"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-99"])
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "absent from intents"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_removed_id_still_in_workbook_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["VAL-S-01"])
+            self.write_ledger(temp_path, manifest, removed_ids=["VAL-S-01"])
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "still present in workbook"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_official_count_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            # Manifest stays schema-self-consistent (officialCount == sum of
+            # sourceSplitCounts == 4) so _load_official_manifest accepts it,
+            # while the workbook holds only 3 questions; the dedicated
+            # officialCount check in build_dataset then rejects it before the
+            # sourceSplitCounts comparison is ever reached.
+            self.write_manifest(
+                manifest_path,
+                self.official_manifest(
+                    workbook_path,
+                    ["TRAIN-S-02"],
+                    officialCount=4,
+                    sourceSplitCounts={"train": 2, "dev": 1, "test": 1},
+                ),
+            )
+            with self.assertRaisesRegex(DatasetBuildError, "officialCount"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_clarification_projects_ledger_metric_contract(self) -> None:
+        """最小合成 RED：账本声明的 5 个基础指标 + 1 个 derived 完整投影。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_clarification_fixture(temp_path)
+            manifest = self.official_manifest(
+                workbook_path, [], officialCount=2, sourceSplitCounts={"train": 2, "dev": 0, "test": 0}
+            )
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[
+                    {
+                        "id": "TRAIN-C-01",
+                        "metricCodes": [
+                            "ZB001",
+                            "ZB002",
+                            "ZB011",
+                            "ZB012",
+                            "ZB013",
+                            {"derived": {"numerator": "ZB002", "denominator": "ZB001"}, "name": "存贷比"},
+                        ],
+                    }
+                ],
+            )
+            self.write_manifest(manifest_path, manifest)
+            output_path = temp_path / "bank_nl2sql"
+
+            report = build_dataset(workbook_path, intent_root, output_path, manifest_path)
+
+            self.assertEqual(report["officialCount"], 2)
+            records = [
+                json.loads(line)
+                for line in (output_path / "train.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            clarified = next(record for record in records if record["id"] == "TRAIN-C-01")
+            # 基础 metricCodes 按账本顺序投影为 metrics，只含账本声明
+            self.assertEqual(
+                clarified["normalizedIntent"]["metrics"],
+                [{"code": "ZB001"}, {"code": "ZB002"}, {"code": "ZB011"}, {"code": "ZB012"}, {"code": "ZB013"}],
+            )
+            # derived 规格按账本顺序写入 derivedMetrics，保留完整规格
+            self.assertEqual(
+                clarified["normalizedIntent"]["derivedMetrics"],
+                [
+                    {
+                        "metricCode": "DERIVED_ZB002_DIV_ZB001",
+                        "numerator": "ZB002",
+                        "denominator": "ZB001",
+                        "name": "存贷比",
+                    }
+                ],
+            )
+            # 未声明的默认指标（_status_metrics 中的 ZB015/ZB016/ZB017 等）不得出现
+            declared = {metric["code"] for metric in clarified["normalizedIntent"]["metrics"]}
+            self.assertNotIn("ZB015", declared)
+            self.assertNotIn("ZB016", declared)
+            self.assertNotIn("ZB017", declared)
+            self.assertEqual(clarified["expectedAction"], "EXECUTE")
+            # 普通记录（无 ledger 契约）normalizedIntent 不变
+            plain = next(record for record in records if record["id"] == "TRAIN-S-01")
+            self.assertEqual(
+                plain["normalizedIntent"]["metrics"],
+                [{"code": "ZB001", "name": "各项存款余额", "matchedText": "存款余额"}],
+            )
+            self.assertNotIn("derivedMetrics", plain["normalizedIntent"])
+            self.assertEqual(validate_dataset(output_path)["result"], "PASS")
+
+    def test_answer_correction_entry_does_not_override_normalized_intent(self) -> None:
+        """ANSWER_CORRECTION 只改答案，不得覆盖任何记录的指标契约。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_clarification_fixture(temp_path)
+            manifest = self.official_manifest(
+                workbook_path, [], officialCount=2, sourceSplitCounts={"train": 2, "dev": 0, "test": 0}
+            )
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[
+                    {
+                        "id": "TRAIN-C-01",
+                        "metricCodes": [
+                            "ZB001",
+                            "ZB002",
+                            "ZB011",
+                            "ZB012",
+                            "ZB013",
+                            {"derived": {"numerator": "ZB002", "denominator": "ZB001"}, "name": "存贷比"},
+                        ],
+                    }
+                ],
+                answer_changes=["TRAIN-S-01"],
+            )
+            self.write_manifest(manifest_path, manifest)
+            output_path = temp_path / "bank_nl2sql"
+
+            build_dataset(workbook_path, intent_root, output_path, manifest_path)
+
+            records = [
+                json.loads(line)
+                for line in (output_path / "train.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            corrected = next(record for record in records if record["id"] == "TRAIN-S-01")
+            self.assertEqual(
+                corrected["normalizedIntent"]["metrics"],
+                [{"code": "ZB001", "name": "各项存款余额", "matchedText": "存款余额"}],
+            )
+            self.assertNotIn("derivedMetrics", corrected["normalizedIntent"])
+            clarified = next(record for record in records if record["id"] == "TRAIN-C-01")
+            self.assertEqual(len(clarified["normalizedIntent"]["metrics"]), 5)
+            self.assertEqual(len(clarified["normalizedIntent"]["derivedMetrics"]), 1)
+
+    def test_manifest_missing_ledger_file_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_manifest(manifest_path, self.official_manifest(workbook_path, ["TRAIN-S-02"]))
+            with self.assertRaisesRegex(DatasetBuildError, "Change ledger does not exist"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_hash_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            ledger_path = self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            # 篡改账本字节但保持 manifest 锚定的旧哈希
+            ledger_path.write_text(ledger_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "Change ledger SHA-256 does not match"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_generator_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            ledger_path = self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger["generatorName"] = "other_generator"
+            ledger_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            # 同步重算账本哈希：内容契约（generator）仍必须拒绝
+            manifest["artifactSha256"]["changeLedger"] = hashlib.sha256(ledger_path.read_bytes()).hexdigest().upper()
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "ledger.generatorName"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_change_counts_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            manifest["changeCounts"]["questionClarifications"] = 1
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "QUESTION_CLARIFICATION=0 != manifest.changeCounts"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_removed_ids_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_unknown=True)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            # VAL-S-99 有 intent 注解且不在工作簿，可被账本授权删除；
+            # 但 ledger 的 QUESTION_REMOVAL 条目只声明了 TRAIN-S-02。
+            manifest["removedIds"] = ["VAL-S-99"]
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "QUESTION_REMOVAL IDs"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_id_absent_from_workbook_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+            manifest = self.official_manifest(workbook_path, [])
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[{"id": "VAL-S-99", "metricCodes": ["ZB001"]}],
+            )
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "Ledger clarification IDs absent from workbook"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_empty_metric_codes_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+            manifest = self.official_manifest(workbook_path, [])
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[{"id": "TRAIN-S-01", "metricCodes": []}],
+            )
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "metricCodes 非法"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_derived_operands_need_not_be_output_base_metrics(self) -> None:
+        """derived 操作数是底层取数指标，无需出现在输出基础 metrics 集合中。
+
+        账本 string metricCodes 只投影为基础 metrics；ZB001/ZB002 仅作为
+        derived 操作数保留在 derivedMetrics，不得作为基础行输出。
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+            manifest = self.official_manifest(workbook_path, [])
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[
+                    {
+                        "id": "TRAIN-S-01",
+                        "metricCodes": [
+                            "ZB011",
+                            {"derived": {"numerator": "ZB002", "denominator": "ZB001"}, "name": "存贷比"},
+                        ],
+                    }
+                ],
+            )
+            self.write_manifest(manifest_path, manifest)
+            output_path = temp_path / "bank_nl2sql"
+
+            build_dataset(workbook_path, intent_root, output_path, manifest_path)
+
+            records = [
+                json.loads(line)
+                for line in (output_path / "train.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            clarified = next(record for record in records if record["id"] == "TRAIN-S-01")
+            # 基础 metrics 只含账本 string 项，ZB001/ZB002 不进入输出基础集合
+            self.assertEqual(clarified["normalizedIntent"]["metrics"], [{"code": "ZB011"}])
+            self.assertNotIn("ZB001", [metric["code"] for metric in clarified["normalizedIntent"]["metrics"]])
+            self.assertNotIn("ZB002", [metric["code"] for metric in clarified["normalizedIntent"]["metrics"]])
+            # derived 规格单独保留操作数
+            self.assertEqual(
+                clarified["normalizedIntent"]["derivedMetrics"],
+                [
+                    {
+                        "metricCode": "DERIVED_ZB002_DIV_ZB001",
+                        "numerator": "ZB002",
+                        "denominator": "ZB001",
+                        "name": "存贷比",
+                    }
+                ],
+            )
+            self.assertEqual(validate_dataset(output_path)["result"], "PASS")
+
+    def test_manifest_ledger_clarification_derived_invalid_operands_rejected(self) -> None:
+        """非法指标代码与分子等于分母的 derived 契约必须 fail closed。"""
+        invalid_cases = [
+            (
+                ["ZB001", {"derived": {"numerator": "NOT_A_CODE", "denominator": "ZB001"}, "name": "伪造比率"}],
+                "derived numerator 'NOT_A_CODE' 不是合法指标代码",
+            ),
+            (
+                ["ZB001", {"derived": {"numerator": "ZB001", "denominator": "ZB001"}, "name": "自比"}],
+                "derived numerator 与 denominator 必须不同",
+            ),
+        ]
+        for metric_codes, expected_error in invalid_cases:
+            with self.subTest(metric_codes=metric_codes), tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+                manifest = self.official_manifest(workbook_path, [])
+                manifest_path = temp_path / "official-manifest.json"
+                self.write_ledger(
+                    temp_path,
+                    manifest,
+                    clarifications=[{"id": "TRAIN-S-01", "metricCodes": metric_codes}],
+                )
+                self.write_manifest(manifest_path, manifest)
+                with self.assertRaisesRegex(DatasetBuildError, expected_error):
+                    build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
 
 
 if __name__ == "__main__":
