@@ -2,9 +2,12 @@
 """Build the DATA-02 NL2SQL annotated dataset from frozen source inputs.
 
 The competition workbook remains the source of truth for the official
-questions, their source splits, and their expected answers.  The separately
-curated intent data supplies semantic annotations and the template-isolated
-evaluation split.  Curated augmentations are intentionally emitted to a
+questions, their source splits, and their expected answers.  Official
+records always keep the workbook ``sourceSplit`` as their ``split`` with
+``splitReason`` set to ``source_assignment``; template overlap is reported
+verbatim in ``manifest.templateOverlap`` and never triggers cross-split
+migration.  The separately curated intent data supplies semantic
+annotations only.  Curated augmentations are intentionally emitted to a
 separate file, so they can never alter the official benchmark score.
 
 An explicit ``--official-manifest`` (the validated official package manifest)
@@ -406,12 +409,18 @@ def _apply_clarification_contract(record: dict[str, Any], contract: dict[str, An
 
 
 def _official_record(question: dict[str, str], intent: dict[str, Any], workbook_name: str) -> dict[str, Any]:
+    """Build an official record frozen to the workbook's source split.
+
+    The workbook is the sole source of truth for the official split
+    assignment: ``split`` always equals ``sourceSplit`` and ``splitReason``
+    is always ``source_assignment``.  Template overlap never migrates an
+    official record across splits.
+    """
     sample_id = question["id"]
     if intent.get("sourceSplit") != question["sourceSplit"]:
         raise DatasetBuildError(
             f"{sample_id}: workbook source split {question['sourceSplit']} does not match intent sourceSplit {intent.get('sourceSplit')}"
         )
-    split = intent["split"]
     return {
         "id": sample_id,
         "source": {
@@ -421,8 +430,8 @@ def _official_record(question: dict[str, str], intent: dict[str, Any], workbook_
             "intentDataset": "bank_intent",
         },
         "sourceSplit": question["sourceSplit"],
-        "split": split,
-        "splitReason": "source_assignment" if split == question["sourceSplit"] else "template_isolation",
+        "split": question["sourceSplit"],
+        "splitReason": "source_assignment",
         "difficulty": question["difficulty"],
         "question": question["question"],
         "normalizedIntent": _normalized_intent(intent),
@@ -489,7 +498,9 @@ def build_dataset(
     With an official manifest, only its ledger-declared ``removedIds`` are
     exempted from the strict unknown-intent check; the workbook hash, file
     name, question count and source split counts must match the manifest and
-    removed IDs must be absent from the workbook.
+    removed IDs must be absent from the workbook.  Official records never
+    migrate: ``split`` is always the workbook ``sourceSplit``, so
+    ``reassignedForTemplateIsolation`` is always empty.
     """
 
     workbook_path = Path(workbook_path).resolve()
@@ -561,12 +572,6 @@ def build_dataset(
     augmentations = sorted((_augmentation_record(record) for record in raw_augmentations), key=lambda item: item["id"])
     source_split_counts = Counter(question["sourceSplit"] for question in questions)
     evaluation_split_counts = {split: len(records_by_split[split]) for split in EVALUATION_SPLITS}
-    reassigned = [
-        {"id": record["id"], "sourceSplit": record["sourceSplit"], "split": record["split"]}
-        for split_records in records_by_split.values()
-        for record in split_records
-        if record["splitReason"] == "template_isolation"
-    ]
     manifest = {
         "version": official_manifest["datasetVersion"] if official_manifest is not None else "0.1.0",
         "sourceWorkbook": workbook_path.name,
@@ -575,7 +580,8 @@ def build_dataset(
         "augmentationCount": len(augmentations),
         "sourceSplitCounts": {split: source_split_counts[split] for split in EVALUATION_SPLITS},
         "evaluationSplitCounts": evaluation_split_counts,
-        "reassignedForTemplateIsolation": sorted(reassigned, key=lambda item: item["id"]),
+        # 官方切分不可变：workbook sourceSplit 是唯一事实，不存在 template 迁移。
+        "reassignedForTemplateIsolation": [],
         "templateOverlap": _template_overlap(records_by_split),
     }
 

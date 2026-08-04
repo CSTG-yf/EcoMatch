@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from build_dataset import DatasetBuildError, build_dataset  # noqa: E402
-from validate_dataset import validate_dataset  # noqa: E402
+from validate_dataset import DatasetValidationError, validate_dataset  # noqa: E402
 
 
 class BuildDatasetTest(unittest.TestCase):
@@ -70,7 +70,7 @@ class BuildDatasetTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-    def test_freezes_source_split_and_isolates_augmentations(self) -> None:
+    def test_freezes_official_split_to_workbook_source_split(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             workbook_path = temp_path / "questions.xlsx"
@@ -85,21 +85,120 @@ class BuildDatasetTest(unittest.TestCase):
             self.assertEqual(report["officialCount"], 3)
             self.assertEqual(report["augmentationCount"], 1)
             self.assertEqual(report["sourceSplitCounts"], {"train": 1, "dev": 1, "test": 1})
+            self.assertEqual(report["evaluationSplitCounts"], {"train": 1, "dev": 1, "test": 1})
+            self.assertEqual(report["reassignedForTemplateIsolation"], [])
+            self.assertEqual(report["templateOverlap"], {"trainDev": [], "trainTest": [], "devTest": []})
             self.assertEqual(report["version"], "0.1.0")
             self.assertEqual(validation["result"], "PASS")
 
-            test_records = [
+            # VAL-S-01 的 intent split 为 "test"，但 workbook sourceSplit 是唯一事实：
+            # 官方记录必须冻结在 dev，不得发生 template 迁移。
+            dev_records = [
                 json.loads(line)
-                for line in (output_path / "test.jsonl").read_text(encoding="utf-8").splitlines()
+                for line in (output_path / "dev.jsonl").read_text(encoding="utf-8").splitlines()
             ]
-            moved = next(record for record in test_records if record["id"] == "VAL-S-01")
-            self.assertEqual(moved["sourceSplit"], "dev")
-            self.assertEqual(moved["split"], "test")
-            self.assertEqual(moved["splitReason"], "template_isolation")
-            self.assertEqual(moved["expectedAction"], "EXECUTE")
-            self.assertIsNone(moved["s2sql"])
-            self.assertEqual(moved["expected"]["answerText"], "1.10%")
+            kept = next(record for record in dev_records if record["id"] == "VAL-S-01")
+            self.assertEqual(kept["sourceSplit"], "dev")
+            self.assertEqual(kept["split"], "dev")
+            self.assertEqual(kept["splitReason"], "source_assignment")
+            self.assertEqual(kept["expectedAction"], "EXECUTE")
+            self.assertIsNone(kept["s2sql"])
+            self.assertEqual(kept["expected"]["answerText"], "1.10%")
             self.assertEqual(len((output_path / "augmentation.jsonl").read_text(encoding="utf-8").splitlines()), 1)
+
+
+class OfficialSplitContractTest(BuildDatasetTest):
+    """DATA-02 官方切分不可变契约。
+
+    对 competition_workbook 官方记录，workbook sourceSplit 是唯一事实：
+    输出恒为 split == sourceSplit、splitReason == source_assignment。
+    模板重叠只如实写入 manifest.templateOverlap，不触发跨切分迁移，
+    也不令 validate_dataset 失败。
+    """
+
+    def write_overlap_intents(self, root: Path) -> None:
+        """TRAIN-S-01 与 VAL-S-01 共享 templateGroup，制造真实模板重叠。"""
+        root.mkdir()
+        train = self.intent_record("TRAIN-S-01", "train", "train")
+        train["templateGroup"] = "template-shared"
+        dev = self.intent_record("VAL-S-01", "dev", "test")
+        dev["templateGroup"] = "template-shared"
+        entries = {
+            "train": [train],
+            "dev": [dev],
+            "test": [self.intent_record("TEST-S-01", "test", "test")],
+        }
+        for split, records in entries.items():
+            (root / f"{split}.jsonl").write_text(
+                "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
+                encoding="utf-8",
+            )
+
+    def test_template_overlap_passes_without_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path = temp_path / "questions.xlsx"
+            intent_root = temp_path / "bank_intent"
+            output_path = temp_path / "bank_nl2sql"
+            self.create_question_workbook(workbook_path)
+            self.write_overlap_intents(intent_root)
+
+            report = build_dataset(workbook_path, intent_root, output_path)
+
+            self.assertEqual(
+                report["templateOverlap"], {"trainDev": ["template-shared"], "trainTest": [], "devTest": []}
+            )
+            self.assertEqual(report["reassignedForTemplateIsolation"], [])
+            records = [
+                json.loads(line)
+                for split in ("train", "dev", "test")
+                for line in (output_path / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            for record in records:
+                self.assertEqual(record["split"], record["sourceSplit"])
+                self.assertEqual(record["splitReason"], "source_assignment")
+            # 非空模板重叠本身必须允许通过
+            self.assertEqual(validate_dataset(output_path)["result"], "PASS")
+
+    def test_official_split_mismatch_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path = temp_path / "questions.xlsx"
+            intent_root = temp_path / "bank_intent"
+            output_path = temp_path / "bank_nl2sql"
+            self.create_question_workbook(workbook_path)
+            self.write_intents(intent_root)
+            build_dataset(workbook_path, intent_root, output_path)
+
+            # 篡改官方记录 split，使其与 workbook sourceSplit 不一致
+            dev_lines = (output_path / "dev.jsonl").read_text(encoding="utf-8").splitlines()
+            tampered = json.loads(dev_lines[0])
+            tampered["split"] = "test"
+            (output_path / "dev.jsonl").write_text(
+                json.dumps(tampered, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(DatasetValidationError, "split must equal sourceSplit"):
+                validate_dataset(output_path)
+
+    def test_nonempty_reassigned_for_template_isolation_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path = temp_path / "questions.xlsx"
+            intent_root = temp_path / "bank_intent"
+            output_path = temp_path / "bank_nl2sql"
+            self.create_question_workbook(workbook_path)
+            self.write_intents(intent_root)
+            build_dataset(workbook_path, intent_root, output_path)
+
+            manifest = json.loads((output_path / "manifest.json").read_text(encoding="utf-8"))
+            manifest["reassignedForTemplateIsolation"] = [
+                {"id": "VAL-S-01", "sourceSplit": "dev", "split": "test"}
+            ]
+            (output_path / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(DatasetValidationError, "reassignedForTemplateIsolation"):
+                validate_dataset(output_path)
 
 
 class OfficialManifestTest(BuildDatasetTest):
@@ -282,7 +381,7 @@ class OfficialManifestTest(BuildDatasetTest):
             self.assertEqual(report["officialCount"], 3)
             self.assertEqual(report["version"], "2.0.0")
             self.assertEqual(report["sourceSplitCounts"], {"train": 1, "dev": 1, "test": 1})
-            self.assertEqual(report["evaluationSplitCounts"], {"train": 1, "dev": 0, "test": 2})
+            self.assertEqual(report["evaluationSplitCounts"], {"train": 1, "dev": 1, "test": 1})
             ids = {
                 record["id"]
                 for split in ("train", "dev", "test")
