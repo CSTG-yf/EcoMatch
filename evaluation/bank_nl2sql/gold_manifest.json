@@ -2,9 +2,9 @@
   "databaseSha256": "868ee86db7a84ada9c11c3a1d38c9f5a8709940d11c90806094073de3cb613e4",
   "officialCount": 199,
   "splitCounts": {
-    "dev": 36,
-    "test": 49,
-    "train": 114
+    "dev": 40,
+    "test": 40,
+    "train": 119
   },
   "sqlExecution": "PASS",
   "version": "2.0.0"

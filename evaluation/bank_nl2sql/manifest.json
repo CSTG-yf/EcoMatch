@@ -1,58 +1,12 @@
 {
   "augmentationCount": 12,
   "evaluationSplitCounts": {
-    "dev": 36,
-    "test": 49,
-    "train": 114
+    "dev": 40,
+    "test": 40,
+    "train": 119
   },
   "officialCount": 199,
-  "reassignedForTemplateIsolation": [
-    {
-      "id": "TRAIN-M-25",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-26",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-27",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-36",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-45",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-04",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-05",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-06",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-S-06",
-      "sourceSplit": "dev",
-      "split": "test"
-    }
-  ],
+  "reassignedForTemplateIsolation": [],
   "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
   "sourceSplitCounts": {
     "dev": 40,
@@ -61,9 +15,15 @@
   },
   "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.0.xlsx",
   "templateOverlap": {
-    "devTest": [],
+    "devTest": [
+      "15664243130b4506",
+      "d1e4e92198127158"
+    ],
     "trainDev": [],
-    "trainTest": []
+    "trainTest": [
+      "86a881de4989ff33",
+      "b92432933806f5fa"
+    ]
   },
   "version": "2.0.0"
 }
