@@ -235,7 +235,7 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ## 8. 验收标准
 
-- 官方样本数、`sourceSplit`、问题文本和答案与源工作簿一致率 100%；`split` 的调整可由 manifest 逐题追溯；`templateOverlap` 仅作风险披露，不改变题目归属。
+- 官方样本数、`sourceSplit`、问题文本和答案与源工作簿一致率 100%；`split` 与 `sourceSplit` 严格一致（split == sourceSplit），不发生跨切分迁移；`templateOverlap` 仅作风险披露，不改变题目归属。
 - 金标 S2SQL/SQL 解析成功率 100%，在标准库执行成功率 100%。
 - 金标执行结果与标准答案一致率 100%；容差、单位和排序规则必须显式记录。
 - 单表、多表、嵌套/CTE、聚合、同比环比、TopN、窗口排名和跨机构查询均有可审计覆盖统计。
