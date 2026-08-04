@@ -294,6 +294,33 @@ class GoldSqlTest(unittest.TestCase):
         self.assertIn("metric_code = 'ZB001'", spec.sql)
         self.assertEqual(spec.features, ["POINT_QUERY"])
 
+    def test_explicit_metrics_with_empty_code_are_rejected(self) -> None:
+        """显式 metrics 含空 code 必须 fail closed，不得回退到题干推断。"""
+        malformed = record(
+            "江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"]
+        )
+        malformed["normalizedIntent"]["metrics"] = [{"code": ""}]
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(malformed)
+
+    def test_explicit_metrics_without_code_are_rejected(self) -> None:
+        """显式 metrics 含缺失 code 的对象必须 fail closed，不得回退到题干推断。"""
+        malformed = record(
+            "江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"]
+        )
+        malformed["normalizedIntent"]["metrics"] = [{}]
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(malformed)
+
+    def test_explicit_metrics_with_non_string_code_are_rejected(self) -> None:
+        """显式 metrics 中 code 非字符串必须 fail closed，不得强转后放行。"""
+        malformed = record(
+            "江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"]
+        )
+        malformed["normalizedIntent"]["metrics"] = [{"code": 123}]
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(malformed)
+
     def test_invalid_derived_metrics_are_rejected(self) -> None:
         invalid_derived = [
             {"numerator": "NOT_A_CODE", "denominator": "ZB001"},

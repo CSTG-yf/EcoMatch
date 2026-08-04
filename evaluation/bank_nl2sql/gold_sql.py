@@ -146,30 +146,27 @@ def _metric_codes(record: dict[str, Any]) -> list[str]:
     metrics = record.get("normalizedIntent", {}).get("metrics", [])
     if not isinstance(metrics, list):
         raise GoldSqlError(f"Invalid metrics for {record.get('id')}")
+    if not metrics:
+        question = str(record.get("question", ""))
+        aliases = sorted(METRIC_ALIASES, key=len, reverse=True)
+        found: list[str] = []
+        for alias in aliases:
+            if alias in question and METRIC_ALIASES[alias] not in found:
+                found.append(METRIC_ALIASES[alias])
+        if not found:
+            raise GoldSqlError(f"No metric annotation or recognized metric text for {record.get('id')}")
+        return found
     codes: list[str] = []
     for metric in metrics:
         if not isinstance(metric, dict):
             raise GoldSqlError(f"Invalid metric entry for {record.get('id')}: {metric!r}")
         code = metric.get("code")
-        if not code:
-            continue
-        code = str(code)
-        if METRIC_CODE_PATTERN.fullmatch(code) is None:
+        if not isinstance(code, str) or not code or METRIC_CODE_PATTERN.fullmatch(code) is None:
             raise GoldSqlError(f"Invalid metric code {code!r} for {record.get('id')}")
         codes.append(code)
-    if codes:
-        if len(set(codes)) != len(codes):
-            raise GoldSqlError(f"Duplicate metric codes for {record.get('id')}: {sorted(set(codes))}")
-        return codes
-    question = str(record.get("question", ""))
-    aliases = sorted(METRIC_ALIASES, key=len, reverse=True)
-    found: list[str] = []
-    for alias in aliases:
-        if alias in question and METRIC_ALIASES[alias] not in found:
-            found.append(METRIC_ALIASES[alias])
-    if not found:
-        raise GoldSqlError(f"No metric annotation or recognized metric text for {record.get('id')}")
-    return found
+    if len(set(codes)) != len(codes):
+        raise GoldSqlError(f"Duplicate metric codes for {record.get('id')}: {sorted(set(codes))}")
+    return codes
 
 
 def _derived_metrics(record: dict[str, Any]) -> list[dict[str, Any]]:
