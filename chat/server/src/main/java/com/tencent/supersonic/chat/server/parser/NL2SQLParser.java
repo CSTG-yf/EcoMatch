@@ -24,6 +24,7 @@ import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.MapResp;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.core.gateway.QueryPerformanceMonitor;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
@@ -157,9 +158,18 @@ public class NL2SQLParser implements ChatQueryParser {
 
                 // try again with all semantic fields passed to LLM
                 if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
-                    queryNLReq.setSelectedParseInfo(null);
-                    queryNLReq.setMapModeEnum(MapModeEnum.ALL);
-                    doParse(queryNLReq, parseContext.getResponse());
+                    String errorMsg = parseContext.getResponse().getErrorMsg();
+                    if (BankNl2SqlError.isTerminalParserError(errorMsg)) {
+                        // fail-closed: a constrained bank plan failure is terminal, so never
+                        // fall back to MapModeEnum.ALL; strip the internal parser prefix and
+                        // surface only the user-facing message.
+                        parseContext.getResponse()
+                                .setErrorMsg(BankNl2SqlError.toUserMessage(errorMsg));
+                    } else {
+                        queryNLReq.setSelectedParseInfo(null);
+                        queryNLReq.setMapModeEnum(MapModeEnum.ALL);
+                        doParse(queryNLReq, parseContext.getResponse());
+                    }
                 }
             } finally {
                 QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.MODEL,
