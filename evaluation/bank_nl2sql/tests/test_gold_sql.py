@@ -277,6 +277,37 @@ class GoldSqlTest(unittest.TestCase):
                         record("哪家农商行的不良贷款率最低？", "RANKING", metrics, ["2026年3月末"], [])
                     )
 
+    def test_ranking_empty_metrics_keeps_status_metrics_fallback(self) -> None:
+        """RANKING 且 metrics=[]（题干文本推断也失败）时保留历史 _status_metrics 回退。"""
+        spec = build_gold_sql(
+            record(
+                "2026年3月末，哪家农商行排名第一？",
+                "RANKING",
+                [],
+                ["2026年3月末"],
+                [],
+            )
+        )
+        self.assertEqual(spec.features, ["RANKING", "WINDOW_RANK", "MULTI_METRIC"])
+        for code in ("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"):
+            with self.subTest(code=code):
+                self.assertIn(f"metric_code = '{code}'", spec.sql)
+
+    def test_ranking_falsy_non_list_metrics_are_fail_closed(self) -> None:
+        """RANKING 的 metrics 为 ""、None、{} 等非 list 值必须抛 GoldSqlError，绝不回退。"""
+        for bad_metrics in ("", None, {}):
+            with self.subTest(metrics=bad_metrics):
+                malformed = record(
+                    "2026年3月末，哪家农商行排名第一？",
+                    "RANKING",
+                    [],
+                    ["2026年3月末"],
+                    [],
+                )
+                malformed["normalizedIntent"]["metrics"] = bad_metrics
+                with self.assertRaises(GoldSqlError):
+                    build_gold_sql(malformed)
+
     def test_malformed_metrics_are_rejected(self) -> None:
         non_list = record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"])
         non_list["normalizedIntent"]["metrics"] = "ZB001"

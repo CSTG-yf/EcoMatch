@@ -386,11 +386,13 @@ def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
     try:
         metric_codes = _metric_codes(record)
     except GoldSqlError:
-        # 空 metrics 且文本推断失败时保留历史状态指标回退；直接输入的
-        # 非法/重复 metrics 必须 fail closed，不得被吞掉。
-        if metrics:
+        # 仅当 metrics 确为 list 且为空（题干文本推断也失败）时保留历史
+        # 状态指标回退；任何非 list 值（""、None、{} 等）或非空但非法的
+        # list 都必须 fail closed re-raise，绝不生成回退 ranking SQL。
+        if isinstance(metrics, list) and not metrics:
+            metric_codes = _status_metrics()
+        else:
             raise
-        metric_codes = _status_metrics()
     if len(metric_codes) != 1 or derived_metrics:
         return _multi_metric_rank_query(record, metric_codes or _status_metrics(), derived_metrics)
     metric_code = metric_codes[0]
