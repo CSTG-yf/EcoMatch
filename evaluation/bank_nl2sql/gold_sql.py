@@ -17,6 +17,7 @@ from typing import Any
 
 
 LOWER_IS_BETTER = {"ZB012", "ZB013", "ZB017"}
+METRIC_CODE_PATTERN = re.compile(r"^ZB\d{3}$")
 CHINESE_RANK_NUMBERS = {
     "一": 1,
     "二": 2,
@@ -134,9 +135,31 @@ def _latest_date_from_record(record: dict[str, Any]) -> str:
 
 
 def _metric_codes(record: dict[str, Any]) -> list[str]:
+    """Return the record's declared base metric codes, or infer them from text.
+
+    Directly supplied ``normalizedIntent.metrics`` fail closed: every entry
+    must be an object carrying a valid ``ZB###`` code, duplicates are
+    rejected, and any violation raises ``GoldSqlError`` before SQL can be
+    generated.  An empty metrics list keeps the historical question-text
+    inference behavior (``METRIC_ALIASES``).
+    """
     metrics = record.get("normalizedIntent", {}).get("metrics", [])
-    codes = [str(metric.get("code")) for metric in metrics if metric.get("code")]
+    if not isinstance(metrics, list):
+        raise GoldSqlError(f"Invalid metrics for {record.get('id')}")
+    codes: list[str] = []
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            raise GoldSqlError(f"Invalid metric entry for {record.get('id')}: {metric!r}")
+        code = metric.get("code")
+        if not code:
+            continue
+        code = str(code)
+        if METRIC_CODE_PATTERN.fullmatch(code) is None:
+            raise GoldSqlError(f"Invalid metric code {code!r} for {record.get('id')}")
+        codes.append(code)
     if codes:
+        if len(set(codes)) != len(codes):
+            raise GoldSqlError(f"Duplicate metric codes for {record.get('id')}: {sorted(set(codes))}")
         return codes
     question = str(record.get("question", ""))
     aliases = sorted(METRIC_ALIASES, key=len, reverse=True)
@@ -154,8 +177,10 @@ def _derived_metrics(record: dict[str, Any]) -> list[dict[str, Any]]:
 
     Derived specs come exclusively from the official change ledger projection
     (``normalizedIntent.derivedMetrics``); nothing is guessed from the
-    question text.  Each spec must declare non-empty numerator/denominator
-    base metric codes and receives the stable metric code
+    question text.  Directly supplied specs fail closed: each must be an
+    object declaring numerator/denominator as distinct valid ``ZB###`` base
+    metric codes, and any violation raises ``GoldSqlError`` before SQL can be
+    generated.  Each spec receives the stable metric code
     ``DERIVED_<numerator>_DIV_<denominator>``.
     """
     specs = record.get("normalizedIntent", {}).get("derivedMetrics", [])
@@ -163,12 +188,18 @@ def _derived_metrics(record: dict[str, Any]) -> list[dict[str, Any]]:
         raise GoldSqlError(f"Invalid derivedMetrics for {record.get('id')}")
     validated: list[dict[str, Any]] = []
     for spec in specs:
-        numerator = spec.get("numerator") if isinstance(spec, dict) else None
-        denominator = spec.get("denominator") if isinstance(spec, dict) else None
-        if not isinstance(numerator, str) or not numerator:
-            raise GoldSqlError(f"Invalid derived numerator for {record.get('id')}")
-        if not isinstance(denominator, str) or not denominator:
-            raise GoldSqlError(f"Invalid derived denominator for {record.get('id')}")
+        if not isinstance(spec, dict):
+            raise GoldSqlError(f"Invalid derived metric spec for {record.get('id')}: {spec!r}")
+        numerator = spec.get("numerator")
+        denominator = spec.get("denominator")
+        if not isinstance(numerator, str) or METRIC_CODE_PATTERN.fullmatch(numerator) is None:
+            raise GoldSqlError(f"Invalid derived numerator {numerator!r} for {record.get('id')}")
+        if not isinstance(denominator, str) or METRIC_CODE_PATTERN.fullmatch(denominator) is None:
+            raise GoldSqlError(f"Invalid derived denominator {denominator!r} for {record.get('id')}")
+        if numerator == denominator:
+            raise GoldSqlError(
+                f"Derived numerator and denominator must differ for {record.get('id')}: {numerator!r}"
+            )
         validated.append(
             {
                 "metricCode": f"DERIVED_{numerator}_DIV_{denominator}",
@@ -354,9 +385,14 @@ def _is_subset_winner(question: str, organizations: list[str]) -> bool:
 
 def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
     derived_metrics = _derived_metrics(record)
+    metrics = record.get("normalizedIntent", {}).get("metrics", [])
     try:
         metric_codes = _metric_codes(record)
     except GoldSqlError:
+        # 空 metrics 且文本推断失败时保留历史状态指标回退；直接输入的
+        # 非法/重复 metrics 必须 fail closed，不得被吞掉。
+        if metrics:
+            raise
         metric_codes = _status_metrics()
     if len(metric_codes) != 1 or derived_metrics:
         return _multi_metric_rank_query(record, metric_codes or _status_metrics(), derived_metrics)

@@ -1960,6 +1960,49 @@ class PromoteGroundTruthTest(unittest.TestCase):
             with self.assertRaisesRegex(PromotionError, "源工作簿哈希不匹配"):
                 scenario.promote()
 
+    def assert_promotion_rejects_clarification_metric_codes(self, metric_codes: Any, expected_error: str) -> None:
+        """把 QUESTION_CLARIFICATION 条目 metricCodes 改为非法值并同步哈希后 promote。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            scenario = PromotionScenario(Path(tmp))
+            ledger = json.loads(scenario.ledger_path.read_text(encoding="utf-8"))
+            ledger["entries"][1]["metricCodes"] = metric_codes
+            scenario.rewrite_ledger(ledger)
+            manifest = json.loads(scenario.manifest_path.read_text(encoding="utf-8"))
+            manifest["changeLedgerSha256"] = _promo_sha256(scenario.ledger_path.read_bytes())
+            scenario.rewrite_manifest(manifest)
+            with self.assertRaisesRegex(PromotionError, expected_error):
+                scenario.promote()
+
+    def test_fails_closed_on_clarification_metric_codes_not_a_list_or_empty(self) -> None:
+        for metric_codes in ("ZB001", None, {}, []):
+            with self.subTest(metric_codes=metric_codes):
+                self.assert_promotion_rejects_clarification_metric_codes(metric_codes, "metricCodes 非法")
+
+    def test_fails_closed_on_clarification_invalid_base_code(self) -> None:
+        for metric_codes in (["ZB01"], ["zb001"], ["ZB0011"], ["ZB001 "], [""], ["存款余额"]):
+            with self.subTest(metric_codes=metric_codes):
+                self.assert_promotion_rejects_clarification_metric_codes(metric_codes, "不是合法指标代码")
+
+    def test_fails_closed_on_clarification_duplicate_base_codes(self) -> None:
+        self.assert_promotion_rejects_clarification_metric_codes(["ZB001", "ZB001"], "基础指标重复")
+
+    def test_fails_closed_on_clarification_derived_only(self) -> None:
+        """仅 derived 无 string base 的契约必须 fail closed（至少一个 base code）。"""
+        self.assert_promotion_rejects_clarification_metric_codes(
+            [{"derived": {"numerator": "ZB002", "denominator": "ZB001"}, "name": "存贷比"}],
+            "未声明任何基础指标",
+        )
+
+    def test_fails_closed_on_clarification_invalid_derived_operands(self) -> None:
+        cases = [
+            ([{"derived": {"numerator": "NOT_A_CODE", "denominator": "ZB001"}}], "derived numerator 'NOT_A_CODE' 不是合法指标代码"),
+            ([{"derived": {"numerator": "ZB002", "denominator": "NOT_A_CODE"}}], "derived denominator 'NOT_A_CODE' 不是合法指标代码"),
+            ([{"derived": {"numerator": "ZB002", "denominator": "ZB002"}}], "derived numerator 与 denominator 必须不同"),
+        ]
+        for metric_codes, expected_error in cases:
+            with self.subTest(metric_codes=metric_codes):
+                self.assert_promotion_rejects_clarification_metric_codes(metric_codes, expected_error)
+
 
 if __name__ == "__main__":
     unittest.main()

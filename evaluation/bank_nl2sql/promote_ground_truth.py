@@ -85,6 +85,7 @@ CURRENT_POINTER = "CURRENT.json"
 
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+")
 SIDECAR_PATTERN = re.compile(r"([0-9A-F]{64})  ([^\n]+)\n")
+METRIC_CODE_PATTERN = re.compile(r"^ZB\d{3}$")
 
 
 class PromotionError(ValueError):
@@ -229,6 +230,47 @@ def _validate_manifest(manifest: dict[str, Any], version: str, expected_source_s
             raise PromotionError(f"manifest.{field} 非法: {manifest.get(field)!r}")
 
 
+def _validate_clarification_metric_codes(entry_id: str, metric_codes: Any) -> None:
+    """QUESTION_CLARIFICATION metricCodes 结构契约（与 build_dataset 投影同构）。
+
+    string 基础指标必须为合法 ``ZB###`` 代码且不得重复，至少声明一个基础
+    指标；derived 规格的 numerator/denominator 必须是不同的合法 ``ZB###``
+    代码。任何结构违例都 fail closed，绝不放过非法契约进入官方包。
+    """
+    if not isinstance(metric_codes, list) or not metric_codes:
+        raise PromotionError(f"{entry_id}: QUESTION_CLARIFICATION metricCodes 非法")
+    base_codes: list[str] = []
+    for item in metric_codes:
+        if isinstance(item, str):
+            if METRIC_CODE_PATTERN.fullmatch(item) is None:
+                raise PromotionError(
+                    f"{entry_id}: QUESTION_CLARIFICATION metricCodes 基础指标 {item!r} 不是合法指标代码（应为 ZB### 格式）"
+                )
+            base_codes.append(item)
+            continue
+        if isinstance(item, dict) and isinstance(item.get("derived"), dict):
+            numerator = item["derived"].get("numerator")
+            denominator = item["derived"].get("denominator")
+            if not isinstance(numerator, str) or METRIC_CODE_PATTERN.fullmatch(numerator) is None:
+                raise PromotionError(
+                    f"{entry_id}: QUESTION_CLARIFICATION derived numerator {numerator!r} 不是合法指标代码（应为 ZB### 格式）"
+                )
+            if not isinstance(denominator, str) or METRIC_CODE_PATTERN.fullmatch(denominator) is None:
+                raise PromotionError(
+                    f"{entry_id}: QUESTION_CLARIFICATION derived denominator {denominator!r} 不是合法指标代码（应为 ZB### 格式）"
+                )
+            if numerator == denominator:
+                raise PromotionError(
+                    f"{entry_id}: QUESTION_CLARIFICATION derived numerator 与 denominator 必须不同：{numerator!r}"
+                )
+            continue
+        raise PromotionError(f"{entry_id}: QUESTION_CLARIFICATION metricCodes 含非法条目：{item!r}")
+    if not base_codes:
+        raise PromotionError(f"{entry_id}: QUESTION_CLARIFICATION 未声明任何基础指标")
+    if len(set(base_codes)) != len(base_codes):
+        raise PromotionError(f"{entry_id}: QUESTION_CLARIFICATION 基础指标重复")
+
+
 def _validate_ledger(ledger_path: Path, manifest: dict[str, Any]) -> dict[str, list[str]]:
     """Ledger content contract; returns {removed_ids, correction_ids, clarification_ids}."""
     try:
@@ -274,6 +316,8 @@ def _validate_ledger(ledger_path: Path, manifest: dict[str, Any]) -> dict[str, l
             for field in ("oldTextSha256", "newTextSha256"):
                 if not isinstance(entry.get(field), str):
                     raise PromotionError(f"{change_type} 条目缺少 {field}：{entry_id}")
+            if change_type == "QUESTION_CLARIFICATION":
+                _validate_clarification_metric_codes(entry_id, entry.get("metricCodes"))
             buckets["corrected" if change_type == "ANSWER_CORRECTION" else "clarified"].append(entry_id)
     change_counts = manifest.get("changeCounts")
     for field, change_type in (

@@ -254,6 +254,78 @@ class GoldSqlTest(unittest.TestCase):
         with self.assertRaises(GoldSqlError):
             build_gold_sql(record("未知问题", "UNKNOWN", ["ZB001"], ["2025-01-01"], ["ORG001"]))
 
+    def test_invalid_metric_code_is_rejected(self) -> None:
+        for code in ("ZB01", "ZB0011", "zb001", "ZB001 ", "存款余额"):
+            with self.subTest(code=code):
+                with self.assertRaises(GoldSqlError):
+                    build_gold_sql(
+                        record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [code], ["2025-01-31"], ["ORG001"])
+                    )
+
+    def test_duplicate_metric_codes_are_rejected(self) -> None:
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(
+                record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", ["ZB001", "ZB001"], ["2025-01-31"], ["ORG001"])
+            )
+
+    def test_ranking_does_not_swallow_invalid_or_duplicate_metric_codes(self) -> None:
+        """RANKING 的 _status_metrics 回退只适用于空 metrics 推断失败，直接输入的非法/重复 base 必须 fail closed。"""
+        for metrics in (["ZB01"], ["ZB001", "ZB001"]):
+            with self.subTest(metrics=metrics):
+                with self.assertRaises(GoldSqlError):
+                    build_gold_sql(
+                        record("哪家农商行的不良贷款率最低？", "RANKING", metrics, ["2026年3月末"], [])
+                    )
+
+    def test_malformed_metrics_are_rejected(self) -> None:
+        non_list = record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"])
+        non_list["normalizedIntent"]["metrics"] = "ZB001"
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(non_list)
+        non_dict_entry = record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"])
+        non_dict_entry["normalizedIntent"]["metrics"] = [["ZB001"]]
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(non_dict_entry)
+
+    def test_empty_metrics_keeps_question_text_inference(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行各项存款余额是多少？", "POINT_QUERY", [], ["2025-01-31"], ["ORG001"])
+        )
+        self.assertIn("metric_code = 'ZB001'", spec.sql)
+        self.assertEqual(spec.features, ["POINT_QUERY"])
+
+    def test_invalid_derived_metrics_are_rejected(self) -> None:
+        invalid_derived = [
+            {"numerator": "NOT_A_CODE", "denominator": "ZB001"},
+            {"numerator": "ZB002", "denominator": "NOT_A_CODE"},
+            {"numerator": "ZB002", "denominator": "ZB002"},
+        ]
+        for derived in invalid_derived:
+            with self.subTest(derived=derived):
+                with self.assertRaises(GoldSqlError):
+                    build_gold_sql(
+                        record(
+                            "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？",
+                            "RANKING",
+                            ["ZB001", "ZB002"],
+                            ["2025-11-30"],
+                            [],
+                            derived_metrics=[derived],
+                        )
+                    )
+
+    def test_non_list_derived_metrics_are_rejected(self) -> None:
+        malformed = record(
+            "请列出江苏省G市农商行在2025-11-30的主要经营指标及排名？",
+            "RANKING",
+            ["ZB001", "ZB002"],
+            ["2025-11-30"],
+            [],
+        )
+        malformed["normalizedIntent"]["derivedMetrics"] = {"numerator": "ZB002", "denominator": "ZB001"}
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(malformed)
+
     def test_derived_ratio_rank_sqlite_base_plus_derived_returns_six_rows(self) -> None:
         """5 个声明基础指标 + 1 个派生比率 = 6 行，派生值 = ZB002/ZB001*100。"""
         daily = [

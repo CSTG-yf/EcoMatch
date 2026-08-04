@@ -358,7 +358,9 @@ def _apply_clarification_contract(record: dict[str, Any], contract: dict[str, An
     (in ledger order) and derived ratio specs become
     ``normalizedIntent.derivedMetrics`` (in ledger order).  The ledger is the
     only source of truth: nothing is guessed from the question text and no
-    default metric may leak in.  Derived numerator/denominator are the
+    default metric may leak in.  Every string base code must be a valid
+    project metric code (``ZB###`` format) and duplicates are rejected.
+    Derived numerator/denominator are the
     underlying data-source metric codes: each must be a distinct valid
     project metric code (``ZB###`` format), but they need not be declared
     among the output base metrics.
@@ -368,8 +370,10 @@ def _apply_clarification_contract(record: dict[str, Any], contract: dict[str, An
     derived_specs: list[dict[str, Any]] = []
     for item in contract["metricCodes"]:
         if isinstance(item, str):
-            if not item:
-                raise DatasetBuildError(f"{sample_id}: QUESTION_CLARIFICATION metricCodes 含空基础指标")
+            if METRIC_CODE_PATTERN.fullmatch(item) is None:
+                raise DatasetBuildError(
+                    f"{sample_id}: QUESTION_CLARIFICATION metricCodes 基础指标 {item!r} 不是合法指标代码（应为 ZB### 格式）"
+                )
             metric_codes.append(item)
             continue
         if isinstance(item, dict) and isinstance(item.get("derived"), dict):

@@ -738,6 +738,10 @@ class OfficialManifestTest(BuildDatasetTest):
                 "derived numerator 'NOT_A_CODE' 不是合法指标代码",
             ),
             (
+                ["ZB001", {"derived": {"numerator": "ZB002", "denominator": "NOT_A_CODE"}, "name": "伪造比率"}],
+                "derived denominator 'NOT_A_CODE' 不是合法指标代码",
+            ),
+            (
                 ["ZB001", {"derived": {"numerator": "ZB001", "denominator": "ZB001"}, "name": "自比"}],
                 "derived numerator 与 denominator 必须不同",
             ),
@@ -756,6 +760,62 @@ class OfficialManifestTest(BuildDatasetTest):
                 self.write_manifest(manifest_path, manifest)
                 with self.assertRaisesRegex(DatasetBuildError, expected_error):
                     build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_invalid_base_code_rejected(self) -> None:
+        """string base metricCodes 必须为合法 ZB### 代码：空串与非法格式 fail closed。"""
+        for metric_code in ("", "ZB01", "ZB0011", "zb001", "ZB001 ", "存款余额"):
+            with self.subTest(metric_code=metric_code), tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
+                workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+                manifest = self.official_manifest(workbook_path, [])
+                manifest_path = temp_path / "official-manifest.json"
+                self.write_ledger(
+                    temp_path,
+                    manifest,
+                    clarifications=[{"id": "TRAIN-S-01", "metricCodes": [metric_code]}],
+                )
+                self.write_manifest(manifest_path, manifest)
+                with self.assertRaisesRegex(DatasetBuildError, "不是合法指标代码"):
+                    build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_duplicate_base_codes_rejected(self) -> None:
+        """重复的 string base metricCodes 必须 fail closed。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+            manifest = self.official_manifest(workbook_path, [])
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[{"id": "TRAIN-S-01", "metricCodes": ["ZB001", "ZB001"]}],
+            )
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "基础指标重复"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
+
+    def test_manifest_ledger_clarification_derived_only_rejected(self) -> None:
+        """仅 derived 无 string base 的契约必须 fail closed（至少一个 base code）。"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path, include_removed_intent=False)
+            manifest = self.official_manifest(workbook_path, [])
+            manifest_path = temp_path / "official-manifest.json"
+            self.write_ledger(
+                temp_path,
+                manifest,
+                clarifications=[
+                    {
+                        "id": "TRAIN-S-01",
+                        "metricCodes": [
+                            {"derived": {"numerator": "ZB002", "denominator": "ZB001"}, "name": "存贷比"}
+                        ],
+                    }
+                ],
+            )
+            self.write_manifest(manifest_path, manifest)
+            with self.assertRaisesRegex(DatasetBuildError, "未声明任何基础指标"):
+                build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
 
 
 if __name__ == "__main__":
