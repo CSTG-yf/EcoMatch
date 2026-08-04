@@ -37,9 +37,11 @@
   无法复核，已从正式库移除（来源划分相应变为 119/40/40）；
 - 0 个契约错误，事实区域哈希与源一致。
 
-评测切分：模板隔离后 train/dev/test = 114/36/49（test 仍为 49），
-`DATA-01` 的 12 条增强样本单独进入 `augmentation.jsonl`，只用于开发和
-鲁棒性测试，不计入官方 SQL 准确率，也不进入官方验证集或测试集。
+评测切分：来源与正式评测均为 train/dev/test = 119/40/40（199 条）；
+模板重叠仅记录于 `manifest.json` 的 `templateOverlap`（风险披露，不改变
+题目归属）。`DATA-01` 的 12 条增强样本单独进入 `augmentation.jsonl`，
+只用于开发和鲁棒性测试，不计入官方 SQL 准确率，也不进入官方验证集或
+测试集。
 
 生成与验证命令：
 
@@ -71,9 +73,10 @@ SHA-256、题数、来源切分与 `canonicalReady` 时才允许忽略 `removedI
 版本 2.0.0；无 manifest 的旧兼容路径仍为 0.1.0。
 
 官方核心集在 2.0.0 中为 199 道题（原始 200 道减去上述 1 条删除题），
-`split` 使用 DATA-01 已冻结的无模板泄漏评测分割；被调整的题目保留原
-`sourceSplit` 和调整原因（见 `contract-change-ledger.json` 与
-`manifest.json`）。
+来源与正式评测均为 train/dev/test = 119/40/40；被调整的题目保留原
+`sourceSplit` 和调整原因（题目/答案契约变更逐条记录于
+`contract-change-ledger.json`，逐题调整与 `templateOverlap` 风险披露
+记录于 `manifest.json`）。
 
 ## 3. 标准基准库
 
@@ -200,11 +203,11 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ### Task 2：标注 schema 与划分冻结
 
-- 状态：已完成（2026-07-23）；正式评估库 2.0.0 收口后更新为 199 条。已生成 `schema.json`、`manifest.json` 和官方/增强 JSONL；正式库来源划分保持 train/dev/test = 119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），模板隔离后的评测划分为 114/36/49（test 仍为 49），变更（5 修正、10 澄清、1 删除）在 `contract-change-ledger.json` 与 `manifest.json` 中可追溯，12 条增强题单独存放且三组官方题模板无重叠。
+- 状态：已完成（2026-07-23）；正式评估库 2.0.0 收口后更新为 199 条。已生成 `schema.json`、`manifest.json` 和官方/增强 JSONL；正式库来源与正式评测均为 train/dev/test = 119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），契约变更（5 修正、10 澄清、1 删除）逐条记录于 `contract-change-ledger.json`，`manifest.json` 的 `templateOverlap` 仅披露模板重叠风险而不改变题目归属，12 条增强题单独存放。
 - Owner/Boundary：`schema.json`、基础 JSONL 生成器、manifest；不生成最终 SQL。
 - Dependency：Task 1 的 schema 和 DATA-01 标注。
 - Mode：`BDD_TDD`。
-- Verification/Stop：`sourceSplit` 的 119/40/40 保持不变；模板隔离后的 `split` 为 114/36/49，ID 唯一，官方与增强样本隔离，`split` 的 train/dev/test 模板无泄漏。
+- Verification/Stop：`sourceSplit` 与正式评测切分均为 119/40/40 保持不变；ID 唯一，官方与增强样本隔离；`manifest.json` 的 `templateOverlap` 仅作风险披露，不改变题目归属。
 
 ### Task 3：S2SQL、物理 SQL 与标准结果
 
@@ -232,7 +235,7 @@ Critical Path：`Task 1 → Task 2 → Task 3 → Task 4 → Task 5`。共享 sc
 
 ## 8. 验收标准
 
-- 官方样本数、`sourceSplit`、问题文本和答案与源工作簿一致率 100%；`split` 的调整可由 manifest 逐题追溯且不存在模板泄漏。
+- 官方样本数、`sourceSplit`、问题文本和答案与源工作簿一致率 100%；`split` 的调整可由 manifest 逐题追溯；`templateOverlap` 仅作风险披露，不改变题目归属。
 - 金标 S2SQL/SQL 解析成功率 100%，在标准库执行成功率 100%。
 - 金标执行结果与标准答案一致率 100%；容差、单位和排序规则必须显式记录。
 - 单表、多表、嵌套/CTE、聚合、同比环比、TopN、窗口排名和跨机构查询均有可审计覆盖统计。

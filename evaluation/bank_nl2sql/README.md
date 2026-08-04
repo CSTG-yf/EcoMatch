@@ -4,7 +4,7 @@
 
 - `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
-- `build_dataset.py`：冻结官方题、意图标注和模板隔离后的评测切分；
+- `build_dataset.py`：冻结官方题、意图标注和来源评测切分；
 - `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（2.0.0 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
@@ -18,7 +18,7 @@
 - `official-manifest.json`：`datasetVersion=2.0.0`、`canonicalReady=true`、
   `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
   源/候选/事实区哈希与变更计数；
-- `contract-change-ledger.json`：全部变更的逐条账本（含文本哈希）；
+- `contract-change-ledger.json`：题目/答案契约变更的逐条账本（含文本哈希）；
 - `final-audit-summary.json`：199 条全量 VERIFIED 审查证据摘要；
 - 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
 
@@ -30,9 +30,10 @@
   已从正式库移除（`removedIds` 仅含账本声明的这一条）；
 - 0 个契约错误，事实区域哈希不变。
 
-正式统计：`officialCount=199`，来源切分 119/40/40，模板隔离后的评测切分
-114/36/49（test 仍为 49），增强样本 12 条（不参与官方评分）。三个官方评测
-切分之间没有模板重叠。
+正式统计：`officialCount=199`，来源与正式评测均为 train/dev/test =
+119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），增强样本
+12 条（不参与官方评分）。`manifest.json` 的 `templateOverlap` 仅披露
+模板重叠风险，不改变任何题目归属。
 
 ### 生成正式评估库（promote）
 
@@ -96,10 +97,10 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
 
 正式版基于源文件 SHA-256
 `c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`
-（冻结原始工作簿 `source.xlsx`，只读、永不修改）。官方题来源划分为
-train/dev/test = 119/40/40，模板隔离后的实际评测划分为 114/36/49
-（test 仍为 49），增强样本 12 条。`manifest.json` 记录逐题调整，
-三个官方评测切分之间没有模板重叠。
+（冻结原始工作簿 `source.xlsx`，只读、永不修改）。199 条官方题的来源
+与正式评测均为 train/dev/test = 119/40/40，增强样本 12 条。
+`manifest.json` 记录逐题调整；其 `templateOverlap` 仅作为风险披露，
+绝不改变题目归属。
 
 ## 生成并验证金标
 
