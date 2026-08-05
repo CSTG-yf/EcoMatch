@@ -25,6 +25,7 @@ public class QueryStatement {
     private SemanticSchemaResp semanticSchema;
     private Integer limit = 1000;
     private Boolean isTranslated = false;
+    private boolean trustedCompiledSql = false;
     private User user;
 
     public boolean isOk() {

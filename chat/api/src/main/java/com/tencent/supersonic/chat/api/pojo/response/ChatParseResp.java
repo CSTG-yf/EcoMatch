@@ -19,6 +19,7 @@ public class ChatParseResp {
     @JsonIgnore
     private boolean terminalError;
     private List<SemanticParseInfo> selectedParses = Lists.newArrayList();
+    private ParseResp.BankRoutingAttemptTelemetry bankRoutingAttemptTelemetry;
     private ParseTimeCostResp parseTimeCost = new ParseTimeCostResp();
     private List<Text2SQLExemplar> usedExemplars;
     private MultiTurnContextResp multiTurnContext;

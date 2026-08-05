@@ -529,6 +529,42 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileMultipleMetricProvinceAverageAggregationToStableLongSummary() {
+        BankQueryPlan plan = thresholdPlan();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setMetrics(List.of(metric("ZB002"), metric("ZB001")));
+        plan.getOutput().setColumns(List.of("ZB002", "ZB001"));
+        plan.setOrganizations(List.of(organization("ORG004")));
+        plan.setFilters(List.of(provinceAverageBenchmark()));
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, provinceAverageAggregationHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        String s2sql = compiled.getS2sql();
+        assertTrue(s2sql.contains("bank_daily_values_0 AS ("));
+        assertTrue(s2sql.contains("bank_aggregation_0 AS ("));
+        assertTrue(s2sql.contains("bank_daily_values_1 AS ("));
+        assertTrue(s2sql.contains("bank_aggregation_1 AS ("));
+        int firstOuterProjection =
+                s2sql.indexOf("SELECT bank_organization, 'ZB001' AS metric_code");
+        int secondOuterProjection =
+                s2sql.indexOf("SELECT bank_organization, 'ZB002' AS metric_code");
+        assertTrue(firstOuterProjection > s2sql.indexOf("bank_aggregation_1 AS ("));
+        assertTrue(secondOuterProjection > s2sql.indexOf("bank_aggregation_1 AS ("));
+        assertFalse(s2sql.contains("GROUP BY bank_organization, metric_code"));
+        assertTrue(s2sql.contains("UNION ALL"));
+        assertTrue(s2sql
+                .contains("ORDER BY metric_code ASC, aggregate_value DESC, bank_organization ASC"));
+        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count"), compiled.getOutputColumns());
+        assertEquals(List.of("ZB001", "ZB002"), compiled.getResultContract().getMetrics().stream()
+                .map(BankResultProjector.MetricBinding::getMetricCode).toList());
+        assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldCompileAnnualDailyAggregationToAStableSummaryContract() {
         BankQueryPlan plan = rankingPlan();
         plan.setIntent(BankIntentType.AGGREGATION);

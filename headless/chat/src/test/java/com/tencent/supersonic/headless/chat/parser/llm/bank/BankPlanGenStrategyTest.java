@@ -154,11 +154,13 @@ class BankPlanGenStrategyTest {
     @Test
     void shouldProvideAnAbsoluteStartOfYearBaselineForChangePlans() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(validChangePlanJson());
+        when(model.generate(anyString())).thenReturn(validChangePlanJson()
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
         LLMResp response = strategy.generate(changeRequest());
 
+        assertEquals(List.of(), response.getBankQueryPlan().getDimensions());
         assertEquals(BankQueryPlan.TimeComparison.START_OF_YEAR,
                 response.getBankQueryPlan().getTime().getComparison());
         assertEquals(LocalDate.of(2024, 12, 31),
@@ -174,11 +176,13 @@ class BankPlanGenStrategyTest {
     @Test
     void shouldProvideAnExplicitPeriodBaselineForAChangeRange() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(validPeriodChangePlanJson());
+        when(model.generate(anyString())).thenReturn(validPeriodChangePlanJson()
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
         LLMResp response = strategy.generate(periodChangeRequest());
 
+        assertEquals(List.of(), response.getBankQueryPlan().getDimensions());
         assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
                 response.getBankQueryPlan().getTime().getComparison());
         assertEquals(LocalDate.of(2025, 12, 31),

@@ -171,12 +171,17 @@ public class NL2SQLParser implements ChatQueryParser {
     private void doParse(QueryNLReq req, ChatParseResp resp) {
         ChatLayerService chatLayerService = ContextUtils.getBean(ChatLayerService.class);
         ParseResp parseResp = chatLayerService.parse(req);
+        copyParseResponse(parseResp, resp);
+    }
+
+    static void copyParseResponse(ParseResp parseResp, ChatParseResp resp) {
         if (parseResp.getState().equals(ParseResp.ParseState.COMPLETED)) {
             resp.getSelectedParses().addAll(parseResp.getSelectedParses());
         }
         resp.setState(parseResp.getState());
         resp.setParseTimeCost(parseResp.getParseTimeCost());
         resp.setErrorMsg(parseResp.getErrorMsg());
+        resp.setBankRoutingAttemptTelemetry(parseResp.getBankRoutingAttemptTelemetry());
     }
 
     private void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {

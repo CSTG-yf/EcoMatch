@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlValidationResult;
 import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlValidator;
@@ -95,6 +96,12 @@ public class LLMResponseService {
 
     public Map<String, LLMSqlResp> getDeduplicationSqlResp(int currentRetry, LLMResp llmResp,
             LLMReq llmReq) {
+        return getDeduplicationSqlRespWithOutcome(currentRetry, llmResp, llmReq)
+                .acceptedCandidates();
+    }
+
+    DeduplicationOutcome getDeduplicationSqlRespWithOutcome(int currentRetry, LLMResp llmResp,
+            LLMReq llmReq) {
         Map<String, LLMSqlResp> sqlRespMap = llmResp.getSqlRespMap();
         if (MapUtils.isEmpty(sqlRespMap)) {
             sqlRespMap = new HashMap<>();
@@ -105,7 +112,11 @@ public class LLMResponseService {
         }
         List<String> validationFailures = new ArrayList<>();
         List<RankedCandidate> candidates = new ArrayList<>();
+        int candidateCount = 0;
+        SqlErrorType validationErrorType = null;
+        boolean inconsistentValidationErrorType = false;
         for (Map.Entry<String, LLMSqlResp> entry : sqlRespMap.entrySet()) {
+            candidateCount++;
             LLMSqlResp response = entry.getValue() == null
                     ? LLMSqlResp.builder().sqlWeight(0D).fewShots(new ArrayList<>()).build()
                     : entry.getValue();
@@ -116,6 +127,12 @@ public class LLMResponseService {
                 String failure = validation.getEvaluation().getErrorType() + ": "
                         + validation.getEvaluation().getValidateMsg();
                 validationFailures.add(failure);
+                SqlErrorType candidateErrorType = validation.getEvaluation().getErrorType();
+                if (validationErrorType == null) {
+                    validationErrorType = candidateErrorType;
+                } else if (validationErrorType != candidateErrorType) {
+                    inconsistentValidationErrorType = true;
+                }
                 log.warn("currentRetry:{}, rejected S2SQL candidate, reason:{}, sql:{}",
                         currentRetry, SensitiveLogUtils.summarize(failure),
                         SensitiveLogUtils.summarize(entry.getKey()));
@@ -142,7 +159,11 @@ public class LLMResponseService {
             llmReq.setPriorExts(prefix + "Previous SQL candidates were rejected. Correct these "
                     + "issues without dropping requested filters: " + feedback);
         }
-        return result;
+        boolean allCandidatesRejectedByValidation = candidateCount > 0 && result.isEmpty()
+                && validationFailures.size() == candidateCount;
+        return new DeduplicationOutcome(result, allCandidatesRejectedByValidation,
+                allCandidatesRejectedByValidation && !inconsistentValidationErrorType
+                        ? validationErrorType : null);
     }
 
     private boolean areEquivalent(String left, String right) {
@@ -167,4 +188,7 @@ public class LLMResponseService {
     }
 
     private record RankedCandidate(String sql, LLMSqlResp response, double score) {}
+
+    record DeduplicationOutcome(Map<String, LLMSqlResp> acceptedCandidates,
+            boolean allCandidatesRejectedByValidation, SqlErrorType validationErrorType) {}
 }

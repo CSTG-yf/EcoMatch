@@ -1,0 +1,10 @@
+{
+  "policyName": "data-contract-pending",
+  "description": "训练集数据契约待订正记录清单：保留原始观测 outcome，但不计入计分有效分母。清单仅含记录 ID 与统一 issueCode，不含题目、答案、SQL、数据行或 test 记录。",
+  "issueCode": "STRUCTURED_GOLD_INCOMPLETE",
+  "recordIds": [
+    "TRAIN-M-31",
+    "TRAIN-M-32",
+    "TRAIN-M-33"
+  ]
+}

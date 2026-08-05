@@ -77,6 +77,7 @@ public class SqlSafetyPolicy {
     private final int maxParseTimeMs;
     private final Set<String> dangerousFunctions;
     private final Pattern dangerousFunctionCallPattern;
+    private final ThreadLocal<Set<PlainSelect>> trustedCteModelTableWrappers = new ThreadLocal<>();
 
     public SqlSafetyPolicy(int maxSqlLength) {
         this(maxSqlLength, "", DEFAULT_MAX_SELECT_DEPTH, DEFAULT_MAX_PARSE_TIME_MS);
@@ -123,6 +124,19 @@ public class SqlSafetyPolicy {
     }
 
     public void validate(String sql) {
+        validate(sql, false);
+    }
+
+    /**
+     * Validates a physical SQL statement produced by the server-side semantic compiler. Only a
+     * base-table SELECT * wrapper inside a CTE receives a compatibility exception; every other
+     * safety rule remains identical to {@link #validate(String)}.
+     */
+    public void validateTrustedCompiledSql(String sql) {
+        validate(sql, true);
+    }
+
+    private void validate(String sql, boolean trustedCompiledSql) {
         if (sql == null || sql.isBlank()) {
             throw new SqlPolicyViolationException("SQL must not be empty");
         }
@@ -156,7 +170,80 @@ public class SqlSafetyPolicy {
             throw new SqlPolicyViolationException(
                     "Dangerous SQL function is forbidden: " + dangerousFunctionMatcher.group(1));
         }
-        validateSelectTree((Select) statement);
+        Set<PlainSelect> wrappers = trustedCompiledSql
+                ? collectTrustedCteModelTableWrappers((Select) statement)
+                : Collections.emptySet();
+        trustedCteModelTableWrappers.set(wrappers);
+        try {
+            validateSelectTree((Select) statement);
+        } finally {
+            trustedCteModelTableWrappers.remove();
+        }
+    }
+
+    private Set<PlainSelect> collectTrustedCteModelTableWrappers(Select statement) {
+        Set<PlainSelect> wrappers = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Select> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        collectTrustedCteModelTableWrappers(statement, Collections.emptySet(), visited, false,
+                wrappers);
+        return wrappers;
+    }
+
+    private void collectTrustedCteModelTableWrappers(Select select, Set<String> inheritedCteNames,
+            Set<Select> visited, boolean insideCte, Set<PlainSelect> wrappers) {
+        if (select == null || !visited.add(select)) {
+            return;
+        }
+        Set<String> cteNames = new LinkedHashSet<>(inheritedCteNames);
+        if (select.getWithItemsList() != null) {
+            select.getWithItemsList().stream().filter(withItem -> withItem.getAlias() != null)
+                    .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
+                    .forEach(cteNames::add);
+            select.getWithItemsList().forEach(withItem -> collectTrustedCteModelTableWrappers(
+                    withItem.getSelect(), cteNames, visited, true, wrappers));
+        }
+        if (select instanceof PlainSelect plainSelect) {
+            if (insideCte && isUnboundedBaseTableWrapper(plainSelect, cteNames)) {
+                wrappers.add(plainSelect);
+            }
+            collectTrustedNestedSelect(plainSelect.getFromItem(), cteNames, visited, insideCte,
+                    wrappers);
+            if (plainSelect.getJoins() != null) {
+                plainSelect.getJoins().forEach(join -> collectTrustedNestedSelect(
+                        join.getRightItem(), cteNames, visited, insideCte, wrappers));
+            }
+        } else if (select instanceof ParenthesedSelect parenthesedSelect) {
+            collectTrustedCteModelTableWrappers(parenthesedSelect.getSelect(), cteNames, visited,
+                    insideCte, wrappers);
+        } else if (select instanceof SetOperationList setOperationList
+                && setOperationList.getSelects() != null) {
+            setOperationList.getSelects().forEach(child -> collectTrustedCteModelTableWrappers(
+                    child, cteNames, visited, insideCte, wrappers));
+        }
+    }
+
+    private void collectTrustedNestedSelect(FromItem source, Set<String> cteNames,
+            Set<Select> visited, boolean insideCte, Set<PlainSelect> wrappers) {
+        if (source instanceof ParenthesedSelect parenthesedSelect) {
+            collectTrustedCteModelTableWrappers(parenthesedSelect, cteNames, visited, insideCte,
+                    wrappers);
+        } else if (source instanceof ParenthesedFromItem parenthesedFromItem) {
+            collectTrustedNestedSelect(parenthesedFromItem.getFromItem(), cteNames, visited,
+                    insideCte, wrappers);
+            if (parenthesedFromItem.getJoins() != null) {
+                parenthesedFromItem.getJoins().forEach(join -> collectTrustedNestedSelect(
+                        join.getRightItem(), cteNames, visited, insideCte, wrappers));
+            }
+        }
+    }
+
+    private boolean isUnboundedBaseTableWrapper(PlainSelect select, Set<String> cteNames) {
+        if (select.getJoins() != null && !select.getJoins().isEmpty()
+                || !(select.getFromItem() instanceof Table table)) {
+            return false;
+        }
+        String tableName = table.getName();
+        return tableName != null && !cteNames.contains(tableName.toLowerCase(Locale.ROOT));
     }
 
     private Pattern compileDangerousFunctionCallPattern(Set<String> functions) {
@@ -324,7 +411,10 @@ public class SqlSafetyPolicy {
                         || expression instanceof AllTableColumns);
         boolean bounded =
                 select.getWhere() != null || select.getLimit() != null || select.getFetch() != null;
-        if (selectsAll && !bounded && !readsOnlyDerivedSources(select, cteNames)) {
+        boolean trustedModelTableWrapper = trustedCteModelTableWrappers.get() != null
+                && trustedCteModelTableWrappers.get().contains(select);
+        if (selectsAll && !bounded && !readsOnlyDerivedSources(select, cteNames)
+                && !trustedModelTableWrapper) {
             throw new SqlPolicyViolationException(
                     "Every SELECT * query branch must include WHERE, LIMIT, or FETCH");
         }

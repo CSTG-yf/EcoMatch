@@ -52,9 +52,10 @@ public class LLMRequestService {
             llmSchema.setMetrics(getMappedMetrics(queryCtx, dataSetId));
             llmSchema.setDimensions(getMappedDimensions(queryCtx, dataSetId));
         }
-        LLMReq.SqlGenType sqlGenType = selectSqlGenType(configuredSqlGenType,
+        BankRoutingDecision bankRouting = selectBankRouting(configuredSqlGenType,
                 queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
                         parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
+        LLMReq.SqlGenType sqlGenType = bankRouting.selectedSqlGenType();
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmSchema.setDimensions(ensureBankOrganizationDimension(llmSchema.getDimensions(),
                     queryCtx.getSemanticSchema().getDimensions(), dataSetId));
@@ -80,6 +81,7 @@ public class LLMRequestService {
         llmReq.setCurrentDate(DateUtils.getBeforeDate(0));
         llmReq.setTerms(getMappedTerms(queryCtx, dataSetId));
         llmReq.setSqlGenType(sqlGenType);
+        llmReq.setBankRoutingTelemetry(bankRouting.telemetry());
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmReq.setBankMaxCandidates(bankMaxCandidates());
         }
@@ -94,10 +96,18 @@ public class LLMRequestService {
     static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,
             List<SchemaElement> availableDimensions, Long dataSetId,
             boolean bankConstrainedPlanEnabled) {
-        if (bankConstrainedPlanEnabled && isBankDataset(availableDimensions, dataSetId)) {
-            return LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN;
-        }
-        return configuredSqlGenType;
+        return selectBankRouting(configuredSqlGenType, availableDimensions, dataSetId,
+                bankConstrainedPlanEnabled).selectedSqlGenType();
+    }
+
+    static BankRoutingDecision selectBankRouting(LLMReq.SqlGenType configuredSqlGenType,
+            List<SchemaElement> availableDimensions, Long dataSetId,
+            boolean bankConstrainedPlanEnabled) {
+        boolean bankDatasetQualified = isBankDataset(availableDimensions, dataSetId);
+        LLMReq.SqlGenType selectedSqlGenType = bankConstrainedPlanEnabled && bankDatasetQualified
+                ? LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN : configuredSqlGenType;
+        return new BankRoutingDecision(bankConstrainedPlanEnabled, bankDatasetQualified,
+                selectedSqlGenType);
     }
 
     private static boolean isBankDataset(List<SchemaElement> availableDimensions, Long dataSetId) {
@@ -130,6 +140,7 @@ public class LLMRequestService {
         SqlGenStrategy sqlGenStrategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
         String dataSet = llmReq.getSchema().getDataSetName();
         LLMResp result = sqlGenStrategy.generate(llmReq);
+        result.setBankRoutingTelemetry(llmReq.getBankRoutingTelemetry());
         result.setQuery(llmReq.getQueryText());
         result.setDataSet(dataSet);
         return result;
@@ -245,5 +256,15 @@ public class LLMRequestService {
         Map<Long, DataSetSchema> dataSetSchemaMap = semanticSchema.getDataSetSchemaMap();
         DataSetSchema dataSetSchema = dataSetSchemaMap.get(dataSetId);
         return new Pair(dataSetSchema.getDatabaseType(), dataSetSchema.getDatabaseVersion());
+    }
+
+    record BankRoutingDecision(boolean bankConstrainedPlanEnabled, boolean bankDatasetQualified,
+            LLMReq.SqlGenType selectedSqlGenType) {
+
+        Map<String, Object> telemetry() {
+            return Map.of("bankConstrainedPlanEnabled", bankConstrainedPlanEnabled,
+                    "bankDatasetQualified", bankDatasetQualified, "selectedSqlGenType",
+                    selectedSqlGenType.name());
+        }
     }
 }

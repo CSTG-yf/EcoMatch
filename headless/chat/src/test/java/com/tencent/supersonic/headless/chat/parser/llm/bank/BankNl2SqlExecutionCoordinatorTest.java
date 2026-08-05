@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,6 +33,9 @@ class BankNl2SqlExecutionCoordinatorTest {
         assertEquals("STRUCT", candidate.diagnostics().get("bank.nl2sql.route"));
         assertEquals(candidate.getFingerprint(),
                 candidate.diagnostics().get("bank.nl2sql.fingerprint"));
+        assertEquals(Map.of("generator", "BANK_CONSTRAINED_PLAN", "planIntent", "RANKING",
+                "timeComparison", "NONE", "calculationType", "DIRECT", "route", "STRUCT",
+                "templateCategory", "STRUCT"), candidate.diagnostics().get("bankTelemetry"));
     }
 
     @Test
@@ -52,6 +56,28 @@ class BankNl2SqlExecutionCoordinatorTest {
         assertEquals(
                 List.of("current_value", "baseline_value", "absolute_change", "percent_change"),
                 candidate.getOutputColumns());
+    }
+
+    @Test
+    void shouldClassifyMonthAndYearChangeWithoutInspectingCompiledSql() {
+        BankQueryPlan plan = changePlan();
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        BankNl2SqlExecutionCoordinator coordinator =
+                new BankNl2SqlExecutionCoordinator(new BankQueryPlanCompiler(), request -> {
+                    throw new AssertionError("month-and-year change must use the template route");
+                });
+
+        BankNl2SqlExecutionCoordinator.ExecutionCandidate candidate =
+                coordinator.coordinate(request(BankIntentType.CHANGE, plan), response(plan));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> telemetry =
+                (Map<String, Object>) candidate.diagnostics().get("bankTelemetry");
+        assertEquals("CHANGE", telemetry.get("planIntent"));
+        assertEquals("MOM_AND_YOY", telemetry.get("timeComparison"));
+        assertEquals("MONTH_AND_YEAR_CHANGE", telemetry.get("templateCategory"));
     }
 
     private LLMReq request(BankIntentType intent, BankQueryPlan plan) {

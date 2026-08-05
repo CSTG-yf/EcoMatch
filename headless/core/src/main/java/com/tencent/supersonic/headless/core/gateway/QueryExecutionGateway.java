@@ -69,8 +69,21 @@ public class QueryExecutionGateway {
     }
 
     public <T> T execute(String sql, Supplier<T> action) {
+        return execute(sql, action, false);
+    }
+
+    /** Executes a server-marked semantic compiler output with its narrow CTE compatibility rule. */
+    public <T> T executeTrustedCompiledSql(String sql, Supplier<T> action) {
+        return execute(sql, action, true);
+    }
+
+    private <T> T execute(String sql, Supplier<T> action, boolean trustedCompiledSql) {
         try {
-            safetyPolicy.validate(sql);
+            if (trustedCompiledSql) {
+                safetyPolicy.validateTrustedCompiledSql(sql);
+            } else {
+                safetyPolicy.validate(sql);
+            }
         } catch (RuntimeException e) {
             rejectedQueries.incrementAndGet();
             throw e;

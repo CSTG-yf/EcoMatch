@@ -340,6 +340,37 @@ final class BankS2SqlTemplateFactory {
     }
 
     String compileDailyAggregationSummary(TemplateContext context) {
+        if (context.metrics().size() == 1) {
+            return compileSingleMetricDailyAggregationSummary(context);
+        }
+        if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "province-average aggregation requires at least one metric and no metric filter");
+        }
+        Filter organizationFilter = organizationFilter(context);
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String outerWhere =
+                organizationFilter == null ? "" : "\nWHERE " + filter(organizationFilter);
+        List<ResolvedMetric> metrics = context.metrics().stream()
+                .sorted(java.util.Comparator.comparing(ResolvedMetric::metricCode)).toList();
+        List<String> aggregations = new ArrayList<>();
+        List<String> projections = new ArrayList<>();
+        for (int index = 0; index < metrics.size(); index++) {
+            ResolvedMetric metric = metrics.get(index);
+            aggregations.add(dailyAggregationCtes(context, metric.identifier(), where, index));
+            projections.add(aggregationSummaryProjection(metric, index, outerWhere));
+        }
+        return """
+                WITH %s
+                %s
+                ORDER BY metric_code ASC, aggregate_value DESC, bank_organization ASC
+                """.formatted(String.join(",\n", aggregations),
+                String.join("\nUNION ALL\n", projections)).trim();
+    }
+
+    private String compileSingleMetricDailyAggregationSummary(TemplateContext context) {
         requireSingleMetricWithoutMetricFilters(context, "province-average aggregation");
         Filter organizationFilter = organizationFilter(context);
         String where = where(withoutOrganizationFilter(context), context.dateField(),
@@ -366,6 +397,37 @@ final class BankS2SqlTemplateFactory {
                 ORDER BY aggregate_value DESC, bank_organization ASC
                 """.formatted(context.dateField(), metric, context.dataSetName(), where,
                 "aggregation_date", outerWhere).trim();
+    }
+
+    private String dailyAggregationCtes(TemplateContext context, String metric, String where,
+            int index) {
+        String dailyValues = "bank_daily_values_" + index;
+        String aggregation = "bank_aggregation_" + index;
+        return """
+                %s AS (
+                  SELECT bank_organization, %s AS aggregation_date, SUM(%s) AS metric_value
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization, aggregation_date
+                ), %s AS (
+                  SELECT bank_organization, AVG(metric_value) AS aggregate_value,
+                         MIN(metric_value) AS min_value, MAX(metric_value) AS max_value,
+                         COUNT(metric_value) AS observation_count
+                  FROM %s
+                  GROUP BY bank_organization
+                )
+                """.formatted(dailyValues, context.dateField(), metric, context.dataSetName(),
+                where, aggregation, dailyValues)
+                .trim();
+    }
+
+    private String aggregationSummaryProjection(ResolvedMetric metric, int index,
+            String outerWhere) {
+        return """
+                SELECT bank_organization, '%s' AS metric_code, aggregate_value, min_value,
+                       max_value, observation_count
+                FROM bank_aggregation_%s%s
+                """.formatted(metric.metricCode(), index, outerWhere).trim();
     }
 
     String compileDailyAverageRanking(TemplateContext context) {
@@ -472,7 +534,7 @@ final class BankS2SqlTemplateFactory {
         return literal;
     }
 
-    record ResolvedMetric(String identifier) {}
+    record ResolvedMetric(String identifier, String metricCode) {}
 
     record TemplateContext(BankQueryPlan plan, String dataSetName, List<ResolvedMetric> metrics,
             List<String> dimensions, String dateField, List<Filter> dimensionFilters,

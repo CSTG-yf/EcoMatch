@@ -434,10 +434,14 @@ public class BankResultProjector {
 
     private Projection projectAggregationSummary(Contract contract,
             List<Map<String, Object>> sourceRows) {
-        if (contract.getMetrics().size() != 1) {
+        if (contract.getMetrics().isEmpty()) {
             return Projection.notApplied();
         }
-        String metricCode = contract.getMetrics().get(0).getMetricCode();
+        boolean multiMetric = contract.getMetrics().size() > 1;
+        Set<String> configuredMetricCodes = contract.getMetrics().stream()
+                .map(MetricBinding::getMetricCode).filter(StringUtils::isNotBlank)
+                .map(StringUtils::upperCase).collect(java.util.stream.Collectors.toSet());
+        String fallbackMetricCode = contract.getMetrics().get(0).getMetricCode();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
@@ -450,6 +454,18 @@ public class BankResultProjector {
                     || !maximum.found() || !count.found()) {
                 return Projection.notApplied();
             }
+            String metricCode = fallbackMetricCode;
+            if (multiMetric) {
+                ValueLookup sourceMetricCode = value(sourceRow, "metric_code");
+                if (!sourceMetricCode.found() || sourceMetricCode.value() == null) {
+                    return Projection.notApplied();
+                }
+                metricCode = StringUtils.upperCase(String.valueOf(sourceMetricCode.value()));
+                if (StringUtils.isBlank(metricCode) || !configuredMetricCodes.contains(metricCode)
+                        || decimal(aggregate.value()) == null) {
+                    return Projection.notApplied();
+                }
+            }
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("org_code", organizationCode);
             row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
@@ -460,6 +476,20 @@ public class BankResultProjector {
             row.put("max_value", maximum.value());
             row.put("observation_count", count.value());
             rows.add(row);
+        }
+        if (multiMetric) {
+            rows.sort((left, right) -> {
+                int metricOrder = String.valueOf(left.get("metric_code"))
+                        .compareTo(String.valueOf(right.get("metric_code")));
+                if (metricOrder != 0) {
+                    return metricOrder;
+                }
+                int aggregateOrder = decimal(right.get("aggregate_value"))
+                        .compareTo(decimal(left.get("aggregate_value")));
+                return aggregateOrder != 0 ? aggregateOrder
+                        : String.valueOf(left.get("org_code"))
+                                .compareTo(String.valueOf(right.get("org_code")));
+            });
         }
         return Projection.applied(columns(contract), rows);
     }

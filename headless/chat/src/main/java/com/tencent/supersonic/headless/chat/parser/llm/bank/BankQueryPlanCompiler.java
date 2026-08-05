@@ -90,7 +90,8 @@ public class BankQueryPlanCompiler {
                 new BankS2SqlTemplateFactory.TemplateContext(plan, schema.getDataSetName(),
                         metrics.stream()
                                 .map(metric -> new BankS2SqlTemplateFactory.ResolvedMetric(
-                                        metric.identifier()))
+                                        metric.identifier(),
+                                        metricCode(metric.schemaElement())))
                                 .collect(Collectors.toList()),
                         dimensions.stream().map(ResolvedDimension::identifier).toList(),
                         dateField(index.partitionTime()), executionDimensionFilters, metricFilters);
@@ -108,8 +109,7 @@ public class BankQueryPlanCompiler {
                 if (plan.getIntent() == BankIntentType.AGGREGATION) {
                     return CompiledQuery.s2sql(
                             templateFactory.compileProvinceAverageAggregation(templateContext),
-                            List.of(ORGANIZATION_DIMENSION, "aggregate_value", "min_value",
-                                    "max_value", "observation_count"),
+                            aggregationSummaryOutputColumns(metrics),
                             aggregationSummaryResultContract(plan, metrics, index));
                 }
                 throw new BankPlanCompilationException(
@@ -123,11 +123,10 @@ public class BankQueryPlanCompiler {
                         absoluteThresholdResultContract(plan, metrics, index));
             }
             if (requiresDailyAggregationSummary(plan, metrics, dimensions, metricFilters)) {
-                return CompiledQuery.s2sql(
-                        templateFactory.compileDailyAggregationSummary(templateContext),
-                        List.of(ORGANIZATION_DIMENSION, "aggregate_value", "min_value",
-                                "max_value", "observation_count"),
-                        aggregationSummaryResultContract(plan, metrics, index));
+                    return CompiledQuery.s2sql(
+                            templateFactory.compileDailyAggregationSummary(templateContext),
+                            aggregationSummaryOutputColumns(metrics),
+                            aggregationSummaryResultContract(plan, metrics, index));
             }
             if (requiresOrganizationComparisonTemplate(plan, metrics, dimensions, metricFilters)) {
                 return CompiledQuery.s2sql(
@@ -211,8 +210,8 @@ public class BankQueryPlanCompiler {
             List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
             List<Filter> metricFilters) {
         return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() == 1
-                && metrics.size() == 1
-                && metrics.get(0).planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG
+                && !metrics.isEmpty() && metrics.stream().allMatch(metric -> metric.planMetric()
+                        .getAggregation() == BankQueryPlan.Aggregation.AVG)
                 && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)
                         .toList().equals(List.of(ORGANIZATION_DIMENSION));
     }
@@ -299,16 +298,34 @@ public class BankQueryPlanCompiler {
 
     private BankResultProjector.Contract aggregationSummaryResultContract(BankQueryPlan plan,
             List<ResolvedMetric> metrics, SchemaIndex index) {
-        if (metrics.size() != 1) {
+        if (metrics.isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
-                    "daily aggregation summary requires exactly one metric");
+                    "daily aggregation summary requires at least one metric");
+        }
+        if (metrics.size() == 1) {
+            return provinceAverageContract(plan, index,
+                    BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+                    List.of(BankResultProjector.MetricBinding.builder()
+                            .semanticColumn("aggregate_value")
+                            .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
         }
         return provinceAverageContract(plan, index,
                 BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
-                List.of(BankResultProjector.MetricBinding.builder()
+                metrics.stream().map(metric -> BankResultProjector.MetricBinding.builder()
                         .semanticColumn("aggregate_value")
-                        .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                        .sorted(java.util.Comparator
+                                .comparing(BankResultProjector.MetricBinding::getMetricCode))
+                        .toList());
+    }
+
+    private List<String> aggregationSummaryOutputColumns(List<ResolvedMetric> metrics) {
+        return metrics.size() == 1
+                ? List.of(ORGANIZATION_DIMENSION, "aggregate_value", "min_value", "max_value",
+                        "observation_count")
+                : List.of(ORGANIZATION_DIMENSION, "metric_code", "aggregate_value", "min_value",
+                        "max_value", "observation_count");
     }
 
     private BankResultProjector.Contract provinceAverageContract(BankQueryPlan plan,

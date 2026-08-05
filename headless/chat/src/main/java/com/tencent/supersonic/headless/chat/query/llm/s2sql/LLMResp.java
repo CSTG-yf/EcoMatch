@@ -23,6 +23,8 @@ public class LLMResp {
 
     private Map<String, Object> bankCandidateDiagnostics;
 
+    private Map<String, Object> bankRoutingTelemetry;
+
     private List<String> fields;
 
     private Map<String, LLMSqlResp> sqlRespMap;

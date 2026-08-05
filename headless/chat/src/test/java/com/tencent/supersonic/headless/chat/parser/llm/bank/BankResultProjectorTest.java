@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankResultProjectorTest {
 
@@ -311,6 +313,43 @@ class BankResultProjectorTest {
                 "aggregate_value", new BigDecimal("1.27"), "min_value", new BigDecimal("1.27"),
                 "max_value", new BigDecimal("1.27"), "observation_count", 1)),
                 projection.getRows());
+    }
+
+    @Test
+    void shouldProjectMultipleMetricAggregationSummaryFromValidatedSourceMetricCodes() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG004", "D"))
+                .selectedOrganizationCodes(List.of("ORG004"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("metric_code")
+                                .metricCode("ZB001").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("metric_code")
+                                .metricCode("ZB002").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract, List.of(
+                row("bank_organization", "ORG004", "metric_code", "ZB002", "aggregate_value",
+                        new BigDecimal("42.25"), "min_value", new BigDecimal("40.00"), "max_value",
+                        new BigDecimal("45.00"), "observation_count", 3),
+                row("bank_organization", "ORG004", "metric_code", "ZB001", "aggregate_value",
+                        new BigDecimal("54.79"), "min_value", new BigDecimal("50.00"), "max_value",
+                        new BigDecimal("60.00"), "observation_count", 3)));
+
+        assertTrue(projection.isApplied());
+        assertEquals(List.of(row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB001",
+                "aggregate_value", new BigDecimal("54.79"), "min_value", new BigDecimal("50.00"),
+                "max_value", new BigDecimal("60.00"), "observation_count", 3),
+                row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB002",
+                        "aggregate_value", new BigDecimal("42.25"), "min_value", new BigDecimal("40.00"),
+                        "max_value", new BigDecimal("45.00"), "observation_count", 3)),
+                projection.getRows());
+
+        assertFalse(projector.project(contract, List.of(
+                row("bank_organization", "ORG004", "metric_code", "ZB999", "aggregate_value",
+                        new BigDecimal("1"), "min_value", new BigDecimal("1"), "max_value",
+                        new BigDecimal("1"), "observation_count", 1))).isApplied());
     }
 
     @Test

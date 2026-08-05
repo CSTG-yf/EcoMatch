@@ -148,14 +148,16 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private BankQueryPlan normalizePlanForQuestion(String queryText, BankQueryPlan plan,
             SemanticIntentHints hints) {
-        if (plan == null || plan.getTime() == null || queryText == null) {
+        if (plan == null || plan.getTime() == null) {
             return plan;
         }
-        if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
-            return normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
-        }
-        if (isAnnualDailyExtremaSummary(queryText, hints)) {
-            return normalizeAnnualDailyExtremaSummary(plan, hints);
+        if (queryText != null) {
+            if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
+                return normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
+            }
+            if (isAnnualDailyExtremaSummary(queryText, hints)) {
+                return normalizeAnnualDailyExtremaSummary(plan, hints);
+            }
         }
         if (isAbsoluteThreshold(hints)) {
             return normalizeAbsoluteThreshold(plan, hints);
@@ -163,10 +165,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (isSingleOrganizationRatio(hints)) {
             return normalizeSingleOrganizationRatio(plan, hints);
         }
-        if (hints.getExpectedIntent() != BankIntentType.CHANGE || !queryText.contains("环比")
-                || !queryText.contains("同比")) {
+        if (hints.getExpectedIntent() != BankIntentType.CHANGE) {
             return plan;
         }
+        return normalizeChangePlan(queryText, plan, hints);
+    }
+
+    private BankQueryPlan normalizeChangePlan(String queryText, BankQueryPlan plan,
+            SemanticIntentHints hints) {
         plan.setIntent(BankIntentType.CHANGE);
         plan.setMetrics(hints
                 .getRequiredMetrics().stream().sorted().map(metric -> BankQueryPlan.Metric.builder()
@@ -180,12 +186,27 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
                                 .operator(filter.operator()).value(filter.value()).build())
                         .toList());
-        plan.getTime().setStartDate(hints.getRequiredStartDate());
-        plan.getTime().setEndDate(hints.getRequiredEndDate());
         plan.getTime().setGranularity(BankQueryPlan.TimeGranularity.DAY);
-        plan.getTime().setComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY);
-        plan.getTime().setBaselineStartDate(null);
-        plan.getTime().setBaselineEndDate(null);
+        if (queryText != null && queryText.contains("环比") && queryText.contains("同比")) {
+            plan.getTime().setStartDate(hints.getRequiredStartDate());
+            plan.getTime().setEndDate(hints.getRequiredEndDate());
+            plan.getTime().setComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY);
+            plan.getTime().setBaselineStartDate(null);
+            plan.getTime().setBaselineEndDate(null);
+        } else if (isExplicitChangeRange(hints)) {
+            plan.getTime().setStartDate(hints.getRequiredEndDate());
+            plan.getTime().setEndDate(hints.getRequiredEndDate());
+            plan.getTime().setComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD);
+            plan.getTime().setBaselineStartDate(hints.getRequiredStartDate());
+            plan.getTime().setBaselineEndDate(hints.getRequiredStartDate());
+        } else {
+            LocalDate baselineDate = hints.getRequiredStartDate().minusDays(1);
+            plan.getTime().setStartDate(hints.getRequiredStartDate());
+            plan.getTime().setEndDate(hints.getRequiredEndDate());
+            plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
+            plan.getTime().setBaselineStartDate(baselineDate);
+            plan.getTime().setBaselineEndDate(baselineDate);
+        }
         plan.setCalculation(BankQueryPlan.Calculation.builder()
                 .type(BankQueryPlan.CalculationType.CHANGE).build());
         plan.setOrderBy(List.of());

@@ -12,9 +12,12 @@ import com.tencent.supersonic.headless.core.utils.ComponentFactory;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.Objects;
 
 @Component("JdbcExecutor")
@@ -36,19 +39,44 @@ public class JdbcExecutor implements QueryExecutor {
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         try {
             QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
-            SemanticQueryResp result =
-                    gateway.execute(queryStatement.getSql(),
+            SemanticQueryResp result = queryStatement.isTrustedCompiledSql()
+                    ? gateway.executeTrustedCompiledSql(queryStatement.getSql(),
+                            () -> enforceResultLimit(
+                                    executeInternal(queryStatement, queryResultWithColumns),
+                                    resultLimit))
+                    : gateway.execute(queryStatement.getSql(),
                             () -> enforceResultLimit(
                                     executeInternal(queryStatement, queryResultWithColumns),
                                     resultLimit));
             result.setSql(sql);
             return result;
         } catch (Exception e) {
-            log.error("Query execution failed: type={}, error=[{}]", e.getClass().getSimpleName(),
-                    SensitiveLogUtils.summarize(e));
+            Map<String, Object> telemetry = executionTelemetry(e);
+            log.error("Query execution failed: failureLayer={}", telemetry.get("failureLayer"));
+            queryResultWithColumns.setExecutionTelemetry(telemetry);
             queryResultWithColumns.setErrorMsg(safeErrorMessage(e));
         }
         return queryResultWithColumns;
+    }
+
+    static Map<String, Object> executionTelemetry(Exception exception) {
+        return Map.of("failureLayer", executionFailureLayer(exception));
+    }
+
+    private static String executionFailureLayer(Exception exception) {
+        if (exception instanceof SqlPolicyViolationException) {
+            return "SQL_SAFETY_POLICY";
+        }
+        if (exception instanceof QueryRejectedException) {
+            return "QUERY_GATEWAY";
+        }
+        if (exception instanceof BadSqlGrammarException) {
+            return "JDBC_GRAMMAR";
+        }
+        if (exception instanceof DataAccessException) {
+            return "JDBC_DATA_ACCESS";
+        }
+        return "JDBC_OTHER";
     }
 
     static String safeErrorMessage(Exception exception) {

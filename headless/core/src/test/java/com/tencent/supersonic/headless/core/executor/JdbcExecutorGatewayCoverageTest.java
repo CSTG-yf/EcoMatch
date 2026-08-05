@@ -9,7 +9,9 @@ import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.springframework.jdbc.BadSqlGrammarException;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 
@@ -40,6 +42,15 @@ class JdbcExecutorGatewayCoverageTest {
                 new RuntimeException("SELECT * FROM customer WHERE id_card='secret'")));
         assertEquals("Only read-only SELECT statements are allowed", JdbcExecutor.safeErrorMessage(
                 new SqlPolicyViolationException("Only read-only SELECT statements are allowed")));
+    }
+
+    @Test
+    void classifiesJdbcGrammarFailuresWithoutRetainingErrorBody() {
+        Map<String, Object> telemetry = JdbcExecutor.executionTelemetry(
+                new BadSqlGrammarException("query", "opaque-details", new SQLException("opaque-details")));
+
+        assertEquals(Map.of("failureLayer", "JDBC_GRAMMAR"), telemetry);
+        assertTrue(telemetry.values().stream().noneMatch("opaque-details"::equals));
     }
 
     @Test

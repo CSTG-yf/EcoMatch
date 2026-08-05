@@ -66,6 +66,19 @@ class ComplexSqlValidatorTest {
     }
 
     @Test
+    void acceptsCrossJoinForIndependentSnapshots() {
+        String crossJoin = "WITH current_snapshot AS (SELECT SUM(zb001) AS current_value "
+                + "FROM bank_indicator_dataset WHERE bank_data_date = '2026-04-30'), "
+                + "baseline_snapshot AS (SELECT SUM(zb001) AS baseline_value "
+                + "FROM bank_indicator_dataset WHERE bank_data_date = '2025-04-30') "
+                + "SELECT current_value, baseline_value FROM current_snapshot CROSS JOIN baseline_snapshot";
+
+        ComplexSqlValidationResult result = validator.validate(crossJoin, schema, "synthetic snapshot comparison");
+
+        Assert.assertTrue(result.getEvaluation().getIsValidated());
+    }
+
+    @Test
     void classifiesExecutionFailures() {
         Assert.assertEquals(SqlErrorType.SYNTAX_ERROR,
                 ComplexSqlErrorClassifier.classifyExecutionError("syntax error near FROM"));

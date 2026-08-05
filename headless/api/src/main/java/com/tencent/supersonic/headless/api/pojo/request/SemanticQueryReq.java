@@ -32,6 +32,13 @@ public abstract class SemanticQueryReq {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     protected boolean innerLayerNative = false;
 
+    /**
+     * Reserved for a physical SQL statement produced by the server-side semantic compiler. It is
+     * deliberately read-only for JSON so API callers cannot weaken SQL safety validation.
+     */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    protected boolean trustedCompiledSql = false;
+
     protected Long dataSetId;
 
     protected String dataSetName;

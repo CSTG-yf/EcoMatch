@@ -101,7 +101,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.
 4. 轮询 `POST /openapi/chat/query/getExecuteSummary`；
 5. 结果匹配时删除临时会话，失败会话保留用于排查。
 
-样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。每完成一条就更新输出 checkpoint，默认可从同一报告续跑。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
+样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。解析成功必须同时满足 API `state=COMPLETED` 与存在可执行的 `selectedParses`；候选解析仍处于 `PENDING` 或已 `FAILED` 时不会调用执行接口。每完成一条就更新输出 checkpoint，默认可从同一报告续跑：仅成功项或已经获得最终业务结果的项会跳过；HTTP/传输重试耗尽、服务端失败、会话创建失败和解释阶段失败会重新执行。若服务会话可能长期挂起，可显式传入 `--record-timeout-seconds 90`：该模式每条记录使用一个受控进程，超时仅终止该进程并记录可重试的 `HTTP_RECORD_TIMEOUT`，从而释放并发槽；未传入时仍使用原有线程执行模式。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
@@ -110,6 +110,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
   --base-url http://127.0.0.1:9080 `
   --agent-id 33 `
   --concurrency 4 `
+  --record-timeout-seconds 90 `
   --max-records 5 `
   --output .local-dev/bank-nl2sql/api-train-smoke.json
 ```
@@ -127,7 +128,9 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
   --output .local-dev/bank-nl2sql/supersonic-final-report.json
 ```
 
-报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、标准错误类别、S2SQL 与物理 SQL 摘要；解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出实际查询行或金标答案。
+报告包含解析、执行、结果一致率、按难度、SQL 能力、编译模板类别、选用 SQL 生成策略、LLM 路由尝试策略、执行候选来源和失败层级分组的指标、标准错误类别；每题还记录 save、parse、execute、summary 的终态、耗时和不含服务端原文的异常/重试分类。银行受约束链路只保留枚举遥测：生成器、计划意图、时间比较、计算类型、编译路由、模板类别；策略路由还只保留受约束开关、数据集资格两个布尔值和选用 SQL 生成策略枚举。顶层 LLM 路由尝试遥测只保留同样三项路由事实及“是否已创建 LLM 候选”的布尔值，即使最终候选列表没有 LLM 候选也可用于诊断。候选观测只保留首选候选是否为内部 LLM 的固定枚举、具备完整路由遥测的候选数和候选总数；不保留候选 properties、题目、答案、SQL 或行值。执行遥测只保留 SQL 安全策略/网关/JDBC 的失败层级和修复布尔值。严格结果不一致会额外标记为 `COLUMN_PROJECTION`、`ROW_COUNT`、`ORDER_ONLY` 或 `ROW_VALUE`，不保留行值、模型原始输出或 SQL。解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出题目、金标答案、实际查询行、解释文本、SQL 或服务端原始错误。
+
+该运行器覆盖的是并发 OpenAPI 前端会话链路，不会调用浏览器侧意图交互，也不替代已登录浏览器的 UI smoke；后者仍须作为独立验收执行。
 
 ## QA-03 语义缓存验收
 

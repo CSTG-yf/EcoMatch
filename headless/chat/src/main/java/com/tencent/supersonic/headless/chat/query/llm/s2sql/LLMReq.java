@@ -27,6 +27,7 @@ public class LLMReq {
     private SqlGenType sqlGenType;
     private SemanticIntentHints semanticIntentHints;
     private int bankMaxCandidates = 1;
+    private Map<String, Object> bankRoutingTelemetry;
     private Map<String, ChatApp> chatAppConfig;
     private String customPrompt;
     private List<Text2SQLExemplar> dynamicExemplars;
