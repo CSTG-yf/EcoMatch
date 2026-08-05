@@ -27,6 +27,28 @@ class SqlReplaceHelperTest {
     }
 
     @Test
+    void shouldReplaceNestedInExpressionInsideParenthesizedAndOrFilter() {
+        String sql = "SELECT * FROM t_33 "
+                + "WHERE (bank_data_date IN ('2025-03-31', '2025-06-30') "
+                + "AND bank_organization IN ('org_1', 'org_2')) "
+                + "OR metric_code IN ('m_1', 'm_2')";
+
+        Map<String, String> fieldMap = new HashMap<>();
+        fieldMap.put("bank_data_date", "data_date");
+        fieldMap.put("bank_organization", "organization");
+        fieldMap.put("metric_code", "metric");
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, fieldMap);
+
+        Assert.assertFalse(rewritten.contains("bank_data_date"));
+        Assert.assertFalse(rewritten.contains("bank_organization"));
+        Assert.assertFalse(rewritten.contains("metric_code"));
+        assertTrue(rewritten.contains("(data_date IN ('2025-03-31', '2025-06-30') "
+                + "AND organization IN ('org_1', 'org_2'))"));
+        assertTrue(rewritten.contains("OR metric IN ('m_1', 'm_2')"));
+    }
+
+    @Test
     void testReplaceAggField() {
         String sql = "SELECT 维度1,sum(播放量) FROM 数据库 "
                 + "WHERE (歌手名 = '张三') AND 数据日期 = '2023-11-17' GROUP BY 维度1";

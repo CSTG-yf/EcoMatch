@@ -93,6 +93,11 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
             Parenthesis parenthesis = (Parenthesis) expression;
             parenthesis.setExpression(replace(parenthesis.getExpression(), fieldExprMap));
         }
+        if (expression instanceof InExpression) {
+            InExpression inExpression = (InExpression) expression;
+            inExpression.setLeftExpression(replace(inExpression.getLeftExpression(), fieldExprMap));
+            inExpression.setRightExpression(replace(inExpression.getRightExpression(), fieldExprMap));
+        }
 
         if (!toReplace.isEmpty()) {
             Expression replace = getExpression(toReplace);
