@@ -147,6 +147,9 @@ public class LLMSqlParser implements SemanticParser {
                     if (e instanceof BankNl2SqlError bankError) {
                         throw bankError;
                     }
+                    if (bankPlanCompilationException(e) != null) {
+                        throw BankNl2SqlError.compilationFailure(e);
+                    }
                     throw e;
                 }
             }
