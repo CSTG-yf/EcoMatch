@@ -2,12 +2,55 @@
 
 此目录包含 DATA-02 的可复现产物：
 
+- `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
-- `build_dataset.py`：冻结官方题、意图标注和模板隔离后的评测切分；
-- `train.jsonl`、`dev.jsonl`、`test.jsonl`：200 道官方题；
+- `build_dataset.py`：冻结官方题、意图标注和来源评测切分；
+- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（2.0.0 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
+
+## 正式评估库 2.0.0
+
+`evaluation/bank_nl2sql/official/2.0.0/` 是**唯一正式评分依据**，包含：
+
+- `bank-nl2sql-ground-truth-v2.0.0.xlsx`：正式 ground-truth 工作簿（199 题）；
+- `official-manifest.json`：`datasetVersion=2.0.0`、`canonicalReady=true`、
+  `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
+  源/候选/事实区哈希与变更计数；
+- `contract-change-ledger.json`：题目/答案契约变更的逐条账本（含文本哈希）；
+- `final-audit-summary.json`：199 条全量 VERIFIED 审查证据摘要；
+- 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
+
+正式库相对冻结原始工作簿（`source.xlsx`，只读、永不修改）只包含账本声明的变更：
+
+- 5 个答案修正（`ANSWER_CORRECTION`）；
+- 10 个题目澄清（`QUESTION_CLARIFICATION`）；
+- 1 个训练题删除（`QUESTION_REMOVAL`）：该训练题因缺失同比基期证据而无法复核，
+  已从正式库移除（`removedIds` 仅含账本声明的这一条）；
+- 0 个契约错误，事实区域哈希不变。
+
+正式统计：`officialCount=199`，来源与正式评测均为 train/dev/test =
+119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），增强样本
+12 条（不参与官方评分）。`manifest.json` 的 `templateOverlap` 仅披露
+模板重叠风险，不改变任何题目归属。
+
+### 生成正式评估库（promote）
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/promote_ground_truth.py `
+  --candidate-dir .local-dev/gt-audit/codex-hash-contract `
+  --audit-dir .local-dev/gt-audit/codex-hash-audit-two `
+  --version 2.0.0 `
+  --output evaluation/bank_nl2sql/official/2.0.0
+```
+
+promote 对候选 manifest/sidecar、候选工作簿/sidecar、变更账本/sidecar、
+源工作簿哈希、199 条全量 VERIFIED 审查证据、空 correction ledger、事实区
+哈希以及账本声明的变更逐项 fail-closed 验证，输出确定性且不含时间戳；
+任何一项不匹配都不产出任何文件。
+
+## 标准基准库
 
 `db/build_database.py` 将比赛工作簿转换为可重复生成的标准基准库：
 
@@ -36,16 +79,28 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 ## 构建标注数据集
 
+正式版必须使用 2.0.0 官方工作簿与 `official-manifest.json`（manifest 严格
+匹配工作簿名称/SHA-256/题数/来源切分/`canonicalReady` 后，才允许忽略
+`removedIds`；无 manifest 时保持原严格未知意图行为；除 `removedIds` 外
+任何未知/缺失 ID 一律失败）：
+
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py <workbook.xlsx> `
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
+  evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx `
   --intent-root evaluation/bank_intent `
+  --official-manifest evaluation/bank_nl2sql/official/2.0.0/official-manifest.json `
   --output evaluation/bank_nl2sql
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
   evaluation/bank_nl2sql
 ```
 
-当前冻结版本基于源文件 SHA-256 `c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`：官方题来源划分为 train/dev/test = 120/40/40，模板隔离后的实际评测划分为 115/36/49。9 道题的调整可在 `manifest.json` 中逐题追溯，三个官方评测切分之间没有模板重叠。
+正式版基于源文件 SHA-256
+`c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`
+（冻结原始工作簿 `source.xlsx`，只读、永不修改）。199 条官方题的来源
+与正式评测均为 train/dev/test = 119/40/40，增强样本 12 条。
+`manifest.json` 记录逐题调整；其 `templateOverlap` 仅作为风险披露，
+绝不改变题目归属。
 
 ## 生成并验证金标
 
@@ -57,7 +112,11 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
   evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
 ```
 
-`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希。物理 SQL 已在 SQLite 与 H2 各执行 200 次且全部通过；`s2sql` 目前保存与物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，需要先在运行环境注册银行 H2 数据源及语义 Dataset。
+`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希与数据集版本
+（2.0.0 从 `manifest.json` 继承；无 manifest 的旧兼容路径仍为 0.1.0）。
+物理 SQL 已在 SQLite 与 H2 各执行 199 次且全部通过；`s2sql` 目前保存与
+物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，
+需要先在运行环境注册银行 H2 数据源及语义 Dataset。
 
 ## 冻结与盲测
 
@@ -101,7 +160,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.
 4. 轮询 `POST /openapi/chat/query/getExecuteSummary`；
 5. 结果匹配时删除临时会话，失败会话保留用于排查。
 
-样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。解析成功必须同时满足 API `state=COMPLETED` 与存在可执行的 `selectedParses`；候选解析仍处于 `PENDING` 或已 `FAILED` 时不会调用执行接口。每完成一条就更新输出 checkpoint，默认可从同一报告续跑：仅成功项或已经获得最终业务结果的项会跳过；HTTP/传输重试耗尽、服务端失败、会话创建失败和解释阶段失败会重新执行。若服务会话可能长期挂起，可显式传入 `--record-timeout-seconds 90`：该模式每条记录使用一个受控进程，超时仅终止该进程并记录可重试的 `HTTP_RECORD_TIMEOUT`，从而释放并发槽；未传入时仍使用原有线程执行模式。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
+样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。每完成一条就更新输出 checkpoint，默认可从同一报告续跑。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
@@ -110,7 +169,6 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
   --base-url http://127.0.0.1:9080 `
   --agent-id 33 `
   --concurrency 4 `
-  --record-timeout-seconds 90 `
   --max-records 5 `
   --output .local-dev/bank-nl2sql/api-train-smoke.json
 ```
@@ -128,9 +186,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
   --output .local-dev/bank-nl2sql/supersonic-final-report.json
 ```
 
-报告包含解析、执行、结果一致率、按难度、SQL 能力、编译模板类别、选用 SQL 生成策略、LLM 路由尝试策略、执行候选来源和失败层级分组的指标、标准错误类别；每题还记录 save、parse、execute、summary 的终态、耗时和不含服务端原文的异常/重试分类。银行受约束链路只保留枚举遥测：生成器、计划意图、时间比较、计算类型、编译路由、模板类别；策略路由还只保留受约束开关、数据集资格两个布尔值和选用 SQL 生成策略枚举。顶层 LLM 路由尝试遥测只保留同样三项路由事实及“是否已创建 LLM 候选”的布尔值，即使最终候选列表没有 LLM 候选也可用于诊断。候选观测只保留首选候选是否为内部 LLM 的固定枚举、具备完整路由遥测的候选数和候选总数；不保留候选 properties、题目、答案、SQL 或行值。执行遥测只保留 SQL 安全策略/网关/JDBC 的失败层级和修复布尔值。严格结果不一致会额外标记为 `COLUMN_PROJECTION`、`ROW_COUNT`、`ORDER_ONLY` 或 `ROW_VALUE`，不保留行值、模型原始输出或 SQL。解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出题目、金标答案、实际查询行、解释文本、SQL 或服务端原始错误。
-
-该运行器覆盖的是并发 OpenAPI 前端会话链路，不会调用浏览器侧意图交互，也不替代已登录浏览器的 UI smoke；后者仍须作为独立验收执行。
+报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、标准错误类别、S2SQL 与物理 SQL 摘要；解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出实际查询行或金标答案。
 
 ## QA-03 语义缓存验收
 

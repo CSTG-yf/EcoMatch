@@ -42,7 +42,7 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
     content_hashes = {filename: _sha256(dataset_path / filename) for filename in RELEASE_FILES}
     source_manifest = json.loads((dataset_path / "manifest.json").read_text(encoding="utf-8"))
     release = {
-        "version": "0.1.0",
+        "version": source_manifest.get("version", "0.1.0"),
         "sourceSha256": source_manifest["sourceSha256"],
         "officialCount": dataset_report["officialCount"],
         "augmentationCount": dataset_report["augmentationCount"],

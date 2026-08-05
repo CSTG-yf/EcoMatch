@@ -15,29 +15,38 @@
   "augmentationCount": 12,
   "contentSha256": {
     "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
-    "dev.jsonl": "369f7864c1951ab3a77aacdc30258147b177aa97f19457c31923da00131424ef",
-    "gold_manifest.json": "dcc650e261482a910f8fb352291342b8338777664c25fff075849b7fcce0919f",
-    "manifest.json": "1e50a583c41b77fe0f96640cdfda37e04cf4826676d0331390c6d436c767a9f4",
+    "dev.jsonl": "065c98f7ffcab7009f4137ed6d1a4534d42e8b126ef25cf0100ae36c103371c8",
+    "gold_manifest.json": "bb6249ab6246ef6fa3eb3ecca9dc4a6a300969b2e049fc91b4b1bbd7fbcefd63",
+    "manifest.json": "3e4013ec3a01e0cdf37b0bf766791c9ded42b7bc695cf3dcb3921d27ef194e3e",
     "schema.json": "56d0db738ad0748927fa7ef78eb92efe0c2b0fb8301869d9c427caf71ee9a334",
-    "test.jsonl": "f8102dce081eaf5c33021d8c7466df02adffb1c90e0e45d9bad1232bafb72989",
-    "train.jsonl": "de9a6d56f64681fb8162e263478f81c31606fcf3c763ae5ba6b6dc2180d83ed3"
+    "test.jsonl": "44c503e45ddae2ba2e708d55e6607b92a1d876d3836036f7a00ec176dc3dd877",
+    "train.jsonl": "67aef4dad9d982114b17482615ea9bb6473641064c17ba4c4869cc4cfd787948"
   },
   "evaluationSplitCounts": {
-    "dev": 36,
-    "test": 49,
-    "train": 115
+    "dev": 40,
+    "test": 40,
+    "train": 119
   },
   "goldValidation": {
-    "officialCount": 200,
+    "officialCount": 199,
     "result": "PASS",
-    "sqlExecutionCount": 200
+    "resultMatchCount": 199,
+    "sqlExecutionCount": 199,
+    "timingMs": {
+      "average": 0.85,
+      "count": 199,
+      "max": 29.264,
+      "p50": 0.117,
+      "p95": 6.954,
+      "p99": 22.595
+    }
   },
-  "officialCount": 200,
-  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "officialCount": 199,
+  "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
-    "train": 120
+    "train": 119
   },
-  "version": "0.1.0"
+  "version": "2.0.0"
 }

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Validate structural and split-integrity invariants for DATA-02."""
+"""Validate structural and split-integrity invariants for DATA-02.
+
+Official records are immutable in their split assignment: ``split`` must
+equal ``sourceSplit`` and ``splitReason`` must be ``source_assignment``.
+Template overlap may be non-empty; it is verified only for consistency with
+``manifest.templateOverlap`` and never causes validation failure by itself.
+"""
 
 from __future__ import annotations
 
@@ -69,11 +75,10 @@ def _validate_record(record: dict[str, Any], filename: str, index: int, official
             raise DatasetValidationError(f"{filename}:{index} official record has invalid sourceSplit")
         if record["expectedAction"] != "EXECUTE":
             raise DatasetValidationError(f"{filename}:{index} official record must execute")
-        if record["splitReason"] not in {"source_assignment", "template_isolation"}:
+        if record["splitReason"] != "source_assignment":
             raise DatasetValidationError(f"{filename}:{index} has invalid official split reason")
-        moved = record["split"] != record["sourceSplit"]
-        if moved != (record["splitReason"] == "template_isolation"):
-            raise DatasetValidationError(f"{filename}:{index} split reason contradicts source split")
+        if record["split"] != record["sourceSplit"]:
+            raise DatasetValidationError(f"{filename}:{index} official split must equal sourceSplit")
     elif record["sourceSplit"] is not None or record["splitReason"] != "augmentation":
         raise DatasetValidationError(f"{filename}:{index} augmentation is not isolated")
 
@@ -125,8 +130,8 @@ def validate_dataset(output_path: Path | str) -> dict[str, Any]:
     evaluation_counts = {split: len(records_by_split[split]) for split in EVALUATION_SPLITS}
     expected_source_counts = {split: source_split_counts[split] for split in EVALUATION_SPLITS}
     overlap = _template_overlap(records_by_split)
-    if any(overlap.values()):
-        raise DatasetValidationError(f"Template leakage across official splits: {overlap}")
+    if manifest.get("reassignedForTemplateIsolation") != []:
+        raise DatasetValidationError("Manifest reassignedForTemplateIsolation must be empty for official records")
     if manifest.get("officialCount") != sum(evaluation_counts.values()):
         raise DatasetValidationError("Manifest officialCount does not match JSONL files")
     if manifest.get("augmentationCount") != len(augmentation_records):
