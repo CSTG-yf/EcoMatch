@@ -58,9 +58,9 @@ $SchemaVersion = "1.0"
 $ExpectedCounts = @{ organizations = 13; metrics = 21; facts = 132678 }
 $ExpectedSourceRelativePath = "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx"
 
-# SAFETY 1: This importer never stops processes (no Stop-Process, no taskkill).
-# SAFETY 2: This importer never deletes database files (no Remove-Item, no
-#           deletion of *.mv.db / *.lock.db / Agent/model/chat data).
+# SAFETY 1: This importer never terminates or stops any process or service.
+# SAFETY 2: This importer never deletes or overwrites any database file or
+#           Agent configuration, conversations, or model/chat data.
 # SAFETY 3: This importer applies ONLY the packaged bank-h2.sql benchmark
 #           script (bank_* tables plus bank_benchmark.* views), never any
 #           other SQL.
@@ -81,7 +81,20 @@ $TargetDatabase = [System.IO.Path]::GetFullPath($TargetDatabase)
 
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
-    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    # Pure .NET streaming SHA-256 (no Get-FileHash dependency): both the hash
+    # algorithm and the file stream are disposed deterministically.
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha256.Dispose()
+    }
+    return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
 }
 
 function Assert-ManifestAndArtifacts {
@@ -190,6 +203,10 @@ function Resolve-Toolchain {
     }
     Write-Host "Using java: $JavaPath"
     Write-Host "Using H2 jar: $H2JarPath"
+    # Return the resolved toolchain so the caller assigns it in the outer
+    # script scope (function-local assignments are invisible to
+    # Invoke-RunScript / Assert-RowCounts).
+    return @{ JavaPath = $JavaPath; H2JarPath = $H2JarPath }
 }
 
 function Invoke-RunScript {
@@ -198,6 +215,14 @@ function Invoke-RunScript {
         [Parameter(Mandatory = $true)][string]$Script,
         [switch]$ShowResults
     )
+    # Guard against null/invalid toolchain values: never invoke an empty or
+    # non-existent command name.
+    if ([string]::IsNullOrWhiteSpace($JavaPath) -or -not (Test-Path -LiteralPath $JavaPath)) {
+        throw "Java executable is not configured (JavaPath='$JavaPath'); resolve the toolchain before importing."
+    }
+    if ([string]::IsNullOrWhiteSpace($H2JarPath) -or -not (Test-Path -LiteralPath $H2JarPath)) {
+        throw "H2 jar is not configured (H2JarPath='$H2JarPath'); resolve the toolchain before importing."
+    }
     $arguments = @("-cp", $H2JarPath, "org.h2.tools.RunScript", "-url", $Url, "-user", "root", "-password", "semantic", "-script", $Script)
     if ($ShowResults) { $arguments += "-showResults" }
     & $JavaPath @arguments
@@ -207,19 +232,33 @@ function Invoke-RunScript {
 }
 
 function Assert-RowCounts {
-    $verifyScript = Join-Path ([System.IO.Path]::GetTempPath()) ("bank-import-verify-" + [guid]::NewGuid().ToString("N") + ".sql")
-    $verifySql = @(
-        "SELECT CASE WHEN (SELECT COUNT(*) FROM bank_organization) = $($ExpectedCounts.organizations) THEN 1 ELSE CAST('bank_organization count != $($ExpectedCounts.organizations)' AS INT) END;",
-        "SELECT CASE WHEN (SELECT COUNT(*) FROM bank_metric_definition) = $($ExpectedCounts.metrics) THEN 1 ELSE CAST('bank_metric_definition count != $($ExpectedCounts.metrics)' AS INT) END;",
-        "SELECT CASE WHEN (SELECT COUNT(*) FROM bank_metric_daily) = $($ExpectedCounts.facts) THEN 1 ELSE CAST('bank_metric_daily count != $($ExpectedCounts.facts)' AS INT) END;"
-    ) -join "`n"
-    [System.IO.File]::WriteAllText($verifyScript, $verifySql, (New-Object System.Text.UTF8Encoding($false)))
-    try {
-        Invoke-RunScript -Url $JdbcUrl -Script $verifyScript
-    } finally {
-        if ([System.IO.File]::Exists($verifyScript)) {
-            [System.IO.File]::Delete($verifyScript)
+    # Read the three actual fixed-table COUNT(*) values back from H2 via
+    # org.h2.tools.Shell (no CASE/CAST in SQL: H2 eagerly compiles the ELSE
+    # branch, so a CASE-based check fails even when the counts are correct).
+    # Compare the observed counts in PowerShell and throw a clear mismatch
+    # message only when an observed count differs from the expected one.
+    $checks = @(
+        @{ Table = "bank_organization";      Token = "ORG_COUNT";   Expected = $ExpectedCounts.organizations },
+        @{ Table = "bank_metric_definition"; Token = "METRIC_COUNT"; Expected = $ExpectedCounts.metrics },
+        @{ Table = "bank_metric_daily";      Token = "FACT_COUNT";   Expected = $ExpectedCounts.facts }
+    )
+    foreach ($check in $checks) {
+        $sql = "SELECT '$($check.Token)=' || COUNT(*) FROM $($check.Table);"
+        $output = & $JavaPath -cp $H2JarPath org.h2.tools.Shell -url $JdbcUrl -user root -password semantic -sql $sql 2>&1
+        $exitCode = $LASTEXITCODE
+        $outputText = $output -join "`n"
+        if ($exitCode -ne 0) {
+            throw "Row-count query failed for $($check.Table) (org.h2.tools.Shell exit code $exitCode): $outputText"
         }
+        $match = [regex]::Match($outputText, [regex]::Escape($check.Token) + "=(\d+)")
+        if (-not $match.Success) {
+            throw "Could not read the row count for $($check.Table) from org.h2.tools.Shell output: $outputText"
+        }
+        $actual = [int]$match.Groups[1].Value
+        if ($actual -ne $check.Expected) {
+            throw "Row count mismatch for $($check.Table): expected $($check.Expected), observed $actual"
+        }
+        Write-Host "  verified $($check.Table): $actual rows"
     }
 }
 
@@ -228,7 +267,11 @@ Write-Host "Target H2 database base: $TargetDatabase"
 
 Assert-ManifestAndArtifacts
 Assert-TargetNotLocked
-Resolve-Toolchain
+# Resolve the Java/H2 toolchain into the OUTER script scope (function-local
+# assignments would be invisible to Invoke-RunScript / Assert-RowCounts).
+$toolchain = Resolve-Toolchain
+$JavaPath = $toolchain.JavaPath
+$H2JarPath = $toolchain.H2JarPath
 
 $TargetDir = Split-Path -Parent $TargetDatabase
 if (-not (Test-Path -LiteralPath $TargetDir)) {
