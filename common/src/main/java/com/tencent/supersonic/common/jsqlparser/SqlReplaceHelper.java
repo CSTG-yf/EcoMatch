@@ -805,8 +805,11 @@ public class SqlReplaceHelper {
         if (Objects.nonNull(groupBy)) {
             ExpressionList groupByExpressionList = groupBy.getGroupByExpressionList();
             for (int i = 0; i < groupByExpressionList.size(); i++) {
-                groupByExpressionList.set(i, QueryExpressionReplaceVisitor.replace(
-                        groupByExpressionList.get(i), replace, aliasFields, cteNames));
+                Object groupByExpression = groupByExpressionList.get(i);
+                if (groupByExpression instanceof Expression) {
+                    groupByExpressionList.set(i, QueryExpressionReplaceVisitor.replace(
+                            (Expression) groupByExpression, replace, aliasFields, cteNames));
+                }
             }
         }
 
@@ -901,8 +904,10 @@ public class SqlReplaceHelper {
             @Override
             public void visit(AnalyticExpression expr) {
                 if (Objects.nonNull(expr.getPartitionExpressionList())) {
-                    for (Expression partitionExpression : expr.getPartitionExpressionList()) {
-                        partitionExpression.accept(this);
+                    for (Object partitionExpression : expr.getPartitionExpressionList()) {
+                        if (partitionExpression instanceof Expression) {
+                            ((Expression) partitionExpression).accept(this);
+                        }
                     }
                 }
                 super.visit(expr);
@@ -928,8 +933,10 @@ public class SqlReplaceHelper {
         if (Objects.nonNull(plainSelect.getGroupBy())) {
             ExpressionList groupByExpressionList =
                     plainSelect.getGroupBy().getGroupByExpressionList();
-            for (Expression groupByExpression : groupByExpressionList) {
-                groupByExpression.accept(subSelectVisitor);
+            for (Object groupByExpression : groupByExpressionList) {
+                if (groupByExpression instanceof Expression) {
+                    ((Expression) groupByExpression).accept(subSelectVisitor);
+                }
             }
         }
         if (!CollectionUtils.isEmpty(plainSelect.getOrderByElements())) {
