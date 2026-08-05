@@ -33,6 +33,11 @@ public class BankNl2SqlError extends RuntimeException {
                 "bank query plan model generation failed", cause);
     }
 
+    public static BankNl2SqlError compilationFailure(Throwable cause) {
+        return new BankNl2SqlError(Stage.COMPILATION, Category.COMPILATION_FAILURE, false,
+                "bank query plan compilation failed", cause);
+    }
+
     public static boolean allowsParserRetry(Throwable error) {
         return error instanceof BankNl2SqlError bankError && bankError.isRetryable();
     }
