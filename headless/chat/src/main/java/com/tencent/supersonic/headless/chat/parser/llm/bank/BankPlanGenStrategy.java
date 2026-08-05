@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -151,24 +152,57 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (plan == null || plan.getTime() == null) {
             return plan;
         }
+        BankQueryPlan normalized = plan;
         if (queryText != null) {
             if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
-                return normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
-            }
-            if (isAnnualDailyExtremaSummary(queryText, hints)) {
-                return normalizeAnnualDailyExtremaSummary(plan, hints);
+                normalized = normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
+            } else if (isAnnualDailyExtremaSummary(queryText, hints)) {
+                normalized = normalizeAnnualDailyExtremaSummary(plan, hints);
             }
         }
         if (isAbsoluteThreshold(hints)) {
-            return normalizeAbsoluteThreshold(plan, hints);
+            normalized = normalizeAbsoluteThreshold(normalized, hints);
+        } else if (isSingleOrganizationRatio(hints)) {
+            normalized = normalizeSingleOrganizationRatio(normalized, hints);
+        } else if (hints.getExpectedIntent() == BankIntentType.CHANGE) {
+            normalized = normalizeChangePlan(queryText, normalized, hints);
         }
-        if (isSingleOrganizationRatio(hints)) {
-            return normalizeSingleOrganizationRatio(plan, hints);
-        }
-        if (hints.getExpectedIntent() != BankIntentType.CHANGE) {
+        return normalizeOutputColumns(normalized);
+    }
+
+    /**
+     * Reorders output.columns into the canonical dimensions-then-metrics plan order. Only a
+     * complete, nonblank, duplicate-free declaration whose field set exactly matches the selected
+     * dimensions plus selected metric bizNames is reordered; every other declaration is left
+     * untouched so the plan validator rejects missing, extra, blank, null, or duplicated columns
+     * instead of silently repairing them.
+     */
+    private BankQueryPlan normalizeOutputColumns(BankQueryPlan plan) {
+        BankQueryPlan.Output output = plan.getOutput();
+        if (output == null || output.getColumns() == null) {
             return plan;
         }
-        return normalizeChangePlan(queryText, plan, hints);
+        List<String> declared = output.getColumns();
+        if (declared.stream().anyMatch(column -> column == null || column.isBlank())
+                || declared.stream().distinct().count() != declared.size()) {
+            return plan;
+        }
+        List<String> dimensions =
+                plan.getDimensions() == null ? List.of() : plan.getDimensions();
+        List<String> metricNames = plan.getMetrics() == null ? List.of()
+                : plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList();
+        Set<String> declaredSet = new LinkedHashSet<>(declared);
+        Set<String> selectedSet = new LinkedHashSet<>();
+        selectedSet.addAll(dimensions);
+        selectedSet.addAll(metricNames);
+        if (!selectedSet.equals(declaredSet)) {
+            return plan;
+        }
+        List<String> canonical = new ArrayList<>(dimensions.size() + metricNames.size());
+        canonical.addAll(dimensions);
+        canonical.addAll(metricNames);
+        output.setColumns(canonical);
+        return plan;
     }
 
     private BankQueryPlan normalizeChangePlan(String queryText, BankQueryPlan plan,

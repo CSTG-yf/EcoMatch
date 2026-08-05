@@ -155,7 +155,9 @@ class BankPlanGenStrategyTest {
     void shouldProvideAnAbsoluteStartOfYearBaselineForChangePlans() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validChangePlanJson()
-                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]")
+                .replace("\"output\":{\"columns\":[\"ZB001\"]",
+                        "\"output\":{\"columns\":[\"bank_organization\",\"ZB001\"]"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
         LLMResp response = strategy.generate(changeRequest());
@@ -177,7 +179,9 @@ class BankPlanGenStrategyTest {
     void shouldProvideAnExplicitPeriodBaselineForAChangeRange() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validPeriodChangePlanJson()
-                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]")
+                .replace("\"output\":{\"columns\":[\"ZB001\"]",
+                        "\"output\":{\"columns\":[\"bank_organization\",\"ZB001\"]"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
         LLMResp response = strategy.generate(periodChangeRequest());
@@ -201,7 +205,9 @@ class BankPlanGenStrategyTest {
     void shouldNormalizeACombinedMonthAndYearQuestionToTheDualBaselinePlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validChangePlanJson()
-                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]"));
+                .replace("\"dimensions\":[]", "\"dimensions\":[\"bank_organization\"]")
+                .replace("\"output\":{\"columns\":[\"ZB001\"]",
+                        "\"output\":{\"columns\":[\"bank_organization\",\"ZB001\"]"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
         LLMReq request = changeRequest();
         request.setQueryText(
@@ -304,6 +310,37 @@ class BankPlanGenStrategyTest {
                 .<String>argThat(prompt -> prompt.contains("\"dimensions\":[\"bank_data_date\"]")
                         && prompt.contains("\"granularity\":\"QUARTER\"") && prompt.contains(
                                 "\"output\":{\"columns\":[\"bank_data_date\",\"ZB001\"]")));
+    }
+
+    @Test
+    void shouldNormalizeACompleteReversedOutputToCanonicalPlanOrder() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validPlanJson()
+                .replace("\"output\":{\"columns\":[\"bank_organization\",\"ZB001\"]",
+                        "\"output\":{\"columns\":[\"ZB001\",\"bank_organization\"]"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(request());
+
+        assertEquals(List.of("bank_organization", "ZB001"),
+                response.getBankQueryPlan().getOutput().getColumns());
+    }
+
+    @Test
+    void shouldRejectAnAllowedButUnselectedOutputFieldInsteadOfSilentlyAlteringIt() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validTrendPlanJson()
+                .replace("\"output\":{\"columns\":[\"bank_data_date\",\"ZB001\"]",
+                        "\"output\":{\"columns\":[\"bank_data_date\",\"bank_organization\","
+                                + "\"ZB001\"]"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        BankNl2SqlError exception = assertThrows(BankNl2SqlError.class,
+                () -> strategy.generate(trendRequest()));
+
+        assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
+        assertFalse(exception.isRetryable());
+        verify(model, org.mockito.Mockito.times(2)).generate(anyString());
     }
 
     private LLMReq request() {
