@@ -49,6 +49,202 @@ class SqlReplaceHelperTest {
     }
 
     @Test
+    void shouldReplaceFieldsInNotInFilter() {
+        String sql = "SELECT bank_data_date FROM t_33 "
+                + "WHERE bank_organization NOT IN ('org_1', 'org_2')";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertFalse(rewritten.contains("bank_organization"));
+        assertTrue(rewritten.contains("org_code NOT IN ('org_1', 'org_2')"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInBetweenFilter() {
+        String sql = "SELECT bank_data_date FROM t_33 "
+                + "WHERE bank_data_date BETWEEN '2025-01-01' AND '2025-06-30'";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("WHERE data_date BETWEEN '2025-01-01' AND '2025-06-30'"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInCaseWhen() {
+        String sql = "SELECT CASE WHEN bank_indicator > 100 THEN bank_organization "
+                + "ELSE bank_data_date END FROM t_33";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains(
+                "CASE WHEN metric_code > 100 THEN org_code ELSE data_date END"));
+        Assert.assertFalse(rewritten.contains("bank_"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInFunctionArguments() {
+        String sql = "SELECT datediff('day', bank_data_date, '2025-03-31') AS days FROM t_33";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("datediff('day', data_date, '2025-03-31') AS days"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInsideMultipleParenthesis() {
+        String sql = "SELECT * FROM t_33 WHERE (((bank_organization = 'org_1')))";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("(((org_code = 'org_1')))"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInJoinOnClause() {
+        String sql = "SELECT a.bank_organization FROM t_33 a JOIN t_33 b "
+                + "ON a.bank_organization = b.bank_organization "
+                + "AND b.bank_data_date BETWEEN '2025-01-01' AND '2025-06-30'";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertFalse(rewritten.contains("a.bank_organization"));
+        Assert.assertFalse(rewritten.contains("b.bank_data_date"));
+        assertTrue(rewritten.contains("ON a.org_code = b.org_code"));
+        assertTrue(rewritten.contains("AND b.data_date BETWEEN '2025-01-01' AND '2025-06-30'"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInGroupByAndHaving() {
+        String sql = "SELECT bank_organization, sum(bank_indicator) FROM t_33 "
+                + "GROUP BY bank_organization "
+                + "HAVING sum(bank_indicator) > 100 AND count(bank_data_date) > 1";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertFalse(rewritten.contains("GROUP BY bank_organization"));
+        Assert.assertFalse(rewritten.contains("HAVING sum(bank_indicator)"));
+        assertTrue(rewritten.contains("GROUP BY org_code"));
+        assertTrue(rewritten.contains("HAVING sum(metric_code) > 100 AND count(data_date) > 1"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInOrderByClause() {
+        String sql = "SELECT bank_data_date FROM t_33 ORDER BY bank_data_date DESC";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("ORDER BY data_date DESC"));
+    }
+
+    @Test
+    void shouldNotReplaceCteOutputColumns() {
+        String sql = "WITH cte AS (SELECT bank_organization FROM t_33) "
+                + "SELECT bank_organization FROM cte WHERE bank_organization = 'org_1'";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("WITH cte AS (SELECT org_code AS bank_organization "
+                + "FROM t_33)"));
+        assertTrue(rewritten.contains("SELECT bank_organization FROM cte "
+                + "WHERE bank_organization = 'org_1'"));
+    }
+
+    @Test
+    void shouldNotReplaceCteOutputColumnsInJoin() {
+        String sql = "WITH cte AS (SELECT bank_organization FROM t_33) "
+                + "SELECT cte.bank_organization FROM t_33 JOIN cte "
+                + "ON t_33.bank_organization = cte.bank_organization";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("SELECT cte.bank_organization FROM t_33 JOIN cte"));
+        assertTrue(rewritten.contains("ON t_33.org_code = cte.bank_organization"));
+        Assert.assertFalse(rewritten.contains("t_33.bank_organization"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInExistsSubQuery() {
+        String sql = "SELECT * FROM t_33 WHERE EXISTS "
+                + "(SELECT 1 FROM t_33 WHERE bank_data_date = '2025-03-31')";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertFalse(rewritten.contains("bank_data_date"));
+        assertTrue(rewritten.contains("EXISTS (SELECT 1 FROM t_33 WHERE data_date = "
+                + "'2025-03-31')"));
+    }
+
+    @Test
+    void shouldReplaceFieldsInWindowFunction() {
+        String sql = "SELECT bank_organization, "
+                + "sum(bank_indicator) OVER (PARTITION BY bank_organization "
+                + "ORDER BY bank_data_date) AS total FROM t_33";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertFalse(rewritten.contains("OVER (PARTITION BY bank_organization"));
+        assertTrue(rewritten.contains("sum(metric_code) OVER (PARTITION BY org_code "
+                + "ORDER BY data_date) AS total"));
+    }
+
+    @Test
+    void shouldNotReplaceSelectAliasReferences() {
+        String sql = "SELECT sum(bank_indicator) AS bank_indicator FROM t_33 "
+                + "HAVING bank_indicator > 10";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("sum(metric_code) AS bank_indicator"));
+        assertTrue(rewritten.contains("HAVING bank_indicator > 10"));
+    }
+
+    @Test
+    void shouldKeepUnmappedFieldsAndLiteralsUntouched() {
+        String sql = "SELECT user_name, 100 AS const FROM t_33 "
+                + "WHERE user_name = 'alice' AND amount > 100.5";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        Assert.assertEquals(
+                "SELECT user_name, 100 AS const FROM t_33 "
+                        + "WHERE user_name = 'alice' AND amount > 100.5",
+                rewritten);
+    }
+
+    @Test
+    void shouldReplaceFunctionWithAggregateExprMapping() {
+        String sql = "SELECT sum(bank_indicator) FROM t_33";
+        Map<String, String> fieldExprMap = new HashMap<>();
+        fieldExprMap.put("bank_indicator", "count(distinct metric_code)");
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, fieldExprMap);
+
+        assertTrue(rewritten.contains("count(DISTINCT metric_code) AS bank_indicator"));
+    }
+
+    private Map<String, String> initFieldExprMap() {
+        Map<String, String> fieldExprMap = new HashMap<>();
+        fieldExprMap.put("bank_organization", "org_code");
+        fieldExprMap.put("bank_indicator", "metric_code");
+        fieldExprMap.put("bank_data_date", "data_date");
+        return fieldExprMap;
+    }
+
+    @Test
     void testReplaceAggField() {
         String sql = "SELECT 维度1,sum(播放量) FROM 数据库 "
                 + "WHERE (歌手名 = '张三') AND 数据日期 = '2023-11-17' GROUP BY 维度1";
