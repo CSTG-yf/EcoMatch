@@ -229,6 +229,48 @@ class BankQueryPlanValidatorTest {
         assertTrue(result.codes().contains("TREND_TIME_DIMENSION_REQUIRED"));
     }
 
+    @Test
+    void shouldRejectOutputThatDropsASelectedDimension() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setDimensions(List.of("机构", "数据日期"));
+        plan.getOutput().setColumns(List.of("机构", "ZB001"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+        assertFalse(result.codes().contains("UNKNOWN_OUTPUT_COLUMN"));
+    }
+
+    @Test
+    void shouldRejectOutputContainingAValidButUnselectedField() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.getOutput().setColumns(List.of("机构", "ZB001", "ZB002"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+        assertFalse(result.codes().contains("UNKNOWN_OUTPUT_COLUMN"));
+    }
+
+    @Test
+    void shouldRejectOutputWithDuplicateColumns() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.getOutput().setColumns(List.of("机构", "ZB001", "机构"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+    }
+
     private SemanticIntentHints hints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))

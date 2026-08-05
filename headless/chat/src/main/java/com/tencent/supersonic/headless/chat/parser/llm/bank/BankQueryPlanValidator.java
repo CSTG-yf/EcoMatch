@@ -319,7 +319,9 @@ public class BankQueryPlanValidator {
             errors.add(error("OUTPUT_REQUIRED", "ordered output columns are required"));
             return;
         }
-        Set<String> output = safe(plan.getOutput().getColumns()).collect(Collectors.toSet());
+        List<String> outputColumns =
+                safe(plan.getOutput().getColumns()).collect(Collectors.toList());
+        Set<String> output = new LinkedHashSet<>(outputColumns);
         Set<String> validColumns = Stream
                 .concat(hints.getAllowedMetrics().stream(), hints.getAllowedDimensions().stream())
                 .collect(Collectors.toSet());
@@ -327,10 +329,27 @@ public class BankQueryPlanValidator {
             errors.add(
                     error("UNKNOWN_OUTPUT_COLUMN", "output columns must be semantic identifiers"));
         }
+        if (output.size() != outputColumns.size()) {
+            errors.add(error("OUTPUT_EXTRA_COLUMN", "output columns must not contain duplicates"));
+        }
         Set<String> metrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
-                .collect(Collectors.toSet());
+                .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!output.containsAll(metrics)) {
             errors.add(error("OUTPUT_MISSING_METRIC", "output must retain every requested metric"));
+        }
+        Set<String> dimensions = safe(plan.getDimensions())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!output.containsAll(dimensions)) {
+            errors.add(error("OUTPUT_MISSING_DIMENSION",
+                    "output must retain every requested dimension"));
+        }
+        Set<String> selected = Stream.concat(metrics.stream(), dimensions.stream())
+                .collect(Collectors.toSet());
+        for (String column : output) {
+            if (!selected.contains(column)) {
+                errors.add(error("OUTPUT_EXTRA_COLUMN",
+                        "output must not contain valid but unselected fields: " + column));
+            }
         }
     }
 
