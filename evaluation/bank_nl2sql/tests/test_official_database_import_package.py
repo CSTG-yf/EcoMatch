@@ -60,6 +60,32 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _executable_powershell(text: str) -> str:
+    """Return only the executable PowerShell lines of the importer.
+
+    Comment lines (both ``#`` line comments and the ``<# ... #>`` help block)
+    are excluded so that forbidden-command contract checks inspect what the
+    importer actually executes, not prose that explains what the importer must
+    never do.
+    """
+    lines: list[str] = []
+    in_block_comment = False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if in_block_comment:
+            if "#>" in stripped:
+                in_block_comment = False
+            continue
+        if stripped.startswith("<#"):
+            if "#>" not in stripped:
+                in_block_comment = True
+            continue
+        if stripped.startswith("#"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _read_manifest() -> dict[str, Any]:
     manifest_path = RELEASE_DIR / "database-manifest.json"
     if not manifest_path.is_file():
@@ -203,37 +229,56 @@ class OfficialDatabaseImportPackageTest(unittest.TestCase):
 
     def test_importer_safety_markers(self) -> None:
         text = IMPORTER.read_text(encoding="utf-8")
+        # Forbidden-command checks inspect the executable PowerShell code, not
+        # the comments (comments may legitimately describe what the importer
+        # must never do without ever executing it).
+        code = _executable_powershell(text)
         # Safety markers are explicit, greppable contract points.
         self.assertIn("# SAFETY 1:", text)
         self.assertIn("# SAFETY 2:", text)
         self.assertIn("# SAFETY 3:", text)
         self.assertIn("# SAFETY 4:", text)
         # Never manages processes.
-        self.assertNotIn("Stop-Process", text)
-        self.assertNotIn("taskkill", text.lower())
+        self.assertNotIn("Stop-Process", code)
+        self.assertNotIn("taskkill", code.lower())
         # Never deletes files (not even temporary database files).
-        self.assertNotIn("Remove-Item", text)
+        self.assertNotIn("Remove-Item", code)
         # Refuses an active/locked target database instead of touching it.
-        self.assertIn("lock.db", text)
+        self.assertIn("lock.db", code)
         # Defaults to the repository-local semantic H2 base path.
-        self.assertIn('".local-dev\\state\\semantic"', text)
+        self.assertIn('".local-dev\\state\\semantic"', code)
         # Explicit parameter surface.
-        self.assertIn("TargetDatabase", text)
-        self.assertIn("JavaPath", text)
-        self.assertIn("H2JarPath", text)
+        self.assertIn("TargetDatabase", code)
+        self.assertIn("JavaPath", code)
+        self.assertIn("H2JarPath", code)
         # Applies only the packaged bank benchmark script via RunScript with the
         # project-standard root/semantic credentials.
-        self.assertIn("org.h2.tools.RunScript", text)
-        self.assertIn('"-user"', text)
-        self.assertIn("root", text)
-        self.assertIn('"-password"', text)
-        self.assertIn("semantic", text)
+        self.assertIn("org.h2.tools.RunScript", code)
+        self.assertIn('"-user"', code)
+        self.assertIn("root", code)
+        self.assertIn('"-password"', code)
+        self.assertIn("semantic", code)
         # Verifies the three exact row counts after the import.
-        self.assertIn("132678", text)
-        self.assertIn("21", text)
+        self.assertIn("132678", code)
+        self.assertIn("21", code)
         # Project-local toolchain discovery when parameters are omitted.
-        self.assertIn("ECOMATCH_H2_JAR", text)
-        self.assertIn(".local-dev\\jdk", text)
+        self.assertIn("ECOMATCH_H2_JAR", code)
+        self.assertIn(".local-dev\\jdk", code)
+        # Hash verification uses the pure .NET streaming SHA-256, not the
+        # Get-FileHash cmdlet.
+        self.assertNotIn("Get-FileHash", code)
+        self.assertIn("System.Security.Cryptography.SHA256", code)
+        # The Java/H2 toolchain is resolved into the outer script scope before
+        # Invoke-RunScript (function-local resolution would be invisible to it).
+        self.assertIn("$toolchain = Resolve-Toolchain", code)
+        self.assertIn("$JavaPath = $toolchain.JavaPath", code)
+        self.assertIn("$H2JarPath = $toolchain.H2JarPath", code)
+        # Row counts are read back from H2 (org.h2.tools.Shell) and compared in
+        # PowerShell; no CASE/CAST verification that H2 eagerly compiles even
+        # when the counts are correct.
+        self.assertIn("org.h2.tools.Shell", code)
+        self.assertNotIn("CASE WHEN", code)
+        self.assertNotIn("CAST(", code)
 
         wrapper = CMD_WRAPPER.read_text(encoding="utf-8")
         self.assertIn("Import-OfficialBankData.ps1", wrapper)
