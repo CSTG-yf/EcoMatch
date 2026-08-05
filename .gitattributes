@@ -1,1 +1,2 @@
 evaluation/bank_nl2sql/official/** -text
+evaluation/bank_nl2sql/db/releases/** -text

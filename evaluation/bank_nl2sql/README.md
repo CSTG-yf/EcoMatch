@@ -77,6 +77,47 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 校验器检查机构、指标和事实表数量，联合键、外键、完整日期序列以及每天完整的 `机构 × 指标` 立方体。
 
+## 官方数据库伴随导入包（companion import package）
+
+`db/releases/2.0.0/` 是基于 2.0.0 官方工作簿冻结的**伴随导入包**，**不是运行时
+`semantic.mv.db`**：它只包含不可变产物与导入器，运行时数据库由导入器按需生成。
+包内文件：
+
+- `bank.sqlite`：SQLite 标准基准库（13 家机构、21 个指标、132678 条事实）；
+- `bank-h2.sql`：H2 脚本（`bank_organization`、`bank_metric_definition`、
+  `bank_metric_daily` 三张表及 `bank_benchmark.*` 三个兼容视图）；
+- `database-manifest.json`：`schemaVersion`、官方版本/路径/SHA-256、来源日期范围
+  （2024-12-31 至 2026-04-30）、每个产物的 SHA-256 与字节数、精确行数
+  （organizations=13、metrics=21、facts=132678）。
+
+`db/Import-OfficialBankData.ps1`（及双击包装 `Import-OfficialBankData.cmd`）把该包
+导入本地 H2：默认目标为仓库内 `.local-dev/state/semantic`（与运行时
+`S2_METADATA_DB_PATH=.local-dev/state/semantic` 一致），可显式传入
+`-TargetDatabase`/`-JavaPath`/`-H2JarPath`，缺省时自动发现项目本地 JDK/H2 jar
+（`JAVA_HOME`、`.local-dev/jdk`、`ECOMATCH_H2_JAR`、`.local-dev` Maven 仓库、
+`~/.m2`）。导入前校验 manifest 与全部产物哈希；目标库被占用/锁定（
+`<base>.lock.db`）时直接拒绝并退出（不会停止任何进程、不删除任何文件）；只通过
+`org.h2.tools.RunScript` 以项目标准 `root`/`semantic` 凭据应用包内 H2 脚本（仅
+bank 基准表/视图，幂等）；导入后再次校验三个精确行数。它不会删除或覆盖任意数据库
+文件，也不会触碰 Agent/model/chat 配置或会话。
+
+一键导入（默认目标）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-OfficialBankData.ps1
+```
+
+或直接双击 `evaluation/bank_nl2sql/db/Import-OfficialBankData.cmd`。指定自定义目标：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-OfficialBankData.ps1 `
+  -TargetDatabase .local-dev/state/semantic `
+  -JavaPath C:\path\to\java.exe -H2JarPath C:\path\to\h2-2.2.224.jar
+```
+
+`db/releases/**` 已在 `.gitattributes` 标记为 `-text`，保证包内产物校验和在
+跨平台检出时保持稳定。
+
 ## 构建标注数据集
 
 正式版必须使用 2.0.0 官方工作簿与 `official-manifest.json`（manifest 严格
