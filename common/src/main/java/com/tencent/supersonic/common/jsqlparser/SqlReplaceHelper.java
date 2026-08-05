@@ -707,6 +707,16 @@ public class SqlReplaceHelper {
         List<PlainSelect> plainSelectList = new ArrayList<>();
         Set<String> cteNames = new HashSet<>();
         collectPlainSelects(selectStatement, plainSelectList, cteNames);
+        // a Table alias referring to a known CTE is also part of the CTE output scope; collect
+        // these aliases in a second pass so the WITH/SetOperation traversal order does not matter
+        for (PlainSelect plainSelect : plainSelectList) {
+            collectCteTableAlias(plainSelect.getFromItem(), cteNames);
+            if (!CollectionUtils.isEmpty(plainSelect.getJoins())) {
+                for (Join join : plainSelect.getJoins()) {
+                    collectCteTableAlias(join.getFromItem(), cteNames);
+                }
+            }
+        }
         // rewrite nested select bodies (sub-queries, CTEs) before their parents so that parent
         // expressions deparsed afterwards already contain the rewritten sub-queries
         for (int i = plainSelectList.size() - 1; i >= 0; i--) {
@@ -885,6 +895,15 @@ public class SqlReplaceHelper {
                 cteNames.add(parenthesedSelect.getAlias().getName());
             }
             collectPlainSelects(parenthesedSelect.getSelect(), plainSelectList, cteNames);
+        }
+    }
+
+    private static void collectCteTableAlias(FromItem fromItem, Set<String> cteNames) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
+            if (Objects.nonNull(table.getAlias()) && cteNames.contains(table.getName())) {
+                cteNames.add(table.getAlias().getName());
+            }
         }
     }
 

@@ -173,6 +173,24 @@ class SqlReplaceHelperTest {
     }
 
     @Test
+    void shouldNotReplaceCteOutputColumnsQualifiedByTableAlias() {
+        String sql = "WITH cte AS (SELECT bank_organization FROM t_33) "
+                + "SELECT c.bank_organization FROM t_33 JOIN cte c "
+                + "ON t_33.bank_organization = c.bank_organization "
+                + "WHERE c.bank_organization = 'org_1'";
+
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
+                initFieldExprMap());
+
+        assertTrue(rewritten.contains("WITH cte AS (SELECT org_code AS bank_organization "
+                + "FROM t_33)"));
+        assertTrue(rewritten.contains("SELECT c.bank_organization FROM t_33 JOIN cte c"));
+        assertTrue(rewritten.contains("ON t_33.org_code = c.bank_organization"));
+        assertTrue(rewritten.contains("WHERE c.bank_organization = 'org_1'"));
+        Assert.assertFalse(rewritten.contains("t_33.bank_organization"));
+    }
+
+    @Test
     void shouldReplaceFieldsInExistsSubQuery() {
         String sql = "SELECT * FROM t_33 WHERE EXISTS "
                 + "(SELECT 1 FROM t_33 WHERE bank_data_date = '2025-03-31')";
