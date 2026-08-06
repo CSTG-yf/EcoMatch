@@ -327,6 +327,113 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldBuildDeterministicAnnualDailyAveragePlanWithoutModelOrAppConfig() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualDailyAverageRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.AGGREGATION, plan.getIntent());
+        assertEquals(BankQueryPlan.Aggregation.AVG,
+                plan.getMetrics().get(0).getAggregation());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("ORG010"), plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode).toList());
+        assertEquals(LocalDate.of(2025, 1, 1), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        assertEquals(List.of("bank_organization", "ZB001"), plan.getOutput().getColumns());
+        assertEquals(List.of(), plan.getOrderBy());
+        assertEquals(null, plan.getLimit());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicAnnualAverageTopAndBottomRankingPlanWithoutCallingTheModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualAverageRankingRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals(BankQueryPlan.Aggregation.AVG,
+                plan.getMetrics().get(0).getAggregation());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("bank_organization", "ZB002"), plan.getOutput().getColumns());
+        assertEquals(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("3").build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE").value("3")
+                        .build()),
+                plan.getFilters());
+        assertEquals(List.of(BankQueryPlan.OrderBy.builder().field("ZB002")
+                .direction(BankQueryPlan.SortDirection.DESC).build()), plan.getOrderBy());
+        assertEquals(Integer.valueOf(6), plan.getLimit());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicAnnualDailyExtremaSummaryPlanBeforeModelCandidates() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualDailySummaryRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.AGGREGATION, plan.getIntent());
+        assertEquals(BankQueryPlan.Aggregation.AVG,
+                plan.getMetrics().get(0).getAggregation());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("ORG010"), plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode).toList());
+        assertEquals(LocalDate.of(2025, 1, 1), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        assertEquals(List.of("bank_organization", "ZB001"), plan.getOutput().getColumns());
+        assertEquals(List.of(), plan.getOrderBy());
+        assertEquals(null, plan.getLimit());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldUseThePreviousNaturalQuarterEndAsBaselineForLastQuarterEndChange() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validChangePlanJson()
+                .replace("\"time\":{\"startDate\":\"2025-01-01\",\"endDate\":\"2025-04-30\",\"granularity\":\"DAY\",\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\",\"baselineEndDate\":\"2024-12-31\"}",
+                        "\"time\":{\"startDate\":\"2025-12-31\",\"endDate\":\"2025-12-31\",\"granularity\":\"DAY\",\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\",\"baselineEndDate\":\"2024-12-31\"}"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = changeRequest();
+        request.setQueryText("2025年12月末各项存款余额较上季度末变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan.TimeRange time = response.getBankQueryPlan().getTime();
+        assertEquals(LocalDate.of(2025, 12, 31), time.getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), time.getEndDate());
+        assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, time.getComparison());
+        assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineStartDate());
+        assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineEndDate());
+        verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt ->
+                prompt.contains("\"comparison\":\"PERIOD_OVER_PERIOD\"")
+                        && prompt.contains("\"baselineStartDate\":\"2025-09-30\"")
+                        && prompt.contains("\"baselineEndDate\":\"2025-09-30\"")));
+    }
+
+    @Test
     void shouldRejectAnAllowedButUnselectedOutputFieldInsteadOfSilentlyAlteringIt() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validTrendPlanJson()
@@ -480,6 +587,21 @@ class BankPlanGenStrategyTest {
                 "orderBy":[{"field":"ZB002","direction":"DESC"}],"limit":6,
                 "output":{"columns":["bank_organization","ZB002"],"orderSensitive":true}}
                 """;
+    }
+
+    private LLMReq annualDailyAverageRequest() {
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省J市农商行2025年全年各项存款余额日均是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG010"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        // 故意不配置任何 chatApp,证明确定性路径不依赖模型配置。
+        request.setChatAppConfig(Map.of());
+        return request;
     }
 
     private LLMReq annualDailySummaryRequest() {

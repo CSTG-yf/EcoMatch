@@ -154,6 +154,39 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldRecognizeADailyAverageQuestionAsAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额日均是多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.AGGREGATION, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenRankingIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年全年各项存款余额日均排名前3和后3的农商行？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenTrendIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行各项存款余额日均的逐月趋势？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenChangeIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行2025年各项存款余额日均较上季度末变化了多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+    }
+
+    @Test
     void shouldNotTreatAMinimumRegulatoryRequirementAsARankingFilter() {
         BankIntentResult result = recognizer.recognize("2026年一季度末，江苏省H市农商行的资本充足率满足10.5%的最低要求吗？",
                 LocalDate.of(2026, 7, 22));

@@ -216,7 +216,7 @@ public class BankFinancialIntentRecognizer {
                 "表现较好", "表现较差")) {
             score(scores, BankIntentType.RANKING, 0.98D, "命中排名或极值表达");
         }
-        if (containsAny(text, "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
+        if (containsAny(text, "日均", "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
             score(scores, BankIntentType.AGGREGATION, 0.91D, "命中聚合统计表达");
         }
         if (annualDailyExtremaSummary) {
