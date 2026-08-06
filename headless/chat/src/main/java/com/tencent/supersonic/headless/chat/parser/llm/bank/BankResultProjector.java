@@ -49,6 +49,7 @@ public class BankResultProjector {
             case DAILY_AVERAGE_RANKING -> projectDailyAverageRanking(contract, sourceRows);
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
+            case DERIVED_RANKING -> projectDerivedRanking(contract, sourceRows);
         };
     }
 
@@ -342,6 +343,55 @@ public class BankResultProjector {
         return Projection.applied(columns(contract), rows);
     }
 
+    /**
+     * Pass-through projection for the compiler-owned derived-metric ranking template. The SQL
+     * already ranks over the full organization population with stable ROW_NUMBER ordinals and
+     * restricts the selected organization outside that ranking, so this projection preserves the
+     * source rank_position verbatim instead of recomputing ranks from the returned rows. A
+     * missing source field or a non-usable source rank fails closed; no row is ever dropped or
+     * re-ranked silently. The emitted rows are re-ordered to the deterministic metric_code ASC,
+     * org_code ASC contract.
+     */
+    private Projection projectDerivedRanking(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup metricValue = value(sourceRow, "metric_value");
+            ValueLookup rankPosition = value(sourceRow, "rank_position");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !metricValue.found()
+                    || metricValue.value() == null || !rankPosition.found()
+                    || decimal(rankPosition.value()) == null) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty() && !contract
+                    .getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_value", metricValue.value());
+            row.put("rank_position", rankPosition.value());
+            rows.add(row);
+        }
+        rows.sort((left, right) -> {
+            int metricOrder = String.valueOf(left.get("metric_code"))
+                    .compareTo(String.valueOf(right.get("metric_code")));
+            if (metricOrder != 0) {
+                return metricOrder;
+            }
+            return String.valueOf(left.get("org_code"))
+                    .compareTo(String.valueOf(right.get("org_code")));
+        });
+        return Projection.applied(columns(contract), rows);
+    }
+
     private Projection projectComparison(Contract contract, List<Map<String, Object>> sourceRows) {
         if (contract.getMetrics().size() != 1) {
             return Projection.notApplied();
@@ -601,6 +651,9 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",
                     "absolute_change", "percent_change");
         }
+        if (contract.getType() == ProjectionType.DERIVED_RANKING) {
+            return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 && rankedMetricCodeFirst(contract)) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
@@ -631,7 +684,8 @@ public class BankResultProjector {
         COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
         TREND,
         MOM_YOY_CHANGE,
-        MULTI_METRIC_CHANGE
+        MULTI_METRIC_CHANGE,
+        DERIVED_RANKING
     }
 
     @Data

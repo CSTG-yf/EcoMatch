@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /** Generates a constrained semantic plan; the plan is compiled to S2SQL only in T4. */
 @Service
@@ -164,6 +165,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
      * returned directly and the model is never invoked.
      */
     private BankQueryPlan buildDeterministicPlan(String queryText, SemanticIntentHints hints) {
+        if (isDerivedMetricRanking(hints)) {
+            return buildDerivedMetricRankingPlan(hints);
+        }
         if (isDaysAboveProvinceAverageCount(queryText, hints)) {
             return buildDaysAboveProvinceAverageCountPlan(hints);
         }
@@ -174,6 +178,70 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             return buildAnnualAverageTopAndBottomRankingPlan(queryText, hints);
         }
         return null;
+    }
+
+    /**
+     * The fully determined multi-metric derived ranking (e.g. TRAIN-H-07: 存贷比 plus direct
+     * indicators). Recognition must already prove a RANKING intent, exactly one organization, one
+     * exact date, and derived metric specifications whose operands are all direct required
+     * metrics; the plan is then decided entirely from those hints, so no model call or candidate
+     * validation is needed. Every other request keeps its existing path.
+     */
+    private boolean isDerivedMetricRanking(SemanticIntentHints hints) {
+        if (hints.getExpectedIntent() != BankIntentType.RANKING
+                || hints.getRequiredOrganizationCodes().size() != 1
+                || hints.getRequiredStartDate() == null
+                || !hints.getRequiredStartDate().equals(hints.getRequiredEndDate())
+                || hints.getRequiredDerivedMetrics().isEmpty()) {
+            return false;
+        }
+        return hints.getRequiredDerivedMetrics().stream()
+                .allMatch(spec -> containsIgnoreCase(hints.getRequiredMetrics(), spec.numerator())
+                        && containsIgnoreCase(hints.getRequiredMetrics(), spec.denominator()));
+    }
+
+    private static boolean containsIgnoreCase(Set<String> values, String target) {
+        return values.stream().anyMatch(value -> value != null && value.equalsIgnoreCase(target));
+    }
+
+    private BankQueryPlan buildDerivedMetricRankingPlan(SemanticIntentHints hints) {
+        List<String> metrics = hints.getRequiredMetrics().stream().sorted().toList();
+        String organization = hints.getRequiredOrganizationCodes().iterator().next();
+        LocalDate date = hints.getRequiredStartDate();
+        String firstMetric = metrics.get(0);
+        return BankQueryPlan.builder()
+                .action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.RANKING)
+                .metrics(metrics.stream().map(metric -> BankQueryPlan.Metric.builder()
+                        .bizName(metric).aggregation(BankQueryPlan.Aggregation.DEFAULT).build())
+                        .toList())
+                .derivedMetrics(hints.getRequiredDerivedMetrics().stream()
+                        .map(spec -> BankQueryPlan.DerivedMetric.builder()
+                                .metricCode(spec.code()).numerator(spec.numerator())
+                                .denominator(spec.denominator()).name(spec.name()).build())
+                        .toList())
+                .dimensions(List.of("bank_organization"))
+                .organizations(List.of(BankQueryPlan.Organization.builder().code(organization)
+                        .build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(date).endDate(date)
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(hints.getRequiredFilters().stream()
+                        .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
+                                .operator(filter.operator()).value(filter.value()).build())
+                        .toList())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of(BankQueryPlan.OrderBy.builder().field(firstMetric)
+                        .direction(BankQueryPlan.SortDirection
+                                .valueOf(BankResultProjector.rankingDirection(firstMetric)))
+                        .build()))
+                .limit(hints.getRequiredLimit())
+                .output(BankQueryPlan.Output.builder()
+                        .columns(Stream.concat(Stream.of("bank_organization"), metrics.stream())
+                                .toList())
+                        .orderSensitive(true).build())
+                .build();
     }
 
     /**

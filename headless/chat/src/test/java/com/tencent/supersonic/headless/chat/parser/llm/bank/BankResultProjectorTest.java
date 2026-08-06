@@ -432,6 +432,64 @@ class BankResultProjectorTest {
                         "above_ratio_percent", 1))).isApplied());
     }
 
+    @Test
+    void shouldRetainSourceRankPositionsVerbatimForDerivedRankingRows() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG004", "江苏省D市农商行"))
+                .selectedOrganizationCodes(List.of("ORG004")).build();
+
+        BankResultProjector.Projection projection = projector.project(contract, List.of(
+                row("metric_code", "ZB001", "bank_organization", "ORG004", "metric_value",
+                        new BigDecimal("48.50"), "rank_position", 3),
+                row("metric_code", "DERIVED_ZB002_DIV_ZB001", "bank_organization", "ORG004",
+                        "metric_value", new BigDecimal("87.30"), "rank_position", 7)));
+
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("metric_code", "org_code", "org_name", "metric_value",
+                "rank_position"), projection.getColumns());
+        // 直接沿用 SQL 的 ROW_NUMBER 序位,不重新计算;输出按 metric_code ASC、org_code ASC 确定排序。
+        assertEquals(List.of(
+                row("metric_code", "DERIVED_ZB002_DIV_ZB001", "org_code", "ORG004", "org_name",
+                        "江苏省D市农商行", "metric_value", new BigDecimal("87.30"), "rank_position", 7),
+                row("metric_code", "ZB001", "org_code", "ORG004", "org_name", "江苏省D市农商行",
+                        "metric_value", new BigDecimal("48.50"), "rank_position", 3)),
+                projection.getRows());
+    }
+
+    @Test
+    void shouldFailClosedWhenDerivedRankingSourceRankIsMissingOrNotUsable() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG004", "D"))
+                .selectedOrganizationCodes(List.of("ORG004")).build();
+
+        assertFalse(projector.project(contract,
+                List.of(row("metric_code", "ZB001", "bank_organization", "ORG004",
+                        "metric_value", new BigDecimal("1")))).isApplied());
+        assertFalse(projector.project(contract,
+                List.of(row("metric_code", "ZB001", "bank_organization", "ORG004",
+                        "metric_value", new BigDecimal("1"), "rank_position", "first")))
+                .isApplied());
+    }
+
+    @Test
+    void shouldFailClosedWhenADerivedRankingRowHasNoUsableRatioValue() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG004", "D"))
+                .selectedOrganizationCodes(List.of("ORG004")).build();
+
+        // 零分母在 SQL 中产生 NULL 比值并在排名前被排除;若任何行仍缺 metric_value,
+        // 投影必须整体 fail closed,绝不臆造一个排名的比值。
+        assertFalse(projector.project(contract,
+                List.of(row("metric_code", "DERIVED_ZB002_DIV_ZB001", "bank_organization",
+                        "ORG004", "rank_position", 5))).isApplied());
+    }
+
     private static Map<String, Object> row(Object... values) {
         Map<String, Object> row = new LinkedHashMap<>();
         for (int index = 0; index < values.length; index += 2) {

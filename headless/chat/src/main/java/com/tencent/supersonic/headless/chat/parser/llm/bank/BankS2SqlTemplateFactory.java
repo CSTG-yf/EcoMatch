@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
+import org.apache.commons.lang3.StringUtils;
 
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -507,6 +508,100 @@ final class BankS2SqlTemplateFactory {
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     operation + " requires exactly one metric and no metric filter");
         }
+    }
+
+    /**
+     * Full-population ranking over direct metrics plus derived ratios (e.g. 存贷比 =
+     * DERIVED_ZB002_DIV_ZB001). Every metric ranks all organizations first; the selected
+     * organization restriction is applied only outside the ranking. Derived ratios are computed
+     * as numerator / NULLIF(denominator, 0) * 100 and rows without a usable ratio (missing
+     * numerator data or a zero denominator) are excluded before ROW_NUMBER, so an invalid ratio
+     * can never receive or fabricate a rank position. Direct metrics keep their business
+     * direction (ZB012/ZB013/ZB017 lower-is-better ASC, otherwise DESC); derived ratios always
+     * rank DESC. All ranks are stable ROW_NUMBER ordinals with organization-code ASC tie breaks,
+     * and the final result is ordered metric_code ASC, bank_organization ASC.
+     */
+    String compileDerivedMetricRanking(TemplateContext context) {
+        if (context.plan().getDerivedMetrics().isEmpty() || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "derived-metric ranking requires derived metrics and no metric filter");
+        }
+        if (!context.dimensions().equals(List.of("bank_organization"))) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "derived-metric ranking requires only the organization dimension");
+        }
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        List<String> ctes = new ArrayList<>();
+        List<String> rankedSelects = new ArrayList<>();
+        int metricIndex = 0;
+        List<ResolvedMetric> directMetrics = context.metrics().stream()
+                .sorted(java.util.Comparator.comparing(ResolvedMetric::metricCode)).toList();
+        for (ResolvedMetric metric : directMetrics) {
+            String cte = "bank_metric_" + metricIndex;
+            ctes.add("""
+                    %s AS (
+                      SELECT '%s' AS metric_code, bank_organization, SUM(%s) AS metric_value
+                      FROM %s
+                      WHERE %s
+                      GROUP BY bank_organization
+                    )
+                    """.formatted(cte, metric.metricCode(), metric.identifier(),
+                    context.dataSetName(), where).trim());
+            rankedSelects.add(rankedSelect(cte,
+                    BankResultProjector.rankingDirection(metric.metricCode())));
+            metricIndex++;
+        }
+        for (BankQueryPlan.DerivedMetric derived : context.plan().getDerivedMetrics()) {
+            String cte = "bank_metric_" + metricIndex;
+            ctes.add("""
+                    %s AS (
+                      SELECT '%s' AS metric_code, bank_organization,
+                             SUM(%s) / NULLIF(SUM(%s), 0) * 100.0 AS metric_value
+                      FROM %s
+                      WHERE %s
+                      GROUP BY bank_organization
+                    )
+                    """.formatted(cte, derived.getMetricCode(), derived.getNumerator(),
+                    derived.getDenominator(), context.dataSetName(), where).trim());
+            rankedSelects.add(rankedSelect(cte, "DESC"));
+            metricIndex++;
+        }
+        return """
+                WITH %s,
+                bank_ranked AS (
+                %s
+                )
+                SELECT metric_code, bank_organization, metric_value, rank_position
+                FROM bank_ranked%s
+                ORDER BY metric_code ASC, bank_organization ASC
+                """.formatted(String.join(",\n", ctes),
+                String.join("\nUNION ALL\n", rankedSelects), selectedOrganizationsWhere(context))
+                .trim();
+    }
+
+    private String rankedSelect(String cte, String direction) {
+        return """
+                SELECT metric_code, bank_organization, metric_value,
+                       ROW_NUMBER() OVER (ORDER BY metric_value %s, bank_organization ASC) AS rank_position
+                FROM %s
+                WHERE metric_value IS NOT NULL
+                """.formatted(direction, cte).trim();
+    }
+
+    private String selectedOrganizationsWhere(TemplateContext context) {
+        List<String> codes = context.plan().getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank).toList();
+        if (codes.isEmpty()) {
+            return "";
+        }
+        if (codes.size() == 1) {
+            return "\nWHERE bank_organization = " + literal(codes.get(0));
+        }
+        return "\nWHERE bank_organization IN ("
+                + codes.stream().map(this::literal).collect(Collectors.joining(", ")) + ")";
     }
 
     private List<Filter> withoutOrganizationFilter(TemplateContext context) {

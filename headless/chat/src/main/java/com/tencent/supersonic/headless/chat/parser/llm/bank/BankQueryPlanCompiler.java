@@ -101,6 +101,13 @@ public class BankQueryPlanCompiler {
                         .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
         if (directCalculation
                 && plan.getTime().getComparison() == BankQueryPlan.TimeComparison.NONE) {
+            if (!plan.getDerivedMetrics().isEmpty()) {
+                return CompiledQuery.s2sql(
+                        templateFactory.compileDerivedMetricRanking(templateContext),
+                        List.of("metric_code", ORGANIZATION_DIMENSION, "metric_value",
+                                "rank_position"),
+                        derivedRankingResultContract(plan, index));
+            }
             if (plan.getCalculation().getType() == BankQueryPlan.CalculationType
                     .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
                 if (plan.getIntent() == BankIntentType.AGGREGATION) {
@@ -365,6 +372,37 @@ public class BankQueryPlanCompiler {
                         "observation_count")
                 : List.of(ORGANIZATION_DIMENSION, "metric_code", "aggregate_value", "min_value",
                         "max_value", "observation_count");
+    }
+
+    /**
+     * The auditable projection contract for the compiler-owned derived-metric ranking template.
+     * The SQL already ranks over the full organization population, so the projector must preserve
+     * the source rank_position verbatim instead of recomputing ranks from the returned rows.
+     */
+    private BankResultProjector.Contract derivedRankingResultContract(BankQueryPlan plan,
+            SchemaIndex index) {
+        if (!index.hasDimension(ORGANIZATION_DIMENSION)) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,
+                    "derived-metric ranking requires the semantic organization dimension");
+        }
+        SchemaElement organization = index.dimension(ORGANIZATION_DIMENSION);
+        Map<String, String> organizationNames = new LinkedHashMap<>();
+        if (organization.getSchemaValueMaps() != null) {
+            for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
+                if (valueMap != null && StringUtils.isNotBlank(valueMap.getTechName())
+                        && StringUtils.isNotBlank(valueMap.getBizName())) {
+                    organizationNames.put(valueMap.getTechName(), valueMap.getBizName());
+                }
+            }
+        }
+        return BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
+                .organizationColumn(identifier(organization)).organizationNames(organizationNames)
+                .selectedOrganizationCodes(
+                        plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
+                                .filter(StringUtils::isNotBlank).sorted().toList())
+                .build();
     }
 
     private BankResultProjector.Contract provinceAverageContract(BankQueryPlan plan,

@@ -147,6 +147,96 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileDerivedMetricRankingOverTheFullPopulationWithOuterOrganizationRestriction() {
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(derivedRankingPlan(), derivedRankingHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("WITH bank_metric_0 AS"));
+        assertTrue(sql.contains(
+                "SELECT 'ZB001' AS metric_code, bank_organization, SUM(ZB001) AS metric_value"));
+        assertTrue(sql.contains(
+                "SELECT 'ZB002' AS metric_code, bank_organization, SUM(ZB002) AS metric_value"));
+        assertTrue(sql.contains("SELECT 'DERIVED_ZB002_DIV_ZB001' AS metric_code, "
+                + "bank_organization,"));
+        // 派生指标 = 分子 / NULLIF(分母, 0) * 100,零分母不会产生可排名的比值。
+        assertTrue(sql.contains("SUM(ZB002) / NULLIF(SUM(ZB001), 0) * 100.0 AS metric_value"));
+        // 全量机构先完成排名,选中机构只在最外层 WHERE 限制。
+        assertEquals(1, occurrences(sql, "bank_organization = 'ORG004'"));
+        assertTrue(sql.contains(
+                "WHERE \u6570\u636e\u65e5\u671f >= '2026-03-31' AND \u6570\u636e\u65e5\u671f"
+                        + " <= '2026-03-31'\n  GROUP BY bank_organization"));
+        // ROW_NUMBER 稳定序位,绝不使用会合并并列的 RANK。
+        assertTrue(sql.contains(
+                "ROW_NUMBER() OVER (ORDER BY metric_value DESC, bank_organization ASC)"
+                        + " AS rank_position"));
+        assertFalse(sql.contains("RANK()"));
+        // 无效比值在排名前被排除,不会凭空得到排名。
+        assertTrue(sql.contains("FROM bank_metric_2\nWHERE metric_value IS NOT NULL"));
+        assertTrue(sql.contains("\nWHERE bank_organization = 'ORG004'\n"
+                + "ORDER BY metric_code ASC, bank_organization ASC"));
+        assertEquals(List.of("metric_code", "bank_organization", "metric_value", "rank_position"),
+                compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
+                compiled.getResultContract().getType());
+        assertEquals("bank_organization",
+                compiled.getResultContract().getOrganizationColumn());
+        assertEquals(List.of("ORG004"),
+                compiled.getResultContract().getSelectedOrganizationCodes());
+    }
+
+    @Test
+    void shouldRankLowerIsBetterDirectMetricsAscendingInsideTheDerivedTemplate() {
+        LLMReq.LLMSchema schema = schema();
+        schema.setMetrics(List.of(
+                SchemaElement.builder().name("各项存款余额").bizName("ZB001").defaultAgg("SUM")
+                        .build(),
+                SchemaElement.builder().name("各项贷款余额").bizName("ZB002").defaultAgg("SUM")
+                        .build(),
+                SchemaElement.builder().name("不良贷款率").bizName("ZB013").defaultAgg("SUM")
+                        .build()));
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002"), metric("ZB013")));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001", "ZB002", "ZB013"));
+        plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
+                .direction(BankQueryPlan.SortDirection.DESC).build()));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002", "ZB013"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema);
+
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains(
+                "SELECT 'ZB013' AS metric_code, bank_organization, SUM(ZB013) AS metric_value"));
+        // 直接指标按业务方向排序:ZB013 低优 ASC,其余 DESC;派生指标恒为 DESC。
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY metric_value ASC, "
+                + "bank_organization ASC) AS rank_position\nFROM bank_metric_2"));
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY metric_value DESC, "
+                + "bank_organization ASC) AS rank_position\nFROM bank_metric_3"));
+        assertFalse(sql.contains("RANK()"));
+    }
+
+    private int occurrences(String text, String value) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(value, index)) >= 0) {
+            count++;
+            index += value.length();
+        }
+        return count;
+    }
+
+    @Test
     void shouldAttachTheStableLongFormContractToAnOrganizationComparison() {
         BankQueryPlan plan = rankingPlan();
         plan.setIntent(BankIntentType.COMPARISON);
@@ -705,6 +795,39 @@ class BankQueryPlanCompilerTest {
                         .columns(List.of("bank_organization", "ZB001")).orderSensitive(true)
                         .build())
                 .build();
+    }
+
+    private BankQueryPlan derivedRankingPlan() {
+        return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RANKING).metrics(List.of(metric("ZB001"), metric("ZB002")))
+                .derivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                        .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002")
+                        .denominator("ZB001").name("存贷比").build()))
+                .dimensions(List.of("bank_organization"))
+                .organizations(List.of(organization("ORG004")))
+                .time(time(BankQueryPlan.TimeComparison.NONE, null, null))
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
+                        .direction(BankQueryPlan.SortDirection.DESC).build()))
+                .limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", "ZB001", "ZB002"))
+                        .orderSensitive(true).build())
+                .build();
+    }
+
+    private SemanticIntentHints derivedRankingHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .maxLimit(100).build();
     }
 
     private BankQueryPlan changePlan() {

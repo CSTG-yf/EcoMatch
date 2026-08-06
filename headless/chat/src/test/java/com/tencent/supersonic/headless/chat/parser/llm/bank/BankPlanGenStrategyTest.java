@@ -432,6 +432,66 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldBuildDeterministicDerivedMetricRankingPlanWithoutCallingTheModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(derivedRankingRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankQueryPlan.PlanAction.EXECUTE, plan.getAction());
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals(List.of("ZB001", "ZB002"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002").denominator("ZB001")
+                .name("存贷比").build()), plan.getDerivedMetrics());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("ORG004"),
+                plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode).toList());
+        assertEquals(LocalDate.of(2026, 3, 31), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2026, 3, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        assertEquals(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
+                .direction(BankQueryPlan.SortDirection.DESC).build()), plan.getOrderBy());
+        assertEquals(null, plan.getLimit());
+        assertEquals(List.of("bank_organization", "ZB001", "ZB002"),
+                plan.getOutput().getColumns());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldKeepTheModelPathWhenDerivedHintsCarryMoreThanOneOrganization() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validDerivedPlanJson().replace(
+                "\"organizations\":[{\"code\":\"ORG004\"}]",
+                "\"organizations\":[{\"code\":\"ORG004\"},{\"code\":\"ORG005\"}]"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = derivedRankingRequest();
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB001", "ZB002")))
+                .requiredOrganizationCodes(Set.of("ORG004", "ORG005"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(List.of("ORG004", "ORG005"), response.getBankQueryPlan().getOrganizations()
+                .stream().map(BankQueryPlan.Organization::getCode).toList());
+        verify(model, org.mockito.Mockito.times(1)).generate(anyString());
+    }
+
+    @Test
     void shouldUseThePreviousNaturalQuarterEndAsBaselineForLastQuarterEndChange() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validChangePlanJson()
@@ -664,6 +724,38 @@ class BankPlanGenStrategyTest {
         // 故意不配置任何 chatApp,证明确定性路径不依赖模型配置。
         request.setChatAppConfig(Map.of());
         return request;
+    }
+
+    private LLMReq derivedRankingRequest() {
+        LLMReq request = new LLMReq();
+        request.setQueryText("2026年3月末各农商行存贷比排名如何？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB001", "ZB002")))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .build());
+        // 故意不配置任何 chatApp,证明确定性路径不依赖模型配置。
+        request.setChatAppConfig(Map.of());
+        return request;
+    }
+
+    private String validDerivedPlanJson() {
+        return """
+                {"version":"1.0","intent":"RANKING",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT"},{"bizName":"ZB002","aggregation":"DEFAULT"}],
+                "dimensions":["bank_organization"],"organizations":[{"code":"ORG004"}],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"DIRECT"},
+                "orderBy":[{"field":"ZB001","direction":"DESC"}],"limit":null,
+                "derivedMetrics":[{"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}],
+                "output":{"columns":["bank_organization","ZB001","ZB002"],"orderSensitive":true}}
+                """;
     }
 
     private String validAnnualDailySummaryPlanJson() {
