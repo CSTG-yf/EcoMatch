@@ -164,6 +164,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
      * returned directly and the model is never invoked.
      */
     private BankQueryPlan buildDeterministicPlan(String queryText, SemanticIntentHints hints) {
+        if (isDaysAboveProvinceAverageCount(queryText, hints)) {
+            return buildDaysAboveProvinceAverageCountPlan(hints);
+        }
         if (isAnnualDailyAverageAggregation(queryText, hints)) {
             return buildAnnualDailyAverageAggregationPlan(hints);
         }
@@ -171,6 +174,73 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             return buildAnnualAverageTopAndBottomRankingPlan(queryText, hints);
         }
         return null;
+    }
+
+    /**
+     * The fully determined single-organization, single-metric, full-year question "how many days
+     * is the metric above the daily province average". The benchmark evidence, the organization,
+     * the metric and the date range all come from the mapper hints, so no model call or candidate
+     * validation is needed: the plan carries the explicit COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+     * calculation contract that the compiler and projector must honor.
+     */
+    private boolean isDaysAboveProvinceAverageCount(String queryText, SemanticIntentHints hints) {
+        if (hints.getExpectedIntent() != BankIntentType.AGGREGATION
+                || hints.getRequiredMetrics().size() != 1
+                || hints.getRequiredOrganizationCodes().size() != 1
+                || hints.getRequiredStartDate() == null || hints.getRequiredEndDate() == null
+                || !hasProvinceAverageBenchmark(hints)) {
+            return false;
+        }
+        LocalDate startDate = hints.getRequiredStartDate();
+        LocalDate endDate = hints.getRequiredEndDate();
+        boolean fullYear = startDate.getDayOfMonth() == 1 && startDate.getMonthValue() == 1
+                && endDate.getDayOfMonth() == 31 && endDate.getMonthValue() == 12
+                && startDate.getYear() == endDate.getYear();
+        if (!fullYear) {
+            return false;
+        }
+        return queryText != null
+                && (queryText.contains("多少天") || queryText.contains("几天")
+                        || queryText.contains("天数"))
+                && (queryText.contains("高于") || queryText.contains("超过")
+                        || queryText.contains("大于"))
+                && (queryText.contains("全省均值") || queryText.contains("全省平均")
+                        || queryText.contains("平均水平"));
+    }
+
+    private boolean hasProvinceAverageBenchmark(SemanticIntentHints hints) {
+        return hints.getRequiredFilters().stream().anyMatch(filter -> "benchmark".equals(
+                filter.field()) && "COMPARE".equals(filter.operator())
+                && "PROVINCE_AVERAGE".equals(filter.value()));
+    }
+
+    private BankQueryPlan buildDaysAboveProvinceAverageCountPlan(SemanticIntentHints hints) {
+        String metric = hints.getRequiredMetrics().iterator().next();
+        String organization = hints.getRequiredOrganizationCodes().iterator().next();
+        return BankQueryPlan.builder()
+                .intent(BankIntentType.AGGREGATION)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of("bank_organization"))
+                .organizations(List.of(BankQueryPlan.Organization.builder().code(organization)
+                        .build()))
+                .filters(hints.getRequiredFilters().stream()
+                        .map(filter -> BankQueryPlan.Filter.builder().field(filter.field())
+                                .operator(filter.operator()).value(filter.value()).build())
+                        .toList())
+                .time(BankQueryPlan.TimeRange.builder().startDate(hints.getRequiredStartDate())
+                        .endDate(hints.getRequiredEndDate())
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE)
+                        .build())
+                .orderBy(List.of())
+                .limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", metric)).orderSensitive(true)
+                        .build())
+                .build();
     }
 
     private boolean isAnnualDailyAverageAggregation(String queryText,
@@ -256,6 +326,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         BankQueryPlan normalized = plan;
         if (queryText != null) {
+            if (isDaysAboveProvinceAverageCount(queryText, hints)) {
+                return buildDaysAboveProvinceAverageCountPlan(hints);
+            }
             if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
                 normalized = normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
             } else if (isAnnualDailyExtremaSummary(queryText, hints)) {

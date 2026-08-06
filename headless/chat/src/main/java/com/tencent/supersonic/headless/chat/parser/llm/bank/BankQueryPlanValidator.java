@@ -262,11 +262,18 @@ public class BankQueryPlanValidator {
         BankQueryPlan.CalculationType expected = switch (hints.getExpectedIntent()) {
             case CHANGE -> BankQueryPlan.CalculationType.CHANGE;
             case RATIO -> BankQueryPlan.CalculationType.RATIO;
+            case AGGREGATION -> calculation.getType() == BankQueryPlan.CalculationType
+                    .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+                            ? BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+                            : BankQueryPlan.CalculationType.DIRECT;
             default -> BankQueryPlan.CalculationType.DIRECT;
         };
         if (calculation.getType() != expected) {
             errors.add(error("CALCULATION_MISMATCH",
                     "calculation type conflicts with financial intent"));
+        }
+        if (calculation.getType() == BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+            validateDaysAboveProvinceAverageCount(plan, errors);
         }
         if (calculation.getType() == BankQueryPlan.CalculationType.RATIO) {
             List<String> metricOrder = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
@@ -278,6 +285,71 @@ public class BankQueryPlanValidator {
                 errors.add(error("RATIO_DENOMINATOR_MISMATCH",
                         "ratio denominator must be the second selected metric"));
             }
+        }
+    }
+
+    /**
+     * Fail-closed gate for the explicit per-day province-average comparison contract. The
+     * calculation is only legal as an AGGREGATION over exactly one metric and one organization,
+     * scoped to a DAY range, grouped on the organization dimension, carrying the PROVINCE_AVERAGE
+     * benchmark, without any absolute metric threshold, ordering, or TopN limit. An ordinary
+     * COUNT or THRESHOLD plan must never be mistaken for this semantics.
+     */
+    private void validateDaysAboveProvinceAverageCount(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        if (plan.getIntent() != BankIntentType.AGGREGATION) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_INTENT_REQUIRED",
+                    "days-above-province-average count requires aggregation intent"));
+        }
+        List<String> planMetrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).collect(Collectors.toList());
+        if (planMetrics.size() != 1) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_SINGLE_METRIC_REQUIRED",
+                    "days-above-province-average count requires exactly one metric"));
+        }
+        List<String> planOrganizations = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toList());
+        if (planOrganizations.size() != 1) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_SINGLE_ORGANIZATION_REQUIRED",
+                    "days-above-province-average count requires exactly one organization"));
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null || time.getGranularity() != BankQueryPlan.TimeGranularity.DAY) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_DAY_GRANULARITY_REQUIRED",
+                    "days-above-province-average count requires DAY time granularity"));
+        }
+        if (time != null && time.getComparison() != null
+                && time.getComparison() != BankQueryPlan.TimeComparison.NONE) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_COMPARISON_REQUIRED",
+                    "days-above-province-average count requires no baseline comparison"));
+        }
+        boolean benchmark = safe(plan.getFilters()).anyMatch(filter -> "benchmark".equals(
+                filter.getField()) && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        if (!benchmark) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_BENCHMARK_REQUIRED",
+                    "days-above-province-average count requires the PROVINCE_AVERAGE benchmark"));
+        }
+        List<String> dimensions = safe(plan.getDimensions()).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toList());
+        if (dimensions.size() != 1 || !ORGANIZATION_DIMENSIONS.contains(dimensions.get(0))) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_ORGANIZATION_DIMENSION_REQUIRED",
+                    "days-above-province-average count requires only the organization dimension"));
+        }
+        boolean absoluteThreshold = safe(plan.getFilters())
+                .anyMatch(filter -> "metric_value".equals(filter.getField()));
+        if (absoluteThreshold) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_METRIC_FILTER_FORBIDDEN",
+                    "days-above-province-average count must not carry an absolute metric threshold"));
+        }
+        if (plan.getLimit() != null) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_LIMIT_REQUIRED",
+                    "days-above-province-average count requires no TopN limit"));
+        }
+        if (safe(plan.getOrderBy()).findAny().isPresent()) {
+            errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_ORDER_REQUIRED",
+                    "days-above-province-average count requires no ordering"));
         }
     }
 

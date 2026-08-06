@@ -399,6 +399,39 @@ class BankResultProjectorTest {
                 projection.getRows());
     }
 
+    @Test
+    void shouldProjectDaysAboveProvinceAverageToTheStableAuditableColumns() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG004", "D"))
+                .selectedOrganizationCodes(List.of("ORG004"))
+                .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("days_above_province_average").metricCode("ZB001")
+                        .build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG004", "days_above_province_average", 132,
+                        "observation_count", 250,
+                        "above_ratio_percent", new BigDecimal("52.8"))));
+
+        assertEquals(List.of("org_code", "org_name", "days_above_province_average",
+                "observation_count", "above_ratio_percent"), projection.getColumns());
+        assertEquals(
+                List.of(row("org_code", "ORG004", "org_name", "D",
+                        "days_above_province_average", 132, "observation_count", 250,
+                        "above_ratio_percent", new BigDecimal("52.8"))),
+                projection.getRows());
+        // 数值缺失或非数值必须 fail closed,而不是静默丢弃。
+        assertFalse(projector.project(contract,
+                List.of(row("bank_organization", "ORG004", "days_above_province_average", "many",
+                        "observation_count", 250, "above_ratio_percent", 1))).isApplied());
+        assertFalse(projector.project(contract,
+                List.of(row("bank_organization", "ORG004", "days_above_province_average", 1,
+                        "above_ratio_percent", 1))).isApplied());
+    }
+
     private static Map<String, Object> row(Object... values) {
         Map<String, Object> row = new LinkedHashMap<>();
         for (int index = 0; index < values.length; index += 2) {

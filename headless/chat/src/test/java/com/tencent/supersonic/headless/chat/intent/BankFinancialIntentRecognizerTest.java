@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankFinancialIntentRecognizerTest {
@@ -198,6 +199,55 @@ class BankFinancialIntentRecognizerTest {
                 .anyMatch(filter -> "metric_value".equals(filter.getField())
                         && "GTE".equals(filter.getOperator())
                         && "10.5%".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldRecognizeDaysAboveProvinceAverageAsAggregationWithBenchmark() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额有多少天高于全省均值？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.AGGREGATION, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+        assertEquals("ORG010", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 1, 1), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+        assertTrue(result.getFilters().stream().anyMatch(filter -> "benchmark".equals(
+                filter.getField()) && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue())));
+        assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
+    void shouldKeepRankingStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年全年各项存款余额有多少天在省均值以上，排名前3的农商行？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+    }
+
+    @Test
+    void shouldKeepTrendStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年各项存款余额有多少天高于全省均值的逐月趋势？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+    }
+
+    @Test
+    void shouldKeepChangeStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额有多少天高于全省均值，较上季变化了多少？",
+                LocalDate.of(2026, 7, 22));
+
+        assertNotEquals(BankIntentType.AGGREGATION, result.getIntent());
+    }
+
+    @Test
+    void shouldNotRecognizeDaysAboveProvinceAverageWithoutADayCountExpression() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额高于全省均值吗？", LocalDate.of(2026, 7, 22));
+
+        assertNotEquals(BankIntentType.AGGREGATION, result.getIntent());
     }
 
     private Set<String> metricCodes(BankIntentResult result) {

@@ -96,8 +96,24 @@ public class BankQueryPlanCompiler {
                         dimensions.stream().map(ResolvedDimension::identifier).toList(),
                         dateField(index.partitionTime()), executionDimensionFilters, metricFilters);
 
-        if (plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT
+        boolean directCalculation = plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT
+                || plan.getCalculation().getType() == BankQueryPlan.CalculationType
+                        .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
+        if (directCalculation
                 && plan.getTime().getComparison() == BankQueryPlan.TimeComparison.NONE) {
+            if (plan.getCalculation().getType() == BankQueryPlan.CalculationType
+                    .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+                if (plan.getIntent() == BankIntentType.AGGREGATION) {
+                    return CompiledQuery.s2sql(
+                            templateFactory.compileDaysAboveProvinceAverage(templateContext),
+                            List.of(ORGANIZATION_DIMENSION, "days_above_province_average",
+                                    "observation_count", "above_ratio_percent"),
+                            daysAboveProvinceAverageResultContract(plan, metrics, index));
+                }
+                throw new BankPlanCompilationException(
+                        BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                        "days-above-province-average count requires an aggregation intent");
+            }
             if (hasProvinceAverageBenchmark(plan)) {
                 if (plan.getIntent() == BankIntentType.THRESHOLD) {
                     return CompiledQuery.s2sql(
@@ -172,6 +188,9 @@ public class BankQueryPlanCompiler {
             case DIRECT -> throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "time comparison requires a supported calculation type");
+            case COUNT_DAYS_ABOVE_PROVINCE_AVERAGE -> throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "days-above-province-average count requires a NONE time comparison");
         };
     }
 
@@ -286,6 +305,26 @@ public class BankQueryPlanCompiler {
             SchemaIndex index) {
         return provinceAverageContract(plan, index,
                 BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD, List.of());
+    }
+
+    /**
+     * The auditable projection contract for the per-day province-average comparison. The fixed
+     * output column order org_code, org_name, days_above_province_average, observation_count,
+     * above_ratio_percent is shared verbatim by the projector and any downstream golden-label
+     * generator.
+     */
+    private BankResultProjector.Contract daysAboveProvinceAverageResultContract(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, SchemaIndex index) {
+        if (metrics.size() != 1) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "days-above-province-average count requires exactly one metric");
+        }
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
+                List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("days_above_province_average")
+                        .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
     }
 
     private BankResultProjector.Contract absoluteThresholdResultContract(BankQueryPlan plan,

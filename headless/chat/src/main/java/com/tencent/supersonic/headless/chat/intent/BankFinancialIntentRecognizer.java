@@ -222,6 +222,10 @@ public class BankFinancialIntentRecognizer {
         if (annualDailyExtremaSummary) {
             score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构全年日均及极值统计表达");
         }
+        if (isDailyProvinceAverageCount(text, organizationCount)) {
+            score(scores, BankIntentType.AGGREGATION, 0.995D,
+                    "命中单机构逐日高于全省均值的天数统计表达");
+        }
         if ((organizationCount >= 2 && containsAny(text, "谁", "更", "比", "差"))
                 || containsAny(text, "两家相比", "机构间比较")) {
             score(scores, BankIntentType.COMPARISON, 0.97D, "命中多机构横向比较表达");
@@ -375,6 +379,28 @@ public class BankFinancialIntentRecognizer {
     private boolean isAnnualDailyExtremaSummary(String text) {
         return text.contains("全年") && containsAny(text, "日均", "均值", "平均") && text.contains("最高日")
                 && text.contains("最低日");
+    }
+
+    /**
+     * Recognizes the fully determined per-day province-average comparison: one organization asks
+     * how many days in the range its metric stayed above the daily province average. The score is
+     * only granted when the question combines a province-average benchmark, an explicit day-count
+     * expression, and a comparison word; stronger ranking, trend, or change semantics are never
+     * overridden by this aggregation.
+     */
+    private boolean isDailyProvinceAverageCount(String text, int organizationCount) {
+        if (organizationCount != 1) {
+            return false;
+        }
+        boolean benchmark = containsAny(text, "全省均值", "全省平均", "平均水平");
+        boolean dayCount = containsAny(text, "多少天", "几天", "天数", "多少个交易日");
+        boolean comparison = containsAny(text, "高于", "超过", "大于");
+        if (!benchmark || !dayCount || !comparison) {
+            return false;
+        }
+        return !containsAny(text, "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续",
+                "全年变化", "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动",
+                "变化");
     }
 
     private boolean isTrendExtremaSummary(String text) {

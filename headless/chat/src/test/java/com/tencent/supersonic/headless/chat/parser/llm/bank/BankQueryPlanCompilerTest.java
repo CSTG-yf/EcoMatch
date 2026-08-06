@@ -589,6 +589,107 @@ class BankQueryPlanCompilerTest {
                 compiled.getResultContract().getType());
     }
 
+    @Test
+    void shouldCompileDaysAboveProvinceAverageToPerDayComparisonSql() {
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(daysAboveProvinceAveragePlan(), daysAboveProvinceAverageHints(),
+                        schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("WITH bank_daily_values AS"));
+        assertTrue(sql.contains(
+                "SELECT bank_organization, bank_data_date AS aggregation_date, SUM(ZB001) AS metric_value"));
+        assertTrue(sql.contains("GROUP BY bank_organization, aggregation_date"));
+        assertTrue(sql.contains("SELECT aggregation_date, AVG(metric_value) AS daily_average"));
+        assertTrue(sql.contains("GROUP BY aggregation_date"));
+        assertTrue(sql.contains(
+                "SUM(CASE WHEN metric_value > daily_average THEN 1 ELSE 0 END)\n         AS days_above_province_average"));
+        assertTrue(sql.contains("COUNT(metric_value) AS observation_count"));
+        assertTrue(sql.contains("AS above_ratio_percent"));
+        // 目标机构过滤必须发生在每日省均之后,而不是在每日聚合之前。
+        assertTrue(sql.indexOf("WHERE bank_organization = 'ORG004'") > sql
+                .indexOf("GROUP BY aggregation_date"));
+        // 不得先按机构跨期 SUM 后比较:机构过滤绝不能出现在逐日聚合 CTE 之前。
+        assertFalse(sql.contains("FROM 银行指标数据集\n  WHERE bank_organization = 'ORG004'"));
+        assertEquals(List.of("bank_organization", "days_above_province_average",
+                "observation_count", "above_ratio_percent"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
+                compiled.getResultContract().getType());
+        assertEquals("ZB001",
+                compiled.getResultContract().getMetrics().get(0).getMetricCode());
+        assertEquals(List.of("ORG004"),
+                compiled.getResultContract().getSelectedOrganizationCodes());
+    }
+
+    @Test
+    void shouldRejectDaysAboveProvinceAverageWithoutAnOrganization() {
+        BankQueryPlan plan = daysAboveProvinceAveragePlan();
+        plan.setOrganizations(List.of());
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage()
+                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_SINGLE_ORGANIZATION_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDaysAboveProvinceAverageWithoutTheProvinceAverageBenchmark() {
+        BankQueryPlan plan = daysAboveProvinceAveragePlan();
+        plan.setFilters(List.of());
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage()
+                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_BENCHMARK_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDaysAboveProvinceAverageWithTheWrongIntent() {
+        BankQueryPlan plan = daysAboveProvinceAveragePlan();
+        plan.setIntent(BankIntentType.THRESHOLD);
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage()
+                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_INTENT_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDaysAboveProvinceAverageWithTheWrongDimension() {
+        BankQueryPlan plan = daysAboveProvinceAveragePlan();
+        plan.setDimensions(List.of("bank_data_date"));
+        plan.getOutput().setColumns(List.of("bank_data_date", "ZB001"));
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage()
+                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_ORGANIZATION_DIMENSION_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDaysAboveProvinceAverageCarryingAnAbsoluteMetricThreshold() {
+        BankQueryPlan plan = daysAboveProvinceAveragePlan();
+        plan.setFilters(List.of(provinceAverageBenchmark(),
+                BankQueryPlan.Filter.builder().field("metric_value").operator("GT").value("100")
+                        .build()));
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage()
+                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_METRIC_FILTER_FORBIDDEN"));
+    }
+
     private BankQueryPlan rankingPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
                 .intent(BankIntentType.RANKING).metrics(List.of(metric("ZB001")))
@@ -746,6 +847,41 @@ class BankQueryPlanCompilerTest {
     private BankQueryPlan.Filter provinceAverageBenchmark() {
         return BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
                 .value("PROVINCE_AVERAGE").build();
+    }
+
+    private BankQueryPlan daysAboveProvinceAveragePlan() {
+        return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.AGGREGATION)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of("bank_organization"))
+                .organizations(List.of(organization("ORG004")))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                        .endDate(LocalDate.of(2025, 12, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(List.of(provinceAverageBenchmark()))
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE)
+                        .build())
+                .orderBy(List.of())
+                .limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", "ZB001")).orderSensitive(true)
+                        .build())
+                .build();
+    }
+
+    private SemanticIntentHints daysAboveProvinceAverageHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.AGGREGATION)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE")))
+                .maxLimit(100).build();
     }
 
     private LLMReq.LLMSchema schema() {

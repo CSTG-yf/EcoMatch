@@ -41,6 +41,8 @@ public class BankResultProjector {
                     sourceRows);
             case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
             case AGGREGATION_SUMMARY -> projectAggregationSummary(contract, sourceRows);
+            case COUNT_DAYS_ABOVE_PROVINCE_AVERAGE -> projectDaysAboveProvinceAverage(contract,
+                    sourceRows);
             case TREND -> projectTrend(contract, sourceRows);
             case LONG_FORM -> projectLongForm(contract, sourceRows);
             case RANKED_LONG_FORM -> projectRankedLongForm(contract, sourceRows);
@@ -404,6 +406,38 @@ public class BankResultProjector {
         return Projection.applied(columns(contract), rows);
     }
 
+    /**
+     * Projects the per-day province-average comparison result into the fixed auditable columns
+     * org_code, org_name, days_above_province_average, observation_count, above_ratio_percent.
+     * Every value must be numeric; a missing or non-numeric cell fails closed instead of being
+     * silently dropped.
+     */
+    private Projection projectDaysAboveProvinceAverage(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup days = value(sourceRow, "days_above_province_average");
+            ValueLookup count = value(sourceRow, "observation_count");
+            ValueLookup ratio = value(sourceRow, "above_ratio_percent");
+            if (StringUtils.isBlank(organizationCode) || !days.found() || !count.found()
+                    || !ratio.found() || decimal(days.value()) == null
+                    || decimal(count.value()) == null || decimal(ratio.value()) == null) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("days_above_province_average", days.value());
+            row.put("observation_count", count.value());
+            row.put("above_ratio_percent", ratio.value());
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
     private Projection projectAbsoluteThreshold(Contract contract,
             List<Map<String, Object>> sourceRows) {
         if (contract.getMetrics().size() != 1) {
@@ -549,6 +583,10 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_code", "metric_value",
                     "meets_condition");
         }
+        if (contract.getType() == ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+            return List.of("org_code", "org_name", "days_above_province_average",
+                    "observation_count", "above_ratio_percent");
+        }
         if (contract.getType() == ProjectionType.AGGREGATION_SUMMARY) {
             return List.of("org_code", "org_name", "metric_code", "aggregate_value", "min_value",
                     "max_value", "observation_count");
@@ -590,6 +628,7 @@ public class BankResultProjector {
         PROVINCIAL_AVERAGE_THRESHOLD,
         ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,
+        COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
         TREND,
         MOM_YOY_CHANGE,
         MULTI_METRIC_CHANGE

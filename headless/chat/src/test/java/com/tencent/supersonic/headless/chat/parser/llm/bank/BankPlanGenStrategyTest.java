@@ -404,6 +404,34 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldBuildDeterministicDaysAboveProvinceAveragePlanWithoutCallingTheModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(daysAboveProvinceAverageRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.AGGREGATION, plan.getIntent());
+        assertEquals(BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
+                plan.getCalculation().getType());
+        assertEquals(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()), plan.getMetrics());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("ORG010"), plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode).toList());
+        assertEquals(List.of(BankQueryPlan.Filter.builder().field("benchmark")
+                .operator("COMPARE").value("PROVINCE_AVERAGE").build()), plan.getFilters());
+        assertEquals(LocalDate.of(2025, 1, 1), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(List.of("bank_organization", "ZB001"), plan.getOutput().getColumns());
+        assertEquals(List.of(), plan.getOrderBy());
+        assertEquals(null, plan.getLimit());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
     void shouldUseThePreviousNaturalQuarterEndAsBaselineForLastQuarterEndChange() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validChangePlanJson()
@@ -617,6 +645,24 @@ class BankPlanGenStrategyTest {
                 .requiredStartDate(LocalDate.of(2025, 1, 1))
                 .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
         request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private LLMReq daysAboveProvinceAverageRequest() {
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省J市农商行2025年全年各项存款余额有多少天高于全省均值？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG010"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE")))
+                .build());
+        // 故意不配置任何 chatApp,证明确定性路径不依赖模型配置。
+        request.setChatAppConfig(Map.of());
         return request;
     }
 

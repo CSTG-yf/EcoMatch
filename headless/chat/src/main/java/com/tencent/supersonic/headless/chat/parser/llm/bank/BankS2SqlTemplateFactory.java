@@ -339,6 +339,55 @@ final class BankS2SqlTemplateFactory {
         return compileDailyAggregationSummary(context);
     }
 
+    /**
+     * Per-day province-average comparison: keeps every organization's daily value inside the
+     * range, computes the daily province average per bank_data_date, then compares only the
+     * selected organization against that daily average with a strict greater-than. The selected
+     * organization is filtered after the daily averages exist and never summed across the period
+     * before the comparison.
+     */
+    String compileDaysAboveProvinceAverage(TemplateContext context) {
+        requireSingleMetricWithoutMetricFilters(context, "days-above-province-average count");
+        Filter organizationFilter = organizationFilter(context);
+        if (organizationFilter == null) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "days-above-province-average count requires exactly one selected organization");
+        }
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String metric = context.metrics().get(0).identifier();
+        return """
+                WITH bank_daily_values AS (
+                  SELECT bank_organization, %s AS aggregation_date, SUM(%s) AS metric_value
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization, aggregation_date
+                ), province_daily_average AS (
+                  SELECT aggregation_date, AVG(metric_value) AS daily_average
+                  FROM bank_daily_values
+                  GROUP BY aggregation_date
+                ), bank_target_days AS (
+                  SELECT bank_daily_values.bank_organization, bank_daily_values.metric_value,
+                         province_daily_average.daily_average
+                  FROM bank_daily_values INNER JOIN province_daily_average
+                    ON bank_daily_values.aggregation_date = province_daily_average.aggregation_date
+                  WHERE %s
+                )
+                SELECT bank_organization,
+                       SUM(CASE WHEN metric_value > daily_average THEN 1 ELSE 0 END)
+                         AS days_above_province_average,
+                       COUNT(metric_value) AS observation_count,
+                       CASE WHEN COUNT(metric_value) = 0 THEN NULL
+                            ELSE SUM(CASE WHEN metric_value > daily_average THEN 1 ELSE 0 END)
+                                 * 100.0 / COUNT(metric_value) END AS above_ratio_percent
+                FROM bank_target_days
+                GROUP BY bank_organization
+                ORDER BY bank_organization ASC
+                """.formatted(context.dateField(), metric, context.dataSetName(), where,
+                filter(organizationFilter)).trim();
+    }
+
     String compileDailyAggregationSummary(TemplateContext context) {
         if (context.metrics().size() == 1) {
             return compileSingleMetricDailyAggregationSummary(context);
