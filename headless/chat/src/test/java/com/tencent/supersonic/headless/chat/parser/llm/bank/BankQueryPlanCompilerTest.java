@@ -599,7 +599,7 @@ class BankQueryPlanCompilerTest {
         String sql = compiled.getS2sql();
         assertTrue(sql.contains("WITH bank_daily_values AS"));
         assertTrue(sql.contains(
-                "SELECT bank_organization, bank_data_date AS aggregation_date, SUM(ZB001) AS metric_value"));
+                "SELECT bank_organization, 数据日期 AS aggregation_date, SUM(ZB001) AS metric_value"));
         assertTrue(sql.contains("GROUP BY bank_organization, aggregation_date"));
         assertTrue(sql.contains("SELECT aggregation_date, AVG(metric_value) AS daily_average"));
         assertTrue(sql.contains("GROUP BY aggregation_date"));
