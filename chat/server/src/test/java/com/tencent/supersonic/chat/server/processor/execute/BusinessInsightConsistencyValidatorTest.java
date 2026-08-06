@@ -6,6 +6,7 @@ import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -171,6 +172,104 @@ class BusinessInsightConsistencyValidatorTest {
         result.getBusinessExplanation().setTimeRange("2025-01至2026-02");
 
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
+    void acceptsCanonicalCountDaysResultWithoutTreatingNumericMetricAsDate() {
+        QueryResult result = canonicalCountDaysResult();
+        result.getBusinessExplanation().setTimeRange(null);
+        result.getBusinessExplanation().setSummary("查询返回1条记录。"
+                + "days_above_province_average范围为17至17；observation_count范围为30至30；"
+                + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertDoesNotThrow(() -> validator.validate(result));
+    }
+
+    @Test
+    void rejectsCanonicalCountDaysResultWhoseTimeRangeTreatsNumericMetricAsDate() {
+        QueryResult result = canonicalCountDaysResult();
+        result.getBusinessExplanation().setTimeRange("17");
+        result.getBusinessExplanation().setSummary("查询返回1条记录，时间范围为17。"
+                + "days_above_province_average范围为17至17；observation_count范围为30至30；"
+                + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
+    void keepsNumericDateShowTypeColumnEligibleForTimeRangeValidation() {
+        QueryResult result = validResult();
+        result.getQueryColumns().set(0, column("data_date", "DATE"));
+        result.setQueryResults(List.of(Map.of("data_date", 202601, "balance", 100),
+                Map.of("data_date", 202602, "balance", 120)));
+        result.getRecommendedChart().setChartType("TABLE");
+        result.getRecommendedChart().setDimensionFields(List.of());
+        result.getBusinessExplanation().setTimeRange("202601至202602");
+        result.getBusinessExplanation().setSummary(
+                "查询返回2条记录，时间范围为202601至202602。balance范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertDoesNotThrow(() -> validator.validate(result));
+
+        result.getBusinessExplanation().setTimeRange(null);
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    @Test
+    void keepsNameBasedDateInferenceForNonNumericColumns() {
+        QueryResult result = validResult();
+        result.getQueryColumns().set(0, column("month", "CATEGORY"));
+        result.getBusinessExplanation().setTimeRange("2026-01至2026-02");
+        result.getBusinessExplanation().setSummary(
+                "查询返回2条记录，时间范围为2026-01至2026-02。balance范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+
+        assertDoesNotThrow(() -> validator.validate(result));
+
+        result.getBusinessExplanation().setTimeRange(null);
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
+        result.setTextSummary(result.getBusinessExplanation().getSummary());
+        assertThrows(IllegalStateException.class, () -> validator.validate(result));
+    }
+
+    private QueryResult canonicalCountDaysResult() {
+        QueryColumn orgCode = bankColumn("org_code");
+        QueryColumn orgName = bankColumn("org_name");
+        QueryColumn days = bankColumn("days_above_province_average");
+        QueryColumn count = bankColumn("observation_count");
+        QueryColumn ratio = bankColumn("above_ratio_percent");
+        ChartRecommendation chart = ChartRecommendation.builder().chartType("KPI_CARD")
+                .confidence(0.98).reason("单行数值结果适合使用指标卡").dimensionFields(List.of())
+                .metricFields(List.of("days_above_province_average", "observation_count",
+                        "above_ratio_percent"))
+                .build();
+        String summary = "查询返回1条记录。days_above_province_average范围为17至17；"
+                + "observation_count范围为30至30；above_ratio_percent范围为56.67至56.67。提示：范围限制。";
+        BusinessExplanation explanation = BusinessExplanation.builder().summary(summary)
+                .confidence(0.9).timeRange(null).evidence(List.of(
+                        "days_above_province_average范围为17至17", "observation_count范围为30至30",
+                        "above_ratio_percent范围为56.67至56.67"))
+                .warnings(List.of("范围限制")).build();
+        QueryResult result = new QueryResult();
+        result.setQueryColumns(new java.util.ArrayList<>(List.of(orgCode, orgName, days, count, ratio)));
+        result.setQueryResults(List.of(Map.of("org_code", "ORG008", "org_name", "江苏省H市农商行",
+                "days_above_province_average", 17, "observation_count", 30, "above_ratio_percent",
+                new BigDecimal("56.67"))));
+        result.setRecommendedChart(chart);
+        result.setCandidateCharts(List.of());
+        result.setBusinessExplanation(explanation);
+        result.setTextSummary(summary);
+        return result;
+    }
+
+    private QueryColumn bankColumn(String name) {
+        return new QueryColumn(name, "STRING", name);
     }
 
     private QueryResult validResult() {
