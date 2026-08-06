@@ -53,7 +53,10 @@ public class BankQueryPlan {
                     "direction":{"enum":["ASC","DESC"]}}}},"limit":{"type":"integer","minimum":1},
                     "output":{"type":"object","additionalProperties":false,"required":["columns","orderSensitive"],
                     "properties":{"columns":{"type":"array","items":{"type":"string"}},
-                    "orderSensitive":{"type":"boolean"}}}}}
+                    "orderSensitive":{"type":"boolean"}}},"derivedMetrics":{"type":"array",
+                    "items":{"type":"object","additionalProperties":false,"required":["metricCode",
+                    "numerator","denominator","name"],"properties":{"metricCode":{"type":"string"},
+                    "numerator":{"type":"string"},"denominator":{"type":"string"},"name":{"type":"string"}}}}}
                     """;
 
     @Builder.Default
@@ -62,6 +65,8 @@ public class BankQueryPlan {
     private BankIntentType intent;
     @Builder.Default
     private List<Metric> metrics = new ArrayList<>();
+    @Builder.Default
+    private List<DerivedMetric> derivedMetrics = new ArrayList<>();
     @Builder.Default
     private List<String> dimensions = new ArrayList<>();
     @Builder.Default
@@ -107,6 +112,17 @@ public class BankQueryPlan {
         private String bizName;
         private Aggregation aggregation;
         private String alias;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DerivedMetric {
+        private String metricCode;
+        private String numerator;
+        private String denominator;
+        private String name;
     }
 
     @Data

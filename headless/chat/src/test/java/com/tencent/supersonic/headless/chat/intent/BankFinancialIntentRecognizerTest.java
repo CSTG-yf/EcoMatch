@@ -250,6 +250,23 @@ class BankFinancialIntentRecognizerTest {
         assertNotEquals(BankIntentType.AGGREGATION, result.getIntent());
     }
 
+    @Test
+    void shouldRecognizeDerivedLoanToDepositRatioWithRankingSemantics() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年一季度末全省哪家农商行的存贷比最高？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(1, result.getDerivedMetrics().size());
+        BankIntentResult.DerivedMetricCandidate derived = result.getDerivedMetrics().get(0);
+        assertEquals("DERIVED_ZB002_DIV_ZB001", derived.getCode());
+        assertEquals("存贷比", derived.getName());
+        assertEquals("ZB002", derived.getNumerator());
+        assertEquals("ZB001", derived.getDenominator());
+        assertTrue(result.getMetrics().stream().noneMatch(
+                metric -> metric.getCode().startsWith("DERIVED_")));
+        assertEquals(Set.of("ZB002", "ZB001"), metricCodes(result));
+    }
+
     private Set<String> metricCodes(BankIntentResult result) {
         return result.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
                 .collect(Collectors.toSet());

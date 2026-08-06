@@ -8,8 +8,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -24,6 +26,10 @@ public class BankQueryPlanValidator {
     private static final Pattern FORBIDDEN_SQL = Pattern
             .compile("(?i)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|create|merge|"
                     + "truncate|join|union|from|where|with)\\b|[()])");
+    private static final Pattern DERIVED_METRIC_CODE = Pattern
+            .compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BASE_METRIC_CODE =
+            Pattern.compile("ZB\\d{3}", Pattern.CASE_INSENSITIVE);
     private static final Set<String> FILTER_OPERATORS =
             Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "CONTAINS", "COMPARE");
     private static final Set<String> LOGICAL_FILTER_FIELDS =
@@ -48,6 +54,7 @@ public class BankQueryPlanValidator {
         validateTime(plan, hints, errors);
         validateFilters(plan, hints, errors);
         validateCalculation(plan, hints, errors);
+        validateDerivedMetrics(plan, hints, errors);
         validateOrderingAndLimit(plan, hints, errors);
         validateOutput(plan, hints, errors);
         return new ValidationResult(errors);
@@ -71,6 +78,9 @@ public class BankQueryPlanValidator {
     private Stream<String> strings(BankQueryPlan plan) {
         Stream<String> metrics = safe(plan.getMetrics())
                 .flatMap(metric -> Stream.of(metric.getBizName(), metric.getAlias()));
+        Stream<String> derivedMetrics = safe(plan.getDerivedMetrics()).flatMap(
+                derived -> Stream.of(derived.getMetricCode(), derived.getNumerator(),
+                        derived.getDenominator(), derived.getName()));
         Stream<String> organizations = safe(plan.getOrganizations()).flatMap(
                 organization -> Stream.of(organization.getCode(), organization.getBizName()));
         Stream<String> filters = safe(plan.getFilters()).flatMap(filter -> Stream.concat(
@@ -80,7 +90,8 @@ public class BankQueryPlanValidator {
         Stream<String> output =
                 plan.getOutput() == null ? Stream.empty() : safe(plan.getOutput().getColumns());
         return Stream
-                .of(metrics, safe(plan.getDimensions()), organizations, filters, orderBy, output)
+                .of(metrics, derivedMetrics, safe(plan.getDimensions()), organizations, filters,
+                        orderBy, output)
                 .flatMap(stream -> stream);
     }
 
@@ -286,6 +297,124 @@ public class BankQueryPlanValidator {
                         "ratio denominator must be the second selected metric"));
             }
         }
+    }
+
+    /**
+     * Fail-closed gate for the runtime derived metric contract (e.g. 存贷比 =
+     * DERIVED_ZB002_DIV_ZB001). A derived metric is only accepted when the code equals
+     * DERIVED_&lt;numerator&gt;_DIV_&lt;denominator&gt;, the operands are distinct legal ZB###
+     * base metrics also selected as direct metrics, the plan is RANKING with a DIRECT
+     * calculation, and the plan derived metrics match the mapper evidence exactly in content and
+     * order. Missing, duplicate, extra, reordered or illegal entries are all rejected.
+     */
+    private void validateDerivedMetrics(BankQueryPlan plan, SemanticIntentHints hints,
+            List<ValidationError> errors) {
+        List<BankQueryPlan.DerivedMetric> derived =
+                safe(plan.getDerivedMetrics()).collect(Collectors.toList());
+        List<SemanticIntentHints.DerivedMetricSpec> required = hints.getRequiredDerivedMetrics();
+        if (derived.isEmpty()) {
+            if (!required.isEmpty()) {
+                errors.add(error("DERIVED_METRIC_MISSING",
+                        "plan omitted a derived metric recognized from the question"));
+            }
+            return;
+        }
+        if (required.isEmpty()) {
+            errors.add(error("DERIVED_METRIC_UNEXPECTED",
+                    "plan contains a derived metric outside mapper evidence"));
+            return;
+        }
+        if (plan.getIntent() != BankIntentType.RANKING) {
+            errors.add(error("DERIVED_METRIC_INTENT_REQUIRED",
+                    "derived metrics currently require ranking intent"));
+        }
+        if (plan.getCalculation() == null
+                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT) {
+            errors.add(error("DERIVED_METRIC_CALCULATION_REQUIRED",
+                    "derived metrics currently require a DIRECT calculation"));
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        for (BankQueryPlan.DerivedMetric item : derived) {
+            validateDerivedMetricItem(item, seen, errors);
+        }
+        if (derived.size() != required.size()) {
+            errors.add(error("DERIVED_METRIC_MISMATCH",
+                    "plan derived metrics must match the recognized derived metric specifications"));
+        } else {
+            for (int index = 0; index < derived.size(); index++) {
+                if (!matches(required.get(index), derived.get(index))) {
+                    errors.add(error("DERIVED_METRIC_MISMATCH",
+                            "plan derived metrics must match the recognized derived metric "
+                                    + "specifications exactly, in order"));
+                    break;
+                }
+            }
+        }
+        List<String> planMetrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).collect(Collectors.toList());
+        for (BankQueryPlan.DerivedMetric item : derived) {
+            if (!containsIgnoreCase(planMetrics, item.getNumerator())) {
+                errors.add(error("DERIVED_METRIC_OPERAND_REQUIRED",
+                        "derived metric numerator must also be selected as a direct metric: "
+                                + item.getNumerator()));
+            }
+            if (!containsIgnoreCase(planMetrics, item.getDenominator())) {
+                errors.add(error("DERIVED_METRIC_OPERAND_REQUIRED",
+                        "derived metric denominator must also be selected as a direct metric: "
+                                + item.getDenominator()));
+            }
+        }
+    }
+
+    private void validateDerivedMetricItem(BankQueryPlan.DerivedMetric item, Set<String> seen,
+            List<ValidationError> errors) {
+        String code = item.getMetricCode();
+        String numerator = item.getNumerator();
+        String denominator = item.getDenominator();
+        if (StringUtils.isBlank(code) || StringUtils.isBlank(numerator)
+                || StringUtils.isBlank(denominator) || StringUtils.isBlank(item.getName())) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric requires metricCode, numerator, denominator and name"));
+            return;
+        }
+        if (!seen.add(code.toUpperCase(Locale.ROOT))) {
+            errors.add(error("DERIVED_METRIC_DUPLICATE",
+                    "derived metrics must not repeat a metric code: " + code));
+        }
+        Matcher matcher = DERIVED_METRIC_CODE.matcher(code);
+        if (!matcher.matches()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric code must be DERIVED_<numerator>_DIV_<denominator>: " + code));
+        } else if (!matcher.group(1).equalsIgnoreCase(numerator)
+                || !matcher.group(2).equalsIgnoreCase(denominator)) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric code operands must match the declared numerator and "
+                            + "denominator: " + code));
+        }
+        if (numerator.equalsIgnoreCase(denominator)) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric numerator and denominator must differ: " + code));
+        }
+        if (!BASE_METRIC_CODE.matcher(numerator).matches()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric numerator must be a legal ZB### base metric: " + numerator));
+        }
+        if (!BASE_METRIC_CODE.matcher(denominator).matches()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric denominator must be a legal ZB### base metric: " + denominator));
+        }
+    }
+
+    private boolean matches(SemanticIntentHints.DerivedMetricSpec spec,
+            BankQueryPlan.DerivedMetric item) {
+        return spec.code().equalsIgnoreCase(item.getMetricCode())
+                && spec.numerator().equalsIgnoreCase(item.getNumerator())
+                && spec.denominator().equalsIgnoreCase(item.getDenominator())
+                && Objects.equals(spec.name(), item.getName());
+    }
+
+    private boolean containsIgnoreCase(List<String> values, String target) {
+        return values.stream().anyMatch(value -> value != null && value.equalsIgnoreCase(target));
     }
 
     /**

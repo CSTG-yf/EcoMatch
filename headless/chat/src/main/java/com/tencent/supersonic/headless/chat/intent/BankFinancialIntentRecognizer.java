@@ -1,8 +1,10 @@
 package com.tencent.supersonic.headless.chat.intent;
 
+import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.DerivedMetricDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.MetricDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.OrganizationDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.Clarification;
+import com.tencent.supersonic.headless.chat.intent.BankIntentResult.DerivedMetricCandidate;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.FilterSlot;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.IntentCandidate;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.MetricCandidate;
@@ -60,6 +62,7 @@ public class BankFinancialIntentRecognizer {
         result.setOriginalText(original);
         result.setNormalizedText(normalized);
         result.setMetrics(extractMetrics(original));
+        result.setDerivedMetrics(extractDerivedMetrics(original));
         result.setOrganizations(extractOrganizations(original));
         result.setTime(extractTime(normalized, effectiveReference));
         result.setFilters(extractFilters(normalized));
@@ -169,6 +172,28 @@ public class BankFinancialIntentRecognizer {
         MetricDefinition metric = BankFinancialLexicon.metrics().get(code);
         matches.putIfAbsent(code, MetricCandidate.builder().code(code).name(metric.getName())
                 .matchedText(metric.getName()).confidence(0.94D).reason(reason).build());
+    }
+
+    /**
+     * Extracts derived metric candidates from the lexicon. A derived metric is a runtime-defined
+     * ratio contract (e.g. 存贷比 = ZB002 / ZB001) and is never exposed as a schema base metric:
+     * the base operands stay in {@link BankIntentResult#getMetrics()} while the derived
+     * specification lives in its own candidate list.
+     */
+    private List<DerivedMetricCandidate> extractDerivedMetrics(String text) {
+        List<DerivedMetricCandidate> result = new ArrayList<>();
+        for (DerivedMetricDefinition derived : BankFinancialLexicon.derivedMetrics().values()) {
+            String matched = derived.getAliases().stream().filter(text::contains)
+                    .max(Comparator.comparingInt(String::length)).orElse(null);
+            if (matched != null) {
+                result.add(DerivedMetricCandidate.builder().code(derived.getCode())
+                        .name(derived.getName()).numerator(derived.getNumerator())
+                        .denominator(derived.getDenominator()).matchedText(matched)
+                        .confidence(matched.equals(derived.getName()) ? 1D : 0.96D)
+                        .reason("银行派生指标名称匹配").build());
+            }
+        }
+        return result;
     }
 
     private boolean isComprehensivePerformanceRanking(String text) {

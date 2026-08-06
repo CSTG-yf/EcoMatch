@@ -13,6 +13,7 @@ import java.util.Map;
 public final class BankFinancialLexicon {
 
     private static final Map<String, MetricDefinition> METRICS = new LinkedHashMap<>();
+    private static final Map<String, DerivedMetricDefinition> DERIVED_METRICS = new LinkedHashMap<>();
     private static final Map<String, OrganizationDefinition> ORGANIZATIONS = new LinkedHashMap<>();
     private static final Map<String, String> NORMALIZATIONS = new LinkedHashMap<>();
 
@@ -38,6 +39,7 @@ public final class BankFinancialLexicon {
         metric("ZB019", "网点数量", "网点数", "营业网点");
         metric("ZB020", "个人客户数", "个人客户", "零售客户数", "零售客户");
         metric("ZB021", "对公客户数", "对公客户", "公司客户数", "企业客户数");
+        derivedMetric("DERIVED_ZB002_DIV_ZB001", "存贷比", "ZB002", "ZB001", "存贷比");
 
         for (int index = 0; index < 13; index++) {
             char city = (char) ('A' + index);
@@ -78,12 +80,26 @@ public final class BankFinancialLexicon {
         ORGANIZATIONS.put(code, new OrganizationDefinition(code, name, terms));
     }
 
+    private static void derivedMetric(String code, String name, String numerator,
+            String denominator, String... aliases) {
+        List<String> terms = new ArrayList<>();
+        terms.add(name);
+        terms.addAll(Arrays.asList(aliases));
+        terms.sort(Comparator.comparingInt(String::length).reversed());
+        DERIVED_METRICS.put(code,
+                new DerivedMetricDefinition(code, name, numerator, denominator, terms));
+    }
+
     private static void normalize(String source, String target) {
         NORMALIZATIONS.put(source, target);
     }
 
     public static Map<String, MetricDefinition> metrics() {
         return Collections.unmodifiableMap(METRICS);
+    }
+
+    public static Map<String, DerivedMetricDefinition> derivedMetrics() {
+        return Collections.unmodifiableMap(DERIVED_METRICS);
     }
 
     public static Map<String, OrganizationDefinition> organizations() {
@@ -103,6 +119,24 @@ public final class BankFinancialLexicon {
         private MetricDefinition(String code, String name, List<String> aliases) {
             this.code = code;
             this.name = name;
+            this.aliases = aliases;
+        }
+    }
+
+    @Getter
+    public static class DerivedMetricDefinition {
+        private final String code;
+        private final String name;
+        private final String numerator;
+        private final String denominator;
+        private final List<String> aliases;
+
+        private DerivedMetricDefinition(String code, String name, String numerator,
+                String denominator, List<String> aliases) {
+            this.code = code;
+            this.name = name;
+            this.numerator = numerator;
+            this.denominator = denominator;
             this.aliases = aliases;
         }
     }

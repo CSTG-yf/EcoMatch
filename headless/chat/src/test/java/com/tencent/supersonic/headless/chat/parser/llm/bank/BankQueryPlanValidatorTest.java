@@ -305,4 +305,163 @@ class BankQueryPlanValidatorTest {
                         .orderSensitive(true).build())
                 .build();
     }
+
+    @Test
+    void shouldAcceptRankingPlanPreservingTheDerivedMetricContract() {
+        BankQueryPlan plan = derivedRankingPlan();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
+    void shouldRejectPlanThatDropsTheRecognizedDerivedMetric() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of());
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISSING"));
+    }
+
+    @Test
+    void shouldRejectIllegalDerivedMetricCodeAndOperands() {
+        BankQueryPlan codeOperandConflict = derivedRankingPlan();
+        codeOperandConflict.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB001")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(codeOperandConflict, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+
+        BankQueryPlan sameOperands = derivedRankingPlan();
+        sameOperands.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB001_DIV_ZB001").numerator("ZB001")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(sameOperands, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+
+        BankQueryPlan nonBaseOperand = derivedRankingPlan();
+        nonBaseOperand.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("贷款余额")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(nonBaseOperand, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+    }
+
+    @Test
+    void shouldRejectDuplicateDerivedMetricEntries() {
+        BankQueryPlan plan = derivedRankingPlan();
+        BankQueryPlan.DerivedMetric derived = plan.getDerivedMetrics().get(0);
+        plan.setDerivedMetrics(List.of(derived, derived));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_DUPLICATE"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricThatDoesNotMatchMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB013_DIV_ZB001").numerator("ZB013")
+                .denominator("ZB001").name("不良贷款率").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISMATCH"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricsReorderedAgainstMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of(
+                BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB001_DIV_ZB002")
+                        .numerator("ZB001").denominator("ZB002").name("存贷比倒数").build(),
+                BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                        .numerator("ZB002").denominator("ZB001").name("存贷比").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, twoDerivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISMATCH"));
+    }
+
+    @Test
+    void shouldRejectUnexpectedDerivedMetricWithoutMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_UNEXPECTED"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricWhoseOperandsAreNotDirectMetrics() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_OPERAND_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricOutsideTheRankingDirectContract() {
+        BankQueryPlan nonDirectCalculation = derivedRankingPlan();
+        nonDirectCalculation.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).build());
+        assertTrue(validator.validate(nonDirectCalculation, derivedHints()).codes()
+                .contains("DERIVED_METRIC_CALCULATION_REQUIRED"));
+
+        BankQueryPlan nonRankingIntent = derivedRankingPlan();
+        nonRankingIntent.setIntent(BankIntentType.POINT_QUERY);
+        assertTrue(validator.validate(nonRankingIntent, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INTENT_REQUIRED"));
+    }
+
+    private SemanticIntentHints derivedHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .build();
+    }
+
+    private SemanticIntentHints twoDerivedHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
+                .requiredDerivedMetrics(List.of(
+                        new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB002_DIV_ZB001",
+                                "ZB002", "ZB001", "存贷比"),
+                        new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB001_DIV_ZB002",
+                                "ZB001", "ZB002", "存贷比倒数")))
+                .build();
+    }
+
+    private BankQueryPlan derivedRankingPlan() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setMetrics(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002")
+                .denominator("ZB001").name("存贷比").build()));
+        plan.getOutput().setColumns(List.of("机构", "ZB002", "ZB001"));
+        return plan;
+    }
 }
