@@ -45,6 +45,7 @@ public class BankResultProjector {
             case LONG_FORM -> projectLongForm(contract, sourceRows);
             case RANKED_LONG_FORM -> projectRankedLongForm(contract, sourceRows);
             case DAILY_AVERAGE_RANKING -> projectDailyAverageRanking(contract, sourceRows);
+            case DAILY_EXTREMA_RANKING -> projectDailyExtremaRanking(contract, sourceRows);
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
         };
@@ -251,6 +252,54 @@ public class BankResultProjector {
             rows.add(row);
         }
         return Projection.applied(columns(contract), rows);
+    }
+
+    private Projection projectDailyExtremaRanking(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().size() != 1 || StringUtils.isBlank(contract.getTimeColumn())) {
+            return Projection.notApplied();
+        }
+        MetricBinding metric = contract.getMetrics().get(0);
+        List<DailyObservation> observations = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup date = value(sourceRow, contract.getTimeColumn());
+            ValueLookup metricValue = value(sourceRow, metric.getSemanticColumn());
+            BigDecimal numericValue = metricValue.found() ? decimal(metricValue.value()) : null;
+            if (StringUtils.isBlank(organizationCode) || !date.found() || date.value() == null
+                    || StringUtils.isBlank(String.valueOf(date.value())) || numericValue == null) {
+                return Projection.notApplied();
+            }
+            observations.add(new DailyObservation(organizationCode, String.valueOf(date.value()),
+                    metricValue.value(), numericValue));
+        }
+        if (observations.isEmpty()) {
+            return Projection.notApplied();
+        }
+        Comparator<DailyObservation> ties = Comparator.comparing(DailyObservation::date)
+                .thenComparing(DailyObservation::organizationCode);
+        DailyObservation highest = observations.stream()
+                .min(Comparator.comparing(DailyObservation::numericValue).reversed()
+                        .thenComparing(ties))
+                .orElseThrow();
+        DailyObservation lowest = observations.stream()
+                .min(Comparator.comparing(DailyObservation::numericValue).thenComparing(ties))
+                .orElseThrow();
+        return Projection.applied(columns(contract), List.of(extremaRow(contract, metric, highest),
+                extremaRow(contract, metric, lowest)));
+    }
+
+    private Map<String, Object> extremaRow(Contract contract, MetricBinding metric,
+            DailyObservation observation) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("org_code", observation.organizationCode());
+        row.put("org_name", contract.getOrganizationNames()
+                .getOrDefault(observation.organizationCode(), observation.organizationCode()));
+        row.put("metric_code", metric.getMetricCode());
+        row.put("metric_value", observation.value());
+        row.put("rank_position", 1);
+        return row;
     }
 
     private Projection projectMomYoyChange(Contract contract,
@@ -540,7 +589,8 @@ public class BankResultProjector {
         List<String> columns =
                 new ArrayList<>(List.of("org_code", "org_name", "metric_code", "metric_value"));
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
-                || contract.getType() == ProjectionType.DAILY_AVERAGE_RANKING) {
+                || contract.getType() == ProjectionType.DAILY_AVERAGE_RANKING
+                || contract.getType() == ProjectionType.DAILY_EXTREMA_RANKING) {
             columns.add("rank_position");
         }
         return columns;
@@ -555,6 +605,7 @@ public class BankResultProjector {
         LONG_FORM,
         RANKED_LONG_FORM,
         DAILY_AVERAGE_RANKING,
+        DAILY_EXTREMA_RANKING,
         RATIO,
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
@@ -633,6 +684,9 @@ public class BankResultProjector {
             BigDecimal numericValue) {}
 
     private record RankedValue(String organizationCode, Object value, BigDecimal numericValue) {}
+
+    private record DailyObservation(String organizationCode, String date, Object value,
+            BigDecimal numericValue) {}
 
     private static class DailyAverage {
         private BigDecimal sum = BigDecimal.ZERO;

@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankResultProjectorTest {
 
@@ -236,6 +238,50 @@ class BankResultProjectorTest {
                 row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB001", "metric_value",
                         new BigDecimal("2.000000000000000"), "rank_position", 3)),
                 projection.getRows());
+    }
+
+    @Test
+    void shouldProjectAnnualSingleDayExtremaWithDeterministicTieBreaks() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DAILY_EXTREMA_RANKING)
+                .organizationColumn("bank_organization").timeColumn("bank_data_date")
+                .organizationNames(Map.of("ORG002", "B", "ORG003", "C", "ORG008", "H", "ORG009", "I"))
+                .metrics(List.of(BankResultProjector.MetricBinding.builder().semanticColumn("ZB002")
+                        .metricCode("ZB002").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG003", "bank_data_date", "2025-06-30", "ZB002",
+                                new BigDecimal("95.06")),
+                        row("bank_organization", "ORG002", "bank_data_date", "2025-05-01", "ZB002",
+                                new BigDecimal("95.06")),
+                        row("bank_organization", "ORG009", "bank_data_date", "2025-12-31", "ZB002",
+                                new BigDecimal("30.52")),
+                        row("bank_organization", "ORG008", "bank_data_date", "2025-01-01", "ZB002",
+                                new BigDecimal("30.52"))));
+
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value", "rank_position"),
+                projection.getColumns());
+        assertEquals(List.of(
+                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB002", "metric_value",
+                        new BigDecimal("95.06"), "rank_position", 1),
+                row("org_code", "ORG008", "org_name", "H", "metric_code", "ZB002", "metric_value",
+                        new BigDecimal("30.52"), "rank_position", 1)), projection.getRows());
+    }
+
+    @Test
+    void shouldFailClosedWhenDailyExtremaObservationIsIncomplete() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.DAILY_EXTREMA_RANKING)
+                .organizationColumn("bank_organization").timeColumn("bank_data_date")
+                .metrics(List.of(BankResultProjector.MetricBinding.builder().semanticColumn("ZB002")
+                        .metricCode("ZB002").build()))
+                .build();
+
+        assertFalse(projector.project(contract,
+                List.of(row("bank_organization", "ORG003", "ZB002", new BigDecimal("95.06"))))
+                .isApplied());
     }
 
     @Test

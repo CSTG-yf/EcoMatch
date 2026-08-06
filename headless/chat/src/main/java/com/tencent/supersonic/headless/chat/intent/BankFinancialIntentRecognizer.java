@@ -349,24 +349,34 @@ public class BankFinancialIntentRecognizer {
         }
         if (!comprehensivePerformanceProfile && !isAnnualDailyExtremaSummary(text)
                 && !isTrendExtremaSummary(text) && !isThresholdRequirement(text)) {
-            Matcher topRank = Pattern.compile("(?:排名)?前([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
-            if (topRank.find()) {
-                filters.add(FilterSlot.builder().field("rank").operator("LTE")
-                        .value(rankValue(topRank.group(1))).sourceText(topRank.group()).build());
-            } else if (containsAny(text, "第一", "最高", "最低", "最多", "最少", "表现较好")) {
-                filters.add(FilterSlot.builder().field("rank").operator("LTE")
-                        .value(text.contains("表现较好") ? "3" : "1").sourceText("排名前部").build());
-            }
+            if (text.contains("最高") && text.contains("最低")) {
+                filters.add(FilterSlot.builder().field("rank").operator("LTE").value("1")
+                        .sourceText("最高").build());
+                filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
+                        .value("1").sourceText("最低").build());
+            } else {
+                Matcher topRank = Pattern.compile("(?:排名)?前([1-9]\\d*|[一二三四五六七八九十])")
+                        .matcher(text);
+                if (topRank.find()) {
+                    filters.add(FilterSlot.builder().field("rank").operator("LTE")
+                            .value(rankValue(topRank.group(1))).sourceText(topRank.group()).build());
+                } else if (containsAny(text, "第一", "最高", "最低", "最多", "最少", "表现较好")) {
+                    filters.add(FilterSlot.builder().field("rank").operator("LTE")
+                            .value(text.contains("表现较好") ? "3" : "1").sourceText("排名前部")
+                            .build());
+                }
 
-            Matcher bottomRank =
-                    Pattern.compile("(?:排名)?(?:最后(?:的)?|后)([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
-            if (bottomRank.find()) {
-                filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
-                        .value(rankValue(bottomRank.group(1))).sourceText(bottomRank.group())
-                        .build());
-            } else if (text.contains("表现较差")) {
-                filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
-                        .value("4").sourceText("表现较差").build());
+                Matcher bottomRank = Pattern
+                        .compile("(?:排名)?(?:最后(?:的)?|后)([1-9]\\d*|[一二三四五六七八九十])")
+                        .matcher(text);
+                if (bottomRank.find()) {
+                    filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
+                            .value(rankValue(bottomRank.group(1))).sourceText(bottomRank.group())
+                            .build());
+                } else if (text.contains("表现较差")) {
+                    filters.add(FilterSlot.builder().field("rank_from_bottom").operator("LTE")
+                            .value("4").sourceText("表现较差").build());
+                }
             }
         }
         return filters;

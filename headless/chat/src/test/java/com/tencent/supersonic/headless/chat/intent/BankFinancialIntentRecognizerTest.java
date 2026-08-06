@@ -143,6 +143,19 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldEmitTopAndBottomRankFiltersForAnAnnualSingleDayExtremaQuestion() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年全年，各项贷款余额的单日最高值出现在哪家？单日最低值在哪家？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertTrue(result.getFilters().stream().anyMatch(filter -> "rank".equals(filter.getField())
+                && "LTE".equals(filter.getOperator()) && "1".equals(filter.getValue())));
+        assertTrue(result.getFilters().stream()
+                .anyMatch(filter -> "rank_from_bottom".equals(filter.getField())
+                        && "LTE".equals(filter.getOperator()) && "1".equals(filter.getValue())));
+    }
+
+    @Test
     void shouldNotTreatTheHighestQuarterInATrendAsARankingFilter() {
         BankIntentResult result = recognizer.recognize(
                 "请分析江苏省A市农商行的各项存款余额从2025年一季度末到2026年一季度末的逐季变化，各季度末数值是多少？哪个季度数值最高？",

@@ -147,6 +147,45 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileAnnualSingleDayExtremaToDailyObservationContract() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setOrganizations(List.of());
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT)
+                .alias(BankPlanGenStrategy.DAILY_EXTREMA_SIGNAL_ALIAS).build()));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                .endDate(LocalDate.of(2025, 12, 31)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setFilters(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("1").build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE").value("1")
+                        .build()));
+        plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("ZB002")
+                .direction(BankQueryPlan.SortDirection.DESC).build()));
+        plan.setLimit(2);
+        plan.setOutput(BankQueryPlan.Output.builder()
+                .columns(List.of("bank_organization", "ZB002")).orderSensitive(true).build());
+        SemanticIntentHints hints = SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).requiredLimit(2).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.STRUCT, compiled.getRoute());
+        assertEquals(List.of("bank_organization", "bank_data_date"),
+                compiled.getStructReq().getGroups());
+        assertEquals(AggOperatorEnum.SUM, compiled.getStructReq().getAggregators().get(0).getFunc());
+        assertEquals(10_000, compiled.getStructReq().getLimit());
+        assertTrue(compiled.getStructReq().getOrders().isEmpty());
+        assertEquals(List.of("bank_organization", "数据日期", "ZB002"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.DAILY_EXTREMA_RANKING,
+                compiled.getResultContract().getType());
+        assertEquals("bank_data_date", compiled.getResultContract().getTimeColumn());
+    }
+
+    @Test
     void shouldAttachTheStableLongFormContractToAnOrganizationComparison() {
         BankQueryPlan plan = rankingPlan();
         plan.setIntent(BankIntentType.COMPARISON);

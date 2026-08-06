@@ -134,12 +134,18 @@ public class SemanticIntentHints {
         if (intent == null || intent.getFilters() == null) {
             return null;
         }
-        return intent.getFilters().stream()
-                .filter(filter -> "rank".equals(filter.getField())
-                        || "rank_from_bottom".equals(filter.getField()))
-                .map(BankIntentResult.FilterSlot::getValue)
-                .map(SemanticIntentHints::positiveInteger).filter(Objects::nonNull).findFirst()
-                .orElse(null);
+        Integer topRankLimit = rankLimit(intent, "rank");
+        Integer bottomRankLimit = rankLimit(intent, "rank_from_bottom");
+        if (topRankLimit != null && bottomRankLimit != null) {
+            return topRankLimit + bottomRankLimit;
+        }
+        return topRankLimit == null ? bottomRankLimit : topRankLimit;
+    }
+
+    private static Integer rankLimit(BankIntentResult intent, String field) {
+        return intent.getFilters().stream().filter(filter -> field.equals(filter.getField()))
+                .map(BankIntentResult.FilterSlot::getValue).map(SemanticIntentHints::positiveInteger)
+                .filter(Objects::nonNull).findFirst().orElse(null);
     }
 
     private static Integer positiveInteger(String value) {

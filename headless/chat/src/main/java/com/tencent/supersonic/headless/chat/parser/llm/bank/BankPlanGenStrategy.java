@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 public class BankPlanGenStrategy extends SqlGenStrategy {
 
     public static final String APP_KEY = "BANK_CONSTRAINED_PLAN";
+    static final String DAILY_EXTREMA_SIGNAL_ALIAS = "single_day_extrema";
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
 
     private final BankQueryPlanResponseParser responseParser = new BankQueryPlanResponseParser();
@@ -52,6 +53,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (hints == null) {
             throw new IllegalArgumentException(
                     "semantic intent hints are required for bank plan generation");
+        }
+        BankQueryPlan dailyExtremaPlan = annualSingleDayExtremaPlan(llmReq.getQueryText(), hints);
+        if (dailyExtremaPlan != null) {
+            return planResponse(llmReq, dailyExtremaPlan, Map.of());
         }
         ChatApp chatApp = resolveChatApp(llmReq);
         if (chatApp == null) {
@@ -194,6 +199,52 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 .columns(plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList())
                 .orderSensitive(true).build());
         return plan;
+    }
+
+    private BankQueryPlan annualSingleDayExtremaPlan(String queryText,
+            SemanticIntentHints hints) {
+        if (!isAnnualSingleDayExtremaRanking(queryText, hints)) {
+            return null;
+        }
+        String metric = hints.getRequiredMetrics().iterator().next();
+        return BankQueryPlan.builder().intent(BankIntentType.RANKING)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT)
+                        .alias(DAILY_EXTREMA_SIGNAL_ALIAS).build()))
+                .dimensions(List.of("bank_organization")).organizations(List.of())
+                .filters(List.of(
+                        BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("1")
+                                .build(),
+                        BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE")
+                                .value("1").build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(hints.getRequiredStartDate())
+                        .endDate(hints.getRequiredEndDate())
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of(BankQueryPlan.OrderBy.builder().field(metric)
+                        .direction(BankQueryPlan.SortDirection.DESC).build()))
+                .limit(2).output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", metric)).orderSensitive(true).build())
+                .build();
+    }
+
+    private boolean isAnnualSingleDayExtremaRanking(String queryText,
+            SemanticIntentHints hints) {
+        if (queryText == null || hints.getExpectedIntent() != BankIntentType.RANKING
+                || hints.getRequiredMetrics().size() != 1
+                || !hints.getRequiredOrganizationCodes().isEmpty()
+                || hints.getRequiredStartDate() == null || hints.getRequiredEndDate() == null) {
+            return false;
+        }
+        LocalDate startDate = hints.getRequiredStartDate();
+        LocalDate endDate = hints.getRequiredEndDate();
+        boolean fullNaturalYear = startDate.getMonthValue() == 1 && startDate.getDayOfMonth() == 1
+                && endDate.getMonthValue() == 12 && endDate.getDayOfMonth() == 31
+                && startDate.getYear() == endDate.getYear();
+        return fullNaturalYear && queryText.contains("全年") && queryText.contains("单日")
+                && queryText.contains("最高") && queryText.contains("最低");
     }
 
     private boolean isAbsoluteThreshold(SemanticIntentHints hints) {

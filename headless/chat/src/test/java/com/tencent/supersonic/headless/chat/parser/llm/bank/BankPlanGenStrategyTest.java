@@ -249,6 +249,51 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldBuildAnnualSingleDayExtremaRankingPlanWithoutCallingTheModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualSingleDayExtremaRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).alias("single_day_extrema")
+                .build()), plan.getMetrics());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of(), plan.getOrganizations());
+        assertEquals(List.of(
+                BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("1").build(),
+                BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE").value("1")
+                        .build()),
+                plan.getFilters());
+        assertEquals(LocalDate.of(2025, 1, 1), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        assertEquals(Integer.valueOf(2), plan.getLimit());
+        assertEquals(List.of("bank_organization", "ZB002"), plan.getOutput().getColumns());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldKeepTheModelPathWhenTheSingleDayKeywordIsMissing() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validAnnualAverageRankingPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = annualSingleDayExtremaRequest();
+        request.setQueryText("2025年全年各农商行各项贷款余额最高和最低分别出现在哪一天？");
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        verify(model).generate(anyString());
+    }
+
+    @Test
     void shouldNormalizeAnAbsoluteThresholdToTheStableTemplatePlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validThresholdPlanJson());
@@ -467,6 +512,20 @@ class BankPlanGenStrategyTest {
                 "orderBy":[],"limit":null,
                 "output":{"columns":["ZB001"],"orderSensitive":true}}
                 """;
+    }
+
+    private LLMReq annualSingleDayExtremaRequest() {
+        LLMReq request = new LLMReq();
+        request.setQueryText("2025年全年各农商行各项贷款余额单日最高和最低分别出现在哪一天？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        request.setChatAppConfig(Map.of());
+        return request;
     }
 
     private LLMReq thresholdRequest() {
