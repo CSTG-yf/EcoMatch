@@ -500,5 +500,134 @@ class GoldSqlTest(unittest.TestCase):
         self.assertEqual([row for row in org_result if row[0] == "DERIVED_ZB002_DIV_ZB001"], [])
 
 
+    def test_days_above_province_average_full_year_sqlite(self) -> None:
+        """合法全年 DAYS_ABOVE：按日全省均值（非全年/单日快照），仅汇总目标机构。
+
+        3 天 × 4 机构：每日省均值 85/70/75，ORG001 值 100/40/60，
+        仅第 1 天高于 → 1 天、3 个观测、比率 100/3。
+        """
+        daily = [
+            ("2025-01-01", "ORG001", "ZB001", 100.0),
+            ("2025-01-02", "ORG001", "ZB001", 40.0),
+            ("2025-01-03", "ORG001", "ZB001", 60.0),
+            ("2025-01-01", "ORG002", "ZB001", 80.0),
+            ("2025-01-02", "ORG002", "ZB001", 80.0),
+            ("2025-01-03", "ORG002", "ZB001", 80.0),
+            ("2025-01-01", "ORG003", "ZB001", 80.0),
+            ("2025-01-02", "ORG003", "ZB001", 80.0),
+            ("2025-01-03", "ORG003", "ZB001", 80.0),
+            ("2025-01-01", "ORG004", "ZB001", 80.0),
+            ("2025-01-02", "ORG004", "ZB001", 80.0),
+            ("2025-01-03", "ORG004", "ZB001", 80.0),
+        ]
+        spec = build_gold_sql(
+            record(
+                "江苏省A市农商行2025年全年有多少天各项存款余额高于全省均值？",
+                "THRESHOLD",
+                ["ZB001"],
+                ["2025年全年"],
+                ["ORG001"],
+            )
+        )
+        self.assertIn("BETWEEN '2025-01-01' AND '2025-12-31'", spec.sql)
+        self.assertIn("AVG(d.metric_value) AS provincial_average", spec.sql)
+        self.assertIn("GROUP BY d.data_date", spec.sql)
+        self.assertIn("SELECT d.data_date, d.org_code, d.metric_value", spec.sql)
+        self.assertIn("d.org_code = 'ORG001'", spec.sql)
+        self.assertEqual(spec.features, ["THRESHOLD", "PROVINCIAL_AVERAGE", "DAYS_ABOVE"])
+        # 最终 SELECT 显式别名顺序：org_code、org_name、days_above_province_average、
+        # observation_count、above_ratio_percent，稳定 ORDER BY org_code
+        self.assertIn("SELECT o.org_code, o.org_name", spec.sql)
+        self.assertLess(
+            spec.sql.index("AS days_above_province_average"),
+            spec.sql.index("AS observation_count"),
+        )
+        self.assertLess(
+            spec.sql.index("AS observation_count"),
+            spec.sql.index("AS above_ratio_percent"),
+        )
+        self.assertIn("ORDER BY o.org_code", spec.sql)
+
+        result = execute_gold_sql(spec.sql, daily)
+        self.assertEqual(len(result), 1)
+        row = result[0]
+        self.assertEqual(row[0], "ORG001")
+        self.assertEqual(row[1], "江苏省A市农商行")
+        self.assertEqual(row[2], 1)
+        self.assertEqual(row[3], 3)
+        self.assertAlmostEqual(row[4], 100.0 / 3, places=6)
+
+    def test_days_above_rejects_multi_metric(self) -> None:
+        """DAYS_ABOVE 多指标输入必须 fail-closed 抛 GoldSqlError。"""
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(
+                record(
+                    "江苏省A市农商行2025年全年有多少天各项存款余额和不良贷款率高于全省均值？",
+                    "THRESHOLD",
+                    ["ZB001", "ZB013"],
+                    ["2025年全年"],
+                    ["ORG001"],
+                )
+            )
+
+    def test_days_above_rejects_multi_metric_with_simultaneously(self) -> None:
+        """含“多少天 / 全省均值 / 同时”的多指标输入绝不能被旧多指标分支接受。"""
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(
+                record(
+                    "江苏省A市农商行2025年全年有多少天同时满足各项存款余额和不良贷款率高于全省均值？",
+                    "THRESHOLD",
+                    ["ZB001", "ZB013"],
+                    ["2025年全年"],
+                    ["ORG001"],
+                )
+            )
+
+    def test_days_above_rejects_multi_organization(self) -> None:
+        """DAYS_ABOVE 多机构输入必须 fail-closed 抛 GoldSqlError。"""
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(
+                record(
+                    "江苏省A市农商行和江苏省B市农商行2025年全年有多少天各项存款余额高于全省均值？",
+                    "THRESHOLD",
+                    ["ZB001"],
+                    ["2025年全年"],
+                    ["ORG001", "ORG002"],
+                )
+            )
+
+    def test_days_above_rejects_non_full_year(self) -> None:
+        """DAYS_ABOVE 非显式全年（单日月末）输入必须 fail-closed 抛 GoldSqlError。"""
+        with self.assertRaises(GoldSqlError):
+            build_gold_sql(
+                record(
+                    "江苏省A市农商行2025年6月末有多少天各项存款余额高于全省均值？",
+                    "THRESHOLD",
+                    ["ZB001"],
+                    ["2025年6月末"],
+                    ["ORG001"],
+                )
+            )
+
+    def test_single_day_provincial_average_threshold_keeps_point_in_time_semantics(
+        self,
+    ) -> None:
+        """普通单日全省均值 THRESHOLD 行为保留：单日快照，不按日分组。"""
+        spec = build_gold_sql(
+            record(
+                "2025年6月末，江苏省A市农商行各项存款余额是否高于全省均值？",
+                "THRESHOLD",
+                ["ZB001"],
+                ["2025年6月末"],
+                ["ORG001"],
+            )
+        )
+        self.assertIn("data_date = '2025-06-30'", spec.sql)
+        self.assertIn("provincial_average", spec.sql)
+        self.assertNotIn("GROUP BY d.data_date", spec.sql)
+        self.assertNotIn("days_above_province_average", spec.sql)
+        self.assertEqual(spec.features, ["THRESHOLD", "PROVINCIAL_AVERAGE"])
+
+
 if __name__ == "__main__":
     unittest.main()

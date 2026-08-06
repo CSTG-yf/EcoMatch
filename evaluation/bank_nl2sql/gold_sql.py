@@ -792,13 +792,79 @@ ORDER BY d.metric_code, aggregate_value DESC, o.org_code"""
     return GoldSqlSpec(sql, sql, ["AGGREGATION", "DATE_RANGE"])
 
 
+def _days_above_province_average_query(
+    record: dict[str, Any], metric_codes: list[str]
+) -> GoldSqlSpec:
+    """Count full-year days a single organization stays above the provincial
+    daily average for one base metric.
+
+    The provincial average is computed per day across ALL organizations
+    (``AVG(metric_value)`` grouped by ``data_date``); only afterwards is the
+    target organization's daily series summarized.  This is fail-closed: a
+    DAYS_ABOVE question that is not exactly one base metric, one
+    organization, and an explicit ``YYYY年全年`` range raises
+    ``GoldSqlError`` instead of falling through to the multi-metric
+    threshold branch.
+    """
+    question = str(record.get("question", ""))
+    organizations = _organization_codes(record)
+    if len(metric_codes) != 1:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires exactly one metric for {record.get('id')}: {metric_codes}"
+        )
+    if len(organizations) != 1:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires exactly one organization for {record.get('id')}: {organizations}"
+        )
+    expressions = " ".join(
+        str(value)
+        for value in record.get("normalizedIntent", {}).get("time", {}).get("expressions", [])
+    )
+    year = re.search(r"(20\d{2})年全年", expressions + " " + question)
+    if year is None:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires an explicit full-year range for {record.get('id')}"
+        )
+    metric_code = metric_codes[0]
+    org_code = organizations[0]
+    start_date, end_date = f"{year.group(1)}-01-01", f"{year.group(1)}-12-31"
+    compare = "<" if any(token in question for token in ("低于", "小于")) else ">"
+    sql = f"""WITH daily_provincial AS (
+  SELECT d.data_date, AVG(d.metric_value) AS provincial_average
+  FROM bank_metric_daily d
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+  GROUP BY d.data_date
+), target_daily AS (
+  SELECT d.data_date, d.org_code, d.metric_value
+  FROM bank_metric_daily d
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+    AND d.org_code = {_sql_literal(org_code)}
+)
+SELECT o.org_code, o.org_name,
+       SUM(CASE WHEN t.metric_value {compare} p.provincial_average THEN 1 ELSE 0 END)
+         AS days_above_province_average,
+       COUNT(*) AS observation_count,
+       SUM(CASE WHEN t.metric_value {compare} p.provincial_average THEN 1 ELSE 0 END) * 100.0
+         / COUNT(*) AS above_ratio_percent
+FROM target_daily t
+JOIN daily_provincial p ON p.data_date = t.data_date
+JOIN bank_organization o ON o.org_code = t.org_code
+GROUP BY o.org_code, o.org_name
+ORDER BY o.org_code"""
+    return GoldSqlSpec(sql, sql, ["THRESHOLD", "PROVINCIAL_AVERAGE", "DAYS_ABOVE"])
+
+
 def _threshold_query(record: dict[str, Any]) -> GoldSqlSpec:
     metric_codes = _metric_codes(record)
-    if len(metric_codes) > 1 and "同时" in str(record.get("question", "")):
+    question = str(record.get("question", ""))
+    if "多少天" in question and "全省均值" in question:
+        return _days_above_province_average_query(record, metric_codes)
+    if len(metric_codes) > 1 and "同时" in question:
         return _multi_metric_threshold_query(record, metric_codes)
     metric_code = metric_codes[0]
     date_value = _date_from_record(record)
-    question = str(record.get("question", ""))
     organizations = _organization_codes(record)
     if "全省" in question or "均值" in question:
         compare = "<" if any(token in question for token in ("低于", "小于")) else ">"
