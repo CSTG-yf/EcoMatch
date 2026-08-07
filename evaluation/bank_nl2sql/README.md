@@ -216,6 +216,59 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
 
 smoke 通过后，去掉 `--max-records 5` 即可运行完整训练集。重复相同命令会从输出 checkpoint 续跑；需要从头重跑时显式传入 `--no-resume`。测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
 
+### 银行路径 on/off 对照（不删代码）
+
+当需要验证「银行受约束计划」相对通用 `ONE_PASS` 是否加分时，使用固定 smoke 与对比脚本，**不要删除**银行运行时类：
+
+- 协议：`RUNTIME_ABLATION.md`
+- 清单：`runtime_ablation_manifest.json`
+- 对比：`compare_runtime_ablation.py`
+
+关键开关是系统参数 `s2.parser.bank.constrained-plan.enable`；评测参数 `--runtime-mode bank-on|bank-off` 只给报告打标签，不改服务端配置。
+
+## 答案契约评估（官方主指标）
+
+银行问数**官方主指标**是 `answerExact`（原始 `answerText` 中的必答数值槽位是否都出现在预测结果中），**不是** SQL 文本匹配。结构化 `expected.rows` 全等保留为辅助指标 `tableEX` / 旧名 `resultAccuracy`。
+
+### 金标门禁：L2 ⊇ L1
+
+结构化结果必须能证明官方答案文案中的业务数字，否则该题不得进入官方分母：
+
+| grade | 含义 |
+| --- | --- |
+| `GOLD_OK` | rows 覆盖全部必答数值 → 可计官方分 |
+| `GOLD_PARTIAL` / `GOLD_BAD` | 覆盖不全 / 全无 → 只诊断，不计官方准确率 |
+| `GOLD_NON_NUMERIC` | 答案无可抽取数值（v1 不进 answerExact） |
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold_contract.py `
+  evaluation/bank_nl2sql `
+  --split train `
+  --output .local-dev/bank-nl2sql/gold-contract-train.json
+```
+
+扫描含 test 时需加 `--acknowledge-final-test`。可用 `--fail-on-incomplete` 做 CI 阻断。
+
+### 运行时评分
+
+`run_supersonic_eval.py` 会在每题上写：
+
+- `goldGrade` / `answerExact` / `answerScore`
+- `tableEX`（= 旧 `match`）
+- `resultColumns` / `resultRows`（供 answerExact 与复评）
+
+报告 `metrics.answerExact` 仅在 `GOLD_OK` 且可抽取必答槽位的题目上统计。
+
+对历史报告补分（需含 `resultColumns`/`resultRows`）：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_answer_exact.py `
+  evaluation/bank_nl2sql `
+  .local-dev/bank-nl2sql/some-report.json `
+  --split train `
+  --output .local-dev/bank-nl2sql/some-report.answer-exact.json
+```
+
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
   evaluation/bank_nl2sql `

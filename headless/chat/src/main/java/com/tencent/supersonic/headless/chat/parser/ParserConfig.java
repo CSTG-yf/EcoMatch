@@ -58,6 +58,11 @@ public class ParserConfig extends ParameterConfig {
             "s2.parser.bank.constrained-plan.enable", "false", "是否对银行语义数据集启用受约束计划",
             "仅对同时具备 bank_organization 和 bank_data_date 维度的数据集生效；关闭即可回退原有策略", "bool", "语义解析配置");
 
+    public static final Parameter PARSER_BANK_FREE_SQL_THINKING_ENABLE = new Parameter(
+            "s2.parser.bank.free-sql.thinking.enable", "true", "银行 free-SQL 是否开启深度思考",
+            "仅 bank-off 自由 SQL 前缀路径生效；提升复杂题准确率，但会明显增加时延与生成 token", "bool",
+            "语义解析配置");
+
     public static final Parameter PARSER_SHOW_COUNT =
             new Parameter("s2.parser.show.count", "3", "解析结果展示个数", "前端展示的解析个数", "number", "语义解析配置");
 
@@ -74,7 +79,7 @@ public class ParserConfig extends ParameterConfig {
         return Lists.newArrayList(PARSER_STRATEGY_TYPE, PARSER_LINKING_VALUE_ENABLE,
                 PARSER_RULE_CORRECTOR_ENABLE, PARSER_FEW_SHOT_NUMBER,
                 PARSER_SELF_CONSISTENCY_NUMBER, PARSER_BANK_MAX_CANDIDATES,
-                PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_SHOW_COUNT,
-                PARSER_FIELDS_COUNT_THRESHOLD);
+                PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_BANK_FREE_SQL_THINKING_ENABLE,
+                PARSER_SHOW_COUNT, PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

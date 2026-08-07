@@ -33,7 +33,27 @@ public class LLMRequestService {
 
     public Long getDataSetId(ChatQueryContext queryCtx) {
         DataSetResolver dataSetResolver = ComponentFactory.getModelResolver();
-        return dataSetResolver.resolve(queryCtx, queryCtx.getRequest().getDataSetIds());
+        Long resolved = dataSetResolver.resolve(queryCtx, queryCtx.getRequest().getDataSetIds());
+        boolean bankEnabled = Boolean.parseBoolean(
+                parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE));
+        if (!bankEnabled || queryCtx.getSemanticSchema() == null) {
+            return resolved;
+        }
+        Set<Long> requested = queryCtx.getRequest().getDataSetIds();
+        if (CollectionUtils.isEmpty(requested)) {
+            return resolved;
+        }
+        List<SchemaElement> dimensions = queryCtx.getSemanticSchema().getDimensions();
+        // Prefer a bank-qualified dataset so bank constrained planning is not skipped when the
+        // agent binds both a bank dataset and an unrelated fallback dataset.
+        if (resolved == null || !isBankDataset(dimensions, resolved)) {
+            for (Long dataSetId : requested) {
+                if (isBankDataset(dimensions, dataSetId)) {
+                    return dataSetId;
+                }
+            }
+        }
+        return resolved;
     }
 
     public LLMReq getLlmReq(ChatQueryContext queryCtx, Long dataSetId) {
@@ -45,17 +65,22 @@ public class LLMRequestService {
         LLMReq.LLMSchema llmSchema = new LLMReq.LLMSchema();
         int fieldCntThreshold =
                 Integer.valueOf(parserConfig.getParameterValue(PARSER_FIELDS_COUNT_THRESHOLD));
-        if (queryCtx.getMapInfo().getMatchedElements(dataSetId).size() <= fieldCntThreshold) {
+        BankRoutingDecision bankRouting = selectBankRouting(configuredSqlGenType,
+                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
+                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
+        LLMReq.SqlGenType sqlGenType = bankRouting.selectedSqlGenType();
+        // Bank constrained planning recovers metrics from question keywords; a mapped-only field
+        // subset would mark those recovered codes as UNKNOWN_METRIC at validation time. Free SQL
+        // on bank datasets also needs the full metric catalog so the model can resolve 存贷比/不良率等.
+        boolean bankDatasetQualified = bankRouting.bankDatasetQualified();
+        if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType) || bankDatasetQualified
+                || queryCtx.getMapInfo().getMatchedElements(dataSetId).size() <= fieldCntThreshold) {
             llmSchema.setMetrics(queryCtx.getSemanticSchema().getMetrics());
             llmSchema.setDimensions(queryCtx.getSemanticSchema().getDimensions());
         } else {
             llmSchema.setMetrics(getMappedMetrics(queryCtx, dataSetId));
             llmSchema.setDimensions(getMappedDimensions(queryCtx, dataSetId));
         }
-        BankRoutingDecision bankRouting = selectBankRouting(configuredSqlGenType,
-                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
-                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
-        LLMReq.SqlGenType sqlGenType = bankRouting.selectedSqlGenType();
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmSchema.setDimensions(ensureBankOrganizationDimension(llmSchema.getDimensions(),
                     queryCtx.getSemanticSchema().getDimensions(), dataSetId));

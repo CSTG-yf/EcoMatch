@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from answer_contract import assess_gold_contract, score_answer_exact
 from evaluate_predictions import _json_value, _matches_expected
 from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run
 
@@ -128,6 +129,81 @@ def _selected_parse(parse_response: dict[str, Any]) -> tuple[int, str | None]:
     return parse_id, str(s2sql) if isinstance(s2sql, str) else None
 
 
+def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract safe bank-routing telemetry from a parse response, if present."""
+
+    raw = parse_response.get("bankRoutingAttemptTelemetry")
+    if not isinstance(raw, dict):
+        return None
+    selected = raw.get("selectedSqlGenType")
+    telemetry: dict[str, Any] = {
+        "bankConstrainedPlanEnabled": bool(raw.get("bankConstrainedPlanEnabled")),
+        "bankDatasetQualified": bool(raw.get("bankDatasetQualified")),
+        "selectedSqlGenType": str(selected) if selected is not None else None,
+        "llmCandidateCreated": bool(raw.get("llmCandidateCreated")),
+    }
+    rejection = raw.get("candidateRejectionState")
+    if rejection is not None:
+        telemetry["candidateRejectionState"] = str(rejection)
+    validation_error = raw.get("candidateValidationErrorType")
+    if validation_error is not None:
+        telemetry["candidateValidationErrorType"] = str(validation_error)
+    compiler_reason = raw.get("candidateCompilerReason")
+    if compiler_reason is not None:
+        telemetry["candidateCompilerReason"] = str(compiler_reason)
+    return telemetry
+
+
+def _filter_records_by_ids(
+    records: list[dict[str, Any]],
+    record_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Preserve the requested id order and fail if any id is missing or duplicated."""
+
+    if not record_ids:
+        raise SuperSonicEvaluationError("record id filter must not be empty")
+    if len(record_ids) != len(set(record_ids)):
+        raise SuperSonicEvaluationError("record id filter must not contain duplicates")
+    by_id = {record["id"]: record for record in records if isinstance(record.get("id"), str)}
+    missing = [sample_id for sample_id in record_ids if sample_id not in by_id]
+    if missing:
+        raise SuperSonicEvaluationError(
+            "record id filter references unknown records: " + ", ".join(missing)
+        )
+    return [by_id[sample_id] for sample_id in record_ids]
+
+
+def _load_record_ids_file(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise SuperSonicEvaluationError(f"record id file is empty: {path}")
+    if path.suffix.lower() == ".json":
+        payload = json.loads(text)
+        values: list[Any]
+        if isinstance(payload, list):
+            values = payload
+        elif isinstance(payload, dict):
+            if isinstance(payload.get("recordIds"), list):
+                values = payload["recordIds"]
+            elif isinstance(payload.get("smoke"), dict) and isinstance(
+                payload["smoke"].get("recordIds"), list
+            ):
+                values = payload["smoke"]["recordIds"]
+            else:
+                raise SuperSonicEvaluationError(
+                    "record id JSON must be a list, {recordIds:[...]}, or "
+                    "ablation manifest with smoke.recordIds"
+                )
+        else:
+            raise SuperSonicEvaluationError(
+                "record id JSON must be a list or an object with recordIds"
+            )
+        if not all(isinstance(value, str) and value.strip() for value in values):
+            raise SuperSonicEvaluationError("record id JSON must contain non-empty strings")
+        return [value.strip() for value in values]
+    return [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
 def _record_group_metrics(records: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
     grouped: dict[str, Counter[str]] = defaultdict(Counter)
     for item in records:
@@ -208,6 +284,10 @@ def _evaluate_record(
         "parse": False,
         "execute": False,
         "match": False,
+        "answerExact": False,
+        "tableEX": False,
+        "goldGrade": assess_gold_contract(record).grade,
+        "answerScore": None,
         "parseMs": None,
         "executeMs": None,
         "summaryMs": None,
@@ -217,6 +297,9 @@ def _evaluate_record(
         "errorCategory": None,
         "s2sql": None,
         "physicalSql": None,
+        "bankRouting": None,
+        "resultColumns": None,
+        "resultRows": None,
         "chatId": None,
         "queryId": None,
         "conversationCleaned": False,
@@ -259,6 +342,7 @@ def _evaluate_record(
         item["parse"] = True
         item["s2sql"] = s2sql
         item["queryId"] = query_id
+        item["bankRouting"] = _bank_routing_telemetry(parse_response)
     except Exception as error:
         item["errorCategory"] = "PARSE_ERROR"
         item["errorType"] = type(error).__name__
@@ -293,11 +377,23 @@ def _evaluate_record(
             if isinstance(execute_response.get("querySql"), str)
             else None
         )
+        item["resultColumns"] = columns
+        item["resultRows"] = rows
         item["match"] = _matches_expected(record.get("expected", {}), columns, rows)
+        item["tableEX"] = bool(item["match"])
         item["errorCategory"] = None if item["match"] else "RESULT_MISMATCH"
     except Exception as error:
         item["errorCategory"] = "EXECUTION_ERROR"
         item["errorType"] = type(error).__name__
+        answer_score = score_answer_exact(
+            record,
+            columns=item.get("resultColumns"),
+            rows=item.get("resultRows"),
+            text_summary=None,
+            require_gold_ok=True,
+        )
+        item["answerScore"] = answer_score.to_dict()
+        item["answerExact"] = False
         return finish_query_timing()
 
     try:
@@ -315,8 +411,23 @@ def _evaluate_record(
         item["summaryState"] = "ERROR"
         item["summaryErrorType"] = type(error).__name__
 
+    answer_score = score_answer_exact(
+        record,
+        columns=item.get("resultColumns"),
+        rows=item.get("resultRows"),
+        text_summary=item.get("textSummary") if isinstance(item.get("textSummary"), str) else None,
+        require_gold_ok=True,
+    )
+    item["answerScore"] = answer_score.to_dict()
+    item["answerExact"] = bool(answer_score.scored and answer_score.answerExact)
+    if item["execute"] and answer_score.scored and not answer_score.answerExact:
+        # Prefer slot miss over bare RESULT_MISMATCH when gold is scorable.
+        if item.get("errorCategory") in {None, "RESULT_MISMATCH"}:
+            item["errorCategory"] = "ANSWER_SLOT_MISS" if item.get("match") else "RESULT_MISMATCH"
+
     finish_query_timing()
-    if cleanup_conversations and item["match"]:
+    # Cleanup when either legacy table match or official answerExact succeeds.
+    if cleanup_conversations and (item["match"] or item["answerExact"]):
         try:
             cleaned = _unwrap_api_value(
                 post_json(f"{manage_api_prefix}/delete?chatId={chat_id}", {})
@@ -348,12 +459,30 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     parsed = sum(int(item["parse"]) for item in items)
     executed = sum(int(item["execute"]) for item in items)
     matched = sum(int(item["match"]) for item in items)
+    answer_scored = [
+        item for item in items
+        if isinstance(item.get("answerScore"), dict) and item["answerScore"].get("scored")
+    ]
+    answer_hits = sum(1 for item in answer_scored if item.get("answerExact"))
+    gold_ok = sum(1 for item in items if item.get("goldGrade") == "GOLD_OK")
     return {
         "recordCount": count,
         "metrics": {
             "parseSuccessRate": _rate(parsed, count),
             "executionSuccessRate": _rate(executed, count),
             "resultAccuracy": _rate(matched, count),
+            "tableEX": _rate(matched, count),
+            "answerExact": _rate(answer_hits, len(answer_scored)),
+            "answerExactHits": answer_hits,
+            "answerExactDenominator": len(answer_scored),
+            "goldOkCount": gold_ok,
+            "goldOkRate": _rate(gold_ok, count),
+        },
+        "policy": {
+            "officialMetric": "answerExact",
+            "officialDenominator": "GOLD_OK items with required answer slots",
+            "legacyMetric": "resultAccuracy/tableEX (structured expected.rows equality)",
+            "sqlStructureScored": False,
         },
         "timingMs": {
             "averageParseMs": round(sum(parse_latencies) / len(parse_latencies), 3) if parse_latencies else None,
@@ -483,6 +612,7 @@ def _load_resumable_items(
     *,
     split: str,
     agent_id: int,
+    runtime_mode: str | None = None,
 ) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -497,10 +627,11 @@ def _load_resumable_items(
         or run.get("split") != split
         or run.get("agentId") != agent_id
         or run.get("captureMethod") != "concurrent-openapi-frontend-chain"
+        or run.get("runtimeMode") != runtime_mode
         or not isinstance(items, list)
     ):
         raise SuperSonicEvaluationError(
-            "Existing checkpoint does not match this split, agent, or API runner"
+            "Existing checkpoint does not match this split, agent, runtime mode, or API runner"
         )
     if not all(isinstance(item, dict) and isinstance(item.get("id"), str) for item in items):
         raise SuperSonicEvaluationError("Existing checkpoint contains invalid items")
@@ -535,6 +666,23 @@ def main() -> None:
     parser.add_argument("--retry-backoff-seconds", type=float, default=0.5)
     parser.add_argument("--max-records", type=int)
     parser.add_argument("--record-id")
+    parser.add_argument(
+        "--record-ids",
+        help="Comma-separated record ids to evaluate in the given order",
+    )
+    parser.add_argument(
+        "--ids-file",
+        type=Path,
+        help="Text/JSON file of record ids (one per line, JSON list, or {recordIds:[...]})",
+    )
+    parser.add_argument(
+        "--runtime-mode",
+        choices=("bank-on", "bank-off"),
+        help=(
+            "Label for bank constrained-plan ablation. Does not flip the server switch; "
+            "set s2.parser.bank.constrained-plan.enable before running, then label the report."
+        ),
+    )
     parser.add_argument("--keep-conversations", action="store_true")
     parser.add_argument(
         "--resume",
@@ -555,6 +703,11 @@ def main() -> None:
         parser.error("--max-records must be at least 1")
     if args.split == "test" and args.run_registry is None:
         parser.error("--split test requires --run-registry to audit the final evaluation")
+    id_filters = sum(
+        int(value is not None) for value in (args.record_id, args.record_ids, args.ids_file)
+    )
+    if id_filters > 1:
+        parser.error("use only one of --record-id, --record-ids, or --ids-file")
     try:
         records = load_evaluation_records(
             args.dataset,
@@ -564,10 +717,16 @@ def main() -> None:
     except EvaluationAccessError as error:
         parser.error(str(error))
 
-    if args.record_id is not None:
-        records = [record for record in records if record.get("id") == args.record_id]
-        if len(records) != 1:
-            parser.error(f"--record-id did not select exactly one record: {args.record_id}")
+    try:
+        if args.record_id is not None:
+            records = _filter_records_by_ids(records, [args.record_id])
+        elif args.record_ids is not None:
+            selected_ids = [part.strip() for part in args.record_ids.split(",") if part.strip()]
+            records = _filter_records_by_ids(records, selected_ids)
+        elif args.ids_file is not None:
+            records = _filter_records_by_ids(records, _load_record_ids_file(args.ids_file))
+    except SuperSonicEvaluationError as error:
+        parser.error(str(error))
     if args.max_records is not None:
         records = records[: args.max_records]
 
@@ -577,6 +736,7 @@ def main() -> None:
                 args.output,
                 split=args.split,
                 agent_id=args.agent_id,
+                runtime_mode=args.runtime_mode,
             )
             if args.resume
             else []
@@ -596,7 +756,7 @@ def main() -> None:
     completed_by_id = dict(resumed_by_id)
 
     def run_metadata(*, status: str) -> dict[str, Any]:
-        return {
+        metadata = {
             "split": args.split,
             "agentId": args.agent_id,
             "baseUrl": args.base_url,
@@ -610,7 +770,10 @@ def main() -> None:
             "resumedCount": len(resumed_by_id),
             "status": status,
             "durationSeconds": round(time.time() - started_at, 3),
+            "runtimeMode": args.runtime_mode,
+            "selectedRecordIds": [record["id"] for record in records],
         }
+        return metadata
 
     def ordered_completed_items() -> list[dict[str, Any]]:
         return [

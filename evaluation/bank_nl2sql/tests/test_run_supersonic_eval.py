@@ -82,6 +82,12 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "data": {
                         "queryId": 101,
                         "state": "COMPLETED",
+                        "bankRoutingAttemptTelemetry": {
+                            "bankConstrainedPlanEnabled": False,
+                            "bankDatasetQualified": True,
+                            "selectedSqlGenType": "ONE_PASS_SELF_CONSISTENCY",
+                            "llmCandidateCreated": True,
+                        },
                         "selectedParses": [
                             {
                                 "id": 1,
@@ -118,10 +124,12 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "question": "Query bank A deposit balance",
                 "sql": "SELECT secret_gold_sql",
                 "expected": {
+                    "answerText": "42.02亿元",
                     "columns": ["metric_value"],
                     "rows": [[42.02]],
                     "numericTolerance": 0.000001,
                     "orderSensitive": True,
+                    "unit": None,
                 },
                 "difficulty": "simple",
                 "sqlFeatures": ["POINT_QUERY"],
@@ -163,25 +171,34 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertNotIn("secret_gold_sql", request_text)
         self.assertNotIn('"expected"', request_text)
 
-        self.assertEqual(
-            report["metrics"],
-            {
-                "parseSuccessRate": 1.0,
-                "executionSuccessRate": 1.0,
-                "resultAccuracy": 1.0,
-            },
-        )
+        self.assertEqual(report["metrics"]["parseSuccessRate"], 1.0)
+        self.assertEqual(report["metrics"]["executionSuccessRate"], 1.0)
+        self.assertEqual(report["metrics"]["resultAccuracy"], 1.0)
+        self.assertEqual(report["metrics"]["answerExact"], 1.0)
+        self.assertEqual(report["policy"]["officialMetric"], "answerExact")
         self.assertEqual(report["items"][0]["s2sql"], "SELECT metric_value FROM semantic_dataset")
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
+        self.assertEqual(report["items"][0]["resultColumns"], ["metric_value"])
+        self.assertEqual(report["items"][0]["resultRows"], [[42.02]])
+        self.assertTrue(report["items"][0]["answerExact"])
+        self.assertEqual(
+            report["items"][0]["bankRouting"],
+            {
+                "bankConstrainedPlanEnabled": False,
+                "bankDatasetQualified": True,
+                "selectedSqlGenType": "ONE_PASS_SELF_CONSISTENCY",
+                "llmCandidateCreated": True,
+            },
+        )
         self.assertGreaterEqual(report["items"][0]["endToEndMs"], 0)
         self.assertEqual(
             report["timingDistributionsMs"]["successfulEndToEnd"]["count"],
             1,
         )
         self.assertTrue(report["items"][0]["conversationCleaned"])
-        self.assertNotIn("rows", report["items"][0])
+
 
     def test_keeps_result_mismatch_conversation_for_diagnosis(self) -> None:
         requests: list[str] = []

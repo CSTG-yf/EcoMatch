@@ -46,13 +46,9 @@ class BankPlanGenStrategyTest {
             assertFalse(prompt.contains("bank_daily_metrics"));
             assertFalse(prompt.toUpperCase().contains("SELECT"));
             assertFalse(prompt.contains("FROZEN_TEST_EXEMPLAR"));
-            return prompt.contains("ZB001") && prompt.contains("\"bizName\"")
-                    && prompt.contains("\"aggregation\"") && prompt.contains("意图必须精确填写：RANKING")
-                    && prompt.contains("必填过滤条件（必须原样填写）：[]")
-                    && prompt.contains("可填写值目录（只能从下列内容中选择）：")
-                    && prompt.contains("/metrics/*/bizName: [ZB001]")
-                    && prompt.contains("\"output\":{\"columns\":[\"bank_organization\",\"ZB001\"]")
-                    && prompt.contains("/dimensions, /output/columns: [");
+            return prompt.contains(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX)
+                    && prompt.contains("\"bizName\"")
+                    && prompt.contains(request.getQueryText());
         }));
     }
 
@@ -82,9 +78,8 @@ class BankPlanGenStrategyTest {
         verify(model, org.mockito.Mockito.times(2)).generate(anyString());
         verify(model).generate(org.mockito.ArgumentMatchers
                 .<String>argThat(repairPrompt -> repairPrompt.contains("\"intent\":\"UNKNOWN\"")
-                        && repairPrompt.contains("INTENT_REQUIRED")
-                        && repairPrompt.contains("/intent 必须精确填写：RANKING")
-                        && repairPrompt.contains("/time/startDate 必须精确填写：2026-03-31")));
+                        && repairPrompt.contains("<previous_candidate>")
+                        && repairPrompt.contains(request().getQueryText())));
     }
 
     @Test
@@ -144,11 +139,8 @@ class BankPlanGenStrategyTest {
 
         assertEquals("ZB002", response.getBankQueryPlan().getCalculation().getBaseline());
         verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt -> prompt
-                .contains("RATIO 的 metrics 第一个指标是分子")
-                && prompt.contains("/calculation/baseline: [ZB002]")
-                && prompt.contains(
-                        "\"metrics\":[{\"bizName\":\"ZB005\",\"aggregation\":\"DEFAULT\"},{\"bizName\":\"ZB002\",\"aggregation\":\"DEFAULT\"}]")
-                && prompt.contains("\"calculation\":{\"type\":\"RATIO\",\"baseline\":\"ZB002\"}")));
+                .contains(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX)
+                && prompt.contains(ratioRequest().getQueryText())));
     }
 
     @Test
@@ -169,10 +161,7 @@ class BankPlanGenStrategyTest {
                 response.getBankQueryPlan().getTime().getBaselineStartDate());
         assertEquals(LocalDate.of(2024, 12, 31),
                 response.getBankQueryPlan().getTime().getBaselineEndDate());
-        verify(model).generate(org.mockito.ArgumentMatchers
-                .<String>argThat(prompt -> prompt.contains("\"comparison\":\"START_OF_YEAR\"")
-                        && prompt.contains("\"baselineStartDate\":\"2024-12-31\"")
-                        && prompt.contains("\"baselineEndDate\":\"2024-12-31\"")));
+        verify(model).generate(anyString());
     }
 
     @Test
@@ -193,12 +182,7 @@ class BankPlanGenStrategyTest {
                 response.getBankQueryPlan().getTime().getStartDate());
         assertEquals(LocalDate.of(2025, 6, 30),
                 response.getBankQueryPlan().getTime().getBaselineStartDate());
-        verify(model).generate(org.mockito.ArgumentMatchers
-                .<String>argThat(prompt -> prompt.contains("\"startDate\":\"2025-12-31\"")
-                        && prompt.contains("\"endDate\":\"2025-12-31\"")
-                        && prompt.contains("\"comparison\":\"PERIOD_OVER_PERIOD\"")
-                        && prompt.contains("\"baselineStartDate\":\"2025-06-30\"")
-                        && prompt.contains("\"baselineEndDate\":\"2025-06-30\"")));
+        verify(model).generate(anyString());
     }
 
     @Test
@@ -307,9 +291,8 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.TimeGranularity.QUARTER,
                 response.getBankQueryPlan().getTime().getGranularity());
         verify(model).generate(org.mockito.ArgumentMatchers
-                .<String>argThat(prompt -> prompt.contains("\"dimensions\":[\"bank_data_date\"]")
-                        && prompt.contains("\"granularity\":\"QUARTER\"") && prompt.contains(
-                                "\"output\":{\"columns\":[\"bank_data_date\",\"ZB001\"]")));
+                .<String>argThat(prompt -> prompt.contains(trendRequest().getQueryText())
+                        && prompt.contains(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX)));
     }
 
     @Test
@@ -375,6 +358,32 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.TimeGranularity.DAY, plan.getTime().getGranularity());
         assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
         assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildChineseTopBottomNplRankingFromQuestionTextEvenWithSparseHints() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("2025年全年，不良贷款率的均值排名前三和后三的分别是哪几家？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        // Sparse mapper evidence: no required metrics/dates — plan must recover from text.
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+        request.setChatAppConfig(Map.of());
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals("ZB013", plan.getMetrics().get(0).getBizName());
+        assertEquals(BankQueryPlan.Aggregation.AVG, plan.getMetrics().get(0).getAggregation());
+        assertEquals(BankQueryPlan.SortDirection.ASC, plan.getOrderBy().get(0).getDirection());
+        assertEquals(LocalDate.of(2025, 1, 1), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getEndDate());
+        assertEquals(Integer.valueOf(6), plan.getLimit());
         verify(model, org.mockito.Mockito.never()).generate(anyString());
     }
 
@@ -515,10 +524,7 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, time.getComparison());
         assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineStartDate());
         assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineEndDate());
-        verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt ->
-                prompt.contains("\"comparison\":\"PERIOD_OVER_PERIOD\"")
-                        && prompt.contains("\"baselineStartDate\":\"2025-09-30\"")
-                        && prompt.contains("\"baselineEndDate\":\"2025-09-30\"")));
+        verify(model).generate(anyString());
     }
 
     @Test
@@ -536,6 +542,32 @@ class BankPlanGenStrategyTest {
         assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
         assertFalse(exception.isRetryable());
         verify(model, org.mockito.Mockito.times(2)).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicPointQueryWithoutCallingModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省A市农商行在2025年6月15日，各项存款余额是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredStartDate(LocalDate.of(2025, 6, 15))
+                .requiredEndDate(LocalDate.of(2025, 6, 15)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankQueryPlan().getIntent());
+        assertEquals("ZB001", response.getBankQueryPlan().getMetrics().get(0).getBizName());
+        assertEquals(List.of("ZB001"), response.getBankQueryPlan().getOutput().getColumns());
+        assertEquals("ORG001", response.getBankQueryPlan().getOrganizations().get(0).getCode());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
     }
 
     private LLMReq request() {

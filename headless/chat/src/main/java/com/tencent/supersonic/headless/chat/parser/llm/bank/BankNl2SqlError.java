@@ -34,8 +34,25 @@ public class BankNl2SqlError extends RuntimeException {
     }
 
     public static BankNl2SqlError compilationFailure(Throwable cause) {
-        return new BankNl2SqlError(Stage.COMPILATION, Category.COMPILATION_FAILURE, false,
-                "bank query plan compilation failed", cause);
+        String detail = cause == null || cause.getMessage() == null ? "bank query plan compilation failed"
+                : "bank query plan compilation failed: " + cause.getMessage();
+        return new BankNl2SqlError(Stage.COMPILATION, Category.COMPILATION_FAILURE, false, detail,
+                cause);
+    }
+
+    /**
+     * Terminal failure when the bank route produced no executable candidate. Prevents unconstrained
+     * free-SQL parsers from winning the same parse request after a bank miss.
+     */
+    public static BankNl2SqlError noCandidate(
+            com.tencent.supersonic.headless.api.pojo.response.ParseResp.BankCandidateRejectionState rejectionState,
+            com.tencent.supersonic.headless.api.pojo.response.ParseResp.BankCandidateCompilerReason compilerReason) {
+        String detail = rejectionState == null ? "NO_CANDIDATE" : rejectionState.name();
+        if (compilerReason != null) {
+            detail = detail + "/" + compilerReason.name();
+        }
+        return new BankNl2SqlError(Stage.PLAN, Category.VALIDATION_FAILED, false,
+                "bank constrained plan produced no candidate: " + detail, null);
     }
 
     public static boolean allowsParserRetry(Throwable error) {

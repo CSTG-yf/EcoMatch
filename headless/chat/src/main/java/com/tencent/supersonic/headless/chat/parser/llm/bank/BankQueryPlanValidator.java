@@ -101,10 +101,33 @@ public class BankQueryPlanValidator {
             errors.add(error("INTENT_REQUIRED", "plan intent is required"));
         } else if (hints.getExpectedIntent() != null
                 && hints.getExpectedIntent() != BankIntentType.UNKNOWN
-                && plan.getIntent() != hints.getExpectedIntent()) {
+                && plan.getIntent() != hints.getExpectedIntent()
+                && !isCompatibleIntentRemap(plan, hints)) {
             errors.add(error("INTENT_MISMATCH",
                     "plan intent conflicts with financial intent evidence"));
         }
+    }
+
+    /**
+     * Annual daily-average rankings and single-day extrema summaries are often labeled RANKING by
+     * the financial recognizer (highest/lowest wording) while the compiler-owned templates use
+     * AGGREGATION + AVG (or the inverse: recognizer AGGREGATION + ranking top/bottom filters).
+     * Accept only these AVG remaps so deterministic plans are not rejected at compile time.
+     */
+    private boolean isCompatibleIntentRemap(BankQueryPlan plan, SemanticIntentHints hints) {
+        if (plan.getMetrics() == null || plan.getMetrics().isEmpty()) {
+            return false;
+        }
+        boolean allAvg = plan.getMetrics().stream()
+                .allMatch(metric -> metric != null
+                        && metric.getAggregation() == BankQueryPlan.Aggregation.AVG);
+        if (!allAvg) {
+            return false;
+        }
+        BankIntentType expected = hints.getExpectedIntent();
+        BankIntentType actual = plan.getIntent();
+        return (expected == BankIntentType.RANKING && actual == BankIntentType.AGGREGATION)
+                || (expected == BankIntentType.AGGREGATION && actual == BankIntentType.RANKING);
     }
 
     private void validateMetrics(BankQueryPlan plan, SemanticIntentHints hints,
@@ -116,12 +139,18 @@ public class BankQueryPlanValidator {
             errors.add(error("METRIC_REQUIRED", "at least one metric is required"));
         }
         for (String metric : planMetrics) {
-            if (!hints.getAllowedMetrics().contains(metric)) {
+            if (!hints.getAllowedMetrics().isEmpty() && !hints.getAllowedMetrics().contains(metric)) {
                 errors.add(error("UNKNOWN_METRIC",
                         "metric is not available in the semantic schema: " + metric));
             }
         }
-        if (!planMetrics.containsAll(hints.getRequiredMetrics())) {
+        // Deterministic single-metric plans may intentionally drop sibling mapped metrics (e.g. a
+        // question names 不良贷款率 while the mapper also attaches 贷款余额). Require only that every
+        // plan metric is allowed; when the plan selects exactly one metric and it appears in
+        // required or is the sole recovered primary, do not demand the full required set.
+        if (!planMetrics.containsAll(hints.getRequiredMetrics())
+                && !(planMetrics.size() == 1 && (hints.getRequiredMetrics().isEmpty()
+                        || hints.getRequiredMetrics().containsAll(planMetrics)))) {
             errors.add(error("MISSING_REQUIRED_METRIC",
                     "plan omitted a metric recognized from the question"));
         }
@@ -162,7 +191,10 @@ public class BankQueryPlanValidator {
             errors.add(error("MISSING_REQUIRED_ORGANIZATION",
                     "plan omitted an organization recognized from the question"));
         }
-        if (!hints.getRequiredOrganizationCodes().containsAll(planOrganizations)) {
+        // When the mapper missed organizations, deterministic plan recovery may fill them from
+        // question text. Only reject plan orgs as unknown when the mapper already bound some.
+        if (!hints.getRequiredOrganizationCodes().isEmpty()
+                && !hints.getRequiredOrganizationCodes().containsAll(planOrganizations)) {
             errors.add(error("UNKNOWN_ORGANIZATION",
                     "plan contains an organization outside mapper evidence"));
         }
@@ -218,6 +250,18 @@ public class BankQueryPlanValidator {
                 && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())) {
             return true;
         }
+        // No mapper dates: absolute plan dates from question text (e.g. "2025年全年") are authoritative.
+        if (hints.getRequiredStartDate() == null && hints.getRequiredEndDate() == null) {
+            return true;
+        }
+        // Mapper often clamps "YYYY年全年" endDate to "today". Accept a full calendar year plan when
+        // both sides resolve to the same year so annual averages/extrema are not rejected.
+        if (isFullCalendarYear(time) && hints.getRequiredStartDate() != null
+                && hints.getRequiredEndDate() != null
+                && hints.getRequiredStartDate().getYear() == time.getStartDate().getYear()
+                && hints.getRequiredEndDate().getYear() == time.getEndDate().getYear()) {
+            return true;
+        }
         return hints.getExpectedIntent() == BankIntentType.CHANGE
                 && hints.getRequiredStartDate() != null && hints.getRequiredEndDate() != null
                 && hints.getRequiredStartDate().isBefore(hints.getRequiredEndDate())
@@ -226,6 +270,13 @@ public class BankQueryPlanValidator {
                 && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())
                 && Objects.equals(hints.getRequiredStartDate(), time.getBaselineStartDate())
                 && Objects.equals(hints.getRequiredStartDate(), time.getBaselineEndDate());
+    }
+
+    private static boolean isFullCalendarYear(BankQueryPlan.TimeRange time) {
+        return time != null && time.getStartDate() != null && time.getEndDate() != null
+                && time.getStartDate().getMonthValue() == 1 && time.getStartDate().getDayOfMonth() == 1
+                && time.getEndDate().getMonthValue() == 12 && time.getEndDate().getDayOfMonth() == 31
+                && time.getStartDate().getYear() == time.getEndDate().getYear();
     }
 
     private void validateFilters(BankQueryPlan plan, SemanticIntentHints hints,
@@ -509,9 +560,39 @@ public class BankQueryPlanValidator {
             errors.add(error("RANKING_LIMIT_REQUIRED", "ranking requires a TopN limit"));
         }
         if (hints.getRequiredLimit() != null
-                && !Objects.equals(hints.getRequiredLimit(), plan.getLimit())) {
+                && !Objects.equals(hints.getRequiredLimit(), plan.getLimit())
+                && !isCompatibleTopBottomLimit(plan, hints)) {
             errors.add(error("LIMIT_MISMATCH", "plan must preserve the recognized TopN limit"));
         }
+    }
+
+    /**
+     * When the question asks for both top-N and bottom-N, the plan limit is top+bottom while the
+     * recognizer often only reports the first TopN as requiredLimit. Accept that deterministic
+     * expansion instead of forcing a single-sided limit.
+     */
+    private boolean isCompatibleTopBottomLimit(BankQueryPlan plan, SemanticIntentHints hints) {
+        if (plan.getLimit() == null || hints.getRequiredLimit() == null) {
+            return false;
+        }
+        Integer top = rankFilterLimit(plan, "rank");
+        Integer bottom = rankFilterLimit(plan, "rank_from_bottom");
+        return top != null && bottom != null
+                && Objects.equals(plan.getLimit(), top + bottom)
+                && (Objects.equals(hints.getRequiredLimit(), top)
+                        || Objects.equals(hints.getRequiredLimit(), bottom));
+    }
+
+    private Integer rankFilterLimit(BankQueryPlan plan, String field) {
+        return safe(plan.getFilters()).filter(filter -> field.equals(filter.getField()))
+                .map(BankQueryPlan.Filter::getValue).filter(StringUtils::isNotBlank).findFirst()
+                .map(value -> {
+                    try {
+                        return Integer.valueOf(value);
+                    } catch (NumberFormatException ignored) {
+                        return null;
+                    }
+                }).orElse(null);
     }
 
     private void validateOutput(BankQueryPlan plan, SemanticIntentHints hints,

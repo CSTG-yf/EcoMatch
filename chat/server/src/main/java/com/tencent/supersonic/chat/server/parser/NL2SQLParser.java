@@ -126,6 +126,10 @@ public class NL2SQLParser implements ChatQueryParser {
             int parserShowCount =
                     Integer.parseInt(parserConfig.getParameterValue(PARSER_SHOW_COUNT));
             SemanticParseInfo.sort(candidateParses);
+            // When multiple datasets are bound, keep bank-qualified candidates first so later LLM
+            // routing can enable BANK_CONSTRAINED_PLAN instead of free SQL on a non-bank dataset.
+            candidateParses.sort((left, right) -> Integer.compare(bankDatasetRank(right),
+                    bankDatasetRank(left)));
             parseContext.getResponse().setSelectedParses(
                     candidateParses.subList(0, Math.min(parserShowCount, candidateParses.size())));
             if (parseContext.getResponse().getSelectedParses().isEmpty()) {
@@ -182,6 +186,27 @@ public class NL2SQLParser implements ChatQueryParser {
         ChatLayerService chatLayerService = ContextUtils.getBean(ChatLayerService.class);
         ParseResp parseResp = chatLayerService.parse(req);
         copyParseResponse(parseResp, resp);
+    }
+
+    /**
+     * Higher rank means more preferred. Bank NL2SQL datasets win over unrelated bound datasets so
+     * constrained planning is selected for 银行问数-style agents that also bind fallback datasets.
+     */
+    private static int bankDatasetRank(SemanticParseInfo parseInfo) {
+        if (parseInfo == null || parseInfo.getDataSet() == null) {
+            return 0;
+        }
+        String name = parseInfo.getDataSet().getName();
+        if (name != null && (name.contains("银行") || name.toLowerCase().contains("bank"))) {
+            return 2;
+        }
+        boolean hasBankDimension = parseInfo.getElementMatches() != null && parseInfo
+                .getElementMatches().stream().filter(Objects::nonNull)
+                .map(SchemaElementMatch::getElement).filter(Objects::nonNull)
+                .map(element -> element.getBizName() == null ? "" : element.getBizName())
+                .anyMatch(bizName -> "bank_organization".equalsIgnoreCase(bizName)
+                        || "bank_data_date".equalsIgnoreCase(bizName));
+        return hasBankDimension ? 1 : 0;
     }
 
     static void copyParseResponse(ParseResp parseResp, ChatParseResp resp) {

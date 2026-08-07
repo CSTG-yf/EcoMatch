@@ -247,6 +247,11 @@ public class BankFinancialIntentRecognizer {
         if (annualDailyExtremaSummary) {
             score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构全年日均及极值统计表达");
         }
+        // Province-wide "which org hit the single-day max/min" must beat RANKING (highest/lowest
+        // wording) so the compiler-owned aggregation-summary template is selected.
+        if (isAnnualDailyExtremaRanking(text)) {
+            score(scores, BankIntentType.AGGREGATION, 0.996D, "命中全年单日极值机构定位表达");
+        }
         if (isDailyProvinceAverageCount(text, organizationCount)) {
             score(scores, BankIntentType.AGGREGATION, 0.995D,
                     "命中单机构逐日高于全省均值的天数统计表达");
@@ -376,8 +381,11 @@ public class BankFinancialIntentRecognizer {
             filters.add(FilterSlot.builder().field("benchmark").operator("COMPARE")
                     .value("PROVINCE_AVERAGE").sourceText("全省均值").build());
         }
+        // Annual single-day extrema placement ("单日最高值出现在哪家…最低值…") is an aggregation-summary
+        // contract, not a TopN rank filter; "最高/最低" here must not inject rank LTE 1.
         if (!comprehensivePerformanceProfile && !isAnnualDailyExtremaSummary(text)
-                && !isTrendExtremaSummary(text) && !isThresholdRequirement(text)) {
+                && !isAnnualDailyExtremaRanking(text) && !isTrendExtremaSummary(text)
+                && !isThresholdRequirement(text)) {
             Matcher topRank = Pattern.compile("(?:排名)?前([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
             if (topRank.find()) {
                 filters.add(FilterSlot.builder().field("rank").operator("LTE")
@@ -404,6 +412,19 @@ public class BankFinancialIntentRecognizer {
     private boolean isAnnualDailyExtremaSummary(String text) {
         return text.contains("全年") && containsAny(text, "日均", "均值", "平均") && text.contains("最高日")
                 && text.contains("最低日");
+    }
+
+    /**
+     * "2025年全年，各项贷款余额的单日最高值出现在哪家？单日最低值在哪家？" — no per-org daily average wording,
+     * only which institution owns the single-day extremes over the full year.
+     */
+    private boolean isAnnualDailyExtremaRanking(String text) {
+        if (text == null || !text.contains("全年") || isAnnualDailyExtremaSummary(text)) {
+            return false;
+        }
+        boolean hasMax = containsAny(text, "单日最高", "最高值");
+        boolean hasMin = containsAny(text, "单日最低", "最低值");
+        return hasMax && hasMin && containsAny(text, "哪家", "哪一", "哪个");
     }
 
     /**

@@ -52,6 +52,16 @@ public class LLMSqlParser implements SemanticParser {
             failConstrainedPlan(queryCtx, e);
             log.error("Failed to parse constrained bank query: type={}, error=[{}]",
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
+            // Also clear any free-SQL / rule candidates produced earlier in the same parse so they
+            // cannot be selected after a terminal bank miss. ChatWorkflowEngine rebuilds
+            // selectedParses from candidateQueries, so both lists must be emptied.
+            if (queryCtx.getParseResp() != null
+                    && queryCtx.getParseResp().getSelectedParses() != null) {
+                queryCtx.getParseResp().getSelectedParses().clear();
+            }
+            if (queryCtx.getCandidateQueries() != null) {
+                queryCtx.getCandidateQueries().clear();
+            }
         } catch (Exception e) {
             log.error("Failed to parse query: type={}, error=[{}]", e.getClass().getSimpleName(),
                     SensitiveLogUtils.summarize(e.getMessage()));
@@ -173,6 +183,9 @@ public class LLMSqlParser implements SemanticParser {
                                 ? ParseResp.BankCandidateRejectionState.NO_CANDIDATE
                                 : candidateRejectionState, candidateValidationErrorType,
                         candidateCompilerReason);
+                // Fail closed: never leave an empty bank attempt for rule/free SQL parsers to
+                // silently replace with unconstrained S2SQL on the same request.
+                throw BankNl2SqlError.noCandidate(candidateRejectionState, candidateCompilerReason);
             }
             return;
         }

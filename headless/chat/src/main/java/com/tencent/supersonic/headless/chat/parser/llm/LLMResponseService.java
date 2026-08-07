@@ -115,11 +115,21 @@ public class LLMResponseService {
         int candidateCount = 0;
         SqlErrorType validationErrorType = null;
         boolean inconsistentValidationErrorType = false;
+        boolean bankConstrainedPlan = llmReq != null
+                && LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType());
         for (Map.Entry<String, LLMSqlResp> entry : sqlRespMap.entrySet()) {
             candidateCount++;
             LLMSqlResp response = entry.getValue() == null
                     ? LLMSqlResp.builder().sqlWeight(0D).fewShots(new ArrayList<>()).build()
                     : entry.getValue();
+            // Compiler-owned bank S2SQL is already constrained by BankQueryPlanValidator +
+            // BankQueryPlanCompiler. Free-SQL structural gates (TopN ORDER BY/LIMIT, average
+            // comparison CTE heuristics, etc.) must not reject those candidates after the fact.
+            if (bankConstrainedPlan) {
+                double modelWeight = response.getSqlWeight();
+                candidates.add(new RankedCandidate(entry.getKey(), response, modelWeight + 1D));
+                continue;
+            }
             ComplexSqlValidationResult validation = complexSqlValidator.validate(entry.getKey(),
                     llmReq == null ? null : llmReq.getSchema(),
                     llmReq == null ? null : llmReq.getQueryText());

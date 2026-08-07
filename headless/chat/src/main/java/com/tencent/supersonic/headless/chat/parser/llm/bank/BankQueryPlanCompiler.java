@@ -235,7 +235,9 @@ public class BankQueryPlanCompiler {
     private boolean requiresDailyAggregationSummary(BankQueryPlan plan,
             List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
             List<Filter> metricFilters) {
-        return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() == 1
+        // size 0 = province-wide annual extrema (all institutions); size 1 = single-org summary.
+        return plan.getIntent() == BankIntentType.AGGREGATION
+                && plan.getOrganizations().size() <= 1
                 && !metrics.isEmpty() && metrics.stream().allMatch(metric -> metric.planMetric()
                         .getAggregation() == BankQueryPlan.Aggregation.AVG)
                 && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)

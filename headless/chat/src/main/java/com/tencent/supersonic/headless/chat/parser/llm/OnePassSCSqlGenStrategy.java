@@ -8,6 +8,8 @@ import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankFreeSqlPromptComposer;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.FixedSystemPrefixLlmCache;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.tencent.supersonic.headless.chat.parser.ParserConfig.PARSER_BANK_FREE_SQL_THINKING_ENABLE;
 import static com.tencent.supersonic.headless.chat.parser.ParserConfig.PARSER_FORMAT_JSON_TYPE;
 
 @Service
@@ -41,6 +44,13 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
 
     @Autowired
     private ParserConfig parserConfig;
+
+    /**
+     * Bank free-SQL prefix caches keyed by stable-schema fingerprint. System message includes
+     * frozen metric/dimension catalog so llama.cpp can KV-cache rules+schema; user is question-only.
+     */
+    private final ConcurrentHashMap<String, FixedSystemPrefixLlmCache> bankFreeSqlPrefixCaches =
+            new ConcurrentHashMap<>();
 
     public static final String INSTRUCTION =
             "#Role: You are a data analyst experienced in SQL languages."
@@ -84,18 +94,119 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
     public LLMResp generate(LLMReq llmReq) {
         LLMResp llmResp = new LLMResp();
         llmResp.setQuery(llmReq.getQueryText());
-        // 1.recall exemplars
         log.debug("OnePassSCSqlGenStrategy request=[{}]", SensitiveLogUtils.summarize(llmReq));
-        List<List<Text2SQLExemplar>> exemplarsList = promptHelper.getFewShotExemplars(llmReq);
 
-        // 2.generate sql generation prompt for each self-consistency inference
+        String dataSemantics = promptHelper.buildSchemaStr(llmReq);
+        String sideInformation = promptHelper.buildSideInformation(llmReq);
+        llmResp.setSchema(dataSemantics);
+        llmResp.setSideInfo(sideInformation);
+
         ChatApp chatApp = llmReq.getChatAppConfig().get(APP_KEY);
         ChatModelConfig chatModelConfig = chatApp.getChatModelConfig();
-        if (!StringUtils.isBlank(parserConfig.getParameterValue(PARSER_FORMAT_JSON_TYPE))) {
+        boolean bankDataset = BankFreeSqlPromptComposer.isBankSchema(llmReq.getSchema());
+        boolean bankThinking = bankDataset && Boolean.parseBoolean(
+                parserConfig.getParameterValue(PARSER_BANK_FREE_SQL_THINKING_ENABLE));
+        // Deep thinking emits reasoning tokens before JSON; forced json_object breaks many servers.
+        if (!bankThinking
+                && !StringUtils.isBlank(parserConfig.getParameterValue(PARSER_FORMAT_JSON_TYPE))) {
             chatModelConfig.setJsonFormat(true);
             chatModelConfig
                     .setJsonFormatType(parserConfig.getParameterValue(PARSER_FORMAT_JSON_TYPE));
+        } else if (bankThinking) {
+            chatModelConfig.setJsonFormat(false);
+            if (chatModelConfig.getTimeOut() == null || chatModelConfig.getTimeOut() < 300L) {
+                chatModelConfig.setTimeOut(300L);
+            }
         }
+
+        boolean hasLlamaBaseUrl =
+                chatModelConfig != null && StringUtils.isNotBlank(chatModelConfig.getBaseUrl());
+        if (bankDataset && hasLlamaBaseUrl) {
+            return generateBankFreeSqlWithPrefix(llmReq, llmResp, chatModelConfig, dataSemantics,
+                    sideInformation, bankThinking);
+        }
+        if (bankDataset && !hasLlamaBaseUrl) {
+            keyPipelineLog.warn(
+                    "OnePassSCSqlGenStrategy bank dataset but chatModelConfig.baseUrl blank; falling back to blob prompt (no prefix KV)");
+        }
+        return generateGeneric(llmReq, llmResp, chatApp, chatModelConfig, dataSemantics,
+                sideInformation);
+    }
+
+    /**
+     * Bank free-SQL via llama.cpp system/user split + cache_prompt (real prefix KV).
+     *
+     * <p>System = rules + <b>frozen full schema catalog</b> (prefix-cached). User = question +
+     * SideInfo only, so hits should leave only a short prompt_n.
+     */
+    private LLMResp generateBankFreeSqlWithPrefix(LLMReq llmReq, LLMResp llmResp,
+            ChatModelConfig chatModelConfig, String dataSemantics, String sideInformation,
+            boolean enableThinking) {
+        String stableSchema = BankFreeSqlPromptComposer.buildStableSchemaBlock(llmReq.getSchema());
+        String systemPrefix = BankFreeSqlPromptComposer.composeSystemPrefix(stableSchema);
+        // Thinking flag is part of the cache identity so non-thinking warm-ups are not reused.
+        String prefixVersion = BankFreeSqlPromptComposer.prefixVersion(stableSchema)
+                + (enableThinking ? ":think" : ":nothink");
+        final boolean thinking = enableThinking;
+        FixedSystemPrefixLlmCache cache = bankFreeSqlPrefixCaches.computeIfAbsent(prefixVersion,
+                key -> new FixedSystemPrefixLlmCache(systemPrefix, key, 256, false,
+                        BankFreeSqlPromptComposer.freeSqlWarmProbe(), thinking,
+                        thinking ? 8192 : 0));
+
+        keyPipelineLog.info(
+                "OnePassSCSqlGenStrategy bank free-SQL prefix path version={} schemaInPrefix=true thinking={} skipFewShot=true serial=true stableSchemaChars={}",
+                prefixVersion, enableThinking, stableSchema.length());
+
+        List<Text2SQLExemplar> emptyExemplars = Lists.newArrayList();
+        ChatLanguageModel chatLanguageModel = getChatLanguageModel(chatModelConfig);
+
+        String valuesHint = extractValuesHint(dataSemantics);
+        String userContent = BankFreeSqlPromptComposer.buildQuestionOnlyUserContent(
+                llmReq.getQueryText(), sideInformation, valuesHint);
+        String raw =
+                cache.generate(chatLanguageModel, chatModelConfig, userContent, false);
+        String sql = BankFreeSqlPromptComposer.extractSql(raw);
+        if (StringUtils.isBlank(sql)) {
+            log.warn("OnePass bank free-SQL empty sql from model, rawChars={}",
+                    raw == null ? 0 : raw.length());
+            llmResp.setSqlOutput("");
+            llmResp.setSqlRespMap(Map.of());
+            return llmResp;
+        }
+        if (BankFreeSqlPromptComposer.looksInvalidBankS2Sql(sql)) {
+            keyPipelineLog.warn(
+                    "OnePassSCSqlGenStrategy bank S2SQL looks invalid (long-table/ZB-column style) sql=[{}]",
+                    SensitiveLogUtils.summarize(sql));
+        }
+        keyPipelineLog.info(
+                "OnePassSCSqlGenStrategy bankPrefix modelUser=[{}], modelResp=[{}], sql=[{}], invalidStyle={}, userChars={}",
+                SensitiveLogUtils.summarize(userContent), SensitiveLogUtils.summarize(raw),
+                SensitiveLogUtils.summarize(sql),
+                BankFreeSqlPromptComposer.looksInvalidBankS2Sql(sql), userContent.length());
+
+        Map<String, Double> vote = new HashMap<>();
+        vote.put(sql, 1.0d);
+        llmResp.setSqlOutput(sql);
+        llmResp.setSqlRespMap(ResponseHelper.buildSqlRespMap(emptyExemplars, vote));
+        keyPipelineLog.info("OnePassSCSqlGenStrategy bank free-SQL prefix stats={}", cache.stats());
+        return llmResp;
+    }
+
+    /** Pull Values=[...] from full schema string if present (per-question linking). */
+    private static String extractValuesHint(String fullSchemaStr) {
+        if (fullSchemaStr == null) {
+            return "";
+        }
+        int idx = fullSchemaStr.indexOf("Values=[");
+        if (idx < 0) {
+            return "";
+        }
+        return fullSchemaStr.substring(idx);
+    }
+
+    private LLMResp generateGeneric(LLMReq llmReq, LLMResp llmResp, ChatApp chatApp,
+            ChatModelConfig chatModelConfig, String dataSemantics, String sideInformation) {
+        List<List<Text2SQLExemplar>> exemplarsList = promptHelper.getFewShotExemplars(llmReq);
         ChatLanguageModel chatLanguageModel = getChatLanguageModel(chatModelConfig);
         SemanticSqlExtractor extractor =
                 AiServices.create(SemanticSqlExtractor.class, chatLanguageModel);
@@ -103,11 +214,10 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
         Map<Prompt, List<Text2SQLExemplar>> prompt2Exemplar = new HashMap<>();
         for (List<Text2SQLExemplar> exemplars : exemplarsList) {
             llmReq.setDynamicExemplars(exemplars);
-            Prompt prompt = generatePrompt(llmReq, llmResp, chatApp);
+            Prompt prompt = generatePrompt(llmReq, llmResp, chatApp, dataSemantics, sideInformation);
             prompt2Exemplar.put(prompt, exemplars);
         }
 
-        // 3.perform multiple self-consistency inferences parallelly
         Map<String, Prompt> output2Prompt = new ConcurrentHashMap<>();
         prompt2Exemplar.keySet().parallelStream().forEach(prompt -> {
             SemanticSql s2Sql = extractor.generateSemanticSql(prompt.toUserMessage().singleText());
@@ -116,18 +226,17 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
                     SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(s2Sql));
         });
 
-        // 4.format response.
         Pair<String, Map<String, Double>> sqlMapPair =
                 ResponseHelper.selfConsistencyVote(Lists.newArrayList(output2Prompt.keySet()));
         llmResp.setSqlOutput(sqlMapPair.getLeft());
         List<Text2SQLExemplar> usedExemplars =
                 prompt2Exemplar.get(output2Prompt.get(sqlMapPair.getLeft()));
         llmResp.setSqlRespMap(ResponseHelper.buildSqlRespMap(usedExemplars, sqlMapPair.getRight()));
-
         return llmResp;
     }
 
-    private Prompt generatePrompt(LLMReq llmReq, LLMResp llmResp, ChatApp chatApp) {
+    private Prompt generatePrompt(LLMReq llmReq, LLMResp llmResp, ChatApp chatApp,
+            String dataSemantics, String sideInformation) {
         StringBuilder exemplars = new StringBuilder();
         for (Text2SQLExemplar exemplar : llmReq.getDynamicExemplars()) {
             String exemplarStr = String.format("\nQuestion:%s,Schema:%s,SideInfo:%s,SQL:%s",
@@ -135,10 +244,6 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
                     exemplar.getSql());
             exemplars.append(exemplarStr);
         }
-        String dataSemantics = promptHelper.buildSchemaStr(llmReq);
-        String sideInformation = promptHelper.buildSideInformation(llmReq);
-        llmResp.setSchema(dataSemantics);
-        llmResp.setSideInfo(sideInformation);
 
         Map<String, Object> variable = new HashMap<>();
         variable.put("exemplar", exemplars);
@@ -146,8 +251,14 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
         variable.put("schema", dataSemantics);
         variable.put("information", sideInformation);
 
-        // use custom prompt template if provided.
-        String promptTemplate = chatApp.getPrompt();
+        String promptTemplate = BankFreeSqlPromptComposer.selectPromptTemplate(llmReq.getSchema(),
+                chatApp != null && StringUtils.isNotBlank(chatApp.getPrompt()) ? chatApp.getPrompt()
+                        : INSTRUCTION);
+        if (BankFreeSqlPromptComposer.isBankSchema(llmReq.getSchema())) {
+            keyPipelineLog.info(
+                    "OnePassSCSqlGenStrategy using bank free-SQL blob prompt version={} (no llama.cpp baseUrl)",
+                    BankFreeSqlPromptComposer.PROMPT_VERSION);
+        }
         return PromptTemplate.from(promptTemplate).apply(variable);
     }
 

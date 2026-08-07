@@ -36,6 +36,9 @@ public class BankQueryPlanResponseParser {
                         "model response must contain one JSON object");
             }
             BankQueryPlan plan = OBJECT_MAPPER.readValue(json, BankQueryPlan.class);
+            // Rewrite Chinese display labels (e.g. 各项存款余额) to ZB### / bank_* ids before the
+            // strict evidence validator runs — otherwise a correct plan fails on output.columns.
+            plan = BankQueryPlanAliasNormalizer.normalize(plan, hints);
             BankQueryPlanValidator.ValidationResult validation = validator.validate(plan, hints);
             if (!validation.isValid()) {
                 throw new BankQueryPlanParseException(

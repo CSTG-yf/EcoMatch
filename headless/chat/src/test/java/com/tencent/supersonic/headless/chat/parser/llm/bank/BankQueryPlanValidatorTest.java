@@ -43,6 +43,49 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void shouldAcceptFullYearPlanWhenMapperClampedEndDateWithinSameYear() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.AGGREGATION)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.AVG).build()))
+                .dimensions(List.of("bank_organization")).organizations(List.of())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                        .endDate(LocalDate.of(2025, 12, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of()).output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", "ZB002")).orderSensitive(true).build())
+                .build();
+        // Mapper evidence said RANKING (highest/lowest wording) with a clamped end date.
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB002")).allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 8, 7)).maxLimit(1000).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
+    void shouldAcceptPlanWhenMapperProvidedNoTimeRange() {
+        BankQueryPlan plan = completeRankingPlan();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredLimit(3).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
     void shouldRejectPhysicalSqlAndUnknownOrganizationInsteadOfExecutingThem() {
         BankQueryPlan plan = completeRankingPlan();
         plan.getMetrics().get(0).setBizName("sum(deposit_balance)");
