@@ -6,6 +6,12 @@ settings:
 
 importers:
 
+  .:
+    dependencies:
+      supersonic-chat-sdk:
+        specifier: link:packages/chat-sdk
+        version: link:packages/chat-sdk
+
   packages/chat-sdk:
     dependencies:
       '@ant-design/icons':

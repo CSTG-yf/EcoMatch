@@ -92,8 +92,8 @@ public class SqlExecutor implements ChatQueryExecutor {
         QuerySqlReq sqlReq = QuerySqlReq.builder().sql(scopeSql).build();
         sqlReq.setSqlInfo(parseInfo.getSqlInfo());
         sqlReq.setDataSetId(parseInfo.getDataSetId());
-        sqlReq.setTrustedCompiledSql(StringUtils
-                .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
+        sqlReq.setTrustedCompiledSql(
+                StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
 
         long startTime = System.currentTimeMillis();
         QueryResult queryResult = new QueryResult();
@@ -147,12 +147,12 @@ public class SqlExecutor implements ChatQueryExecutor {
         return queryResult;
     }
 
-    private void persistExecutionTelemetry(SemanticParseInfo parseInfo,
-            SemanticQueryResp queryResp, boolean repairAttempted, boolean repaired) {
+    private void persistExecutionTelemetry(SemanticParseInfo parseInfo, SemanticQueryResp queryResp,
+            boolean repairAttempted, boolean repaired) {
         Map<String, Object> telemetry = new LinkedHashMap<>();
         Map<String, Object> responseTelemetry = queryResp.getExecutionTelemetry();
-        Object failureLayer = responseTelemetry == null
-                ? null : responseTelemetry.get("failureLayer");
+        Object failureLayer =
+                responseTelemetry == null ? null : responseTelemetry.get("failureLayer");
         if (failureLayer instanceof String layer && EXECUTION_FAILURE_LAYERS.contains(layer)) {
             telemetry.put("failureLayer", layer);
         }

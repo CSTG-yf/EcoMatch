@@ -49,8 +49,8 @@ class SqlExecutorTest {
         SqlInfo sqlInfo = parseInfo.getSqlInfo();
         sqlInfo.setCorrectedS2SQL(correctedS2Sql);
         sqlInfo.setQuerySQL(physicalSql);
-        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder()
-                .user(user).chatId(7).queryId(9L).queryText("查询存款余额").build());
+        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder().user(user)
+                .chatId(7).queryId(9L).queryText("查询存款余额").build());
         executeContext.setParseInfo(parseInfo);
 
         new SqlExecutor().execute(executeContext);
@@ -83,8 +83,8 @@ class SqlExecutorTest {
 
         SemanticParseInfo parseInfo = new SemanticParseInfo();
         parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT metric");
-        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder()
-                .user(user).chatId(7).queryId(9L).queryText("query").build());
+        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder().user(user)
+                .chatId(7).queryId(9L).queryText("query").build());
         executeContext.setParseInfo(parseInfo);
 
         new SqlExecutor().execute(executeContext);
@@ -92,8 +92,9 @@ class SqlExecutorTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> telemetry =
                 (Map<String, Object>) parseInfo.getProperties().get("executionTelemetry");
-        assertEquals(Map.of("failureLayer", "JDBC_GRAMMAR", "repairAttempted", false,
-                "repaired", false), telemetry);
+        assertEquals(
+                Map.of("failureLayer", "JDBC_GRAMMAR", "repairAttempted", false, "repaired", false),
+                telemetry);
         assertTrue(parseInfo.getProperties().values().stream()
                 .noneMatch(value -> String.valueOf(value).contains("opaque-details")));
         assertTrue(!parseInfo.getProperties().containsKey("sqlExecutionFeedback"));

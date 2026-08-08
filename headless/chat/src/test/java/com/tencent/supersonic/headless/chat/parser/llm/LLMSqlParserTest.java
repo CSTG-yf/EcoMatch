@@ -36,10 +36,8 @@ class LLMSqlParserTest {
 
         when(requestService.getDataSetId(queryCtx)).thenReturn(33L);
         when(requestService.getLlmReq(queryCtx, 33L)).thenReturn(llmReq);
-        when(requestService.runText2SQL(llmReq)).thenThrow(
-                new BankPlanCompilationException(
-                        BankPlanCompilationException.Reason.DIMENSION_UNAVAILABLE,
-                        "opaque-details"));
+        when(requestService.runText2SQL(llmReq)).thenThrow(new BankPlanCompilationException(
+                BankPlanCompilationException.Reason.DIMENSION_UNAVAILABLE, "opaque-details"));
 
         try (MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
             contextUtils.when(() -> ContextUtils.getBean(LLMRequestService.class))

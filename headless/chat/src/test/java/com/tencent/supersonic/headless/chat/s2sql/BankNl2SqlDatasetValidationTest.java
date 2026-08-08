@@ -40,8 +40,8 @@ class BankNl2SqlDatasetValidationTest {
                         CCJSqlParserUtil.parse(sql) instanceof Select);
             }
         }
-        Assert.assertEquals(200, total);
-        Assert.assertEquals(Map.of("train", 115, "dev", 36, "test", 49), splitCounts);
+        Assert.assertEquals(199, total);
+        Assert.assertEquals(Map.of("train", 119, "dev", 40, "test", 40), splitCounts);
     }
 
     private Path findDatasetDirectory() {

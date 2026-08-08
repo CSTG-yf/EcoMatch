@@ -64,9 +64,9 @@ final class BankS2SqlTemplateFactory {
         String joinConditions = context.dimensions().stream()
                 .map(dimension -> "bank_current." + dimension + " = bank_baseline." + dimension)
                 .collect(Collectors.joining(" AND "));
-        String orderBy =
-                context.dimensions().stream().map(dimension -> "bank_current." + dimension + " ASC")
-                        .collect(Collectors.joining(", "));
+        String orderBy = "metric_code ASC, " + context.dimensions().stream()
+                .map(dimension -> "bank_current." + dimension + " ASC")
+                .collect(Collectors.joining(", "));
         return """
                 WITH bank_current AS (
                   SELECT %s
@@ -79,7 +79,7 @@ final class BankS2SqlTemplateFactory {
                   WHERE %s
                   %s
                 )
-                SELECT %s, current_value, baseline_value,
+                SELECT %s, '%s' AS metric_code, current_value, baseline_value,
                        current_value - baseline_value AS absolute_change,
                        CASE WHEN baseline_value = 0 THEN NULL
                             ELSE (current_value - baseline_value) * 100.0 / baseline_value END AS percent_change
@@ -89,7 +89,7 @@ final class BankS2SqlTemplateFactory {
                 """
                 .formatted(currentSelect, context.dataSetName(), currentWhere, groupBy,
                         baselineSelect, context.dataSetName(), baselineWhere, groupBy,
-                        dimensionSelect, joinConditions, orderBy)
+                        dimensionSelect, metric, joinConditions, orderBy)
                 .trim();
     }
 
@@ -245,6 +245,72 @@ final class BankS2SqlTemplateFactory {
                 orderBy).trim();
     }
 
+    String compileOutletAverage(TemplateContext context, String depositMetric,
+            String outletCountMetric) {
+        if (!context.metricFilters().isEmpty()
+                || !context.dimensions().equals(List.of("bank_organization"))) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "outlet average requires the organization dimension and no metric filter");
+        }
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        return """
+                WITH bank_outlet_average AS (
+                  SELECT bank_organization,
+                         SUM(%s) AS deposit_value,
+                         SUM(%s) AS outlet_count
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                )
+                SELECT bank_organization, deposit_value, outlet_count,
+                       CASE WHEN outlet_count = 0 THEN NULL
+                            ELSE deposit_value * 10000.0 / outlet_count END
+                         AS deposit_per_outlet_wanyuan
+                FROM bank_outlet_average
+                ORDER BY bank_organization ASC
+                """.formatted(depositMetric, outletCountMetric, context.dataSetName(), where)
+                .trim();
+    }
+
+    /**
+     * Compiles one common-denominator ratio per selected numerator. This stays template-owned so
+     * the model never controls arithmetic, metric literals, SQL clauses, or result ordering.
+     */
+    String compileMultiRatio(TemplateContext context) {
+        if (context.metrics().size() < 3 || !context.dimensions().isEmpty()
+                || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-ratio requires two or more metrics, no dimensions, and no metric filter");
+        }
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        ResolvedMetric denominator = context.metrics().get(context.metrics().size() - 1);
+        List<String> numeratorSelects = new ArrayList<>();
+        for (int index = 0; index < context.metrics().size() - 1; index++) {
+            ResolvedMetric numerator = context.metrics().get(index);
+            numeratorSelects.add("""
+                    SELECT '%s' AS metric_code, SUM(%s) AS numerator_value,
+                           SUM(%s) AS denominator_value
+                    FROM %s
+                    WHERE %s
+                    """.formatted(numerator.metricCode(), numerator.identifier(),
+                    denominator.identifier(), context.dataSetName(), where).trim());
+        }
+        return """
+                WITH bank_multi_ratio AS (
+                %s
+                )
+                SELECT metric_code, numerator_value, denominator_value,
+                       CASE WHEN denominator_value = 0 THEN NULL
+                            ELSE numerator_value * 100.0 / denominator_value END AS ratio_percent
+                FROM bank_multi_ratio
+                ORDER BY metric_code ASC
+                """.formatted(String.join("\nUNION ALL\n", numeratorSelects)).trim();
+    }
+
     /**
      * Filters selected organizations outside the semantic aggregation. The semantic translator
      * renders a dimension as a physical column with its semantic name as an alias, so putting a
@@ -341,11 +407,11 @@ final class BankS2SqlTemplateFactory {
     }
 
     /**
-     * Per-day province-average comparison: keeps every organization's daily value inside the
-     * range, computes the daily province average per bank_data_date, then compares only the
-     * selected organization against that daily average with a strict greater-than. The selected
-     * organization is filtered after the daily averages exist and never summed across the period
-     * before the comparison.
+     * Per-day province-average comparison: keeps every organization's daily value inside the range,
+     * computes the daily province average per bank_data_date, then compares only the selected
+     * organization against that daily average with a strict greater-than. The selected organization
+     * is filtered after the daily averages exist and never summed across the period before the
+     * comparison.
      */
     String compileDaysAboveProvinceAverage(TemplateContext context) {
         requireSingleMetricWithoutMetricFilters(context, "days-above-province-average count");
@@ -467,8 +533,7 @@ final class BankS2SqlTemplateFactory {
                   GROUP BY bank_organization
                 )
                 """.formatted(dailyValues, context.dateField(), metric, context.dataSetName(),
-                where, aggregation, dailyValues)
-                .trim();
+                where, aggregation, dailyValues).trim();
     }
 
     private String aggregationSummaryProjection(ResolvedMetric metric, int index,
@@ -513,13 +578,13 @@ final class BankS2SqlTemplateFactory {
     /**
      * Full-population ranking over direct metrics plus derived ratios (e.g. 存贷比 =
      * DERIVED_ZB002_DIV_ZB001). Every metric ranks all organizations first; the selected
-     * organization restriction is applied only outside the ranking. Derived ratios are computed
-     * as numerator / NULLIF(denominator, 0) * 100 and rows without a usable ratio (missing
-     * numerator data or a zero denominator) are excluded before ROW_NUMBER, so an invalid ratio
-     * can never receive or fabricate a rank position. Direct metrics keep their business
-     * direction (ZB012/ZB013/ZB017 lower-is-better ASC, otherwise DESC); derived ratios always
-     * rank DESC. All ranks are stable ROW_NUMBER ordinals with organization-code ASC tie breaks,
-     * and the final result is ordered metric_code ASC, bank_organization ASC.
+     * organization restriction is applied only outside the ranking. Derived ratios are computed as
+     * numerator / NULLIF(denominator, 0) * 100 and rows without a usable ratio (missing numerator
+     * data or a zero denominator) are excluded before ROW_NUMBER, so an invalid ratio can never
+     * receive or fabricate a rank position. Direct metrics keep their business direction
+     * (ZB012/ZB013/ZB017 lower-is-better ASC, otherwise DESC); derived ratios always rank DESC. All
+     * ranks are stable ROW_NUMBER ordinals with organization-code ASC tie breaks, and the final
+     * result is ordered metric_code ASC, bank_organization ASC.
      */
     String compileDerivedMetricRanking(TemplateContext context) {
         if (context.plan().getDerivedMetrics().isEmpty() || !context.metricFilters().isEmpty()) {
@@ -550,8 +615,8 @@ final class BankS2SqlTemplateFactory {
                     )
                     """.formatted(cte, metric.metricCode(), metric.identifier(),
                     context.dataSetName(), where).trim());
-            rankedSelects.add(rankedSelect(cte,
-                    BankResultProjector.rankingDirection(metric.metricCode())));
+            rankedSelects.add(
+                    rankedSelect(cte, BankResultProjector.rankingDirection(metric.metricCode())));
             metricIndex++;
         }
         for (BankQueryPlan.DerivedMetric derived : context.plan().getDerivedMetrics()) {
@@ -577,9 +642,8 @@ final class BankS2SqlTemplateFactory {
                 SELECT metric_code, bank_organization, metric_value, rank_position
                 FROM bank_ranked%s
                 ORDER BY metric_code ASC, bank_organization ASC
-                """.formatted(String.join(",\n", ctes),
-                String.join("\nUNION ALL\n", rankedSelects), selectedOrganizationsWhere(context))
-                .trim();
+                """.formatted(String.join(",\n", ctes), String.join("\nUNION ALL\n", rankedSelects),
+                selectedOrganizationsWhere(context)).trim();
     }
 
     private String rankedSelect(String cte, String direction) {
@@ -588,7 +652,8 @@ final class BankS2SqlTemplateFactory {
                        ROW_NUMBER() OVER (ORDER BY metric_value %s, bank_organization ASC) AS rank_position
                 FROM %s
                 WHERE metric_value IS NOT NULL
-                """.formatted(direction, cte).trim();
+                """
+                .formatted(direction, cte).trim();
     }
 
     private String selectedOrganizationsWhere(TemplateContext context) {

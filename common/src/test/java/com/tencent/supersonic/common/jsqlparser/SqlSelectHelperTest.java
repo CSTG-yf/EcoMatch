@@ -178,6 +178,27 @@ class SqlSelectHelperTest {
     }
 
     @Test
+    void getAllSelectFieldsKeepsCteSourceFieldWhenOuterQueryAliasesIt() {
+        String sql = """
+                WITH bank_current AS (
+                  SELECT bank_organization, SUM(zb001) AS current_value
+                  FROM 银行日指标数据集
+                  WHERE 数据日期 >= '2026-03-31' AND 数据日期 <= '2026-03-31'
+                  GROUP BY bank_organization
+                )
+                SELECT bank_current.bank_organization AS bank_organization, current_value
+                FROM bank_current
+                ORDER BY bank_organization
+                """;
+
+        List<String> fields = SqlSelectHelper.getAllSelectFields(sql);
+
+        Assert.assertTrue(fields.contains("bank_organization"));
+        Assert.assertTrue(fields.contains("zb001"));
+        Assert.assertTrue(fields.contains("数据日期"));
+    }
+
+    @Test
     void testGetSelectFields() {
 
         String sql = "select 部门,sum (访问次数) from 超音数 where 数据日期 = '2023-08-08' "

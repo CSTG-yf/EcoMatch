@@ -105,7 +105,8 @@ public class LLMRequestService {
             boolean bankConstrainedPlanEnabled) {
         boolean bankDatasetQualified = isBankDataset(availableDimensions, dataSetId);
         LLMReq.SqlGenType selectedSqlGenType = bankConstrainedPlanEnabled && bankDatasetQualified
-                ? LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN : configuredSqlGenType;
+                ? LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN
+                : configuredSqlGenType;
         return new BankRoutingDecision(bankConstrainedPlanEnabled, bankDatasetQualified,
                 selectedSqlGenType);
     }

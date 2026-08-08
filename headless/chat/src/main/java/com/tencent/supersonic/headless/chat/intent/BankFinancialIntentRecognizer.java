@@ -161,6 +161,18 @@ public class BankFinancialIntentRecognizer {
             addMetric(matches, "ZB002", "存贷比贷款口径");
             addMetric(matches, "ZB001", "存贷比存款口径");
         }
+        if (text.contains("对公") && text.contains("个人") && text.contains("分别")
+                && containsAny(text, "占比", "比例", "比重")) {
+            if (text.contains("存款")) {
+                addMetric(matches, "ZB003", "对公与个人存款占比分子");
+                addMetric(matches, "ZB004", "对公与个人存款占比分子");
+                addMetric(matches, "ZB001", "对公与个人存款占比分母");
+            } else if (text.contains("贷款")) {
+                addMetric(matches, "ZB005", "对公与个人贷款占比分子");
+                addMetric(matches, "ZB006", "对公与个人贷款占比分子");
+                addMetric(matches, "ZB002", "对公与个人贷款占比分母");
+            }
+        }
         if (text.contains("风险指标")) {
             for (String code : List.of("ZB013", "ZB015", "ZB017", "ZB016")) {
                 addMetric(matches, code, "风险指标组合口径");
@@ -176,9 +188,9 @@ public class BankFinancialIntentRecognizer {
 
     /**
      * Extracts derived metric candidates from the lexicon. A derived metric is a runtime-defined
-     * ratio contract (e.g. 存贷比 = ZB002 / ZB001) and is never exposed as a schema base metric:
-     * the base operands stay in {@link BankIntentResult#getMetrics()} while the derived
-     * specification lives in its own candidate list.
+     * ratio contract (e.g. 存贷比 = ZB002 / ZB001) and is never exposed as a schema base metric: the
+     * base operands stay in {@link BankIntentResult#getMetrics()} while the derived specification
+     * lives in its own candidate list.
      */
     private List<DerivedMetricCandidate> extractDerivedMetrics(String text) {
         List<DerivedMetricCandidate> result = new ArrayList<>();
@@ -229,7 +241,8 @@ public class BankFinancialIntentRecognizer {
         }
         if (containsAny(text, "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "增长", "下降", "变动",
                 "变化", "从") && containsAny(text, "到", "比", "较", "变化", "增长", "下降", "变动")) {
-            score(scores, BankIntentType.CHANGE, 0.98D, "命中期间变化或衍生比较表达");
+            score(scores, BankIntentType.CHANGE, isGrowthRanking(text) ? 0.99D : 0.98D,
+                    isGrowthRanking(text) ? "命中增幅排名，先比较端点再展示排名" : "命中期间变化或衍生比较表达");
         }
         if (containsAny(text, "占比", "比例", "比重", "除以", "存贷比", "净利润率")) {
             score(scores, BankIntentType.RATIO, 0.98D, "命中比率计算表达");
@@ -248,8 +261,7 @@ public class BankFinancialIntentRecognizer {
             score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构全年日均及极值统计表达");
         }
         if (isDailyProvinceAverageCount(text, organizationCount)) {
-            score(scores, BankIntentType.AGGREGATION, 0.995D,
-                    "命中单机构逐日高于全省均值的天数统计表达");
+            score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构逐日高于全省均值的天数统计表达");
         }
         if ((organizationCount >= 2 && containsAny(text, "谁", "更", "比", "差"))
                 || containsAny(text, "两家相比", "机构间比较")) {
@@ -263,6 +275,11 @@ public class BankFinancialIntentRecognizer {
                         .confidence(entry.getValue().score()).reason(entry.getValue().reason())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    private boolean isGrowthRanking(String text) {
+        return containsAny(text, "排名", "第几", "前三", "后三", "前3", "后3")
+                && containsAny(text, "增幅", "增量", "增长", "下降", "变动", "变化", "同比", "环比");
     }
 
     private TimeSlot extractTime(String text, LocalDate referenceDate) {
@@ -373,6 +390,11 @@ public class BankFinancialIntentRecognizer {
             }
         }
         if (containsAny(text, "全省平均", "全省均值", "平均水平")) {
+            String comparisonOperator = provinceAverageComparisonOperator(text);
+            if (comparisonOperator != null) {
+                filters.add(FilterSlot.builder().field("metric_value").operator(comparisonOperator)
+                        .value("PROVINCE_AVERAGE").sourceText("与全省均值比较").build());
+            }
             filters.add(FilterSlot.builder().field("benchmark").operator("COMPARE")
                     .value("PROVINCE_AVERAGE").sourceText("全省均值").build());
         }
@@ -423,9 +445,8 @@ public class BankFinancialIntentRecognizer {
         if (!benchmark || !dayCount || !comparison) {
             return false;
         }
-        return !containsAny(text, "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续",
-                "全年变化", "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动",
-                "变化");
+        return !containsAny(text, "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续", "全年变化",
+                "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动", "变化");
     }
 
     private boolean isTrendExtremaSummary(String text) {
@@ -607,6 +628,22 @@ public class BankFinancialIntentRecognizer {
             case "不低于", "至少" -> "GTE";
             default -> "LTE";
         };
+    }
+
+    private String provinceAverageComparisonOperator(String text) {
+        if (containsAny(text, "不低于", "至少")) {
+            return "GTE";
+        }
+        if (containsAny(text, "不高于", "至多")) {
+            return "LTE";
+        }
+        if (containsAny(text, "低于", "小于")) {
+            return "LT";
+        }
+        if (containsAny(text, "高于", "超过", "大于")) {
+            return "GT";
+        }
+        return null;
     }
 
     private TimeSlot time(String expression, LocalDate start, LocalDate end, String granularity) {

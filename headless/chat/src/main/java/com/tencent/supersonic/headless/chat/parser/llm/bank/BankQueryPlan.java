@@ -47,7 +47,7 @@ public class BankQueryPlan {
                     "operator":{"type":"string"},"value":{"type":"string"},"values":{"type":"array",
                     "items":{"type":"string"}}}}},"calculation":{"type":"object","additionalProperties":false,
                     "required":["type"],"properties":{"type":{"enum":["DIRECT","CHANGE","RATIO",
-                    "COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"]},
+                    "MULTI_RATIO","COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"]},
                     "baseline":{"type":"string"}}},"orderBy":{"type":"array","items":{"type":"object",
                     "additionalProperties":false,"required":["field","direction"],"properties":{"field":{"type":"string"},
                     "direction":{"enum":["ASC","DESC"]}}}},"limit":{"type":"integer","minimum":1},
@@ -97,7 +97,7 @@ public class BankQueryPlan {
     }
 
     public enum CalculationType {
-        DIRECT, CHANGE, RATIO, COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+        DIRECT, CHANGE, RATIO, MULTI_RATIO, COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
     }
 
     public enum SortDirection {

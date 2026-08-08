@@ -33,9 +33,11 @@ class BankNl2SqlExecutionCoordinatorTest {
         assertEquals("STRUCT", candidate.diagnostics().get("bank.nl2sql.route"));
         assertEquals(candidate.getFingerprint(),
                 candidate.diagnostics().get("bank.nl2sql.fingerprint"));
-        assertEquals(Map.of("generator", "BANK_CONSTRAINED_PLAN", "planIntent", "RANKING",
-                "timeComparison", "NONE", "calculationType", "DIRECT", "route", "STRUCT",
-                "templateCategory", "STRUCT"), candidate.diagnostics().get("bankTelemetry"));
+        assertEquals(
+                Map.of("generator", "BANK_CONSTRAINED_PLAN", "planIntent", "RANKING",
+                        "timeComparison", "NONE", "calculationType", "DIRECT", "route", "STRUCT",
+                        "templateCategory", "STRUCT"),
+                candidate.diagnostics().get("bankTelemetry"));
     }
 
     @Test

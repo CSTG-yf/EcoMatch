@@ -96,11 +96,30 @@ public class BankQueryPlanCompiler {
                         dimensions.stream().map(ResolvedDimension::identifier).toList(),
                         dateField(index.partitionTime()), executionDimensionFilters, metricFilters);
 
+        if (plan.getCalculation().getType() == BankQueryPlan.CalculationType.MULTI_RATIO) {
+            if (plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE) {
+                throw new BankPlanCompilationException(
+                        BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                        "multi-ratio requires a single non-comparative time range");
+            }
+            return CompiledQuery.s2sql(templateFactory.compileMultiRatio(templateContext),
+                    List.of("metric_code", "numerator_value", "denominator_value", "ratio_percent"),
+                    multiRatioResultContract(plan, dimensions, index));
+        }
+
         boolean directCalculation = plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT
                 || plan.getCalculation().getType() == BankQueryPlan.CalculationType
                         .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
         if (directCalculation
                 && plan.getTime().getComparison() == BankQueryPlan.TimeComparison.NONE) {
+            if (requiresOutletAverage(plan, metrics, dimensions, metricFilters)) {
+                return CompiledQuery.s2sql(
+                        templateFactory.compileOutletAverage(templateContext, metrics.get(0).identifier(),
+                                metrics.get(1).identifier()),
+                        List.of(ORGANIZATION_DIMENSION, "deposit_value", "outlet_count",
+                                "deposit_per_outlet_wanyuan"),
+                        outletAverageResultContract(plan, dimensions, index));
+            }
             if (!plan.getDerivedMetrics().isEmpty()) {
                 return CompiledQuery.s2sql(
                         templateFactory.compileDerivedMetricRanking(templateContext),
@@ -169,18 +188,22 @@ public class BankQueryPlanCompiler {
             case CHANGE -> {
                 boolean monthAndYear =
                         plan.getTime().getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY;
+                boolean organizationChangeEvidence = dimensions.stream()
+                        .map(ResolvedDimension::schemaElement)
+                        .anyMatch(element -> matches(element, ORGANIZATION_DIMENSION));
+                boolean longFormChange = metrics.size() > 1 || organizationChangeEvidence;
                 yield CompiledQuery.s2sql(
                         monthAndYear ? templateFactory.compileMonthAndYearChange(templateContext)
                                 : templateFactory.compileChange(templateContext),
-                        metrics.size() == 1
-                                ? calculatedOutputColumns(dimensions, "current_value",
+                        longFormChange
+                                ? calculatedOutputColumns(dimensions, "metric_code", "current_value",
                                         "baseline_value", "absolute_change", "percent_change")
-                                : calculatedOutputColumns(dimensions, "metric_code", "current_value",
-                                        "baseline_value", "absolute_change", "percent_change"),
+                                : calculatedOutputColumns(dimensions, "current_value", "baseline_value",
+                                        "absolute_change", "percent_change"),
                         monthAndYear ? BankResultProjector.Contract.builder()
                                 .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE).build()
-                                : metrics.size() > 1
-                                        ? multiMetricChangeResultContract(plan, index)
+                                : longFormChange
+                                        ? multiMetricChangeResultContract(plan, dimensions, index)
                                         : null);
             }
             case RATIO -> {
@@ -192,6 +215,9 @@ public class BankQueryPlanCompiler {
                                 "ratio_percent"),
                         ratioResultContract(plan, dimensions, index));
             }
+            case MULTI_RATIO -> throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-ratio requires a NONE time comparison");
             case DIRECT -> throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "time comparison requires a supported calculation type");
@@ -206,6 +232,16 @@ public class BankQueryPlanCompiler {
                 .anyMatch(filter -> "benchmark".equals(filter.getField())
                         && "COMPARE".equals(filter.getOperator())
                         && "PROVINCE_AVERAGE".equals(filter.getValue()));
+    }
+
+    private boolean requiresOutletAverage(BankQueryPlan plan, List<ResolvedMetric> metrics,
+            List<ResolvedDimension> dimensions, List<Filter> metricFilters) {
+        return "OUTLET_AVERAGE".equals(plan.getCalculation().getBaseline())
+                && plan.getIntent() == BankIntentType.AGGREGATION && metricFilters.isEmpty()
+                && dimensions.stream().map(ResolvedDimension::schemaElement)
+                        .anyMatch(element -> matches(element, ORGANIZATION_DIMENSION))
+                && metrics.size() == 2 && "ZB001".equals(metricCode(metrics.get(0).schemaElement()))
+                && "ZB019".equals(metricCode(metrics.get(1).schemaElement()));
     }
 
     private List<String> calculatedOutputColumns(List<ResolvedDimension> dimensions,
@@ -235,9 +271,11 @@ public class BankQueryPlanCompiler {
     private boolean requiresDailyAggregationSummary(BankQueryPlan plan,
             List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
             List<Filter> metricFilters) {
-        return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() == 1
-                && !metrics.isEmpty() && metrics.stream().allMatch(metric -> metric.planMetric()
-                        .getAggregation() == BankQueryPlan.Aggregation.AVG)
+        return plan.getIntent() == BankIntentType.AGGREGATION && !plan.getOrganizations().isEmpty()
+                && !metrics.isEmpty()
+                && metrics.stream()
+                        .allMatch(metric -> metric.planMetric()
+                                .getAggregation() == BankQueryPlan.Aggregation.AVG)
                 && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)
                         .toList().equals(List.of(ORGANIZATION_DIMENSION));
     }
@@ -285,11 +323,14 @@ public class BankQueryPlanCompiler {
     }
 
     private BankResultProjector.Contract multiMetricChangeResultContract(BankQueryPlan plan,
-            SchemaIndex index) {
-        if (plan.getOrganizations().isEmpty()) {
+            List<ResolvedDimension> dimensions, SchemaIndex index) {
+        SchemaElement organization = dimensions.stream().map(ResolvedDimension::schemaElement)
+                .filter(element -> matches(element, ORGANIZATION_DIMENSION)).findFirst()
+                .orElseGet(() -> plan.getOrganizations().isEmpty() ? null
+                        : organizationDimension(plan, index));
+        if (organization == null) {
             return null;
         }
-        SchemaElement organization = organizationDimension(plan, index);
         Map<String, String> organizationNames = new LinkedHashMap<>();
         if (organization.getSchemaValueMaps() != null) {
             for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
@@ -358,9 +399,10 @@ public class BankQueryPlanCompiler {
         }
         return provinceAverageContract(plan, index,
                 BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
-                metrics.stream().map(metric -> BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("aggregate_value")
-                        .metricCode(metricCode(metric.schemaElement())).build())
+                metrics.stream()
+                        .map(metric -> BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("aggregate_value")
+                                .metricCode(metricCode(metric.schemaElement())).build())
                         .sorted(java.util.Comparator
                                 .comparing(BankResultProjector.MetricBinding::getMetricCode))
                         .toList());
@@ -375,9 +417,9 @@ public class BankQueryPlanCompiler {
     }
 
     /**
-     * The auditable projection contract for the compiler-owned derived-metric ranking template.
-     * The SQL already ranks over the full organization population, so the projector must preserve
-     * the source rank_position verbatim instead of recomputing ranks from the returned rows.
+     * The auditable projection contract for the compiler-owned derived-metric ranking template. The
+     * SQL already ranks over the full organization population, so the projector must preserve the
+     * source rank_position verbatim instead of recomputing ranks from the returned rows.
      */
     private BankResultProjector.Contract derivedRankingResultContract(BankQueryPlan plan,
             SchemaIndex index) {
@@ -611,6 +653,31 @@ public class BankQueryPlanCompiler {
                 .build();
     }
 
+    private BankResultProjector.Contract outletAverageResultContract(BankQueryPlan plan,
+            List<ResolvedDimension> dimensions, SchemaIndex index) {
+        BankResultProjector.Contract contract = ratioResultContract(plan, dimensions, index);
+        if (contract != null) {
+            contract.setType(BankResultProjector.ProjectionType.OUTLET_AVERAGE);
+        }
+        return contract;
+    }
+
+    private BankResultProjector.Contract multiRatioResultContract(BankQueryPlan plan,
+            List<ResolvedDimension> dimensions, SchemaIndex index) {
+        BankResultProjector.Contract contract = ratioResultContract(plan, dimensions, index);
+        if (contract == null) {
+            return null;
+        }
+        String denominator = plan.getCalculation().getBaseline();
+        contract.setType(BankResultProjector.ProjectionType.MULTI_RATIO);
+        contract.setMetrics(plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName)
+                .filter(metric -> !Objects.equals(metric, denominator))
+                .map(metric -> BankResultProjector.MetricBinding.builder().metricCode(metric)
+                        .build())
+                .toList());
+        return contract;
+    }
+
     private String metricCode(SchemaElement metric) {
         if (metric.getExtInfo() != null && metric.getExtInfo().get("indicatorCode") != null) {
             return String.valueOf(metric.getExtInfo().get("indicatorCode"));
@@ -702,6 +769,13 @@ public class BankQueryPlanCompiler {
                 continue;
             }
             if ("metric_value".equals(filter.getField())) {
+                // The provincial-average comparison is semantic-template control data,
+                // not a physical metric filter. The template reads it to form the CASE
+                // expression, so forwarding it would make the threshold template reject
+                // its own control signal as an unsupported absolute filter.
+                if ("PROVINCE_AVERAGE".equals(filter.getValue())) {
+                    continue;
+                }
                 if (metrics.size() != 1) {
                     throw unsupportedFilter(filter);
                 }

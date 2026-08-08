@@ -66,6 +66,37 @@ class ComplexSqlValidatorTest {
     }
 
     @Test
+    void doesNotTreatAMinimumRegulatoryRequirementAsARankingIntent() {
+        String threshold =
+                "WITH bank_values AS (SELECT bank_organization, SUM(zb001) AS metric_value "
+                        + "FROM bank_indicator_dataset WHERE bank_data_date >= '2026-03-31' "
+                        + "AND bank_data_date <= '2026-03-31' GROUP BY bank_organization) "
+                        + "SELECT bank_organization, metric_value, CASE WHEN metric_value >= 10.5 "
+                        + "THEN 1 ELSE 0 END AS meets_condition FROM bank_values "
+                        + "WHERE bank_organization = 'ORG008' ORDER BY bank_organization ASC";
+
+        ComplexSqlValidationResult result =
+                validator.validate(threshold, schema, "2026年一季度末，江苏省H市农商行的资本充足率满足10.5%的最低要求吗？");
+
+        Assert.assertTrue(result.getEvaluation().getIsValidated());
+        Assert.assertFalse(result.getFeatures().contains(ComplexSqlFeature.TOP_N));
+    }
+
+    @Test
+    void recognizesTimeFiltersInMultilineCteQueries() {
+        String ratio = "WITH bank_multi_ratio AS (\nSELECT 'ZB005' AS metric_code, "
+                + "SUM(zb005) AS numerator_value, SUM(zb002) AS denominator_value\n"
+                + "FROM bank_indicator_dataset\nWHERE bank_organization = 'ORG007' "
+                + "AND bank_data_date >= '2026-03-31' AND bank_data_date <= '2026-03-31'\n)\n"
+                + "SELECT metric_code, numerator_value, denominator_value FROM bank_multi_ratio";
+
+        ComplexSqlValidationResult result =
+                validator.validate(ratio, schema, "2026年3月末，江苏省G市农商行的个人贷款占各项贷款的比例？");
+
+        Assert.assertTrue(result.getEvaluation().getIsValidated());
+    }
+
+    @Test
     void acceptsCrossJoinForIndependentSnapshots() {
         String crossJoin = "WITH current_snapshot AS (SELECT SUM(zb001) AS current_value "
                 + "FROM bank_indicator_dataset WHERE bank_data_date = '2026-04-30'), "
@@ -73,7 +104,8 @@ class ComplexSqlValidatorTest {
                 + "FROM bank_indicator_dataset WHERE bank_data_date = '2025-04-30') "
                 + "SELECT current_value, baseline_value FROM current_snapshot CROSS JOIN baseline_snapshot";
 
-        ComplexSqlValidationResult result = validator.validate(crossJoin, schema, "synthetic snapshot comparison");
+        ComplexSqlValidationResult result =
+                validator.validate(crossJoin, schema, "synthetic snapshot comparison");
 
         Assert.assertTrue(result.getEvaluation().getIsValidated());
     }

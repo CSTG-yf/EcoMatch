@@ -25,8 +25,8 @@ class SemanticQueryRequestSecurityTest {
 
     @Test
     void externalSqlJsonCannotEnableSemanticCompilerExecutionMode() throws Exception {
-        QuerySqlReq request = objectMapper.readValue(
-                "{\"sql\":\"select 1\",\"trustedCompiledSql\":true}", QuerySqlReq.class);
+        QuerySqlReq request = objectMapper
+                .readValue("{\"sql\":\"select 1\",\"trustedCompiledSql\":true}", QuerySqlReq.class);
 
         assertFalse(request.isTrustedCompiledSql());
     }

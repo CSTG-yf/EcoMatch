@@ -47,10 +47,12 @@ public class SqlQueryParser implements QueryParser {
         // build ontologyQuery
         SqlQuery sqlQuery = queryStatement.getSqlQuery();
         List<String> queryFields = SqlSelectHelper.getAllSelectFields(sqlQuery.getSql());
-        Set<String> queryAliases = SqlSelectHelper.getAliasFields(sqlQuery.getSql());
         List<Pair<String, String>> ontologyMetricsDimensionsAndBizName =
                 Collections.synchronizedList(new ArrayList<>());
-        queryFields.removeAll(queryAliases);
+        // getAllSelectFields already resolves aliases within their owning SELECT scope.
+        // Removing every alias again here is scope-blind: an outer CTE projection may alias
+        // bank_current.bank_organization to bank_organization and accidentally remove the
+        // source semantic dimension needed by the CTE body.
         Ontology ontology = queryStatement.getOntology();
         OntologyQuery ontologyQuery = buildOntologyQuery(ontology, queryFields);
         Set<String> queryFieldsSet = new HashSet<>(queryFields);

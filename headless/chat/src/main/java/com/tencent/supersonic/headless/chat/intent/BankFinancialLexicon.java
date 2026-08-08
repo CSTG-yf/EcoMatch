@@ -13,7 +13,8 @@ import java.util.Map;
 public final class BankFinancialLexicon {
 
     private static final Map<String, MetricDefinition> METRICS = new LinkedHashMap<>();
-    private static final Map<String, DerivedMetricDefinition> DERIVED_METRICS = new LinkedHashMap<>();
+    private static final Map<String, DerivedMetricDefinition> DERIVED_METRICS =
+            new LinkedHashMap<>();
     private static final Map<String, OrganizationDefinition> ORGANIZATIONS = new LinkedHashMap<>();
     private static final Map<String, String> NORMALIZATIONS = new LinkedHashMap<>();
 
@@ -40,6 +41,7 @@ public final class BankFinancialLexicon {
         metric("ZB020", "个人客户数", "个人客户", "零售客户数", "零售客户");
         metric("ZB021", "对公客户数", "对公客户", "公司客户数", "企业客户数");
         derivedMetric("DERIVED_ZB002_DIV_ZB001", "存贷比", "ZB002", "ZB001", "存贷比");
+        derivedMetric("DERIVED_ZB011_DIV_ZB009", "净利润率", "ZB011", "ZB009", "净利润率");
 
         for (int index = 0; index < 13; index++) {
             char city = (char) ('A' + index);

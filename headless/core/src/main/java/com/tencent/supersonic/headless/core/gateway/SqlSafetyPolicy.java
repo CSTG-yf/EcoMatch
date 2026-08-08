@@ -170,9 +170,9 @@ public class SqlSafetyPolicy {
             throw new SqlPolicyViolationException(
                     "Dangerous SQL function is forbidden: " + dangerousFunctionMatcher.group(1));
         }
-        Set<PlainSelect> wrappers = trustedCompiledSql
-                ? collectTrustedCteModelTableWrappers((Select) statement)
-                : Collections.emptySet();
+        Set<PlainSelect> wrappers =
+                trustedCompiledSql ? collectTrustedCteModelTableWrappers((Select) statement)
+                        : Collections.emptySet();
         trustedCteModelTableWrappers.set(wrappers);
         try {
             validateSelectTree((Select) statement);
@@ -199,8 +199,9 @@ public class SqlSafetyPolicy {
             select.getWithItemsList().stream().filter(withItem -> withItem.getAlias() != null)
                     .map(withItem -> withItem.getAlias().getName().toLowerCase(Locale.ROOT))
                     .forEach(cteNames::add);
-            select.getWithItemsList().forEach(withItem -> collectTrustedCteModelTableWrappers(
-                    withItem.getSelect(), cteNames, visited, true, wrappers));
+            select.getWithItemsList()
+                    .forEach(withItem -> collectTrustedCteModelTableWrappers(withItem.getSelect(),
+                            cteNames, visited, true, wrappers));
         }
         if (select instanceof PlainSelect plainSelect) {
             if (insideCte && isUnboundedBaseTableWrapper(plainSelect, cteNames)) {
@@ -209,16 +210,18 @@ public class SqlSafetyPolicy {
             collectTrustedNestedSelect(plainSelect.getFromItem(), cteNames, visited, insideCte,
                     wrappers);
             if (plainSelect.getJoins() != null) {
-                plainSelect.getJoins().forEach(join -> collectTrustedNestedSelect(
-                        join.getRightItem(), cteNames, visited, insideCte, wrappers));
+                plainSelect.getJoins()
+                        .forEach(join -> collectTrustedNestedSelect(join.getRightItem(), cteNames,
+                                visited, insideCte, wrappers));
             }
         } else if (select instanceof ParenthesedSelect parenthesedSelect) {
             collectTrustedCteModelTableWrappers(parenthesedSelect.getSelect(), cteNames, visited,
                     insideCte, wrappers);
         } else if (select instanceof SetOperationList setOperationList
                 && setOperationList.getSelects() != null) {
-            setOperationList.getSelects().forEach(child -> collectTrustedCteModelTableWrappers(
-                    child, cteNames, visited, insideCte, wrappers));
+            setOperationList.getSelects()
+                    .forEach(child -> collectTrustedCteModelTableWrappers(child, cteNames, visited,
+                            insideCte, wrappers));
         }
     }
 
@@ -231,15 +234,16 @@ public class SqlSafetyPolicy {
             collectTrustedNestedSelect(parenthesedFromItem.getFromItem(), cteNames, visited,
                     insideCte, wrappers);
             if (parenthesedFromItem.getJoins() != null) {
-                parenthesedFromItem.getJoins().forEach(join -> collectTrustedNestedSelect(
-                        join.getRightItem(), cteNames, visited, insideCte, wrappers));
+                parenthesedFromItem.getJoins()
+                        .forEach(join -> collectTrustedNestedSelect(join.getRightItem(), cteNames,
+                                visited, insideCte, wrappers));
             }
         }
     }
 
     private boolean isUnboundedBaseTableWrapper(PlainSelect select, Set<String> cteNames) {
         if (select.getJoins() != null && !select.getJoins().isEmpty()
-                || !(select.getFromItem() instanceof Table table)) {
+                || !(select.getFromItem()instanceof Table table)) {
             return false;
         }
         String tableName = table.getName();

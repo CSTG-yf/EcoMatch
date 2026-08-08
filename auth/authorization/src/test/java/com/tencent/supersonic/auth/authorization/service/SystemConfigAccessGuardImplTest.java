@@ -15,10 +15,8 @@ class SystemConfigAccessGuardImplTest {
 
     private final AtomicReference<User> currentUser = new AtomicReference<>();
     private final UserService userService = (UserService) Proxy.newProxyInstance(
-            UserService.class.getClassLoader(), new Class<?>[] {UserService.class},
-            (proxy, method, args) -> method.getName().equals("getCurrentUser")
-                    ? currentUser.get()
-                    : null);
+            UserService.class.getClassLoader(), new Class<?>[] {UserService.class}, (proxy, method,
+                    args) -> method.getName().equals("getCurrentUser") ? currentUser.get() : null);
     private final SystemConfigAccessGuardImpl guard = new SystemConfigAccessGuardImpl(userService);
 
     @Test

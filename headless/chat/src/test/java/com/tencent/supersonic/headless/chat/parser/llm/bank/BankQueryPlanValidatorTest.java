@@ -205,6 +205,41 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void shouldRejectMultiRatioWhenTheSharedDenominatorIsNotTheFinalMetric() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RATIO)
+                .metrics(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB003")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB004")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of()).organizations(List.of())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 3, 31))
+                        .endDate(LocalDate.of(2026, 3, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.MULTI_RATIO).baseline("ZB001").build())
+                .orderBy(List.of()).output(BankQueryPlan.Output.builder()
+                        .columns(List.of("ZB003", "ZB001", "ZB004")).orderSensitive(true).build())
+                .build();
+        SemanticIntentHints hints =
+                SemanticIntentHints.builder().expectedIntent(BankIntentType.RATIO)
+                        .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                        .allowedDimensions(Set.of("机构", "数据日期"))
+                        .requiredMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                        .requiredStartDate(LocalDate.of(2026, 3, 31))
+                        .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("MULTI_RATIO_DENOMINATOR_MISMATCH"));
+    }
+
+    @Test
     void shouldRejectTrendWithoutTheSemanticDateDimension() {
         BankQueryPlan plan = completeRankingPlan();
         plan.setIntent(BankIntentType.TREND);
@@ -329,23 +364,23 @@ class BankQueryPlanValidatorTest {
     @Test
     void shouldRejectIllegalDerivedMetricCodeAndOperands() {
         BankQueryPlan codeOperandConflict = derivedRankingPlan();
-        codeOperandConflict.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB001")
-                .denominator("ZB001").name("存贷比").build()));
+        codeOperandConflict.setDerivedMetrics(
+                List.of(BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                        .numerator("ZB001").denominator("ZB001").name("存贷比").build()));
         assertTrue(validator.validate(codeOperandConflict, derivedHints()).codes()
                 .contains("DERIVED_METRIC_INVALID"));
 
         BankQueryPlan sameOperands = derivedRankingPlan();
-        sameOperands.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                .metricCode("DERIVED_ZB001_DIV_ZB001").numerator("ZB001")
-                .denominator("ZB001").name("存贷比").build()));
+        sameOperands.setDerivedMetrics(
+                List.of(BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB001_DIV_ZB001")
+                        .numerator("ZB001").denominator("ZB001").name("存贷比").build()));
         assertTrue(validator.validate(sameOperands, derivedHints()).codes()
                 .contains("DERIVED_METRIC_INVALID"));
 
         BankQueryPlan nonBaseOperand = derivedRankingPlan();
-        nonBaseOperand.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("贷款余额")
-                .denominator("ZB001").name("存贷比").build()));
+        nonBaseOperand.setDerivedMetrics(
+                List.of(BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                        .numerator("贷款余额").denominator("ZB001").name("存贷比").build()));
         assertTrue(validator.validate(nonBaseOperand, derivedHints()).codes()
                 .contains("DERIVED_METRIC_INVALID"));
     }
@@ -365,9 +400,9 @@ class BankQueryPlanValidatorTest {
     @Test
     void shouldRejectDerivedMetricThatDoesNotMatchMapperEvidence() {
         BankQueryPlan plan = derivedRankingPlan();
-        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                .metricCode("DERIVED_ZB013_DIV_ZB001").numerator("ZB013")
-                .denominator("ZB001").name("不良贷款率").build()));
+        plan.setDerivedMetrics(
+                List.of(BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB013_DIV_ZB001")
+                        .numerator("ZB013").denominator("ZB001").name("不良贷款率").build()));
 
         BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
 
@@ -384,7 +419,8 @@ class BankQueryPlanValidatorTest {
                 BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
                         .numerator("ZB002").denominator("ZB001").name("存贷比").build()));
 
-        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, twoDerivedHints());
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, twoDerivedHints());
 
         assertFalse(result.isValid());
         assertTrue(result.codes().contains("DERIVED_METRIC_MISMATCH"));
@@ -429,7 +465,8 @@ class BankQueryPlanValidatorTest {
     private SemanticIntentHints derivedHints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
-                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
                 .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
@@ -440,7 +477,8 @@ class BankQueryPlanValidatorTest {
     private SemanticIntentHints twoDerivedHints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
-                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
                 .requiredDerivedMetrics(List.of(
@@ -458,9 +496,9 @@ class BankQueryPlanValidatorTest {
                         .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
                 BankQueryPlan.Metric.builder().bizName("ZB001")
                         .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
-        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002")
-                .denominator("ZB001").name("存贷比").build()));
+        plan.setDerivedMetrics(
+                List.of(BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                        .numerator("ZB002").denominator("ZB001").name("存贷比").build()));
         plan.getOutput().setColumns(List.of("机构", "ZB002", "ZB001"));
         return plan;
     }

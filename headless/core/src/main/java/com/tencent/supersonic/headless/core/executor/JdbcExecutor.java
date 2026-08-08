@@ -12,9 +12,9 @@ import com.tencent.supersonic.headless.core.utils.ComponentFactory;
 import com.tencent.supersonic.headless.core.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.BadSqlGrammarException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -39,15 +39,16 @@ public class JdbcExecutor implements QueryExecutor {
         SemanticQueryResp queryResultWithColumns = new SemanticQueryResp();
         try {
             QueryExecutionGateway gateway = ContextUtils.getBean(QueryExecutionGateway.class);
-            SemanticQueryResp result = queryStatement.isTrustedCompiledSql()
-                    ? gateway.executeTrustedCompiledSql(queryStatement.getSql(),
-                            () -> enforceResultLimit(
-                                    executeInternal(queryStatement, queryResultWithColumns),
-                                    resultLimit))
-                    : gateway.execute(queryStatement.getSql(),
-                            () -> enforceResultLimit(
-                                    executeInternal(queryStatement, queryResultWithColumns),
-                                    resultLimit));
+            SemanticQueryResp result =
+                    queryStatement.isTrustedCompiledSql()
+                            ? gateway
+                                    .executeTrustedCompiledSql(queryStatement.getSql(),
+                                            () -> enforceResultLimit(executeInternal(queryStatement,
+                                                    queryResultWithColumns), resultLimit))
+                            : gateway.execute(queryStatement.getSql(),
+                                    () -> enforceResultLimit(
+                                            executeInternal(queryStatement, queryResultWithColumns),
+                                            resultLimit));
             result.setSql(sql);
             return result;
         } catch (Exception e) {

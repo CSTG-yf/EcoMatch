@@ -36,6 +36,7 @@ public class ComplexSqlValidator {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern LIMIT =
             Pattern.compile("\\blimit\\s+\\d+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern WHERE = Pattern.compile("\\bwhere\\b", Pattern.CASE_INSENSITIVE);
 
     public ComplexSqlValidationResult validate(String sql, LLMReq.LLMSchema schema,
             String queryText) {
@@ -147,9 +148,8 @@ public class ComplexSqlValidator {
         if (containsAny(normalizedQuestion, "环比", "上月", "上季")) {
             features.add(ComplexSqlFeature.MOM);
         }
-        if (containsAny(normalizedQuestion, "top", "前", "最高", "最低", "排名")
-                && (LIMIT.matcher(sql).find()
-                        || features.contains(ComplexSqlFeature.WINDOW_FUNCTION))) {
+        if (hasRankingIntent(normalizedQuestion) && (LIMIT.matcher(sql).find()
+                || features.contains(ComplexSqlFeature.WINDOW_FUNCTION))) {
             features.add(ComplexSqlFeature.TOP_N);
         }
         if (containsAny(normalizedQuestion, "全省", "机构", "农商行", "对比", "比较")) {
@@ -166,7 +166,7 @@ public class ComplexSqlValidator {
         if (containsAny(question, "环比", "上月", "上季")) {
             expected.add(ComplexSqlFeature.MOM);
         }
-        if (containsAny(question, "top", "前", "最高", "最低", "排名")) {
+        if (hasRankingIntent(question)) {
             expected.add(ComplexSqlFeature.TOP_N);
         }
         if (containsAny(question, "平均", "均值", "合计", "总计")) {
@@ -176,6 +176,13 @@ public class ComplexSqlValidator {
             expected.add(ComplexSqlFeature.CROSS_ORGANIZATION);
         }
         return expected;
+    }
+
+    private boolean hasRankingIntent(String question) {
+        if (containsAny(question, "top", "前", "最高", "排名")) {
+            return true;
+        }
+        return question.contains("最低") && !containsAny(question, "最低要求", "最低标准", "最低限额", "最低监管要求");
     }
 
     private boolean containsAnySemanticField(String normalizedSql, LLMReq.LLMSchema schema) {
@@ -213,7 +220,7 @@ public class ComplexSqlValidator {
     }
 
     private boolean hasTimeFilter(String normalizedSql) {
-        return normalizedSql.contains(" where ")
+        return WHERE.matcher(normalizedSql).find()
                 && (DATE_LITERAL.matcher(normalizedSql).find() || normalizedSql.contains("date")
                         || normalizedSql.contains("日期") || normalizedSql.contains("时间"));
     }

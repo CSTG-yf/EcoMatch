@@ -15,16 +15,15 @@ class NL2SQLParserTest {
     @Test
     void forwardsBankRoutingAttemptTelemetry() {
         ParseResp source = new ParseResp("safe");
-        source.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(
-                true, false, ParseResp.BankRoutingSqlGenType.ONE_PASS_SELF_CONSISTENCY, false,
+        source.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(true, false,
+                ParseResp.BankRoutingSqlGenType.ONE_PASS_SELF_CONSISTENCY, false,
                 ParseResp.BankCandidateRejectionState.VALIDATION_REJECTED,
                 SqlErrorType.JOIN_ERROR));
         ChatParseResp target = new ChatParseResp(1L);
 
         NL2SQLParser.copyParseResponse(source, target);
 
-        ParseResp.BankRoutingAttemptTelemetry telemetry =
-                target.getBankRoutingAttemptTelemetry();
+        ParseResp.BankRoutingAttemptTelemetry telemetry = target.getBankRoutingAttemptTelemetry();
         assertTrue(telemetry.isBankConstrainedPlanEnabled());
         assertFalse(telemetry.isBankDatasetQualified());
         assertEquals(ParseResp.BankRoutingSqlGenType.ONE_PASS_SELF_CONSISTENCY,
@@ -39,8 +38,8 @@ class NL2SQLParserTest {
     void preservesMissingBankRoutingAttemptTelemetry() {
         ParseResp source = new ParseResp("safe");
         ChatParseResp target = new ChatParseResp(1L);
-        target.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(
-                true, true, ParseResp.BankRoutingSqlGenType.BANK_CONSTRAINED_PLAN, true));
+        target.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(true, true,
+                ParseResp.BankRoutingSqlGenType.BANK_CONSTRAINED_PLAN, true));
 
         NL2SQLParser.copyParseResponse(source, target);
 

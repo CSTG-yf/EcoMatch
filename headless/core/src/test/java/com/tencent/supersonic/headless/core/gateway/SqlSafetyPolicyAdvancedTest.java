@@ -30,10 +30,10 @@ class SqlSafetyPolicyAdvancedTest {
 
     @Test
     void allowsOnlySemanticCompilerModelTableWrapperWhenExplicitlyTrusted() {
-        String compilerSql = "WITH deposit_metrics AS ("
-                + "SELECT SUM(deposit_balance) AS total_balance "
-                + "FROM (SELECT * FROM bank_metric) model_table) "
-                + "SELECT total_balance FROM deposit_metrics LIMIT 100";
+        String compilerSql =
+                "WITH deposit_metrics AS (" + "SELECT SUM(deposit_balance) AS total_balance "
+                        + "FROM (SELECT * FROM bank_metric) model_table) "
+                        + "SELECT total_balance FROM deposit_metrics LIMIT 100";
 
         assertThrows(SqlPolicyViolationException.class, () -> policy.validate(compilerSql));
         assertDoesNotThrow(() -> policy.validateTrustedCompiledSql(compilerSql));
@@ -41,11 +41,12 @@ class SqlSafetyPolicyAdvancedTest {
 
     @Test
     void trustedSemanticCompilerOutputStillRejectsNonCteAndDangerousFunctions() {
-        assertThrows(SqlPolicyViolationException.class, () -> policy.validateTrustedCompiledSql(
-                "SELECT * FROM account"));
-        assertThrows(SqlPolicyViolationException.class, () -> policy.validateTrustedCompiledSql(
-                "WITH raw AS (SELECT * FROM read_csv_auto('/private/data.csv')) "
-                        + "SELECT * FROM raw LIMIT 10"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validateTrustedCompiledSql("SELECT * FROM account"));
+        assertThrows(SqlPolicyViolationException.class,
+                () -> policy.validateTrustedCompiledSql(
+                        "WITH raw AS (SELECT * FROM read_csv_auto('/private/data.csv')) "
+                                + "SELECT * FROM raw LIMIT 10"));
     }
 
     @Test

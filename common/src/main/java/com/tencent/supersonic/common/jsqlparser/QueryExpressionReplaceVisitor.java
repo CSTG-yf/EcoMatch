@@ -21,8 +21,8 @@ import java.util.Set;
  * Replaces semantic fields (columns) with physical expressions by walking the full expression AST
  * with the standard JSqlParser {@link ExpressionDeParser}. Instead of a static whitelist of
  * expression types (Function/Column/BinaryExpression/Parenthesis/InExpression), the deparser
- * recursively visits every node type supported by JSqlParser 4.9, so fields nested in BETWEEN,
- * CASE WHEN, NOT IN, function arguments, analytic/window expressions, etc. are all rewritten.
+ * recursively visits every node type supported by JSqlParser 4.9, so fields nested in BETWEEN, CASE
+ * WHEN, NOT IN, function arguments, analytic/window expressions, etc. are all rewritten.
  */
 public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
 
@@ -42,8 +42,8 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
      * @param cteNames names of CTEs (WITH items) and derived tables visible to the query; columns
      *        qualified with one of these names are output columns and are never rewritten
      */
-    public QueryExpressionReplaceVisitor(Map<String, String> fieldExprMap,
-            Set<String> aliasFields, Set<String> cteNames) {
+    public QueryExpressionReplaceVisitor(Map<String, String> fieldExprMap, Set<String> aliasFields,
+            Set<String> cteNames) {
         this.fieldExprMap = fieldExprMap;
         this.aliasFields = aliasFields;
         this.cteNames = cteNames;
@@ -55,8 +55,7 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
         String toReplace = "";
         if (expression instanceof Function) {
             Function leftFunc = (Function) expression;
-            if (Objects.nonNull(leftFunc.getParameters())
-                    && !leftFunc.getParameters().isEmpty()
+            if (Objects.nonNull(leftFunc.getParameters()) && !leftFunc.getParameters().isEmpty()
                     && leftFunc.getParameters().get(0) instanceof Column) {
                 Column column = (Column) leftFunc.getParameters().get(0);
                 if (!isCteQualified(column)) {
@@ -89,8 +88,7 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
     }
 
     private boolean isCteQualified(Column column) {
-        return Objects.nonNull(column.getTable())
-                && cteNames.contains(column.getTable().getName());
+        return Objects.nonNull(column.getTable()) && cteNames.contains(column.getTable().getName());
     }
 
     /**
@@ -193,8 +191,7 @@ public class QueryExpressionReplaceVisitor extends ExpressionVisitorAdapter {
 
         @Override
         public void visit(Function function) {
-            if (Objects.nonNull(function.getParameters())
-                    && !function.getParameters().isEmpty()
+            if (Objects.nonNull(function.getParameters()) && !function.getParameters().isEmpty()
                     && function.getParameters().get(0) instanceof Column) {
                 Column column = (Column) function.getParameters().get(0);
                 if (!isCteQualified(column) && !aliasFields.contains(column.getColumnName())) {

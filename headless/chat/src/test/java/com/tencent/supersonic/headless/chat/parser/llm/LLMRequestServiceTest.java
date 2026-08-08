@@ -56,12 +56,10 @@ class LLMRequestServiceTest {
         SchemaElement nonBankDimension = SchemaElement.builder().dataSetId(33L)
                 .bizName("ordinary_dimension").name("普通维度").build();
 
-        LLMRequestService.BankRoutingDecision decision =
-                LLMRequestService.selectBankRouting(LLMReq.SqlGenType.ONE_PASS_SELF_CONSISTENCY,
-                        List.of(nonBankDimension), 33L, true);
+        LLMRequestService.BankRoutingDecision decision = LLMRequestService.selectBankRouting(
+                LLMReq.SqlGenType.ONE_PASS_SELF_CONSISTENCY, List.of(nonBankDimension), 33L, true);
 
-        assertEquals(LLMReq.SqlGenType.ONE_PASS_SELF_CONSISTENCY,
-                decision.selectedSqlGenType());
+        assertEquals(LLMReq.SqlGenType.ONE_PASS_SELF_CONSISTENCY, decision.selectedSqlGenType());
         assertEquals(Map.of("bankConstrainedPlanEnabled", true, "bankDatasetQualified", false,
                 "selectedSqlGenType", "ONE_PASS_SELF_CONSISTENCY"), decision.telemetry());
     }
@@ -93,10 +91,8 @@ class LLMRequestServiceTest {
     private static LLMReq routingRequest() {
         LLMReq request = new LLMReq();
         request.setSqlGenType(LLMReq.SqlGenType.ONE_PASS_SELF_CONSISTENCY);
-        request.setBankRoutingTelemetry(Map.of(
-                "bankConstrainedPlanEnabled", true,
-                "bankDatasetQualified", false,
-                "selectedSqlGenType", "ONE_PASS_SELF_CONSISTENCY",
+        request.setBankRoutingTelemetry(Map.of("bankConstrainedPlanEnabled", true,
+                "bankDatasetQualified", false, "selectedSqlGenType", "ONE_PASS_SELF_CONSISTENCY",
                 "raw", "opaque-details"));
         return request;
     }

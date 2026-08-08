@@ -39,8 +39,8 @@ class BusinessInsightProcessorTest {
                 bankColumn("days_above_province_average"), bankColumn("observation_count"),
                 bankColumn("above_ratio_percent")));
         result.setQueryResults(List.of(Map.of("org_code", "ORG008", "org_name", "江苏省H市农商行",
-                "days_above_province_average", 17, "observation_count", 30,
-                "above_ratio_percent", new BigDecimal("56.67"))));
+                "days_above_province_average", 17, "observation_count", 30, "above_ratio_percent",
+                new BigDecimal("56.67"))));
         ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
         context.setResponse(result);
 

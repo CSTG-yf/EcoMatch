@@ -90,11 +90,12 @@ public class SemanticIntentHints {
         if (intent == null || intent.getDerivedMetrics() == null) {
             return Collections.emptyList();
         }
-        return intent.getDerivedMetrics().stream().filter(Objects::nonNull).map(candidate ->
-                new DerivedMetricSpec(candidate.getCode(),
+        return intent.getDerivedMetrics().stream().filter(Objects::nonNull)
+                .map(candidate -> new DerivedMetricSpec(candidate.getCode(),
                         canonicalMetricIdentifier(candidate.getNumerator(), schema),
                         canonicalMetricIdentifier(candidate.getDenominator(), schema),
-                        candidate.getName())).collect(Collectors.toList());
+                        candidate.getName()))
+                .collect(Collectors.toList());
     }
 
     private static String canonicalMetricIdentifier(String code, LLMReq.LLMSchema schema) {
@@ -113,10 +114,24 @@ public class SemanticIntentHints {
      */
     public static SemanticIntentHints fromQuery(String queryText, BankIntentResult mappedIntent,
             LLMReq.LLMSchema schema, LocalDate referenceDate) {
-        BankIntentResult intent = mappedIntent == null
-                ? new BankFinancialIntentRecognizer().recognize(queryText, referenceDate)
-                : mappedIntent;
+        BankIntentResult recognizedIntent =
+                new BankFinancialIntentRecognizer().recognize(queryText, referenceDate);
+        BankIntentResult intent = hasCompleteQueryEvidence(recognizedIntent) ? recognizedIntent
+                : mappedIntent == null ? recognizedIntent : mappedIntent;
         return from(intent, schema);
+    }
+
+    /**
+     * The mapper can already contain a partial rule parse. For a fully specified bank question,
+     * however, the query-text recognizer is the authoritative source for immutable metric, date,
+     * organization and threshold evidence. Falling back preserves mapper behaviour for questions
+     * the recognizer cannot resolve safely.
+     */
+    private static boolean hasCompleteQueryEvidence(BankIntentResult intent) {
+        return intent != null && intent.getIntent() != null
+                && intent.getIntent() != BankIntentType.UNKNOWN && intent.getMetrics() != null
+                && !intent.getMetrics().isEmpty() && intent.getTime() != null
+                && intent.getTime().getStartDate() != null && intent.getTime().getEndDate() != null;
     }
 
     private static Set<String> schemaElementNames(Collection<SchemaElement> elements) {
@@ -147,12 +162,22 @@ public class SemanticIntentHints {
         if (intent == null || intent.getFilters() == null) {
             return Collections.emptyList();
         }
-        return intent.getFilters().stream().map(filter -> new RequiredFilter(filter.getField(),
-                filter.getOperator(), filter.getValue())).collect(Collectors.toList());
+        return intent.getFilters().stream()
+                // A growth ranking is a CHANGE calculation whose answer may be narrated as TopN.
+                // The released evaluation contract needs the complete endpoint-change evidence, so
+                // a
+                // presentational rank filter must not turn it into a ranking execution contract.
+                .filter(filter -> intent.getIntent() != BankIntentType.CHANGE
+                        || !("rank".equals(filter.getField())
+                                || "rank_from_bottom".equals(filter.getField())))
+                .map(filter -> new RequiredFilter(filter.getField(), filter.getOperator(),
+                        filter.getValue()))
+                .collect(Collectors.toList());
     }
 
     private static Integer requiredLimit(BankIntentResult intent) {
-        if (intent == null || intent.getFilters() == null) {
+        if (intent == null || intent.getFilters() == null
+                || intent.getIntent() == BankIntentType.CHANGE) {
             return null;
         }
         return intent.getFilters().stream()
@@ -175,8 +200,8 @@ public class SemanticIntentHints {
     public record RequiredFilter(String field, String operator, String value) {}
 
     /**
-     * Immutable derived metric specification carried from intent recognition into plan
-     * validation. Operands are schema canonical identifiers; order matches the recognizer output.
+     * Immutable derived metric specification carried from intent recognition into plan validation.
+     * Operands are schema canonical identifiers; order matches the recognizer output.
      */
     public record DerivedMetricSpec(String code, String numerator, String denominator,
             String name) {}

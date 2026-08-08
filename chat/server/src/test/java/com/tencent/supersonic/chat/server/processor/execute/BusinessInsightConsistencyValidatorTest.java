@@ -178,9 +178,10 @@ class BusinessInsightConsistencyValidatorTest {
     void acceptsCanonicalCountDaysResultWithoutTreatingNumericMetricAsDate() {
         QueryResult result = canonicalCountDaysResult();
         result.getBusinessExplanation().setTimeRange(null);
-        result.getBusinessExplanation().setSummary("查询返回1条记录。"
-                + "days_above_province_average范围为17至17；observation_count范围为30至30；"
-                + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
+        result.getBusinessExplanation()
+                .setSummary("查询返回1条记录。"
+                        + "days_above_province_average范围为17至17；observation_count范围为30至30；"
+                        + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
 
         assertDoesNotThrow(() -> validator.validate(result));
@@ -190,9 +191,10 @@ class BusinessInsightConsistencyValidatorTest {
     void rejectsCanonicalCountDaysResultWhoseTimeRangeTreatsNumericMetricAsDate() {
         QueryResult result = canonicalCountDaysResult();
         result.getBusinessExplanation().setTimeRange("17");
-        result.getBusinessExplanation().setSummary("查询返回1条记录，时间范围为17。"
-                + "days_above_province_average范围为17至17；observation_count范围为30至30；"
-                + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
+        result.getBusinessExplanation()
+                .setSummary("查询返回1条记录，时间范围为17。"
+                        + "days_above_province_average范围为17至17；observation_count范围为30至30；"
+                        + "above_ratio_percent范围为56.67至56.67。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
 
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
@@ -207,15 +209,14 @@ class BusinessInsightConsistencyValidatorTest {
         result.getRecommendedChart().setChartType("TABLE");
         result.getRecommendedChart().setDimensionFields(List.of());
         result.getBusinessExplanation().setTimeRange("202601至202602");
-        result.getBusinessExplanation().setSummary(
-                "查询返回2条记录，时间范围为202601至202602。balance范围为100至120。提示：范围限制。");
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录，时间范围为202601至202602。balance范围为100至120。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
 
         assertDoesNotThrow(() -> validator.validate(result));
 
         result.getBusinessExplanation().setTimeRange(null);
-        result.getBusinessExplanation()
-                .setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
+        result.getBusinessExplanation().setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
     }
@@ -225,15 +226,14 @@ class BusinessInsightConsistencyValidatorTest {
         QueryResult result = validResult();
         result.getQueryColumns().set(0, column("month", "CATEGORY"));
         result.getBusinessExplanation().setTimeRange("2026-01至2026-02");
-        result.getBusinessExplanation().setSummary(
-                "查询返回2条记录，时间范围为2026-01至2026-02。balance范围为100至120。提示：范围限制。");
+        result.getBusinessExplanation()
+                .setSummary("查询返回2条记录，时间范围为2026-01至2026-02。balance范围为100至120。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
 
         assertDoesNotThrow(() -> validator.validate(result));
 
         result.getBusinessExplanation().setTimeRange(null);
-        result.getBusinessExplanation()
-                .setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
+        result.getBusinessExplanation().setSummary("查询返回2条记录。balance范围为100至120。提示：范围限制。");
         result.setTextSummary(result.getBusinessExplanation().getSummary());
         assertThrows(IllegalStateException.class, () -> validator.validate(result));
     }
@@ -251,13 +251,14 @@ class BusinessInsightConsistencyValidatorTest {
                 .build();
         String summary = "查询返回1条记录。days_above_province_average范围为17至17；"
                 + "observation_count范围为30至30；above_ratio_percent范围为56.67至56.67。提示：范围限制。";
-        BusinessExplanation explanation = BusinessExplanation.builder().summary(summary)
-                .confidence(0.9).timeRange(null).evidence(List.of(
-                        "days_above_province_average范围为17至17", "observation_count范围为30至30",
-                        "above_ratio_percent范围为56.67至56.67"))
-                .warnings(List.of("范围限制")).build();
+        BusinessExplanation explanation =
+                BusinessExplanation.builder().summary(summary).confidence(0.9).timeRange(null)
+                        .evidence(List.of("days_above_province_average范围为17至17",
+                                "observation_count范围为30至30", "above_ratio_percent范围为56.67至56.67"))
+                        .warnings(List.of("范围限制")).build();
         QueryResult result = new QueryResult();
-        result.setQueryColumns(new java.util.ArrayList<>(List.of(orgCode, orgName, days, count, ratio)));
+        result.setQueryColumns(
+                new java.util.ArrayList<>(List.of(orgCode, orgName, days, count, ratio)));
         result.setQueryResults(List.of(Map.of("org_code", "ORG008", "org_name", "江苏省H市农商行",
                 "days_above_province_average", 17, "observation_count", 30, "above_ratio_percent",
                 new BigDecimal("56.67"))));

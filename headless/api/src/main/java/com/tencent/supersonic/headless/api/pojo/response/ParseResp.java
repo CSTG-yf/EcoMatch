@@ -61,10 +61,12 @@ public class ParseResp implements Serializable {
             this.candidateRejectionState = llmCandidateCreated ? null : candidateRejectionState;
             this.candidateValidationErrorType = !llmCandidateCreated
                     && candidateRejectionState == BankCandidateRejectionState.VALIDATION_REJECTED
-                    ? candidateValidationErrorType : null;
+                            ? candidateValidationErrorType
+                            : null;
             this.candidateCompilerReason = !llmCandidateCreated
                     && candidateRejectionState == BankCandidateRejectionState.COMPILER_EXCEPTION
-                    ? candidateCompilerReason : null;
+                            ? candidateCompilerReason
+                            : null;
         }
     }
 

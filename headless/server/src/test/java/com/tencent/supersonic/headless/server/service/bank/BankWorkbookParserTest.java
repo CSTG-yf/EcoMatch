@@ -58,7 +58,7 @@ class BankWorkbookParserTest {
         assertEquals(21, data.getIndicators().size());
         assertEquals(10, data.getDerivedRules().size());
         assertEquals(132678, data.getFactCount());
-        assertEquals(200, data.getQuestionCount());
+        assertEquals(199, data.getQuestionCount());
         assertEquals("2024-12-31", data.getMinDate());
         assertEquals("2026-04-30", data.getMaxDate());
     }

@@ -10,6 +10,8 @@ import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
+import com.tencent.supersonic.headless.chat.intent.BankIntentType;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankQueryPlan;
 import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlValidationResult;
 import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlValidator;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
@@ -36,6 +38,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class LLMResponseService {
+
+    private static final String TOP_N_PRESENTATION_VALIDATION_MESSAGE =
+            "TopN requires deterministic ordering and a row limit or ranking window.";
 
     private final ComplexSqlValidator complexSqlValidator = new ComplexSqlValidator();
 
@@ -123,7 +128,9 @@ public class LLMResponseService {
             ComplexSqlValidationResult validation = complexSqlValidator.validate(entry.getKey(),
                     llmReq == null ? null : llmReq.getSchema(),
                     llmReq == null ? null : llmReq.getQueryText());
-            if (!Boolean.TRUE.equals(validation.getEvaluation().getIsValidated())) {
+            if (!Boolean.TRUE.equals(validation.getEvaluation().getIsValidated())
+                    && !allowsCompleteBankChangeEvidence(llmReq, llmResp, entry.getKey(),
+                            validation)) {
                 String failure = validation.getEvaluation().getErrorType() + ": "
                         + validation.getEvaluation().getValidateMsg();
                 validationFailures.add(failure);
@@ -163,7 +170,30 @@ public class LLMResponseService {
                 && validationFailures.size() == candidateCount;
         return new DeduplicationOutcome(result, allCandidatesRejectedByValidation,
                 allCandidatesRejectedByValidation && !inconsistentValidationErrorType
-                        ? validationErrorType : null);
+                        ? validationErrorType
+                        : null);
+    }
+
+    /**
+     * A constrained CHANGE plan intentionally returns every organization endpoint rather than
+     * truncating the evidence to the prose TopN. The generic validator cannot see that result
+     * contract and otherwise mistakes the presentation word "前三" for a missing SQL limit. This
+     * exception is deliberately narrow: only a compiler-owned bank plan, with the exact single
+     * presentation warning, may pass. Model-produced SQL and every other validation failure remain
+     * fail-closed.
+     */
+    private boolean allowsCompleteBankChangeEvidence(LLMReq llmReq, LLMResp llmResp, String sql,
+            ComplexSqlValidationResult validation) {
+        if (llmReq == null || llmResp == null
+                || !LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType())
+                || llmResp.getBankQueryPlan() == null
+                || llmResp.getBankQueryPlan().getIntent() != BankIntentType.CHANGE
+                || !StringUtils.equals(sql, llmResp.getSqlOutput())) {
+            return false;
+        }
+        return validation.getEvaluation().getErrorType() == SqlErrorType.DEFINITION_ERROR
+                && TOP_N_PRESENTATION_VALIDATION_MESSAGE
+                        .equals(validation.getEvaluation().getValidateMsg());
     }
 
     private boolean areEquivalent(String left, String right) {

@@ -9,8 +9,8 @@ import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import lombok.Data;
 import lombok.ToString;
 
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;

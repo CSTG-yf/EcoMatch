@@ -111,13 +111,14 @@ public class LLMSqlParser implements SemanticParser {
                             .getDeduplicationSqlRespWithOutcome(currentRetry, llmResp, llmReq);
                     sqlRespMap = deduplicationOutcome.acceptedCandidates();
                     if (bankConstrainedPlan && MapUtils.isEmpty(sqlRespMap)) {
-                        candidateRejectionState = deduplicationOutcome
-                                .allCandidatesRejectedByValidation()
+                        candidateRejectionState =
+                                deduplicationOutcome.allCandidatesRejectedByValidation()
                                         ? ParseResp.BankCandidateRejectionState.VALIDATION_REJECTED
                                         : ParseResp.BankCandidateRejectionState.NO_CANDIDATE;
-                        candidateValidationErrorType = deduplicationOutcome
-                                .allCandidatesRejectedByValidation()
-                                        ? deduplicationOutcome.validationErrorType() : null;
+                        candidateValidationErrorType =
+                                deduplicationOutcome.allCandidatesRejectedByValidation()
+                                        ? deduplicationOutcome.validationErrorType()
+                                        : null;
                         candidateCompilerReason = null;
                     }
                     if (MapUtils.isNotEmpty(sqlRespMap)) {
@@ -171,8 +172,8 @@ public class LLMSqlParser implements SemanticParser {
                 publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
                         candidateRejectionState == null
                                 ? ParseResp.BankCandidateRejectionState.NO_CANDIDATE
-                                : candidateRejectionState, candidateValidationErrorType,
-                        candidateCompilerReason);
+                                : candidateRejectionState,
+                        candidateValidationErrorType, candidateCompilerReason);
             }
             return;
         }
@@ -181,8 +182,7 @@ public class LLMSqlParser implements SemanticParser {
             double sqlWeight = entry.getValue().getSqlWeight();
             responseService.addParseInfo(queryCtx, parseResult, sql, sqlWeight,
                     selectedDiagnostics);
-            publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, true, null,
-                    null);
+            publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, true, null, null);
         }
     }
 
@@ -217,14 +217,12 @@ public class LLMSqlParser implements SemanticParser {
                 || !(bankDatasetQualified instanceof Boolean qualified)) {
             return;
         }
-        parseResp.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(
-                enabled, qualified, bankRoutingSqlGenType(llmReq.getSqlGenType()),
-                llmCandidateCreated, candidateRejectionState, candidateValidationErrorType,
-                candidateCompilerReason));
+        parseResp.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(enabled,
+                qualified, bankRoutingSqlGenType(llmReq.getSqlGenType()), llmCandidateCreated,
+                candidateRejectionState, candidateValidationErrorType, candidateCompilerReason));
     }
 
-    static ParseResp.BankCandidateRejectionState bankCandidateRejectionState(
-            Exception error) {
+    static ParseResp.BankCandidateRejectionState bankCandidateRejectionState(Exception error) {
         if (error instanceof BankNl2SqlError bankError) {
             if (bankError.getStage() == BankNl2SqlError.Stage.COMPILATION
                     || bankPlanCompilationException(error) != null) {
@@ -269,8 +267,7 @@ public class LLMSqlParser implements SemanticParser {
     private static ParseResp.BankRoutingSqlGenType bankRoutingSqlGenType(
             LLMReq.SqlGenType sqlGenType) {
         return switch (sqlGenType) {
-            case ONE_PASS_SELF_CONSISTENCY ->
-                    ParseResp.BankRoutingSqlGenType.ONE_PASS_SELF_CONSISTENCY;
+            case ONE_PASS_SELF_CONSISTENCY -> ParseResp.BankRoutingSqlGenType.ONE_PASS_SELF_CONSISTENCY;
             case BANK_CONSTRAINED_PLAN -> ParseResp.BankRoutingSqlGenType.BANK_CONSTRAINED_PLAN;
         };
     }

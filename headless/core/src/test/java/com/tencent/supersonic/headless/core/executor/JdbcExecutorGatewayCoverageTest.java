@@ -46,8 +46,9 @@ class JdbcExecutorGatewayCoverageTest {
 
     @Test
     void classifiesJdbcGrammarFailuresWithoutRetainingErrorBody() {
-        Map<String, Object> telemetry = JdbcExecutor.executionTelemetry(
-                new BadSqlGrammarException("query", "opaque-details", new SQLException("opaque-details")));
+        Map<String, Object> telemetry =
+                JdbcExecutor.executionTelemetry(new BadSqlGrammarException("query",
+                        "opaque-details", new SQLException("opaque-details")));
 
         assertEquals(Map.of("failureLayer", "JDBC_GRAMMAR"), telemetry);
         assertTrue(telemetry.values().stream().noneMatch("opaque-details"::equals));

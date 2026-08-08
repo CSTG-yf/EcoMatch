@@ -130,9 +130,9 @@ final class BusinessInsightConsistencyValidator {
         Set<String> numericFields =
                 result.getQueryColumns().stream().filter(column -> isNumericColumn(result, column))
                         .map(this::fieldName).collect(Collectors.toSet());
-        Set<String> dateFields = result.getQueryColumns().stream()
-                .filter(column -> isDateColumn(result, column)).map(this::fieldName)
-                .collect(Collectors.toSet());
+        Set<String> dateFields =
+                result.getQueryColumns().stream().filter(column -> isDateColumn(result, column))
+                        .map(this::fieldName).collect(Collectors.toSet());
         List<String> invalidDimensions =
                 chart.getDimensionFields().stream().filter(numericFields::contains).toList();
         List<String> invalidMetrics = chart.getMetricFields().stream()
@@ -275,8 +275,7 @@ final class BusinessInsightConsistencyValidator {
                 resolveContributionReference(result, matcher.group(1), metricLabels);
         List<String> categoryFields = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
-                .filter(column -> !isNumericColumn(result, column)
-                        && !isDateColumn(result, column))
+                .filter(column -> !isNumericColumn(result, column) && !isDateColumn(result, column))
                 .map(this::fieldName).toList();
         if (categoryFields.size() != 1) {
             throw inconsistent("contribution category is ambiguous");
