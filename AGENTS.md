@@ -5,6 +5,37 @@
 
 ---
 
+## 索引
+
+| 章节 | 内容 |
+|------|------|
+| [§1](#1-优化总则成熟语义编译不是裸-text2sql) | 语义编译总则（plan → 校验 → 模板 → 投影） |
+| [§2](#2-反作弊红线硬禁止) | 反作弊红线 |
+| [§3](#3-查询族与结果契约先表后话) | 查询族与结果契约 |
+| [§4](#4-路由与消融默认hard20-已证) | 路由 / 消融默认开关 |
+| [§5](#5-实现落点优先改哪里) | 实现落点 |
+| [§6](#6-验证与交付) | 验证与交付 |
+| [§7](#7-最佳-bank-on-复现索引) | **最佳 bank-on 参数与复现索引** |
+| [§8](#8-一句话备忘) | 一句话备忘 |
+
+### 最佳 bank-on 复现包（优先入口）
+
+目录：[`evaluation/bank_nl2sql/repro/`](evaluation/bank_nl2sql/repro/)
+
+| 路径 | 说明 |
+|------|------|
+| [`evaluation/bank_nl2sql/repro/BEST_BANK_ON.md`](evaluation/bank_nl2sql/repro/BEST_BANK_ON.md) | 人话：参数表、证据水位、启动与评测步骤 |
+| [`evaluation/bank_nl2sql/repro/best_bank_on.json`](evaluation/bank_nl2sql/repro/best_bank_on.json) | 机器可读：系统参数 / JVM / agent 应用 / 证据 |
+| [`evaluation/bank_nl2sql/repro/apply_best_bank_on.py`](evaluation/bank_nl2sql/repro/apply_best_bank_on.py) | 停机后写入本地 H2（系统参数 + agent 33） |
+| [`evaluation/bank_nl2sql/repro/ids-train-hard20.txt`](evaluation/bank_nl2sql/repro/ids-train-hard20.txt) | hard20 复现 id（TRAIN-H-01…20） |
+| [`evaluation/bank_nl2sql/repro/ids-train-h04-family.txt`](evaluation/bank_nl2sql/repro/ids-train-h04-family.txt) | H-04 族 smoke（H-04…06） |
+| [`evaluation/bank_nl2sql/repro/ids-train-reg21.txt`](evaluation/bank_nl2sql/repro/ids-train-reg21.txt) | reg21 回归 id（v48 弱项 + H-04 族） |
+| [`evaluation/bank_nl2sql/RUNTIME_ABLATION.md`](evaluation/bank_nl2sql/RUNTIME_ABLATION.md) | bank-on / bank-off 消融操作说明 |
+
+复现时先读 **§7** 与 `BEST_BANK_ON.md`，参数以 `best_bank_on.json` 为准。
+
+---
+
 ## 1. 优化总则：成熟语义编译，不是裸 Text2SQL
 
 银行问数优化**必须**对齐成熟语义层 / semantic compiler 做法：
@@ -77,9 +108,7 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 ## 4. 路由与消融默认（hard20 已证）
 
-**复现最佳 bank-on 参数（清单 + 应用脚本 + hard20/reg21 ids）：**  
-[`evaluation/bank_nl2sql/repro/BEST_BANK_ON.md`](evaluation/bank_nl2sql/repro/BEST_BANK_ON.md)  
-[`evaluation/bank_nl2sql/repro/best_bank_on.json`](evaluation/bank_nl2sql/repro/best_bank_on.json)
+完整清单与一键应用见 **[§7](#7-最佳-bank-on-复现索引)**。
 
 | 开关 | 推荐默认 | 说明 |
 |------|----------|------|
@@ -127,9 +156,70 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 ---
 
-## 7. 一句话备忘
+## 7. 最佳 bank-on 复现索引
+
+**目录：** [`evaluation/bank_nl2sql/repro/`](evaluation/bank_nl2sql/repro/)
+
+### 7.1 文档与清单
+
+| 文件 | 用途 |
+|------|------|
+| [`BEST_BANK_ON.md`](evaluation/bank_nl2sql/repro/BEST_BANK_ON.md) | 参数表、证据水位、启动/评测命令、不推荐配置 |
+| [`best_bank_on.json`](evaluation/bank_nl2sql/repro/best_bank_on.json) | 权威参数：`systemParameters` / `jvmSystemProperties` / `agentChatApps` / `evidence` |
+| [`apply_best_bank_on.py`](evaluation/bank_nl2sql/repro/apply_best_bank_on.py) | 停机写 H2：`s2_system_config` + agent 33 chat apps；`--dry-run` 只打印 |
+
+### 7.2 评测 id 列表
+
+| 文件 | 用途 |
+|------|------|
+| [`ids-train-hard20.txt`](evaluation/bank_nl2sql/repro/ids-train-hard20.txt) | hard20（TRAIN-H-01…20） |
+| [`ids-train-h04-family.txt`](evaluation/bank_nl2sql/repro/ids-train-h04-family.txt) | H-04 族 smoke |
+| [`ids-train-reg21.txt`](evaluation/bank_nl2sql/repro/ids-train-reg21.txt) | reg21（v48 弱项 + H-04 族） |
+
+### 7.3 关键参数（摘要，以 JSON 为准）
+
+```text
+s2.parser.bank.constrained-plan.enable              = true
+s2.parser.bank.max-candidates                       = 1
+s2.parser.bank.plan.deterministic-short-circuit.enable = false
+s2.parser.bank.plan.soft-fallback.enable            = true
+s2.parser.bank.plan.thinking.enable                 = false
+agent 33: BANK_CONSTRAINED_PLAN=on; EXECUTION_SQL_CORRECTOR=on（建议）
+```
+
+JVM 建议：
+
+```text
+-Ds2.parser.bank.plan.deterministic-short-circuit.enable=false
+-Ds2.parser.bank.plan.soft-fallback.enable=true
+-Ds2.parser.bank.plan.thinking.enable=false
+```
+
+### 7.4 最短复现命令
+
+```powershell
+# 停服务后对齐 H2
+.local-dev\eval-venv\Scripts\python.exe evaluation/bank_nl2sql/repro/apply_best_bank_on.py
+
+# 启动 standalone（带上 §7.3 JVM），再 hard20
+.local-dev\eval-venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
+  evaluation/bank_nl2sql --split train --base-url http://127.0.0.1:9080 --agent-id 33 `
+  --ids-file evaluation/bank_nl2sql/repro/ids-train-hard20.txt `
+  --runtime-mode bank-on --concurrency 1 --timeout-seconds 300 --no-resume `
+  --output .local-dev/bank-nl2sql/ablation/repro-hard20.json
+```
+
+### 7.5 相关说明
+
+- 消融操作：[`evaluation/bank_nl2sql/RUNTIME_ABLATION.md`](evaluation/bank_nl2sql/RUNTIME_ABLATION.md)  
+- 本地 ablation 大报告默认在 `.local-dev/bank-nl2sql/ablation/`（可不入库）  
+- 改默认参数时：同步更新 `best_bank_on.json` + `BEST_BANK_ON.md` + 本 §7.3  
+
+---
+
+## 8. 一句话备忘
 
 > **提分靠：抽象 plan → 白名单校验 → 查询族编译 → 结果契约。**  
 > **不靠：背题、贴 gold、train few-shot、预短路刷分。**
 
-以后凡 bank NL2SQL「优化 / 修题 / 消融」，先读本文件 §1–§3，再动代码。
+以后凡 bank NL2SQL「优化 / 修题 / 消融」：先读 **§1–§3** 与 **§7（复现参数）**，再动代码。
