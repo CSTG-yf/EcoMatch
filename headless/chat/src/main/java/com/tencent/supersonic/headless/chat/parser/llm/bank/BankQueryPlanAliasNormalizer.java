@@ -29,10 +29,17 @@ public final class BankQueryPlanAliasNormalizer {
 
     static {
         METRIC_ALIASES.put("不良贷款率", "ZB013");
+        METRIC_ALIASES.put("不良率", "ZB013");
         METRIC_ALIASES.put("成本收入比", "ZB012");
         METRIC_ALIASES.put("拨备覆盖率", "ZB015");
+        METRIC_ALIASES.put("资本充足率", "ZB016");
         METRIC_ALIASES.put("逾期贷款率", "ZB017");
+        METRIC_ALIASES.put("逾期率", "ZB017");
         METRIC_ALIASES.put("净利润", "ZB011");
+        METRIC_ALIASES.put("营业收入", "ZB009");
+        METRIC_ALIASES.put("营业支出", "ZB010");
+        METRIC_ALIASES.put("净利息收入", "ZB008");
+        METRIC_ALIASES.put("中间业务收入", "ZB007");
         METRIC_ALIASES.put("各项贷款余额", "ZB002");
         METRIC_ALIASES.put("贷款余额", "ZB002");
         METRIC_ALIASES.put("各项存款余额", "ZB001");
@@ -41,6 +48,12 @@ public final class BankQueryPlanAliasNormalizer {
         METRIC_ALIASES.put("个人贷款", "ZB006");
         METRIC_ALIASES.put("对公存款", "ZB003");
         METRIC_ALIASES.put("个人存款", "ZB004");
+        METRIC_ALIASES.put("员工人数", "ZB018");
+        METRIC_ALIASES.put("员工数", "ZB018");
+        METRIC_ALIASES.put("网点数量", "ZB019");
+        METRIC_ALIASES.put("网点数", "ZB019");
+        METRIC_ALIASES.put("个人客户数", "ZB020");
+        METRIC_ALIASES.put("对公客户数", "ZB021");
 
         DIMENSION_ALIASES.put("机构", "bank_organization");
         DIMENSION_ALIASES.put("bank_organization", "bank_organization");
@@ -105,6 +118,12 @@ public final class BankQueryPlanAliasNormalizer {
                 }
             }
             plan.getOutput().setColumns(columns);
+        }
+        if (plan.getCalculation() != null
+                && StringUtils.isNotBlank(plan.getCalculation().getBaseline())) {
+            String baseline = plan.getCalculation().getBaseline();
+            plan.getCalculation().setBaseline(preferAllowed(canonicalizeMetric(baseline), baseline,
+                    allowedMetrics));
         }
         // When output still has non-semantic labels, rebuild from normalized metrics/dims.
         if (plan.getOutput() != null && plan.getMetrics() != null && !plan.getMetrics().isEmpty()) {

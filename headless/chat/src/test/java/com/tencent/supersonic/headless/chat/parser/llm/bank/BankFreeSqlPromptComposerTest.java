@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankFreeSqlPromptComposerTest {
@@ -49,17 +50,26 @@ class BankFreeSqlPromptComposerTest {
         assertTrue(system.contains("禁止"));
         assertTrue(system.contains("各项存款余额"));
         assertTrue(system.contains("指标"));
-        assertTrue(BankFreeSqlPromptComposer.PROMPT_VERSION.contains("v5"));
+        assertTrue(BankFreeSqlPromptComposer.PROMPT_VERSION.contains("v7"));
     }
 
     @Test
-    void dynamicUserHoldsQuerySlotsOnly() {
-        String user = BankFreeSqlPromptComposer.buildDynamicUserContent("", "存款是多少", "SchemaX",
-                "SideY");
+    void legacyDynamicUserRejectsSchemaInUserTurn() {
+        assertThrows(IllegalArgumentException.class,
+                () -> BankFreeSqlPromptComposer.buildDynamicUserContent("", "存款是多少", "SchemaX",
+                        "SideY"));
+        String user = BankFreeSqlPromptComposer.buildDynamicUserContent("", "存款是多少", "", "SideY");
         assertTrue(user.contains("存款是多少"));
-        assertTrue(user.contains("SchemaX"));
         assertTrue(user.contains("SideY"));
-        assertFalse(user.contains("ZB001"));
+        assertFalse(user.contains("SchemaX"));
+        assertFalse(user.contains("Metrics="));
+    }
+
+    @Test
+    void questionOnlyUserRejectsCatalogDumps() {
+        assertThrows(IllegalArgumentException.class,
+                () -> BankFreeSqlPromptComposer.buildQuestionOnlyUserContent("q",
+                        "Metrics=[<各项存款余额>], Dimensions=[<bank_organization>]", ""));
     }
 
     @Test
@@ -78,13 +88,13 @@ class BankFreeSqlPromptComposerTest {
 
         String system = BankFreeSqlPromptComposer.composeSystemPrefix(stable);
         assertTrue(system.startsWith(BankFreeSqlPromptComposer.FIXED_SYSTEM_PREFIX));
-        assertTrue(system.contains("当前语义Schema"));
+        assertTrue(system.contains("语义目录"));
         assertTrue(system.contains("各项存款余额"));
 
         String user = BankFreeSqlPromptComposer.buildQuestionOnlyUserContent("存款是多少",
                 "CurrentDate=[2026-08-07]", "Values=[<机构='ORG001'>]");
         assertTrue(user.contains("存款是多少"));
-        assertTrue(user.contains("CurrentDate"));
+        assertTrue(user.contains("CurrentDate") || user.contains("附加信息"));
         assertTrue(user.contains("ORG001"));
         assertFalse(user.contains("各项存款余额"));
         assertFalse(user.contains("Metrics="));

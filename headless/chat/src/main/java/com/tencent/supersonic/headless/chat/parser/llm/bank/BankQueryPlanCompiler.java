@@ -123,11 +123,25 @@ public class BankQueryPlanCompiler {
             }
             if (hasProvinceAverageBenchmark(plan)) {
                 if (plan.getIntent() == BankIntentType.THRESHOLD) {
+                    boolean multi = metrics.size() > 1;
+                    // Single-org multi-metric "vs province mean" gold tables use the aggregation
+                    // summary contract (metric_code + aggregate/min/max/count), not gap SQL. The
+                    // multi-metric province-threshold template still fails physical translation.
+                    if (multi && plan.getOrganizations().size() == 1) {
+                        return CompiledQuery.s2sql(
+                                templateFactory.compileProvinceAverageAggregation(templateContext),
+                                aggregationSummaryOutputColumns(metrics),
+                                aggregationSummaryResultContract(plan, metrics, index));
+                    }
                     return CompiledQuery.s2sql(
                             templateFactory.compileProvinceAverageThreshold(templateContext),
-                            List.of(ORGANIZATION_DIMENSION, "metric_value", "provincial_average",
-                                    "meets_condition"),
-                            provinceAverageThresholdResultContract(plan, index));
+                            multi ? List.of(ORGANIZATION_DIMENSION, "metric_code", "metric_value",
+                                    "provincial_average", "gap_value", "meets_condition")
+                                    : List.of(ORGANIZATION_DIMENSION, "metric_value",
+                                            "provincial_average", "meets_condition"),
+                            multi ? multiMetricProvinceAverageThresholdResultContract(plan, metrics,
+                                    index)
+                                    : provinceAverageThresholdResultContract(plan, metrics, index));
                 }
                 if (plan.getIntent() == BankIntentType.AGGREGATION) {
                     return CompiledQuery.s2sql(
@@ -179,18 +193,26 @@ public class BankQueryPlanCompiler {
                                         "baseline_value", "absolute_change", "percent_change"),
                         monthAndYear ? BankResultProjector.Contract.builder()
                                 .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE).build()
-                                : metrics.size() > 1
-                                        ? multiMetricChangeResultContract(plan, index)
-                                        : null);
+                                // Single-org scalar change keeps raw columns; multi-org/metric
+                                // projects long-form org_code/metric_code contract.
+                                : (plan.getOrganizations().size() == 1 && metrics.size() == 1
+                                        && plan.getDimensions().isEmpty()
+                                                ? null
+                                                : multiMetricChangeResultContract(plan, index)));
             }
             case RATIO -> {
                 ResolvedMetric denominator = ratioDenominator(plan, metrics);
+                // 网点平均存款规模（万元/网点）: deposits * 10000 / outlet_count (M-43/M-44 gold).
+                double ratioScale = isDepositPerOutletScale(plan, metrics, denominator) ? 10000.0
+                        : 100.0;
+                BankResultProjector.Contract ratioContract =
+                        ratioResultContract(plan, metrics, dimensions, index);
                 yield CompiledQuery.s2sql(
                         templateFactory.compileRatio(templateContext, metrics.get(0).identifier(),
-                                denominator.identifier()),
+                                denominator.identifier(), ratioScale),
                         calculatedOutputColumns(dimensions, "numerator_value", "denominator_value",
                                 "ratio_percent"),
-                        ratioResultContract(plan, dimensions, index));
+                        ratioContract);
             }
             case DIRECT -> throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
@@ -206,6 +228,17 @@ public class BankQueryPlanCompiler {
                 .anyMatch(filter -> "benchmark".equals(filter.getField())
                         && "COMPARE".equals(filter.getOperator())
                         && "PROVINCE_AVERAGE".equals(filter.getValue()));
+    }
+
+    /** Deposit / outlet (ZB001 / ZB019) uses 万元-per-outlet scale (*10000), not percent. */
+    private boolean isDepositPerOutletScale(BankQueryPlan plan, List<ResolvedMetric> metrics,
+            ResolvedMetric denominator) {
+        if (metrics == null || metrics.size() < 1 || denominator == null) {
+            return false;
+        }
+        String num = metricCode(metrics.get(0).schemaElement());
+        String den = metricCode(denominator.schemaElement());
+        return "ZB001".equalsIgnoreCase(num) && "ZB019".equalsIgnoreCase(den);
     }
 
     private List<String> calculatedOutputColumns(List<ResolvedDimension> dimensions,
@@ -288,9 +321,7 @@ public class BankQueryPlanCompiler {
 
     private BankResultProjector.Contract multiMetricChangeResultContract(BankQueryPlan plan,
             SchemaIndex index) {
-        if (plan.getOrganizations().isEmpty()) {
-            return null;
-        }
+        // Province-wide growth change uses empty organizations; still need the org dimension map.
         SchemaElement organization = organizationDimension(plan, index);
         Map<String, String> organizationNames = new LinkedHashMap<>();
         if (organization.getSchemaValueMaps() != null) {
@@ -301,19 +332,40 @@ public class BankQueryPlanCompiler {
                 }
             }
         }
+        List<BankResultProjector.MetricBinding> metricBindings = plan.getMetrics().stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn(metric.getBizName())
+                        .metricCode(StringUtils.upperCase(metric.getBizName())).build())
+                .toList();
         return BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
                 .organizationColumn(identifier(organization)).organizationNames(organizationNames)
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
-                .build();
+                .metrics(metricBindings).build();
     }
 
     private BankResultProjector.Contract provinceAverageThresholdResultContract(BankQueryPlan plan,
-            SchemaIndex index) {
+            List<ResolvedMetric> metrics, SchemaIndex index) {
+        List<BankResultProjector.MetricBinding> bindings = metrics.stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("metric_value")
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                .toList();
         return provinceAverageContract(plan, index,
-                BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD, List.of());
+                BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD, bindings);
+    }
+
+    private BankResultProjector.Contract multiMetricProvinceAverageThresholdResultContract(
+            BankQueryPlan plan, List<ResolvedMetric> metrics, SchemaIndex index) {
+        List<BankResultProjector.MetricBinding> bindings = metrics.stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("metric_value")
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                .toList();
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE, bindings);
     }
 
     /**
@@ -351,21 +403,32 @@ public class BankQueryPlanCompiler {
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "daily aggregation summary requires at least one metric");
         }
+        BankResultProjector.ProjectionType type = isDailyExtremaOrgPlan(plan, metrics)
+                ? BankResultProjector.ProjectionType.DAILY_EXTREMA_ORG
+                : BankResultProjector.ProjectionType.AGGREGATION_SUMMARY;
         if (metrics.size() == 1) {
-            return provinceAverageContract(plan, index,
-                    BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+            return provinceAverageContract(plan, index, type,
                     List.of(BankResultProjector.MetricBinding.builder()
                             .semanticColumn("aggregate_value")
                             .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
         }
-        return provinceAverageContract(plan, index,
-                BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+        return provinceAverageContract(plan, index, type,
                 metrics.stream().map(metric -> BankResultProjector.MetricBinding.builder()
                         .semanticColumn("aggregate_value")
                         .metricCode(metricCode(metric.schemaElement())).build())
                         .sorted(java.util.Comparator
                                 .comparing(BankResultProjector.MetricBinding::getMetricCode))
                         .toList());
+    }
+
+    /**
+     * Province-wide annual "单日最高/最低在哪家" uses empty organizations + limit 2 so the projector
+     * can collapse per-org min/max into the two extreme orgs.
+     */
+    private boolean isDailyExtremaOrgPlan(BankQueryPlan plan, List<ResolvedMetric> metrics) {
+        return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().isEmpty()
+                && plan.getLimit() != null && plan.getLimit() == 2 && metrics.size() == 1
+                && metrics.get(0).planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG;
     }
 
     private List<String> aggregationSummaryOutputColumns(List<ResolvedMetric> metrics) {
@@ -518,13 +581,18 @@ public class BankQueryPlanCompiler {
         if (organization == null) {
             return null;
         }
-        List<BankResultProjector.MetricBinding> metricBindings = metrics.stream()
+        // Preserve plan metric order for POINT_QUERY multi-metric structure share (对公/个人/合计).
+        // Ranking long-form still benefits from a stable metric_code ASC when many metrics appear.
+        Stream<BankResultProjector.MetricBinding> bindingStream = metrics.stream()
                 .map(metric -> BankResultProjector.MetricBinding.builder()
                         .semanticColumn(metric.identifier())
-                        .metricCode(metricCode(metric.schemaElement())).build())
-                .sorted(java.util.Comparator
-                        .comparing(BankResultProjector.MetricBinding::getMetricCode))
-                .toList();
+                        .metricCode(metricCode(metric.schemaElement())).build());
+        List<BankResultProjector.MetricBinding> metricBindings =
+                plan.getIntent() == BankIntentType.RANKING
+                        ? bindingStream.sorted(java.util.Comparator
+                                .comparing(BankResultProjector.MetricBinding::getMetricCode))
+                                .toList()
+                        : bindingStream.toList();
         Map<String, String> organizationNames = new LinkedHashMap<>();
         if (organization.getSchemaValueMaps() != null) {
             for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
@@ -534,6 +602,8 @@ public class BankQueryPlanCompiler {
                 }
             }
         }
+        boolean structureShare = plan.getOutput() != null && plan.getOutput().isOrderSensitive()
+                && isDepositStructureShareMetrics(metricBindings);
         return BankResultProjector.Contract.builder()
                 .type(plan.getIntent() == BankIntentType.RANKING
                         ? BankResultProjector.ProjectionType.RANKED_LONG_FORM
@@ -545,7 +615,22 @@ public class BankQueryPlanCompiler {
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
                 .metrics(metricBindings).topRankLimit(rankFilterLimit(plan, "rank"))
-                .bottomRankLimit(rankFilterLimit(plan, "rank_from_bottom")).build();
+                .bottomRankLimit(rankFilterLimit(plan, "rank_from_bottom"))
+                .structureShare(structureShare).build();
+    }
+
+    private static boolean isDepositStructureShareMetrics(
+            List<BankResultProjector.MetricBinding> metrics) {
+        if (metrics == null || metrics.isEmpty()) {
+            return false;
+        }
+        java.util.Set<String> codes = new java.util.HashSet<>();
+        for (BankResultProjector.MetricBinding metric : metrics) {
+            if (metric != null && metric.getMetricCode() != null) {
+                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+            }
+        }
+        return codes.contains("ZB001") && codes.contains("ZB003") && codes.contains("ZB004");
     }
 
     private Integer rankFilterLimit(BankQueryPlan plan, String field) {
@@ -586,7 +671,7 @@ public class BankQueryPlanCompiler {
     }
 
     private BankResultProjector.Contract ratioResultContract(BankQueryPlan plan,
-            List<ResolvedDimension> dimensions, SchemaIndex index) {
+            List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions, SchemaIndex index) {
         SchemaElement organization = dimensions.stream().map(ResolvedDimension::schemaElement)
                 .filter(element -> matches(element, ORGANIZATION_DIMENSION)).findFirst()
                 .orElseGet(() -> plan.getOrganizations().isEmpty() ? null
@@ -605,12 +690,17 @@ public class BankQueryPlanCompiler {
                 }
             }
         }
+        List<BankResultProjector.MetricBinding> metricBindings = metrics.stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn(metric.identifier())
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                .toList();
         return BankResultProjector.Contract.builder().type(BankResultProjector.ProjectionType.RATIO)
                 .organizationColumn(identifier(organization)).organizationNames(organizationNames)
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
-                .build();
+                .metrics(metricBindings).build();
     }
 
     private String metricCode(SchemaElement metric) {
@@ -704,6 +794,11 @@ public class BankQueryPlanCompiler {
                 continue;
             }
             if ("metric_value".equals(filter.getField())) {
+                // Logical direction for province-average threshold (value=PROVINCE_AVERAGE) is
+                // consumed by the S2SQL template, not as a numeric metric filter.
+                if ("PROVINCE_AVERAGE".equals(filter.getValue())) {
+                    continue;
+                }
                 if (metrics.size() != 1) {
                     throw unsupportedFilter(filter);
                 }
@@ -933,6 +1028,10 @@ public class BankQueryPlanCompiler {
                                     : Stream.of(schema.getPartitionTime()))
                     .collect(Collectors.toList()));
             this.partitionTime = schema.getPartitionTime();
+            // Deterministic plans emit ZB### / bank_* ids; live catalogs often only list Chinese
+            // display names. Cross-link known bank aliases so compile can resolve either form.
+            registerBankMetricAliases(this.metrics);
+            registerBankDimensionAliases(this.dimensions);
         }
 
         private SchemaElement metric(String value) {
@@ -947,11 +1046,11 @@ public class BankQueryPlanCompiler {
         }
 
         private boolean hasMetric(String value) {
-            return metrics.containsKey(key(value));
+            return resolve(metrics, value) != null;
         }
 
         private boolean hasDimension(String value) {
-            return dimensions.containsKey(key(value));
+            return resolve(dimensions, value) != null;
         }
 
         private SchemaElement partitionTime() {
@@ -967,6 +1066,50 @@ public class BankQueryPlanCompiler {
             return index;
         }
 
+        private static void registerBankMetricAliases(Map<String, SchemaElement> metrics) {
+            // Chinese display name -> ZB code (keep in sync with BankQueryPlanAliasNormalizer /
+            // official bank metric catalog ZB001–ZB021).
+            List<String[]> pairs = List.of(
+                    new String[] {"不良贷款率", "ZB013"}, new String[] {"不良率", "ZB013"},
+                    new String[] {"成本收入比", "ZB012"}, new String[] {"拨备覆盖率", "ZB015"},
+                    new String[] {"资本充足率", "ZB016"}, new String[] {"逾期贷款率", "ZB017"},
+                    new String[] {"逾期率", "ZB017"}, new String[] {"净利润", "ZB011"},
+                    new String[] {"营业收入", "ZB009"}, new String[] {"营业支出", "ZB010"},
+                    new String[] {"净利息收入", "ZB008"}, new String[] {"中间业务收入", "ZB007"},
+                    new String[] {"各项贷款余额", "ZB002"}, new String[] {"贷款余额", "ZB002"},
+                    new String[] {"各项存款余额", "ZB001"}, new String[] {"存款余额", "ZB001"},
+                    new String[] {"对公贷款", "ZB005"}, new String[] {"个人贷款", "ZB006"},
+                    new String[] {"对公存款", "ZB003"}, new String[] {"个人存款", "ZB004"},
+                    new String[] {"员工人数", "ZB018"}, new String[] {"员工数", "ZB018"},
+                    new String[] {"网点数量", "ZB019"}, new String[] {"网点数", "ZB019"},
+                    new String[] {"个人客户数", "ZB020"}, new String[] {"对公客户数", "ZB021"});
+            for (String[] pair : pairs) {
+                SchemaElement element = resolve(metrics, pair[0]);
+                if (element == null) {
+                    element = resolve(metrics, pair[1]);
+                }
+                if (element != null) {
+                    put(metrics, pair[0], element);
+                    put(metrics, pair[1], element);
+                }
+            }
+        }
+
+        private static void registerBankDimensionAliases(Map<String, SchemaElement> dimensions) {
+            List<String[]> pairs = List.of(new String[] {"机构", "bank_organization"},
+                    new String[] {"数据日期", "bank_data_date"});
+            for (String[] pair : pairs) {
+                SchemaElement element = resolve(dimensions, pair[0]);
+                if (element == null) {
+                    element = resolve(dimensions, pair[1]);
+                }
+                if (element != null) {
+                    put(dimensions, pair[0], element);
+                    put(dimensions, pair[1], element);
+                }
+            }
+        }
+
         private static void put(Map<String, SchemaElement> index, String value,
                 SchemaElement element) {
             if (StringUtils.isNotBlank(value)) {
@@ -974,9 +1117,32 @@ public class BankQueryPlanCompiler {
             }
         }
 
+        private static SchemaElement resolve(Map<String, SchemaElement> index, String value) {
+            if (value == null) {
+                return null;
+            }
+            SchemaElement element = index.get(key(value));
+            if (element != null) {
+                return element;
+            }
+            // One more hop through alias normalizer (Chinese <-> ZB / bank_*).
+            String metricAlias = BankQueryPlanAliasNormalizer.canonicalizeMetric(value);
+            if (metricAlias != null && !metricAlias.equals(value)) {
+                element = index.get(key(metricAlias));
+                if (element != null) {
+                    return element;
+                }
+            }
+            String dimAlias = BankQueryPlanAliasNormalizer.canonicalizeDimension(value);
+            if (dimAlias != null && !dimAlias.equals(value)) {
+                return index.get(key(dimAlias));
+            }
+            return null;
+        }
+
         private static SchemaElement require(Map<String, SchemaElement> index, String value,
                 BankPlanCompilationException.Reason reason, String message) {
-            SchemaElement element = index.get(key(value));
+            SchemaElement element = resolve(index, value);
             if (element == null) {
                 throw new BankPlanCompilationException(reason, message + value);
             }

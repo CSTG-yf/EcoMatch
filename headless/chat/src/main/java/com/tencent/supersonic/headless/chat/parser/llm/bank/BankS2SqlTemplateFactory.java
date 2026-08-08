@@ -36,7 +36,6 @@ final class BankS2SqlTemplateFactory {
                 context.plan().getTime().getBaselineEndDate());
         String currentSelect = aggregateSelect(groupColumns, metric, "current_value");
         String baselineSelect = aggregateSelect(groupColumns, metric, "baseline_value");
-        String groupBy = groupColumns.isEmpty() ? "" : "\n  GROUP BY " + groupColumns;
         if (groupColumns.isEmpty()) {
             return """
                     WITH bank_current AS (
@@ -58,39 +57,68 @@ final class BankS2SqlTemplateFactory {
                             context.dataSetName(), baselineWhere)
                     .trim();
         }
-        String dimensionSelect = context.dimensions().stream()
-                .map(dimension -> "bank_current." + dimension + " AS " + dimension)
+        // Grouped multi-org CHANGE: pivot a single base scan instead of joining two CTEs that
+        // each re-scan the semantic dataset. The dual-CTE JOIN form compiles, but the physical
+        // translator/H2 path fails with JDBC_GRAMMAR on province-wide growth rankings (H-16).
+        // Point-day current/baseline (gold contract) uses observation_date pivot; ranges keep
+        // the OR of both date windows.
+        LocalDate currentEnd = context.plan().getTime().getEndDate();
+        LocalDate baselineStart = context.plan().getTime().getBaselineStartDate();
+        LocalDate baselineEnd = context.plan().getTime().getBaselineEndDate();
+        String dimGroup = String.join(", ", context.dimensions());
+        String orderBy = context.dimensions().stream().map(dimension -> dimension + " ASC")
                 .collect(Collectors.joining(", "));
-        String joinConditions = context.dimensions().stream()
-                .map(dimension -> "bank_current." + dimension + " = bank_baseline." + dimension)
-                .collect(Collectors.joining(" AND "));
-        String orderBy =
-                context.dimensions().stream().map(dimension -> "bank_current." + dimension + " ASC")
-                        .collect(Collectors.joining(", "));
+        String dimensionSelect = String.join(", ", context.dimensions());
+        String observationWhere = groupedChangeObservationWhere(context, currentStartDate,
+                currentEnd, baselineStart, baselineEnd);
         return """
-                WITH bank_current AS (
-                  SELECT %s
+                WITH bank_values AS (
+                  SELECT %s, %s AS observation_date, SUM(%s) AS metric_value
                   FROM %s
                   WHERE %s
-                  %s
-                ), bank_baseline AS (
-                  SELECT %s
-                  FROM %s
-                  WHERE %s
-                  %s
+                  GROUP BY %s, observation_date
+                ), bank_pivoted AS (
+                  SELECT %s,
+                         MAX(CASE WHEN observation_date = '%s' THEN metric_value END) AS current_value,
+                         MAX(CASE WHEN observation_date = '%s' THEN metric_value END) AS baseline_value
+                  FROM bank_values
+                  GROUP BY %s
                 )
                 SELECT %s, current_value, baseline_value,
                        current_value - baseline_value AS absolute_change,
                        CASE WHEN baseline_value = 0 THEN NULL
                             ELSE (current_value - baseline_value) * 100.0 / baseline_value END AS percent_change
-                FROM bank_current INNER JOIN bank_baseline
-                  ON %s
+                FROM bank_pivoted
+                WHERE current_value IS NOT NULL AND baseline_value IS NOT NULL
                 ORDER BY %s
                 """
-                .formatted(currentSelect, context.dataSetName(), currentWhere, groupBy,
-                        baselineSelect, context.dataSetName(), baselineWhere, groupBy,
-                        dimensionSelect, joinConditions, orderBy)
+                .formatted(dimensionSelect, context.dateField(), metric, context.dataSetName(),
+                        observationWhere, dimGroup, dimensionSelect, currentEnd, baselineEnd,
+                        dimGroup, dimensionSelect, orderBy)
                 .trim();
+    }
+
+    /**
+     * Builds the base WHERE for grouped CHANGE: non-date filters plus the union of the current and
+     * baseline day/range windows. Point-day pairs use {@code IN (...)} (gold-compatible).
+     */
+    private String groupedChangeObservationWhere(TemplateContext context, LocalDate currentStart,
+            LocalDate currentEnd, LocalDate baselineStart, LocalDate baselineEnd) {
+        List<String> conditions = new ArrayList<>();
+        for (Filter filter : context.dimensionFilters()) {
+            conditions.add(filter(filter));
+        }
+        String dateField = context.dateField();
+        boolean pointCurrent = currentStart != null && currentStart.equals(currentEnd);
+        boolean pointBaseline = baselineStart != null && baselineStart.equals(baselineEnd);
+        if (pointCurrent && pointBaseline) {
+            conditions.add(dateField + " IN ('" + currentEnd + "', '" + baselineEnd + "')");
+        } else {
+            conditions.add("((" + dateField + " >= '" + currentStart + "' AND " + dateField
+                    + " <= '" + currentEnd + "') OR (" + dateField + " >= '" + baselineStart
+                    + "' AND " + dateField + " <= '" + baselineEnd + "'))");
+        }
+        return String.join(" AND ", conditions);
     }
 
     private String compileMultiMetricChange(TemplateContext context) {
@@ -215,6 +243,15 @@ final class BankS2SqlTemplateFactory {
     }
 
     String compileRatio(TemplateContext context, String numerator, String denominator) {
+        return compileRatio(context, numerator, denominator, 100.0);
+    }
+
+    /**
+     * Ratio with a configurable scale factor. Standard bank % ratios use 100; 网点平均存款规模
+     * (万元/网点) uses 10000 when deposits are in 亿元 and the gold contract multiplies by 1e4.
+     */
+    String compileRatio(TemplateContext context, String numerator, String denominator,
+            double scale) {
         if (!context.metricFilters().isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
@@ -231,6 +268,10 @@ final class BankS2SqlTemplateFactory {
                 : "\nORDER BY " + context.dimensions().stream().map(dimension -> dimension + " ASC")
                         .collect(Collectors.joining(", "));
         String outerDimensions = groupColumns.isEmpty() ? "" : groupColumns + ", ";
+        // Keep a decimal literal so percent ratios stay `* 100.0 /` (existing tests + SQL style).
+        String scaleLiteral = (Math.abs(scale - Math.rint(scale)) < 1e-9)
+                ? String.valueOf((long) Math.rint(scale)) + ".0"
+                : String.valueOf(scale);
         return """
                 WITH bank_ratio AS (
                   SELECT %s
@@ -239,10 +280,10 @@ final class BankS2SqlTemplateFactory {
                 )
                 SELECT %snumerator_value, denominator_value,
                        CASE WHEN denominator_value = 0 THEN NULL
-                            ELSE numerator_value * 100.0 / denominator_value END AS ratio_percent
+                            ELSE numerator_value * %s / denominator_value END AS ratio_percent
                 FROM bank_ratio%s
                 """.formatted(innerSelect, context.dataSetName(), where, groupBy, outerDimensions,
-                orderBy).trim();
+                scaleLiteral, orderBy).trim();
     }
 
     /**
@@ -282,6 +323,9 @@ final class BankS2SqlTemplateFactory {
     }
 
     String compileProvinceAverageThreshold(TemplateContext context) {
+        if (context.metrics().size() > 1) {
+            return compileMultiMetricProvinceAverageThreshold(context);
+        }
         requireSingleMetricWithoutMetricFilters(context, "province-average threshold");
         Filter organizationFilter = organizationFilter(context);
         String where = where(withoutOrganizationFilter(context), context.dateField(),
@@ -306,6 +350,61 @@ final class BankS2SqlTemplateFactory {
                 .formatted(context.metrics().get(0).identifier(), context.dataSetName(), where,
                         provinceComparisonOperator(context), outerWhere)
                 .trim();
+    }
+
+    /**
+     * Multi-metric org vs province average (H-04 四项关键指标与全省均值). Single base aggregation then
+     * unpivot — avoids UNION-over-raw-scan physical SQL failures (JDBC_GRAMMAR) seen with
+     * multi-branch bank_values CTEs.
+     */
+    private String compileMultiMetricProvinceAverageThreshold(TemplateContext context) {
+        if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-metric province-average threshold requires metrics and no metric filter");
+        }
+        Filter organizationFilter = organizationFilter(context);
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String outerWhere =
+                organizationFilter == null ? "" : "\nWHERE " + filter(organizationFilter);
+        String aggregates = context.metrics().stream()
+                .map(metric -> "SUM(" + metric.identifier() + ") AS " + metric.identifier()
+                        + "_value")
+                .collect(Collectors.joining(", "));
+        List<String> unpivots = new ArrayList<>();
+        for (ResolvedMetric metric : context.metrics()) {
+            unpivots.add("SELECT bank_organization, '" + metric.metricCode()
+                    + "' AS metric_code, " + metric.identifier()
+                    + "_value AS metric_value FROM bank_org");
+        }
+        return """
+                WITH bank_org AS (
+                  SELECT bank_organization, %s
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                ), bank_values AS (
+                %s
+                ), province_average AS (
+                  SELECT metric_code, AVG(metric_value) AS provincial_average
+                  FROM bank_values
+                  GROUP BY metric_code
+                )
+                SELECT bank_values.bank_organization AS bank_organization,
+                       bank_values.metric_code AS metric_code,
+                       bank_values.metric_value AS metric_value,
+                       province_average.provincial_average AS provincial_average,
+                       bank_values.metric_value - province_average.provincial_average AS gap_value,
+                       CASE WHEN bank_values.metric_value = province_average.provincial_average THEN 0
+                            WHEN bank_values.metric_value > province_average.provincial_average THEN 1
+                            ELSE -1 END AS meets_condition
+                FROM bank_values
+                INNER JOIN province_average
+                  ON bank_values.metric_code = province_average.metric_code%s
+                ORDER BY metric_code ASC, bank_organization ASC
+                """.formatted(aggregates, context.dataSetName(), where,
+                String.join("\nUNION ALL\n", unpivots), outerWhere).trim();
     }
 
     String compileAbsoluteThreshold(TemplateContext context) {

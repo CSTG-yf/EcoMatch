@@ -24,14 +24,16 @@ class BankQueryPlanResponseParserTest {
     }
 
     @Test
-    void shouldRejectUnknownPropertyInsteadOfAcceptingSqlLikeModelOutput() {
+    void shouldStripSqlLikeHelperFieldsAndStillValidateThePlan() {
+        // Models often invent helper keys (sql, additional_analysis). Canonicalization drops them
+        // so a near-correct plan is not rejected solely for unknown properties.
         String output = validPlanJson().replace("\n}",
                 ",\n  \"sql\": \"SELECT * FROM bank_daily_metrics\"\n}");
 
-        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
-                () -> parser.parse(output, hints()));
+        BankQueryPlan plan = parser.parse(output, hints());
 
-        assertEquals(BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, exception.getReason());
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals("ZB001", plan.getMetrics().get(0).getBizName());
     }
 
     @Test

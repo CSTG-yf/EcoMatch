@@ -129,12 +129,30 @@ def _selected_parse(parse_response: dict[str, Any]) -> tuple[int, str | None]:
     return parse_id, str(s2sql) if isinstance(s2sql, str) else None
 
 
+def _bank_plan_source(parse_response: dict[str, Any]) -> str | None:
+    """Read planSource from selected parse diagnostics properties when present."""
+
+    selected = parse_response.get("selectedParses")
+    if not isinstance(selected, list) or not selected or not isinstance(selected[0], dict):
+        return None
+    properties = selected[0].get("properties")
+    if not isinstance(properties, dict):
+        return None
+    plan_source = properties.get("bank.nl2sql.planSource")
+    if plan_source is None:
+        return None
+    return str(plan_source)
+
+
 def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | None:
     """Extract safe bank-routing telemetry from a parse response, if present."""
 
     raw = parse_response.get("bankRoutingAttemptTelemetry")
+    plan_source = _bank_plan_source(parse_response)
     if not isinstance(raw, dict):
-        return None
+        if plan_source is None:
+            return None
+        return {"planSource": plan_source}
     selected = raw.get("selectedSqlGenType")
     telemetry: dict[str, Any] = {
         "bankConstrainedPlanEnabled": bool(raw.get("bankConstrainedPlanEnabled")),
@@ -151,6 +169,22 @@ def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | 
     compiler_reason = raw.get("candidateCompilerReason")
     if compiler_reason is not None:
         telemetry["candidateCompilerReason"] = str(compiler_reason)
+    if plan_source is not None:
+        telemetry["planSource"] = plan_source
+    # Surface multi-candidate diagnostics when the selected parse carries them.
+    selected = parse_response.get("selectedParses")
+    if isinstance(selected, list) and selected and isinstance(selected[0], dict):
+        properties = selected[0].get("properties")
+        if isinstance(properties, dict):
+            for key in (
+                "bank.nl2sql.candidateCount",
+                "bank.nl2sql.uniqueCandidateCount",
+                "bank.nl2sql.rejectedCandidateCount",
+                "bank.nl2sql.planIntent",
+            ):
+                if key in properties and properties[key] is not None:
+                    short = key.rsplit(".", 1)[-1]
+                    telemetry[short] = properties[key]
     return telemetry
 
 

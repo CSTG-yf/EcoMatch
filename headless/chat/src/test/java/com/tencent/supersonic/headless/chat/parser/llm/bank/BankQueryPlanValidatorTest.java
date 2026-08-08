@@ -507,4 +507,95 @@ class BankQueryPlanValidatorTest {
         plan.getOutput().setColumns(List.of("机构", "ZB002", "ZB001"));
         return plan;
     }
+
+    @Test
+    void shouldAcceptAsOfDayPlanWhenMapperOnlyBoundEndDate() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setOrganizations(List.of());
+        plan.getTime().setStartDate(LocalDate.of(2026, 3, 31));
+        plan.getTime().setEndDate(LocalDate.of(2026, 3, 31));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("机构", "数据日期")).requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(Set.of()).requiredStartDate(null)
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("TIME_RANGE_MISMATCH"));
+    }
+
+    @Test
+    void shouldAcceptLoanToDepositRatioWithoutDerivedBlockWhenOperandsSelected() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RATIO)
+                .metrics(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB002")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of())
+                .organizations(List.of(BankQueryPlan.Organization.builder().code("ORG001").build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 31))
+                        .endDate(LocalDate.of(2025, 1, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build())
+                .orderBy(List.of())
+                .output(BankQueryPlan.Output.builder().columns(List.of("ZB002", "ZB001"))
+                        .orderSensitive(true).build())
+                .build();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .requiredStartDate(LocalDate.of(2025, 1, 31))
+                .requiredEndDate(LocalDate.of(2025, 1, 31)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("DERIVED_METRIC_MISSING"));
+    }
+
+    @Test
+    void shouldAcceptStructureShareRatioWhenRecognizerLabeledPointQuery() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RATIO)
+                .metrics(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB003")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of())
+                .organizations(List.of(BankQueryPlan.Organization.builder().code("ORG002").build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 6, 30))
+                        .endDate(LocalDate.of(2025, 6, 30))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build())
+                .orderBy(List.of())
+                .output(BankQueryPlan.Output.builder().columns(List.of("ZB003", "ZB001"))
+                        .orderSensitive(true).build())
+                .build();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 6, 30)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("INTENT_MISMATCH"));
+        assertFalse(result.codes().contains("CALCULATION_MISMATCH"));
+    }
 }

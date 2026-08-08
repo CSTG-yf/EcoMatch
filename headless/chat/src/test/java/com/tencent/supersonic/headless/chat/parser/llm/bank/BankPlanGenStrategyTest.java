@@ -8,6 +8,7 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -20,12 +21,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class BankPlanGenStrategyTest {
+
+    @AfterEach
+    void clearPlanRoutingProperties() {
+        System.clearProperty(BankPlanGenStrategy.DETERMINISTIC_SHORT_CIRCUIT_PROPERTY);
+        System.clearProperty(BankPlanGenStrategy.SOFT_FALLBACK_PROPERTY);
+    }
+
+    private static void enableDeterministicShortCircuit() {
+        System.setProperty(BankPlanGenStrategy.DETERMINISTIC_SHORT_CIRCUIT_PROPERTY, "true");
+    }
+
+    private static void disableSoftFallback() {
+        System.setProperty(BankPlanGenStrategy.SOFT_FALLBACK_PROPERTY, "false");
+    }
+
 
     @Test
     void shouldGenerateValidatedPlanFromRawModelJsonWithoutExposingPhysicalSchema() {
@@ -38,6 +55,7 @@ class BankPlanGenStrategyTest {
 
         assertNotNull(response.getBankQueryPlan());
         assertEquals(BankIntentType.RANKING, response.getBankQueryPlan().getIntent());
+        assertEquals("MODEL", response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
         assertEquals("json_object", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getJsonFormatType());
         assertEquals(0, request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
@@ -50,6 +68,31 @@ class BankPlanGenStrategyTest {
                     && prompt.contains("\"bizName\"")
                     && prompt.contains(request.getQueryText());
         }));
+    }
+
+    @Test
+    void shouldCallModelByDefaultEvenWhenADeterministicRuleWouldMatch() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(request());
+
+        assertEquals("MODEL", response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        verify(model, org.mockito.Mockito.atLeastOnce()).generate(anyString());
+    }
+
+    @Test
+    void shouldShortCircuitToDeterministicPlanOnlyWhenPropertyEnabled() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(annualDailyAverageRequest());
+
+        assertEquals("DETERMINISTIC",
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
     }
 
     @Test
@@ -78,8 +121,11 @@ class BankPlanGenStrategyTest {
         verify(model, org.mockito.Mockito.times(2)).generate(anyString());
         verify(model).generate(org.mockito.ArgumentMatchers
                 .<String>argThat(repairPrompt -> repairPrompt.contains("\"intent\":\"UNKNOWN\"")
+                        && repairPrompt.contains("<repair>")
                         && repairPrompt.contains("<previous_candidate>")
-                        && repairPrompt.contains(request().getQueryText())));
+                        && repairPrompt.contains(request().getQueryText())
+                        // Schema contract must stay in system prefix, not re-taught in user repair.
+                        && !repairPrompt.contains("必须改成合法 BankQueryPlan")));
     }
 
     @Test
@@ -101,7 +147,7 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
-    void shouldStopAfterOneStructuredRepairWhenThePlanRemainsInvalid() {
+    void shouldStopAfterStructuredRepairsAndColdReplanWhenThePlanRemainsInvalid() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString()))
                 .thenReturn(validPlanJson().replace("\"RANKING\"", "\"UNKNOWN\""));
@@ -111,7 +157,8 @@ class BankPlanGenStrategyTest {
                 assertThrows(BankNl2SqlError.class, () -> strategy.generate(request()));
 
         assertFalse(exception.isRetryable());
-        verify(model, org.mockito.Mockito.times(2)).generate(anyString());
+        // draw + repair + repair2 + cold-replan (soft-fallback does not match this wording)
+        verify(model, org.mockito.Mockito.times(4)).generate(anyString());
     }
 
     @Test
@@ -311,6 +358,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildDeterministicAnnualDailyAveragePlanWithoutModelOrAppConfig() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
@@ -336,6 +384,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildDeterministicAnnualAverageTopAndBottomRankingPlanWithoutCallingTheModel() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
@@ -363,6 +412,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildChineseTopBottomNplRankingFromQuestionTextEvenWithSparseHints() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
         LLMReq request = new LLMReq();
@@ -389,6 +439,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildDeterministicAnnualDailyExtremaSummaryPlanBeforeModelCandidates() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
@@ -414,6 +465,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildDeterministicDaysAboveProvinceAveragePlanWithoutCallingTheModel() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
@@ -442,6 +494,7 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldBuildDeterministicDerivedMetricRankingPlanWithoutCallingTheModel() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
 
@@ -502,10 +555,8 @@ class BankPlanGenStrategyTest {
 
     @Test
     void shouldUseThePreviousNaturalQuarterEndAsBaselineForLastQuarterEndChange() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(validChangePlanJson()
-                .replace("\"time\":{\"startDate\":\"2025-01-01\",\"endDate\":\"2025-04-30\",\"granularity\":\"DAY\",\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\",\"baselineEndDate\":\"2024-12-31\"}",
-                        "\"time\":{\"startDate\":\"2025-12-31\",\"endDate\":\"2025-12-31\",\"granularity\":\"DAY\",\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\",\"baselineEndDate\":\"2024-12-31\"}"));
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
         LLMReq request = changeRequest();
         request.setQueryText("2025年12月末各项存款余额较上季度末变化了多少？");
@@ -524,7 +575,7 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, time.getComparison());
         assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineStartDate());
         assertEquals(LocalDate.of(2025, 9, 30), time.getBaselineEndDate());
-        verify(model).generate(anyString());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
     }
 
     @Test
@@ -541,11 +592,13 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
         assertFalse(exception.isRetryable());
-        verify(model, org.mockito.Mockito.times(2)).generate(anyString());
+        // draw + repair + repair2 + cold-replan
+        verify(model, org.mockito.Mockito.times(4)).generate(anyString());
     }
 
     @Test
     void shouldBuildDeterministicPointQueryWithoutCallingModel() {
+        enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
         LLMReq request = new LLMReq();
@@ -568,6 +621,436 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ZB001"), response.getBankQueryPlan().getOutput().getColumns());
         assertEquals("ORG001", response.getBankQueryPlan().getOrganizations().get(0).getCode());
         verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicYearEndChangeWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省A市农商行的各项存款余额截至2025-03-31，和2024年末相比变化了多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredStartDate(LocalDate.of(2024, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 3, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertNotNull(plan);
+        assertEquals(BankIntentType.CHANGE, plan.getIntent());
+        assertEquals(BankQueryPlan.CalculationType.CHANGE, plan.getCalculation().getType());
+        assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
+                plan.getTime().getComparison());
+        assertEquals(LocalDate.of(2025, 3, 31), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2024, 12, 31), plan.getTime().getBaselineStartDate());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicQuarterlyTrendWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText(
+                "请分析江苏省A市农商行的各项存款余额从2025年一季度末到2026年一季度末的逐季变化，各季度末数值是多少？哪个季度数值最高？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.TREND).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredStartDate(LocalDate.of(2025, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertNotNull(plan);
+        assertEquals(BankIntentType.TREND, plan.getIntent());
+        assertEquals(BankQueryPlan.TimeGranularity.QUARTER, plan.getTime().getGranularity());
+        assertEquals(List.of("bank_data_date"), plan.getDimensions());
+        assertEquals(List.of("bank_data_date", "ZB001"), plan.getOutput().getColumns());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicMoMChangeWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省C市农商行的各项存款余额在2025-07-31，比上个月底变动了多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.CHANGE, plan.getIntent());
+        assertEquals(LocalDate.of(2025, 7, 31), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 6, 30), plan.getTime().getBaselineStartDate());
+        assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, plan.getTime().getComparison());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicYoYChangeWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省I市农商行的各项贷款余额在2025-12-31，同比（较去年同期）变动了多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredOrganizationCodes(Set.of("ORG009"))
+                .requiredStartDate(LocalDate.of(2025, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.CHANGE, plan.getIntent());
+        assertEquals(LocalDate.of(2024, 12, 31), plan.getTime().getBaselineStartDate());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicGrowthRateChangeWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省B市农商行的对公存款余额从2024年末到2025-05-31，增幅是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB003"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB003")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2024, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 5, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.CHANGE, plan.getIntent());
+        assertEquals(LocalDate.of(2025, 5, 31), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2024, 12, 31), plan.getTime().getBaselineStartDate());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicOrgVsProvinceAveragePointWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省F市农商行的不良贷款率在2026-01-31和全省均值比，是高还是低？差多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013")).requiredOrganizationCodes(Set.of("ORG006"))
+                .requiredStartDate(LocalDate.of(2026, 1, 31))
+                .requiredEndDate(LocalDate.of(2026, 1, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.THRESHOLD, plan.getIntent());
+        assertEquals("ZB013", plan.getMetrics().get(0).getBizName());
+        assertEquals("ORG006", plan.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2026, 1, 31), plan.getTime().getStartDate());
+        assertTrue(plan.getFilters().stream()
+                .anyMatch(f -> "benchmark".equals(f.getField()) && "COMPARE".equals(f.getOperator())
+                        && "PROVINCE_AVERAGE".equals(f.getValue())));
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicMultiMetricPointQueryWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省D市农商行在2025-10-31的不良贷款率和拨备覆盖率分别是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB013", "ZB015"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 10, 31))
+                .requiredEndDate(LocalDate.of(2025, 10, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(List.of("ZB013", "ZB015"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals("ORG004", plan.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 10, 31), plan.getTime().getStartDate());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicProvinceAverageOrgCountThresholdWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("在2025-12-31，有多少家农商行的不良贷款率低于全省均值？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2025, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.THRESHOLD, plan.getIntent());
+        assertEquals("ZB013", plan.getMetrics().get(0).getBizName());
+        assertTrue(plan.getOrganizations().isEmpty());
+        assertTrue(plan.getFilters().stream()
+                .anyMatch(f -> "benchmark".equals(f.getField()) && "COMPARE".equals(f.getOperator())
+                        && "PROVINCE_AVERAGE".equals(f.getValue())));
+        assertTrue(plan.getFilters().stream()
+                .anyMatch(f -> "metric_value".equals(f.getField()) && "LT".equals(f.getOperator())
+                        && "PROVINCE_AVERAGE".equals(f.getValue())));
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicLoanToDepositRatioWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省A市农商行在2025-01-31的存贷比是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB002", "ZB001")))
+                .requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredStartDate(LocalDate.of(2025, 1, 31))
+                .requiredEndDate(LocalDate.of(2025, 1, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RATIO, plan.getIntent());
+        assertEquals(List.of("ZB002", "ZB001"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals("ZB001", plan.getCalculation().getBaseline());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicDualShareRatioWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省B市农商行在2025-06-30的存款中，对公和个人分别占比多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO)
+                .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 6, 30)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        // Structure share returns 对公/个人/合计 balances so both percentages can be formed.
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(Set.of("ZB003", "ZB004", "ZB001"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName)
+                        .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildDeterministicProvinceTopRankingWithoutCallingModel() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("截至2026-03-31，各项存款余额排名前三的是哪几家？各多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals(Integer.valueOf(3), plan.getLimit());
+        assertEquals(BankQueryPlan.SortDirection.DESC, plan.getOrderBy().get(0).getDirection());
+        assertEquals(List.of(), plan.getOrganizations());
+        assertEquals(1, plan.getFilters().size());
+        assertEquals("rank", plan.getFilters().get(0).getField());
+        assertEquals("3", plan.getFilters().get(0).getValue());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildProvinceTopRankingEvenWhenMapperOmitsRequiredMetricsAndDates() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("截至2026-03-31，各项存款余额排名前三的是哪几家？各多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        // Runtime often arrives with empty required sets when schema mapping is sparse.
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of())
+                .allowedDimensions(Set.of("机构", "数据日期")).requiredMetrics(Set.of())
+                .requiredOrganizationCodes(Set.of()).requiredStartDate(null).requiredEndDate(null)
+                .build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertNotNull(plan);
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals("ZB001", plan.getMetrics().get(0).getBizName());
+        assertEquals(LocalDate.of(2026, 3, 31), plan.getTime().getStartDate());
+        assertEquals(Integer.valueOf(3), plan.getLimit());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldBuildProvinceBottomRankingFrom最后三家Wording() {
+        enableDeterministicShortCircuit();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("截至2025-04-30，不良贷款率排名最后的三家是哪些？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of())
+                .allowedDimensions(Set.of()).requiredMetrics(Set.of())
+                .requiredOrganizationCodes(Set.of()).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals("ZB013", plan.getMetrics().get(0).getBizName());
+        // 不良率 lower-is-better natural ASC; bottom = worst = highest = DESC
+        assertEquals(BankQueryPlan.SortDirection.DESC, plan.getOrderBy().get(0).getDirection());
+        verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldSoftFallbackToChangePlanWhenModelCandidatesAllRejected() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                "{\"version\":\"1.0\",\"intent\":\"CHANGE\",\"metrics\":[],\"dimensions\":[],"
+                        + "\"organizations\":[],\"time\":{},\"filters\":[],\"calculation\":{},"
+                        + "\"orderBy\":[],\"output\":{\"columns\":[]}}");
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        // Wording alone is not enough for pre-model deterministic match (no 变化/增幅/同比 tokens
+        // that resolve baseline without hints); force model path then soft-fallback via hints.
+        request.setQueryText("江苏省C市农商行 ZB001 请给出相对基期的差额");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+        request.setBankMaxCandidates(1);
+
+        LLMResp response = strategy.generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
+        assertEquals(Boolean.TRUE, response.getBankCandidateDiagnostics().get("bankPlanSoftFallback"));
+        assertEquals(LocalDate.of(2025, 7, 31), response.getBankQueryPlan().getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 6, 30),
+                response.getBankQueryPlan().getTime().getBaselineStartDate());
+    }
+
+    @Test
+    void shouldSurfaceModelRejectionWhenSoftFallbackDisabled() {
+        disableSoftFallback();
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                "{\"version\":\"1.0\",\"intent\":\"CHANGE\",\"metrics\":[],\"dimensions\":[],"
+                        + "\"organizations\":[],\"time\":{},\"filters\":[],\"calculation\":{},"
+                        + "\"orderBy\":[],\"output\":{\"columns\":[]}}");
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省C市农商行 ZB001 请给出相对基期的差额");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+        request.setBankMaxCandidates(1);
+
+        BankNl2SqlError exception =
+                assertThrows(BankNl2SqlError.class, () -> strategy.generate(request));
+        assertFalse(exception.isRetryable());
     }
 
     private LLMReq request() {

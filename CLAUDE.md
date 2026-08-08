@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Bank NL2SQL optimization rules (anti-cheat, semantic compiler, ablation defaults):** see root [`AGENTS.md`](AGENTS.md). Follow that file for plan/compile/template work; do not hardcode train/gold answers or leak few-shots.
+
 ## Build Commands
 
 ### Backend (Java/Maven)

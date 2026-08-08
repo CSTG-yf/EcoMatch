@@ -119,15 +119,15 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
             }
         }
 
-        boolean hasLlamaBaseUrl =
-                chatModelConfig != null && StringUtils.isNotBlank(chatModelConfig.getBaseUrl());
-        if (bankDataset && hasLlamaBaseUrl) {
+        // Bank free-SQL must never fall back to the generic blob that re-embeds schema/catalogs
+        // into the user turn. Schema stays in the fixed system prefix; user = question + side info.
+        if (bankDataset) {
+            if (chatModelConfig == null || StringUtils.isBlank(chatModelConfig.getBaseUrl())) {
+                keyPipelineLog.warn(
+                        "OnePassSCSqlGenStrategy bank free-SQL without llama.cpp baseUrl; still using system-prefix + question-only user (no schema-in-user blob)");
+            }
             return generateBankFreeSqlWithPrefix(llmReq, llmResp, chatModelConfig, dataSemantics,
                     sideInformation, bankThinking);
-        }
-        if (bankDataset && !hasLlamaBaseUrl) {
-            keyPipelineLog.warn(
-                    "OnePassSCSqlGenStrategy bank dataset but chatModelConfig.baseUrl blank; falling back to blob prompt (no prefix KV)");
         }
         return generateGeneric(llmReq, llmResp, chatApp, chatModelConfig, dataSemantics,
                 sideInformation);
@@ -251,14 +251,11 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
         variable.put("schema", dataSemantics);
         variable.put("information", sideInformation);
 
-        String promptTemplate = BankFreeSqlPromptComposer.selectPromptTemplate(llmReq.getSchema(),
-                chatApp != null && StringUtils.isNotBlank(chatApp.getPrompt()) ? chatApp.getPrompt()
-                        : INSTRUCTION);
-        if (BankFreeSqlPromptComposer.isBankSchema(llmReq.getSchema())) {
-            keyPipelineLog.info(
-                    "OnePassSCSqlGenStrategy using bank free-SQL blob prompt version={} (no llama.cpp baseUrl)",
-                    BankFreeSqlPromptComposer.PROMPT_VERSION);
-        }
+        // Non-bank only. Bank traffic is forced onto generateBankFreeSqlWithPrefix above so the
+        // user turn never receives Metrics=/Dimensions= schema catalogs.
+        String promptTemplate = chatApp != null && StringUtils.isNotBlank(chatApp.getPrompt())
+                ? chatApp.getPrompt()
+                : INSTRUCTION;
         return PromptTemplate.from(promptTemplate).apply(variable);
     }
 

@@ -393,12 +393,19 @@ class BankQueryPlanCompilerTest {
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
         String sql = compiled.getS2sql();
-        assertTrue(sql.contains("SELECT bank_organization, SUM(ZB001) AS current_value"));
-        assertTrue(sql.contains("GROUP BY bank_organization"));
-        assertTrue(sql.contains("FROM bank_current INNER JOIN bank_baseline"));
-        assertTrue(sql
-                .contains("ON bank_current.bank_organization = bank_baseline.bank_organization"));
-        assertTrue(sql.contains("ORDER BY bank_current.bank_organization ASC"));
+        // Pivot single-scan form (avoids dual-CTE JOIN physical SQL failure).
+        assertTrue(sql.contains("WITH bank_values AS"));
+        assertTrue(sql.contains("bank_pivoted AS"));
+        assertTrue(sql.contains("SUM(ZB001) AS metric_value"));
+        assertTrue(sql.contains("observation_date"));
+        assertTrue(sql.contains("IN ('2026-03-31', '2026-02-28')")
+                || sql.contains("IN ('2026-02-28', '2026-03-31')")
+                || (sql.contains("'2026-03-31'") && sql.contains("'2026-02-28'")));
+        assertTrue(sql.contains("MAX(CASE WHEN observation_date = '2026-03-31' THEN metric_value END) AS current_value"));
+        assertTrue(sql.contains(
+                "MAX(CASE WHEN observation_date = '2026-02-28' THEN metric_value END) AS baseline_value"));
+        assertTrue(sql.contains("ORDER BY bank_organization ASC"));
+        assertFalse(sql.contains("FROM bank_current INNER JOIN bank_baseline"));
         assertEquals(List.of("bank_organization", "current_value", "baseline_value",
                 "absolute_change", "percent_change"), compiled.getOutputColumns());
     }
@@ -566,6 +573,23 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileProvinceAverageThresholdWithBelowDirection() {
+        BankQueryPlan plan = thresholdPlan();
+        plan.setFilters(List.of(provinceAverageBenchmark(),
+                BankQueryPlan.Filter.builder().field("metric_value").operator("LT")
+                        .value("PROVINCE_AVERAGE").build()));
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, provinceAverageThresholdHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertTrue(compiled.getS2sql()
+                .contains("CASE WHEN metric_value < provincial_average THEN 1 ELSE 0 END"));
+        assertEquals(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldCompileAnAbsoluteThresholdToAStableConditionContract() {
         BankQueryPlan plan = thresholdPlan();
         plan.setDimensions(List.of("bank_organization"));
@@ -650,6 +674,42 @@ class BankQueryPlanCompilerTest {
                 "max_value", "observation_count"), compiled.getOutputColumns());
         assertEquals(List.of("ZB001", "ZB002"), compiled.getResultContract().getMetrics().stream()
                 .map(BankResultProjector.MetricBinding::getMetricCode).toList());
+        assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
+    void shouldCompileSingleOrgMultiMetricProvinceThresholdToAggregationSummaryContract() {
+        // Model-shaped THRESHOLD + multi metrics + province benchmark + one org must not use the
+        // gap SQL path (physical failures). Gold multi-metric tableEX uses aggregation summary.
+        BankQueryPlan plan = thresholdPlan();
+        plan.setIntent(BankIntentType.THRESHOLD);
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
+        plan.setOrganizations(List.of(organization("ORG004")));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setFilters(List.of(provinceAverageBenchmark()));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001", "ZB002"));
+        plan.setTime(time(BankQueryPlan.TimeComparison.NONE, null, null));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE")))
+                .maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertTrue(compiled.getS2sql().contains("aggregate_value"));
+        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
+        assertFalse(compiled.getS2sql().contains("provincial_average"));
+        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count"), compiled.getOutputColumns());
         assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
                 compiled.getResultContract().getType());
     }

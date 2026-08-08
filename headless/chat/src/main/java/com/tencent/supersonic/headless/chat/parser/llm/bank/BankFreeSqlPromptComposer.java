@@ -16,8 +16,8 @@ import java.util.stream.Collectors;
 /**
  * Bank free-SQL (ONE_PASS) prompts split for llama.cpp prefix caching.
  *
- * <p>{@link #FIXED_SYSTEM_PREFIX} is byte-stable and sent as the system message.
- * {@link #buildDynamicUserContent} holds question, schema and side info (few-shots optional).
+ * <p>{@link #FIXED_SYSTEM_PREFIX} (+ frozen schema catalog) is the system message.
+ * User turns are question-only via {@link #buildQuestionOnlyUserContent}; never re-embed schema.
  */
 public final class BankFreeSqlPromptComposer {
 
@@ -26,7 +26,7 @@ public final class BankFreeSqlPromptComposer {
      * Runtime prefix version also appends a stable-schema fingerprint (see
      * {@link #prefixVersion(String)}).
      */
-    public static final String PROMPT_VERSION = "bank-free-sql-sys-v5-thinking-schema-prefix";
+    public static final String PROMPT_VERSION = "bank-free-sql-sys-v7-fields-examples";
 
     private static final Pattern FORBIDDEN_LONG_TABLE = Pattern.compile(
             "(?i)(\\b指标\\b\\s*=|\\bmetric_code\\b|\\bmetric_value\\b|\\borg_code\\b|"
@@ -43,84 +43,105 @@ public final class BankFreeSqlPromptComposer {
      * invent physical long-table columns like 指标/值.
      */
     public static final String FIXED_SYSTEM_PREFIX = """
-            #角色
-            你是江苏省农商行智能问数的 S2SQL 专家。把中文问题写成可在语义层执行的 S2SQL。
-            目标：答对数值（answerExact）。
+            你是银行问数 S2SQL 生成器。把中文问题写成语义层可执行的一条 S2SQL。
+            先对齐：意图、指标中文名、机构码、时间、排序（不良率/成本收入比/逾期率越小越好→ASC）。
+            最终只输出 JSON（无 Markdown）：{"thought":"一句结论","sql":"一条完整S2SQL"}
 
-            #深度思考（必须）
-            在给出最终答案前，充分推理：1) 业务意图（时点/变化/比率/排名/趋势）；2) 指标中文名（禁止指标/值假列）；
-            3) 机构 ORG 码；4) 时间字面量；5) 排序方向（不良率等越小越好）。推理可在思考通道完成。
-            思考结束后，最终可见输出必须是且仅是一个 JSON 对象（不要 Markdown）：
-            {"thought":"一句结论","sql":"一条完整S2SQL"}
+            ════════════════════════════════
+            一、可输出 / 可引用字段（语义层）
+            ════════════════════════════════
+            【表】以文末【语义目录】Table 为准，常见：银行日指标数据集
 
-            #语义层字段模型（必须遵守，否则 SQL 无法执行）
-            - 表名：用用户消息 Schema 里的 Table 名（常见 `银行日指标数据集`）。
-            - 指标是「列/度量」，直接写中文度量名，例如 `各项存款余额`、`不良贷款率`、`净利润`。
-            - 维度是「过滤/分组列」：机构维度常见 `机构`，日期维度常见 `数据日期`（以 Schema 为准）。
-            - 禁止把指标当成行过滤：禁止 `WHERE 指标 = ...`、禁止列名 `值`/`指标值`/`metric_code`/`metric_value`。
-            - 禁止物理表名：bank_metric_daily、bank_organization 等。
-            - ZB001～ZB021 与 ORG### 仅用于理解问题；SQL 中指标用中文名，机构过滤用 'ORG001' 这类代码（与 Values 一致），不要写 `ZB013` 当列名。
+            【度量列（SELECT 中写中文名，不要写 ZB 当列名）】
+            各项存款余额 —— 总存款规模（ZB001，亿元）
+            各项贷款余额 —— 总贷款规模（ZB002，亿元）
+            对公存款余额 / 对公存款 —— 对公存款（ZB003）
+            个人存款余额 / 个人存款 —— 个人存款（ZB004）
+            对公贷款余额 / 对公贷款 —— 对公贷款（ZB005）
+            个人贷款余额 / 个人贷款 —— 个人贷款（ZB006）
+            中间业务收入（ZB007） 净利息收入（ZB008） 营业收入（ZB009） 营业支出（ZB010）
+            净利润（ZB011，亿元）
+            成本收入比（ZB012，%，越小越好）
+            不良贷款率（ZB013，%，越小越好）
+            不良贷款余额（ZB014）
+            拨备覆盖率（ZB015，%）
+            资本充足率（ZB016，%）
+            逾期贷款率（ZB017，%，越小越好）
+            员工人数（ZB018，人） 网点数量（ZB019，个）
+            个人客户数（ZB020） 对公客户数（ZB021）
 
-            #业务词典（只用于把问题用语映射到中文度量名）
-            各项存款余额(ZB001)、各项贷款余额(ZB002)、对公存款(ZB003)、个人存款(ZB004)、对公贷款(ZB005)、个人贷款(ZB006)、
-            中间业务收入(ZB007)、净利息收入(ZB008)、营业收入(ZB009)、营业支出(ZB010)、净利润(ZB011)、成本收入比(ZB012)、
-            不良贷款率(ZB013)、不良贷款余额(ZB014)、拨备覆盖率(ZB015)、资本充足率(ZB016)、逾期贷款率(ZB017)、
-            员工人数(ZB018)、网点数量(ZB019)、个人客户数(ZB020)、对公客户数(ZB021)。
-            派生：存贷比=`各项贷款余额`*100/NULLIF(`各项存款余额`,0)；净利润率=`净利润`*100/NULLIF(`营业收入`,0)；
-            网点平均存款(万元)=`各项存款余额`*10000/NULLIF(`网点数量`,0)。
-            机构：A市=ORG001 … M市=ORG013。「全省/哪家/各家」=不按单机构过滤。
+            【维度列】
+            机构 —— 机构过滤/分组；取值 'ORG001'…'ORG013'（A市…M市）
+            数据日期 —— 日期过滤/分组；字面量 'YYYY-MM-DD'
 
-            #时间
-            月末→该月最后一天；年末→YYYY-12-31；全年→[YYYY-01-01,YYYY-12-31]；
-            季度末 Q1=03-31,Q2=06-30,Q3=09-30,Q4=12-31；环比=上月末；同比=去年同月末；较年初=上年12-31。
-            日期写成字面量，禁止用函数推「上个月」。
+            【派生表达式（非独立列，在 SELECT 中计算）】
+            存贷比 = `各项贷款余额`*100/NULLIF(`各项存款余额`,0)
+            净利润率 = `净利润`*100/NULLIF(`营业收入`,0)
+            对公贷款占比 = `对公贷款余额`*100/NULLIF(`各项贷款余额`,0)
+            个人贷款占比 = `个人贷款余额`*100/NULLIF(`各项贷款余额`,0)
+            对公存款占比 = `对公存款余额`*100/NULLIF(`各项存款余额`,0)
 
-            #意图写法（全部用中文度量列，禁止 指标/值）
-            1) 时点：SELECT `度量` FROM 表 WHERE `数据日期`='D' AND `机构`='ORGxxx'
-            2) 变化：WITH 取两端与基期两点，算 absolute_change / percent_change
-            3) 比率：同一 WHERE 下直接 `分子`*100/NULLIF(`分母`,0)
-            4) 谁最大/最小：WHERE 机构 IN (...) AND 日期=D，ORDER BY `度量` DESC/ASC LIMIT 1
-            5) 前三后三：先 AVG 再 ROW_NUMBER；不良率等「越小越好」问表现好用 ASC
-            6) 全省排名/均值：不写机构等值过滤
+            【机构码】ORG001=A市 … ORG013=M市。「全省/哪家/各家」→ 不要写单一机构等值条件
 
-            #硬性禁止（出现即错误）
-            - 列或条件：指标、值、指标值、metric_code、metric_value、org_code（除非 Schema 原文就是这些名字）
-            - SQL 中出现 `ZB001`/`ZB013` 等作列名或 SELECT 项（映射后必须写中文度量名）
-            - 物理表、JOIN bank_organization
-            - 多条语句或注释
+            禁止：WHERE 指标=…；列名 值/指标值/metric_code/metric_value；物理表；SELECT 里写 `ZB013` 当列
 
-            #正确示例（字段名若与 Schema 不一致，以 Schema 为准）
-            例1 时点-A市2025-06-15存款：
-            SELECT `各项存款余额` FROM `银行日指标数据集` WHERE `数据日期`='2025-06-15' AND `机构`='ORG001'
+            ════════════════════════════════
+            二、时间规则
+            ════════════════════════════════
+            月末→该月最后一天；年末→12-31；全年→01-01～12-31
+            一季末03-31 二季末06-30 三季末09-30 四季末12-31
+            环比=上月末；同比=去年同月末；较年初=上年12-31
+            日期一律字面量，禁止用函数推「上个月」
 
-            例2 时点-E市2026-03-31不良率：
-            SELECT `不良贷款率` FROM `银行日指标数据集` WHERE `数据日期`='2026-03-31' AND `机构`='ORG005'
+            ════════════════════════════════
+            三、精确样例（字段以【语义目录】为准；下列表名/列名最常见）
+            ════════════════════════════════
 
-            例3 对公贷款占各项贷款(C市2025-09-30)：
-            SELECT `对公贷款余额`*100.0/NULLIF(`各项贷款余额`,0) AS `占比` FROM `银行日指标数据集` WHERE `数据日期`='2025-09-30' AND `机构`='ORG003'
+            【样例1 点查】A市 2025-06-15 各项存款余额
+            {"thought":"点查ORG001存款","sql":"SELECT `各项存款余额` FROM `银行日指标数据集` WHERE `数据日期`='2025-06-15' AND `机构`='ORG001'"}
 
-            例4 净利润率(G市2026-01-31)：
-            SELECT `净利润`*100.0/NULLIF(`营业收入`,0) AS `净利润率` FROM `银行日指标数据集` WHERE `数据日期`='2026-01-31' AND `机构`='ORG007'
+            【样例2 不良率时点】E市 2026-03-31 不良贷款率
+            {"thought":"点查ORG005不良率","sql":"SELECT `不良贷款率` FROM `银行日指标数据集` WHERE `数据日期`='2026-03-31' AND `机构`='ORG005'"}
 
-            例5 三家谁不良率最低(B/F/J，2026-03-31)：
-            SELECT `机构`,`不良贷款率` FROM `银行日指标数据集` WHERE `数据日期`='2026-03-31' AND `机构` IN ('ORG002','ORG006','ORG010') ORDER BY `不良贷款率` ASC LIMIT 1
+            【样例3 占比】C市 2025-09-30 对公贷款占各项贷款
+            {"thought":"比率对公贷款/各项贷款","sql":"SELECT `对公贷款余额`*100.0/NULLIF(`各项贷款余额`,0) AS `占比` FROM `银行日指标数据集` WHERE `数据日期`='2025-09-30' AND `机构`='ORG003'"}
 
-            例6 环比变动(C市存款 2025-07-31 较上月末)：
-            WITH cur AS (SELECT `各项存款余额` AS current_value FROM `银行日指标数据集` WHERE `数据日期`='2025-07-31' AND `机构`='ORG003'), base AS (SELECT `各项存款余额` AS baseline_value FROM `银行日指标数据集` WHERE `数据日期`='2025-06-30' AND `机构`='ORG003') SELECT current_value, baseline_value, current_value-baseline_value AS absolute_change, CASE WHEN baseline_value=0 THEN NULL ELSE (current_value-baseline_value)*100.0/baseline_value END AS percent_change FROM cur CROSS JOIN base
+            【样例4 净利润率】G市 2026-01-31
+            {"thought":"比率净利润/营业收入","sql":"SELECT `净利润`*100.0/NULLIF(`营业收入`,0) AS `净利润率` FROM `银行日指标数据集` WHERE `数据日期`='2026-01-31' AND `机构`='ORG007'"}
+
+            【样例5 三家谁不良率最低】B/F/J 2026-03-31（越小越好 ASC）
+            {"thought":"三家比较不良率升序取1","sql":"SELECT `机构`,`不良贷款率` FROM `银行日指标数据集` WHERE `数据日期`='2026-03-31' AND `机构` IN ('ORG002','ORG006','ORG010') ORDER BY `不良贷款率` ASC LIMIT 1"}
+
+            【样例6 三家谁存款最多】A/E/I 2025-12-31
+            {"thought":"三家比较存款降序取1","sql":"SELECT `机构`,`各项存款余额` FROM `银行日指标数据集` WHERE `数据日期`='2025-12-31' AND `机构` IN ('ORG001','ORG005','ORG009') ORDER BY `各项存款余额` DESC LIMIT 1"}
+
+            【样例7 环比变动】C市存款 2025-07-31 较上月末
+            {"thought":"当期减上月末","sql":"WITH cur AS (SELECT `各项存款余额` AS current_value FROM `银行日指标数据集` WHERE `数据日期`='2025-07-31' AND `机构`='ORG003'), base AS (SELECT `各项存款余额` AS baseline_value FROM `银行日指标数据集` WHERE `数据日期`='2025-06-30' AND `机构`='ORG003') SELECT current_value, baseline_value, current_value-baseline_value AS absolute_change, CASE WHEN baseline_value=0 THEN NULL ELSE (current_value-baseline_value)*100.0/baseline_value END AS percent_change FROM cur CROSS JOIN base"}
+
+            【样例8 较上年末】A市存款截至2025-03-31较2024年末
+            {"thought":"当期减上年末","sql":"WITH cur AS (SELECT `各项存款余额` AS current_value FROM `银行日指标数据集` WHERE `数据日期`='2025-03-31' AND `机构`='ORG001'), base AS (SELECT `各项存款余额` AS baseline_value FROM `银行日指标数据集` WHERE `数据日期`='2024-12-31' AND `机构`='ORG001') SELECT current_value, baseline_value, current_value-baseline_value AS absolute_change, CASE WHEN baseline_value=0 THEN NULL ELSE (current_value-baseline_value)*100.0/baseline_value END AS percent_change FROM cur CROSS JOIN base"}
+
+            【样例9 阈值】B市 2025-12-31 拨备覆盖率是否超过150%
+            {"thought":"阈值比较","sql":"SELECT `机构`,`拨备覆盖率`, CASE WHEN `拨备覆盖率`>150 THEN '是' ELSE '否' END AS `是否超过150` FROM `银行日指标数据集` WHERE `数据日期`='2025-12-31' AND `机构`='ORG002'"}
+
+            【样例10 全省存款第一】2025-12-31 谁存款最多
+            {"thought":"全省排名无机构过滤","sql":"SELECT `机构`,`各项存款余额` FROM `银行日指标数据集` WHERE `数据日期`='2025-12-31' ORDER BY `各项存款余额` DESC LIMIT 1"}
             """.strip();
 
     /**
-     * Legacy single-blob template for non-prefix callers.
+     * Legacy single-blob template kept for tests/selectPromptTemplate detection only. Live bank
+     * traffic must use {@link #composeSystemPrefix} + {@link #buildQuestionOnlyUserContent}; this
+     * string intentionally has <b>no</b> {@code {{schema}}} slot so schema cannot be re-injected
+     * into the user turn if someone wires the blob path by mistake.
      */
     public static final String BANK_FREE_SQL_INSTRUCTION = FIXED_SYSTEM_PREFIX + """
 
-            #动态示例
+            【示例】
             {{exemplar}}
 
-            #查询
-            Question:{{question}}
-            Schema:{{schema}}
-            SideInfo:{{information}}
+            【查询】
+            问题：{{question}}
+            附加：{{information}}
             """.stripIndent().strip();
 
     private BankFreeSqlPromptComposer() {}
@@ -186,7 +207,7 @@ public final class BankFreeSqlPromptComposer {
     public static String composeSystemPrefix(String stableSchemaBlock) {
         return FIXED_SYSTEM_PREFIX + """
 
-                #当前语义Schema（固定目录，跨请求复用；写 SQL 必须用这里的表名/度量名/维度名）
+                【语义目录】（写 SQL 必须用下列表名/度量/维度）
                 %s
                 """.formatted(nullToEmpty(stableSchemaBlock)).strip();
     }
@@ -197,50 +218,58 @@ public final class BankFreeSqlPromptComposer {
     }
 
     /**
-     * Dynamic user turn for v4: question + side info only (no full schema — that is in system
-     * prefix). Optional Values stay here when present so prefix is not invalidated.
+     * User turn for bank free-SQL: natural question + per-request SideInfo/Values only.
+     * Schema catalogs and SQL rules stay in {@link #composeSystemPrefix} — never restated here.
      */
     public static String buildQuestionOnlyUserContent(String question, String sideInfo,
             String valuesHint) {
         String values = valuesHint == null ? "" : valuesHint.strip();
+        // Refuse accidental schema catalog leakage into the user turn.
+        if (looksLikeSchemaCatalog(values) || looksLikeSchemaCatalog(sideInfo)) {
+            throw new IllegalArgumentException(
+                    "bank free-SQL user content must not carry schema catalogs (Metrics=/Dimensions=)");
+        }
         StringBuilder sb = new StringBuilder();
-        sb.append("#查询\n");
-        sb.append("Question:").append(nullToEmpty(question)).append('\n');
-        sb.append("SideInfo:").append(nullToEmpty(sideInfo));
+        sb.append(nullToEmpty(question).strip());
+        if (sideInfo != null && !sideInfo.isBlank()) {
+            sb.append("\n\n附加信息：").append(sideInfo.strip());
+        }
         if (!values.isEmpty()) {
-            sb.append('\n').append("Values:").append(values);
+            sb.append("\n取值：").append(values);
         }
         return sb.toString().strip();
     }
 
     /**
-     * Legacy user blob (schema still in user). Prefer
-     * {@link #buildQuestionOnlyUserContent} with {@link #composeSystemPrefix}.
+     * @deprecated Bank free-SQL must not put schema into the user turn. Use
+     *             {@link #buildQuestionOnlyUserContent} + {@link #composeSystemPrefix}.
      */
+    @Deprecated
     public static String buildDynamicUserContent(CharSequence exemplars, String question,
             String schema, String sideInfo) {
-        String ex = exemplars == null ? "" : exemplars.toString().strip();
-        return """
-                #说明
-                只使用 Schema 中的表名、Metrics 度量名、Dimensions 维度名。
-                禁止：指标/值/指标值/metric_code、WHERE 指标=、ZB### 作列名、物理表。
+        if (schema != null && !schema.isBlank()) {
+            throw new IllegalArgumentException(
+                    "schema must live in system prefix; do not pass schema into user content");
+        }
+        return buildQuestionOnlyUserContent(question, sideInfo, "");
+    }
 
-                #动态示例
-                %s
-
-                #查询
-                Question:%s
-                Schema:%s
-                SideInfo:%s
-                """.formatted(ex.isEmpty() ? "(无，请直接按系统规则与 Schema 写 S2SQL)" : ex,
-                nullToEmpty(question), nullToEmpty(schema), nullToEmpty(sideInfo)).strip();
+    /** True when text looks like a full schema dump rather than Values=/SideInfo. */
+    static boolean looksLikeSchemaCatalog(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("metrics=") || lower.contains("dimensions=")
+                || lower.contains("table=") && lower.contains("databasetype=")
+                || text.contains("【语义目录】") || text.contains("可填写值目录");
     }
 
     public static String freeSqlWarmProbe() {
         return """
-                #查询
-                Question:前缀预热占位
-                SideInfo:CurrentDate=[1970-01-01]
+                前缀预热占位
+
+                附加信息：CurrentDate=[1970-01-01]
                 """.strip();
     }
 

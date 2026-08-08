@@ -2,15 +2,22 @@ package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.Map;
 
 /**
  * Bank-plan adapter over {@link FixedSystemPrefixLlmCache} with the plan JSON system prefix.
+ *
+ * <p>Thinking can be enabled via system property {@code s2.parser.bank.plan.thinking.enable=true}
+ * (or the matching system parameter once loaded into JVM system properties). Thinking and
+ * non-thinking use different prefix-version keys so KV caches do not mix.
  */
 public class BankPlanLlmPrefixCache {
 
+    public static final String THINKING_PROPERTY = "s2.parser.bank.plan.thinking.enable";
     private static final int DEFAULT_MEMO_CAPACITY = 256;
+    private static final int DEFAULT_THINKING_MAX_TOKENS = 8192;
     private static final String PLAN_WARM_PROBE = "前缀预热：忽略本条业务内容，只输出 "
             + "{\"version\":\"1.0\",\"intent\":\"UNKNOWN\",\"metrics\":[],"
             + "\"dimensions\":[],\"organizations\":[],\"time\":{\"startDate\":\"1970-01-01\","
@@ -19,14 +26,35 @@ public class BankPlanLlmPrefixCache {
             + "\"output\":{\"columns\":[],\"orderSensitive\":false}}";
 
     private final FixedSystemPrefixLlmCache delegate;
+    private final boolean enableThinking;
 
     public BankPlanLlmPrefixCache() {
-        this(DEFAULT_MEMO_CAPACITY, false);
+        this(DEFAULT_MEMO_CAPACITY, false, thinkingEnabledFromProperty());
     }
 
     public BankPlanLlmPrefixCache(int memoCapacity, boolean autoWarm) {
+        this(memoCapacity, autoWarm, thinkingEnabledFromProperty());
+    }
+
+    public BankPlanLlmPrefixCache(int memoCapacity, boolean autoWarm, boolean enableThinking) {
+        this.enableThinking = enableThinking;
+        String version = BankPlanPromptComposer.PREFIX_VERSION
+                + (enableThinking ? ":think" : ":nothink");
         this.delegate = new FixedSystemPrefixLlmCache(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX,
-                BankPlanPromptComposer.PREFIX_VERSION, memoCapacity, autoWarm, PLAN_WARM_PROBE);
+                version, memoCapacity, autoWarm, PLAN_WARM_PROBE, enableThinking,
+                enableThinking ? DEFAULT_THINKING_MAX_TOKENS : 0);
+    }
+
+    public static boolean thinkingEnabledFromProperty() {
+        String value = System.getProperty(THINKING_PROPERTY);
+        if (StringUtils.isBlank(value)) {
+            value = System.getenv("S2_PARSER_BANK_PLAN_THINKING_ENABLE");
+        }
+        return Boolean.parseBoolean(StringUtils.defaultIfBlank(value, "false"));
+    }
+
+    public boolean isThinkingEnabled() {
+        return enableThinking;
     }
 
     public void warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
