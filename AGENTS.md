@@ -77,6 +77,10 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 ## 4. 路由与消融默认（hard20 已证）
 
+**复现最佳 bank-on 参数（清单 + 应用脚本 + hard20/reg21 ids）：**  
+[`evaluation/bank_nl2sql/repro/BEST_BANK_ON.md`](evaluation/bank_nl2sql/repro/BEST_BANK_ON.md)  
+[`evaluation/bank_nl2sql/repro/best_bank_on.json`](evaluation/bank_nl2sql/repro/best_bank_on.json)
+
 | 开关 | 推荐默认 | 说明 |
 |------|----------|------|
 | `s2.parser.bank.plan.deterministic-short-circuit.enable` | **false** | 预模型规则短路：提分有限、掩盖模型路径、泛化差；仅消融/时延实验可开 |

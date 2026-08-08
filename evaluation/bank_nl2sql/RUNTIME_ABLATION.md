@@ -1,5 +1,7 @@
 # 银行受约束计划运行时对照实验（不删代码）
 
+**最佳 bank-on 问数参数与复现：** 见 [`repro/BEST_BANK_ON.md`](repro/BEST_BANK_ON.md)（`best_bank_on.json` + `apply_best_bank_on.py`）。
+
 目标：在**不删除** `BankQueryPlan` / 编译器 / AST 字段映射 / `BankResultProjector` 的前提下，用同一套题目对比：
 
 | 模式 | 系统参数 | 期望路由 |
