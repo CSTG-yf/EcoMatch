@@ -12,15 +12,28 @@
       "dev.jsonl"
     ]
   },
+  "answerContractValidation": {
+    "excludedCount": 0,
+    "inputRecordCount": 159,
+    "legacyIncompleteCount": 37,
+    "readyCount": 159,
+    "recordCount": 159,
+    "reviewRequiredCount": 0,
+    "schemaVersion": "3.0-dry-run",
+    "splits": [
+      "train",
+      "dev"
+    ]
+  },
   "augmentationCount": 12,
   "contentSha256": {
     "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
-    "dev.jsonl": "065c98f7ffcab7009f4137ed6d1a4534d42e8b126ef25cf0100ae36c103371c8",
-    "gold_manifest.json": "bb6249ab6246ef6fa3eb3ecca9dc4a6a300969b2e049fc91b4b1bbd7fbcefd63",
-    "manifest.json": "3e4013ec3a01e0cdf37b0bf766791c9ded42b7bc695cf3dcb3921d27ef194e3e",
+    "dev.jsonl": "5624e6165518140f0e4e8a4d4ff8ff99c7e15817e4123aa918939bb3a97dc94f",
+    "gold_manifest.json": "443072bcd3d47fe6a68532e171a05ccc3b744c0242a73623d0a109e8e7c4165b",
+    "manifest.json": "1f24a4bc86f5ecb7b400a1ba60bf5cd2d24e58de0a541b093335e3c211e8ee91",
     "schema.json": "56d0db738ad0748927fa7ef78eb92efe0c2b0fb8301869d9c427caf71ee9a334",
     "test.jsonl": "44c503e45ddae2ba2e708d55e6607b92a1d876d3836036f7a00ec176dc3dd877",
-    "train.jsonl": "67aef4dad9d982114b17482615ea9bb6473641064c17ba4c4869cc4cfd787948"
+    "train.jsonl": "bdd5f84522ada788a67c6a8420c7e677654fb1d29ff1a7364cf1adfd50ada1bf"
   },
   "evaluationSplitCounts": {
     "dev": 40,
@@ -28,18 +41,8 @@
     "train": 119
   },
   "goldValidation": {
-    "officialCount": 199,
-    "result": "PASS",
-    "resultMatchCount": 199,
-    "sqlExecutionCount": 199,
-    "timingMs": {
-      "average": 0.85,
-      "count": 199,
-      "max": 29.264,
-      "p50": 0.117,
-      "p95": 6.954,
-      "p99": 22.595
-    }
+    "reason": "SQL text/AST and legacy stored-row equivalence are not release criteria",
+    "result": "NOT_SCORED"
   },
   "officialCount": 199,
   "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
@@ -48,5 +51,5 @@
     "test": 40,
     "train": 119
   },
-  "version": "2.0.0"
+  "version": "2.0.1"
 }

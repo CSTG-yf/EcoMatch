@@ -1,0 +1,56 @@
+{
+  "correctionSpecSha256": "9E5DD24147EACA07ECEC309229F95AF0B844615F54C80F8707382046153AF39E",
+  "count": 6,
+  "entries": [
+    {
+      "id": "TRAIN-H-07",
+      "newAnswerSha256": "E0424BC64CC9B440573B947649827FA0EA1DBEBED4DC4917B5EC43DF96F143C3",
+      "oldAnswerSha256": "7285E8993ADC09E964D64A7EDBF6742A762966FEABFEE752500B67901663CAD9",
+      "reason": "按题干规则复核结构化 rank_position：仅第1至3名属于表现较好，第10至13名属于表现较差",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-H-09",
+      "newAnswerSha256": "FCBA1A48B6771DDA93C8A2885A966D9766A2B47DBF8319C65148306A6CB09ABC",
+      "oldAnswerSha256": "E61BE9655F3C240EF29DAB203CA3A8E435BC3407D53B3A380CCAB46B83780C0D",
+      "reason": "按题干规则复核结构化 rank_position：第4至9名不属于前三或后四",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-M-46",
+      "newAnswerSha256": "DB86B4AE216813CED8A3071C680D98BE63024848EA9F4E4AC24B260C3E38A36B",
+      "oldAnswerSha256": "958807741DFF28047E59D3EA51926B28E029AE24288361B6558DF3C90BBDC167",
+      "reason": "1.15%-1.35%=-0.20个百分点，原答案的高出负数与方向语义矛盾",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-M-47",
+      "newAnswerSha256": "B3B40D39531B196A56DDB7E47B6EF73EC2171D4330C20A6ECD3DA024F4585168",
+      "oldAnswerSha256": "8498C29D1F1A135BBE6A805BB869BCB5A9914965DCEE7715DD9A18EECC20DE88",
+      "reason": "1.05%-1.24%=-0.19个百分点，原答案的高出负数与方向语义矛盾",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-M-48",
+      "newAnswerSha256": "E2FBC2BE64A02929C2A16DD6766F2625103A4E9A2A8997049D3CEEBDCF748464",
+      "oldAnswerSha256": "8502D350933D71203BF5226BC4A33BB2781BC7BA5015DB302DD7BF50FB3B325F",
+      "reason": "0.97%-1.12%=-0.15个百分点，原答案的高出负数与方向语义矛盾",
+      "split": "train"
+    },
+    {
+      "id": "VAL-H-04",
+      "newAnswerSha256": "8A193AE351E6B95E992CEB640C96A3EF7130195B6F6EFC2335A946B0514668C7",
+      "oldAnswerSha256": "616398FDD1FC0704EABDBA9DAEDE54AAF0CB1983D84C1CCA76F3D0FF928DF95C",
+      "reason": "按题干规则复核结构化 rank_position：仅净利润第2名属于表现较好",
+      "split": "dev"
+    }
+  ],
+  "generator": {
+    "name": "amend_official_ground_truth",
+    "version": "1.0.0"
+  },
+  "parentDatasetVersion": "2.0.0",
+  "parentOfficialManifestSha256": "957032234B1988DFBC6229E2CB5C0DE2EA81BB9202061F6677D34523FD8232EB",
+  "schemaVersion": "1.0",
+  "targetDatasetVersion": "2.0.1"
+}

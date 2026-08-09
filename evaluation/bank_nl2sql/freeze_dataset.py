@@ -11,6 +11,7 @@ from typing import Any
 
 from validate_dataset import validate_dataset
 from validate_gold import validate_gold_dataset
+from fact_contract_v3 import build_fact_contract_report
 
 
 RELEASE_FILES = (
@@ -22,6 +23,10 @@ RELEASE_FILES = (
     "test.jsonl",
     "augmentation.jsonl",
 )
+
+
+class FactContractReleaseError(ValueError):
+    """A v3 release still contains unresolved train/dev answer contracts."""
 
 
 def _sha256(path: Path) -> str:
@@ -38,9 +43,33 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
     dataset_path = Path(dataset_path).resolve()
     database_path = Path(database_path).resolve()
     dataset_report = validate_dataset(dataset_path)
-    gold_report = validate_gold_dataset(dataset_path, database_path)
-    content_hashes = {filename: _sha256(dataset_path / filename) for filename in RELEASE_FILES}
     source_manifest = json.loads((dataset_path / "manifest.json").read_text(encoding="utf-8"))
+    answer_contract_validation: dict[str, Any] | None = None
+    if isinstance(source_manifest.get("answerAmendment"), dict):
+        records_by_split: dict[str, list[dict[str, Any]]] = {}
+        for split in ("train", "dev"):
+            path = dataset_path / f"{split}.jsonl"
+            records_by_split[split] = [
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        contract_report = build_fact_contract_report(records_by_split)
+        answer_contract_validation = dict(contract_report["summary"])
+        answer_contract_validation["schemaVersion"] = contract_report["schemaVersion"]
+        answer_contract_validation["splits"] = ["train", "dev"]
+        if answer_contract_validation["reviewRequiredCount"] != 0:
+            raise FactContractReleaseError(
+                "v3 answer contracts are not fully ready: "
+                f"{answer_contract_validation['reviewRequiredCount']} REVIEW_REQUIRED"
+            )
+        gold_report = {
+            "result": "NOT_SCORED",
+            "reason": "SQL text/AST and legacy stored-row equivalence are not release criteria",
+        }
+    else:
+        gold_report = validate_gold_dataset(dataset_path, database_path)
+    content_hashes = {filename: _sha256(dataset_path / filename) for filename in RELEASE_FILES}
     release = {
         "version": source_manifest.get("version", "0.1.0"),
         "sourceSha256": source_manifest["sourceSha256"],
@@ -56,6 +85,8 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
             "excludedByDefault": ["test.jsonl", "augmentation.jsonl"],
         },
     }
+    if answer_contract_validation is not None:
+        release["answerContractValidation"] = answer_contract_validation
     (dataset_path / "release_manifest.json").write_text(
         json.dumps(release, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

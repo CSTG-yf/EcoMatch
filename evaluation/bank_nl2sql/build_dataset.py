@@ -146,6 +146,8 @@ def _load_official_manifest(path: Path) -> dict[str, Any]:
     ledger_sha256 = (artifact_hashes or {}).get("changeLedger")
     if not isinstance(ledger_sha256, str) or len(ledger_sha256) != 64:
         raise DatasetBuildError("官方 manifest artifactSha256.changeLedger 非法")
+    if manifest.get("releaseMode") == "INCREMENTAL_ANSWER_AMENDMENT":
+        _validate_incremental_answer_amendment(manifest, path.parent)
     return manifest
 
 
@@ -155,6 +157,94 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _validate_incremental_answer_amendment(
+    manifest: dict[str, Any], manifest_dir: Path
+) -> None:
+    """Fail closed on the parent-to-child answer amendment provenance chain."""
+
+    parent = manifest.get("parent")
+    if (
+        not isinstance(parent, dict)
+        or not isinstance(parent.get("datasetVersion"), str)
+        or not parent["datasetVersion"]
+        or not isinstance(parent.get("officialManifestSha256"), str)
+        or len(parent["officialManifestSha256"]) != 64
+        or not isinstance(parent.get("groundTruthWorkbookSha256"), str)
+        or len(parent["groundTruthWorkbookSha256"]) != 64
+    ):
+        raise DatasetBuildError("增量官方 manifest parent 非法")
+    ledger_name = manifest.get("answerAmendmentLedger")
+    ledger_rel = Path(ledger_name) if isinstance(ledger_name, str) and ledger_name else None
+    if ledger_rel is None or ledger_rel.is_absolute() or ".." in ledger_rel.parts:
+        raise DatasetBuildError("增量官方 manifest answerAmendmentLedger 非法")
+    amendment_count = manifest.get("answerAmendmentCount")
+    if not isinstance(amendment_count, int) or amendment_count <= 0:
+        raise DatasetBuildError("增量官方 manifest answerAmendmentCount 非法")
+    generator = manifest.get("amendmentGenerator")
+    if (
+        not isinstance(generator, dict)
+        or not isinstance(generator.get("name"), str)
+        or not generator["name"]
+        or not isinstance(generator.get("version"), str)
+        or not generator["version"]
+    ):
+        raise DatasetBuildError("增量官方 manifest amendmentGenerator 非法")
+    expected_sha = (manifest.get("artifactSha256") or {}).get("answerAmendmentLedger")
+    if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+        raise DatasetBuildError(
+            "增量官方 manifest artifactSha256.answerAmendmentLedger 非法"
+        )
+    ledger_path = (manifest_dir / ledger_rel).resolve()
+    if not ledger_path.is_file():
+        raise DatasetBuildError(f"answerAmendmentLedger 不存在: {ledger_path}")
+    actual_sha = _sha256(ledger_path).upper()
+    if actual_sha != expected_sha.upper():
+        raise DatasetBuildError(
+            f"answerAmendmentLedger SHA-256 不匹配 ({actual_sha} != {expected_sha.upper()})"
+        )
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetBuildError(f"answerAmendmentLedger 无法解析: {exc}") from exc
+    if not isinstance(ledger, dict):
+        raise DatasetBuildError("answerAmendmentLedger 必须为对象")
+    if ledger.get("targetDatasetVersion") != manifest.get("datasetVersion"):
+        raise DatasetBuildError("answerAmendmentLedger targetDatasetVersion 不匹配")
+    if ledger.get("parentDatasetVersion") != parent["datasetVersion"]:
+        raise DatasetBuildError("answerAmendmentLedger parentDatasetVersion 不匹配")
+    if ledger.get("parentOfficialManifestSha256") != parent["officialManifestSha256"]:
+        raise DatasetBuildError("answerAmendmentLedger parentOfficialManifestSha256 不匹配")
+    if ledger.get("generator") != generator:
+        raise DatasetBuildError("answerAmendmentLedger generator 不匹配")
+    entries = ledger.get("entries")
+    if not isinstance(entries, list) or ledger.get("count") != len(entries):
+        raise DatasetBuildError("answerAmendmentLedger count/entries 非法")
+    if len(entries) != amendment_count:
+        raise DatasetBuildError("answerAmendmentLedger 条目数与 manifest 不匹配")
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise DatasetBuildError("answerAmendmentLedger entry 必须为对象")
+        sample_id = entry.get("id")
+        if not isinstance(sample_id, str) or not sample_id or sample_id in seen:
+            raise DatasetBuildError("answerAmendmentLedger ID 非法或重复")
+        seen.add(sample_id)
+        if entry.get("split") not in {"train", "dev"}:
+            raise DatasetBuildError(f"answerAmendmentLedger 禁止非 train/dev: {sample_id}")
+        old_sha = entry.get("oldAnswerSha256")
+        new_sha = entry.get("newAnswerSha256")
+        if (
+            not isinstance(old_sha, str)
+            or len(old_sha) != 64
+            or not isinstance(new_sha, str)
+            or len(new_sha) != 64
+            or old_sha == new_sha
+        ):
+            raise DatasetBuildError(f"answerAmendmentLedger 文本哈希非法: {sample_id}")
+        if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+            raise DatasetBuildError(f"answerAmendmentLedger reason 非法: {sample_id}")
 
 
 def _load_change_ledger(manifest: dict[str, Any], manifest_dir: Path) -> dict[str, dict[str, Any]]:

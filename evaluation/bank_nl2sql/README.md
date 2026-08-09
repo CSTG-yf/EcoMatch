@@ -5,21 +5,26 @@
 - `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
 - `build_dataset.py`：冻结官方题、意图标注和来源评测切分；
-- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（2.0.0 正式评估库，唯一正式评分依据）；
+- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（当前 2.0.1 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
 
-## 正式评估库 2.0.0
+## 正式评估库 2.0.1
 
-`evaluation/bank_nl2sql/official/2.0.0/` 是**唯一正式评分依据**，包含：
+`evaluation/bank_nl2sql/official/CURRENT.json` 当前指向
+`evaluation/bank_nl2sql/official/2.0.1/`。2.0.1 是**唯一当前正式评分依据**，
+2.0.0 作为不可变父版本继续保留。
 
-- `bank-nl2sql-ground-truth-v2.0.0.xlsx`：正式 ground-truth 工作簿（199 题）；
-- `official-manifest.json`：`datasetVersion=2.0.0`、`canonicalReady=true`、
+2.0.1 包含：
+
+- `bank-nl2sql-ground-truth-v2.0.1.xlsx`：正式 ground-truth 工作簿（199 题）；
+- `official-manifest.json`：`datasetVersion=2.0.1`、`canonicalReady=true`、
   `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
-  源/候选/事实区哈希与变更计数；
-- `contract-change-ledger.json`：题目/答案契约变更的逐条账本（含文本哈希）；
-- `final-audit-summary.json`：199 条全量 VERIFIED 审查证据摘要；
+  父版本、候选/事实区哈希与变更计数；
+- `contract-change-ledger.json`：从原始工作簿到2.0.0的既有题目/答案契约账本；
+- `answer-amendment-ledger.json`：从2.0.0到2.0.1的6条答案语义修正账本；
+- `answer-amendment-audit-summary.json`：只改声明答案单元格、test未变、事实区未变的审计摘要；
 - 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
 
 正式库相对冻结原始工作簿（`source.xlsx`，只读、永不修改）只包含账本声明的变更：
@@ -30,12 +35,29 @@
   已从正式库移除（`removedIds` 仅含账本声明的这一条）；
 - 0 个契约错误，事实区域哈希不变。
 
+2.0.1 在2.0.0基础上修正5条train和1条dev答案：三条“高出负数”的
+方向矛盾，以及三条不符合“前三/后四”规则的排名分类。没有修改题目、SQL、
+结构化rows、test或事实区域。
+
 正式统计：`officialCount=199`，来源与正式评测均为 train/dev/test =
 119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），增强样本
 12 条（不参与官方评分）。`manifest.json` 的 `templateOverlap` 仅披露
 模板重叠风险，不改变任何题目归属。
 
-### 生成正式评估库（promote）
+### 生成增量正式评估库
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/amend_official_ground_truth.py `
+  --parent-dir evaluation/bank_nl2sql/official/2.0.0 `
+  --corrections evaluation/bank_nl2sql/answer-amendments/2.0.1.json `
+  --output evaluation/bank_nl2sql/official/2.0.1 `
+  --update-current
+```
+
+生成器验证父包全部 sidecar、父答案哈希、修正ID/split、工作簿逐单元格差异、
+事实区哈希和test不变性；任何异常都在切换 `CURRENT.json` 前失败。
+
+### 历史2.0.0一次性生成流程（promote）
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/promote_ground_truth.py `
@@ -118,22 +140,63 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-Offici
 `db/releases/**` 已在 `.gitattributes` 标记为 `-text`，保证包内产物校验和在
 跨平台检出时保持稳定。
 
+## 可移植「银行问数」Agent 导入
+
+事实表导入包不会复制本机 `semantic.mv.db`，因此也不会夹带用户、会话、历史自增 ID
+或密钥。完成事实表导入并启动服务后，使用 `bootstrap_bank_agent.py` 将当前正式工作簿
+导入一个已经创建好的银行语义模型，并按接口返回的真实 `dataSetId` 创建或更新
+「银行问数」Agent。脚本同时应用 `repro/best_bank_on.json` 中的系统参数；Agent 不含
+训练题示例或 gold 内容，模型和数据集 ID 都由目标环境显式指定/动态发现。
+
+前置条件：
+
+1. 停止 standalone，运行上面的 `Import-OfficialBankData.ps1`，再启动服务；
+2. 在目标环境创建指向 `bank_metric_daily` 的语义模型，字段至少包含
+   `data_date`、`org_code`、`metric_code`、`metric_value`；
+3. 已配置一个可用的聊天模型，并准备管理员 Token。Token 只通过环境变量读取，
+   不会写入文件或报告。
+
+先做零写入检查：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
+  evaluation/bank_nl2sql --model-id 1 --chat-model-id 1 --dry-run
+```
+
+正式导入：
+
+```powershell
+$env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
+  evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
+  --model-id 1 --chat-model-id 1
+Remove-Item Env:ECOMATCH_AUTH_TOKEN
+```
+
+Windows 队友也可以直接双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`，按提示
+输入语义模型 ID、聊天模型 ID 和管理员 Token；脚本退出前会清空进程内 Token。
+
+导入是幂等的：语义资源按稳定业务键更新，Agent 按名称更新；目标环境生成的 Agent ID
+不要求等于本机历史 ID 33。命令输出最终 `modelId`、`dataSetId`、`agentId`、正式版本和
+manifest 哈希，队友应使用输出的 `agentId` 打开页面或运行评测。
+
 ## 构建标注数据集
 
-正式版必须使用 2.0.0 官方工作簿与 `official-manifest.json`（manifest 严格
+正式版必须使用 `official/CURRENT.json` 指向的2.0.1工作簿与
+`official-manifest.json`（manifest严格
 匹配工作簿名称/SHA-256/题数/来源切分/`canonicalReady` 后，才允许忽略
 `removedIds`；无 manifest 时保持原严格未知意图行为；除 `removedIds` 外
 任何未知/缺失 ID 一律失败）：
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
-  evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx `
+  evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx `
   --intent-root evaluation/bank_intent `
-  --official-manifest evaluation/bank_nl2sql/official/2.0.0/official-manifest.json `
-  --output evaluation/bank_nl2sql
+  --official-manifest evaluation/bank_nl2sql/official/2.0.1/official-manifest.json `
+  --output .local-dev/bank-nl2sql/rebuild-2.0.1
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
-  evaluation/bank_nl2sql
+  .local-dev/bank-nl2sql/rebuild-2.0.1
 ```
 
 正式版基于源文件 SHA-256
@@ -143,7 +206,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
 `manifest.json` 记录逐题调整；其 `templateOverlap` 仅作为风险披露，
 绝不改变题目归属。
 
-## 生成并验证金标
+## 旧SQL金标诊断
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_gold.py `
@@ -153,11 +216,10 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
   evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
 ```
 
-`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希与数据集版本
-（2.0.0 从 `manifest.json` 继承；无 manifest 的旧兼容路径仍为 0.1.0）。
-物理 SQL 已在 SQLite 与 H2 各执行 199 次且全部通过；`s2sql` 目前保存与
-物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，
-需要先在运行环境注册银行 H2 数据源及语义 Dataset。
+`build_gold.py` / `validate_gold.py` 保留为旧SQL模板与结构化rows一致性诊断，
+不再是2.0.1发布或评分门禁。2.0.1只修正答案文本，保留2.0.0既有SQL和rows；
+当前仓库中的旧SQL重执行存在历史结构漂移，因此不能用该命令覆盖已审查结果。
+正式主判定由下述事实合同v3负责。
 
 ## 冻结与盲测
 
@@ -226,18 +288,18 @@ smoke 通过后，去掉 `--max-records 5` 即可运行完整训练集。重复�
 
 关键开关是系统参数 `s2.parser.bank.constrained-plan.enable`；评测参数 `--runtime-mode bank-on|bank-off` 只给报告打标签，不改服务端配置。
 
-## 答案契约评估（官方主指标）
+## 答案契约评估
 
-银行问数**官方主指标**是 `answerExact`（原始 `answerText` 中的必答数值槽位是否都出现在预测结果中），**不是** SQL 文本匹配。结构化 `expected.rows` 全等保留为辅助指标 `tableEX` / 旧名 `resultAccuracy`。
+`answerExact` 是仓库历史内部指标，不是赛题文件明确定义的官方计分公式。它检查原始 `answerText` 中的数值槽位是否出现在预测结果中，**不比较** SQL 文本。结构化 `expected.rows` 全等指标为 `tableEX` / 旧名 `resultAccuracy`。
 
 ### 金标门禁：L2 ⊇ L1
 
-结构化结果必须能证明官方答案文案中的业务数字，否则该题不得进入官方分母：
+旧 v2 协议要求结构化结果能够直接证明答案文案中的全部数字，否则将题目排除出 `answerExact` 分母：
 
 | grade | 含义 |
 | --- | --- |
-| `GOLD_OK` | rows 覆盖全部必答数值 → 可计官方分 |
-| `GOLD_PARTIAL` / `GOLD_BAD` | 覆盖不全 / 全无 → 只诊断，不计官方准确率 |
+| `GOLD_OK` | rows 覆盖全部必答数值 → 进入旧 `answerExact` 分母 |
+| `GOLD_PARTIAL` / `GOLD_BAD` | 覆盖不全 / 全无 → 旧协议只诊断、不计分 |
 | `GOLD_NON_NUMERIC` | 答案无可抽取数值（v1 不进 answerExact） |
 
 ```powershell
@@ -258,6 +320,43 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold_contrac
 - `resultColumns` / `resultRows`（供 answerExact 与复评）
 
 报告 `metrics.answerExact` 仅在 `GOLD_OK` 且可抽取必答槽位的题目上统计。
+
+### Fact contract v3（正式发布门禁与评分迁移）
+
+v3 不再通过 `GOLD_PARTIAL` / `GOLD_BAD` 缩小分母。单题主判定为：
+
+```text
+casePass = resultExact AND finalFactsExact
+```
+
+- `resultExact` / `resultFactsExact`：SQL 执行结果包含源答案要求的全部数值事实，或能通过白名单确定性投影（如 `SUM`、`DIFFERENCE`）推导；不要求列名、投影结构或 SQL 文本相同。
+- `finalFactsExact`：最终文本独立包含源答案的全部必答数值事实和方向语义；正确结果表不能替代缺失的最终文本。
+- `tableExact`：仅保留为旧冻结结构化结果的诊断项，不参与 `casePass`。
+- `REVIEW_REQUIRED`：源答案本身存在语义矛盾或没有可评分事实；该题按失败处理，绝不排除。旧结果表缺项和需要语义绑定只作为 warning，不再缩小分母。
+- 分母始终是所选 split 的全部记录。
+
+先生成仅含 train/dev 的审查清单；命令不会读取 test，也不会修改 JSONL、manifest 或正式发布资产：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_fact_contract_v3.py `
+  evaluation/bank_nl2sql `
+  --split both --legacy-incomplete-only `
+  --output .local-dev/bank-nl2sql/fact-contract-v3/legacy-incomplete-train-dev.json
+```
+
+对已有运行报告执行全分母 v3 评分：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_fact_contract_v3.py `
+  evaluation/bank_nl2sql `
+  .local-dev/bank-nl2sql/some-report.json `
+  --split train `
+  --output .local-dev/bank-nl2sql/some-report.fact-v3.json
+```
+
+2.0.1 的train/dev已经达到159/159 `READY`，`freeze_dataset.py` 使用v3作为
+正式发布门禁。运行时报告主入口仍需在下一阶段从旧 `answerExact/tableEX`
+切换到 `caseAccuracy`；切换前两套指标并行保留，禁止把旧指标称为正式成绩。
 
 对历史报告补分（需含 `resultColumns`/`resultRows`）：
 

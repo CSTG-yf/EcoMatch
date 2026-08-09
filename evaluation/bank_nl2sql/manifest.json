@@ -1,4 +1,11 @@
 {
+  "answerAmendment": {
+    "canonicalWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
+    "canonicalWorkbookSha256": "B19F2DF98CE4CD7A4D7B16B37C220CDB85047D24EB30360D08A37F59105B6706",
+    "count": 6,
+    "ledgerSha256": "60D1294BDF3A7F8AC5FF2EE7E5C98836255E0BD05B6196950D462CBB6AF266F4",
+    "officialManifestSha256": "919557612BAC04C7FCB00FD1DA0CCBF1383F0909F8FEB3078C15E0E43B3477DD"
+  },
   "augmentationCount": 12,
   "evaluationSplitCounts": {
     "dev": 40,
@@ -6,6 +13,7 @@
     "train": 119
   },
   "officialCount": 199,
+  "parentVersion": "2.0.0",
   "reassignedForTemplateIsolation": [],
   "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
   "sourceSplitCounts": {
@@ -25,5 +33,5 @@
       "b92432933806f5fa"
     ]
   },
-  "version": "2.0.0"
+  "version": "2.0.1"
 }
