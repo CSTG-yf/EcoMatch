@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "1.0",
+  "description": "可复现的银行问数 Agent 33 配置。模型连接信息不随仓库发布，由部署环境提供。",
+  "agent": {
+    "id": 33,
+    "name": "银行问数",
+    "description": "银行 NL2SQL 评测与查询 Agent",
+    "status": 1,
+    "enableSearch": 1,
+    "enableFeedback": 0,
+    "isOpen": 1,
+    "examples": [],
+    "admins": [],
+    "viewers": [],
+    "adminOrgs": [],
+    "viewOrgs": [],
+    "toolConfig": {
+      "simpleMode": false,
+      "debugMode": true,
+      "tools": [
+        {
+          "id": "MWOftc0B",
+          "type": "DATASET",
+          "name": "银行 NL2SQL",
+          "dataSetIds": [33, 65],
+          "exampleQuestions": [],
+          "metricOptions": []
+        }
+      ]
+    },
+    "chatAppConfig": {
+      "BANK_CONSTRAINED_PLAN": {
+        "name": "银行受约束查询计划",
+        "description": "通过大模型生成经过白名单约束的银行查询计划",
+        "prompt": null,
+        "enable": true,
+        "chatModelId": null
+      },
+      "S2SQL_PARSER": {
+        "name": "语义SQL解析",
+        "description": "通过大模型做语义解析生成S2SQL",
+        "prompt": "#Role: You are a data analyst experienced in SQL languages.\n#Task: You will be provided with a natural language question asked by users,please convert it to a SQL query so that relevant data could be returned by executing the SQL query against underlying database.\n#Rules:\n1.SQL columns and values must be mentioned in the `Schema`, DO NOT hallucinate.\n2.ALWAYS specify time range using `>`,`<`,`>=`,`<=` operator.\n3.DO NOT include time range in the where clause if not explicitly expressed in the `Question`.\n4.DO NOT calculate date range using functions.\n5.ALWAYS use `with` statement if nested aggregation is needed.\n6.ALWAYS enclose alias declared by `AS` command in underscores.\n7.Alias created by `AS` command must be in the same language ast the `Question`.\n#Exemplars: {{exemplar}}\n#Query: Question:{{question}},Schema:{{schema}},SideInfo:{{information}}",
+        "enable": true,
+        "chatModelId": 1
+      },
+      "EXECUTION_SQL_CORRECTOR": {
+        "name": "Execution SQL Repair",
+        "description": "Repair failed physical SQL once from DB error",
+        "prompt": null,
+        "enable": true,
+        "chatModelId": 1
+      },
+      "REWRITE_MULTI_TURN": {
+        "name": "Multi-turn rewrite",
+        "description": "Rewrite with structured chat history",
+        "prompt": "#Role: Rewrite the current question into a complete standalone question using the structured history from this chat session. #Rules: 1. Process history_context in chronological order. 2. APPEND inherits unspecified metrics, dimensions, filters, date ranges, sorting and granularity. 3. REPLACE overwrites only items explicitly changed. 4. REMOVE excludes only explicitly cancelled items. 5. DRILL_DOWN preserves filters and changes granularity. 6. Never invent conditions or inherit information outside history_context. 7. ONLY respond with the rewritten question. #Current Question: {{current_question}} #Current Mapped Schema: {{current_schema}} #Context Operation: {{context_operation}} #History Context: {{history_context}} #Rewritten Question:",
+        "enable": true,
+        "chatModelId": 1
+      },
+      "S2SQL_CORRECTOR": {
+        "name": "语义SQL修正",
+        "description": "通过大模型对解析S2SQL做二次修正",
+        "prompt": null,
+        "enable": false,
+        "chatModelId": null
+      },
+      "PHYSICAL_SQL_CORRECTOR": {
+        "name": "物理SQL修正",
+        "description": "通过大模型对物理SQL做性能优化",
+        "prompt": null,
+        "enable": false,
+        "chatModelId": null
+      }
+    }
+  },
+  "runtimeRequirements": {
+    "datasetIds": [33, 65],
+    "chatModelId": 1,
+    "modelConfig": "由部署环境配置；不在仓库中保存 API key 或 endpoint"
+  }
+}
