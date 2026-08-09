@@ -19,8 +19,8 @@ class FixedSystemPrefixLlmCacheTest {
         when(model.generate(anyString())).thenAnswer(invocation -> {
             String prompt = invocation.getArgument(0);
             assertTrue(prompt.contains("各项存款余额"));
-            assertTrue(prompt.contains("Question:存款"));
-            assertTrue(prompt.indexOf("各项存款余额") < prompt.indexOf("Question:存款"));
+            assertTrue(prompt.contains("\n\n存款\n\n附加信息：I"));
+            assertTrue(prompt.indexOf("各项存款余额") < prompt.indexOf("\n\n存款"));
             return "{\"sql\":\"SELECT 1\"}";
         });
         String system = BankFreeSqlPromptComposer.composeSystemPrefix(

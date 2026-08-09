@@ -1,7 +1,10 @@
 package com.tencent.supersonic.headless.chat.parser.llm;
 
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
+import com.tencent.supersonic.headless.api.pojo.request.BankPlanRepairContext;
+import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import org.junit.jupiter.api.Test;
 
@@ -88,6 +91,26 @@ class LLMRequestServiceTest {
         LLMSqlParser.publishBankRoutingAttemptTelemetry(parseResp, routingRequest(), true);
 
         assertTrue(parseResp.getBankRoutingAttemptTelemetry().isLlmCandidateCreated());
+    }
+
+    @Test
+    void shouldTransferInternalBankPlanRepairContextToLlmRequest() {
+        BankPlanToolResult failure = BankPlanToolResult.failed(1, "trace-1", "fingerprint-1",
+                BankPlanToolResult.Stage.DATABASE_EXECUTE, "JDBC_GRAMMAR", Map.of(),
+                List.of("regenerate the complete plan"));
+        QueryNLReq queryRequest = new QueryNLReq();
+        queryRequest.setBankPlanRepairContext(BankPlanRepairContext.of(failure.toRepairFeedback(),
+                "{\"version\":\"1.0\",\"intent\":\"DETAIL\"}"));
+        LLMReq llmRequest = new LLMReq();
+
+        LLMRequestService.applyBankPlanRepairContext(queryRequest, llmRequest);
+
+        assertEquals(BankPlanToolResult.Stage.DATABASE_EXECUTE,
+                llmRequest.getBankPlanToolResult().getFailedStage());
+        assertEquals("JDBC_GRAMMAR", llmRequest.getBankPlanToolResult().getErrorCode());
+        assertEquals("trace-1", llmRequest.getBankPlanToolResult().getTraceId());
+        assertEquals("{\"version\":\"1.0\",\"intent\":\"DETAIL\"}",
+                llmRequest.getPreviousBankQueryPlanJson());
     }
 
     private static LLMReq routingRequest() {

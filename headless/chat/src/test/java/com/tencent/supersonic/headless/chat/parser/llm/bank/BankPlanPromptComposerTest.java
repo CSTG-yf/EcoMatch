@@ -2,6 +2,9 @@ package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -43,6 +46,25 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void toolRepairContainsOnlyPreviousPlanAndSanitizedStageFailure() {
+        BankPlanToolResult failure = BankPlanToolResult.failed(2, "trace-2", "fingerprint-1",
+                BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION",
+                Map.of("intent", List.of("POINT_QUERY", "CHANGE")),
+                List.of("重新选择受支持的查询族"));
+
+        String repair = BankPlanPromptComposer.buildToolRepairUserContent("存款变化多少？",
+                "{\"intent\":\"CHANGE\"}", failure);
+
+        assertTrue(repair.startsWith("存款变化多少？"));
+        assertTrue(repair.contains("<tool_result>"));
+        assertTrue(repair.contains("UNSUPPORTED_PLAN_COMBINATION"));
+        assertTrue(repair.contains("<previous_plan>"));
+        assertTrue(repair.contains("必须输出修正后的完整 BankQueryPlan"));
+        assertFalse(repair.toUpperCase().contains("SELECT "));
+        assertFalse(repair.contains("gold"));
+    }
+
+    @Test
     void systemPrefixTeachesRecipesWithoutLeakingEvalQuestions() {
         String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
         // Abstract recipes stay.
@@ -55,6 +77,6 @@ class BankPlanPromptComposerTest {
         assertFalse(sys.contains("待评价指标集合：存贷比、不良率、拨备覆盖率"));
         assertFalse(sys.contains("规模（贷款）、质量（不良率）、效益（净利润）"));
         assertFalse(sys.contains("不良率和全省均值比怎么样"));
-        assertTrue(BankPlanPromptComposer.PREFIX_VERSION.contains("v9"));
+        assertTrue(BankPlanPromptComposer.PREFIX_VERSION.contains("v10"));
     }
 }

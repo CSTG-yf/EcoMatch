@@ -3,6 +3,7 @@ package com.tencent.supersonic.chat.server.processor.execute;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +30,8 @@ class BankResultProjectionHandlerTest {
                 .build();
         parseInfo.getProperties().put(BankResultProjector.CONTRACT_PROPERTY,
                 JsonUtil.objectToMap(contract));
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                executedToolResult("trace-long-form"));
         QueryResult result = new QueryResult();
         result.setChatContext(parseInfo);
         result.setQueryResults(List.of(row("zb010", new BigDecimal("60.28"))));
@@ -41,6 +44,12 @@ class BankResultProjectionHandlerTest {
         assertEquals(List.of(row("org_code", "ORG008", "org_name", "江苏省H市农商行", "metric_code",
                 "ZB010", "metric_value", new BigDecimal("60.28"))), result.getQueryResults());
         assertTrue(result.getTextResult().contains("| metric_value |"));
+        BankPlanToolResult toolResult =
+                (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(BankPlanToolResult.Status.SUCCEEDED, toolResult.getStatus());
+        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value"),
+                toolResult.getResultSchema());
+        assertEquals(1, toolResult.getResultPreview().size());
     }
 
     @Test
@@ -70,6 +79,37 @@ class BankResultProjectionHandlerTest {
                 new BigDecimal("25.75"), "denominator_value", new BigDecimal("48.50"),
                 "ratio_percent", new BigDecimal("53.0928"))), result.getQueryResults());
         assertTrue(result.getTextResult().contains("| ratio_percent |"));
+    }
+
+    @Test
+    void shouldRecordResultSemanticFailureWithoutChangingTheFailedProjection() {
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.LONG_FORM).metrics(List.of()).build();
+        parseInfo.getProperties().put(BankResultProjector.CONTRACT_PROPERTY,
+                JsonUtil.objectToMap(contract));
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                executedToolResult("trace-invalid-result"));
+        QueryResult result = new QueryResult();
+        result.setChatContext(parseInfo);
+        result.setQueryResults(List.of(row("unexpected", BigDecimal.ONE)));
+
+        boolean applied = new BankResultProjectionHandler().apply(result);
+
+        assertTrue(!applied);
+        BankPlanToolResult toolResult =
+                (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(BankPlanToolResult.Status.FAILED, toolResult.getStatus());
+        assertEquals(BankPlanToolResult.Stage.RESULT_SEMANTIC, toolResult.getFailedStage());
+        assertEquals("RESULT_CONTRACT_MISMATCH", toolResult.getErrorCode());
+        assertEquals(List.of(row("unexpected", BigDecimal.ONE)), result.getQueryResults());
+    }
+
+    private static BankPlanToolResult executedToolResult(String traceId) {
+        return BankPlanToolResult.started(1, traceId, "fingerprint-1", "STRUCT",
+                List.of("metric_value")).succeed(BankPlanToolResult.Stage.SQL_SAFETY)
+                .succeed(BankPlanToolResult.Stage.DATABASE_PREPARE)
+                .succeed(BankPlanToolResult.Stage.DATABASE_EXECUTE);
     }
 
     private static Map<String, Object> row(Object... values) {

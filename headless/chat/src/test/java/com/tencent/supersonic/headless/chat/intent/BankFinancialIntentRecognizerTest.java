@@ -188,6 +188,14 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldPreferChangeWhenTheQuestionAsksForRankingMovement() {
+        BankIntentResult result = recognizer.recognize(
+                "从去年末到今年末，各项存款余额的排名变化了多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+    }
+
+    @Test
     void shouldNotTreatAMinimumRegulatoryRequirementAsARankingFilter() {
         BankIntentResult result = recognizer.recognize("2026年一季度末，江苏省H市农商行的资本充足率满足10.5%的最低要求吗？",
                 LocalDate.of(2026, 7, 22));

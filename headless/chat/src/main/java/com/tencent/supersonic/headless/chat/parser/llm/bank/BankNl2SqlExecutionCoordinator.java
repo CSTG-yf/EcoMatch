@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
 
 /**
@@ -48,7 +49,7 @@ public class BankNl2SqlExecutionCoordinator {
                     BankPlanCompilationException.Reason.S2SQL_RENDER_FAILED,
                     "the bank query plan did not produce executable S2SQL");
         }
-        return new ExecutionCandidate(compiled, s2sql, response.getBankQueryPlan());
+        return new ExecutionCandidate(compiled, s2sql, response.getBankQueryPlan(), request);
     }
 
     @Getter
@@ -59,15 +60,24 @@ public class BankNl2SqlExecutionCoordinator {
         private final BankResultProjector.Contract resultContract;
         private final String fingerprint;
         private final Map<String, Object> bankTelemetry;
+        private final BankPlanToolResult toolResult;
+        private final BankQueryPlan plan;
 
         private ExecutionCandidate(BankQueryPlanCompiler.CompiledQuery compiled, String s2sql,
-                BankQueryPlan plan) {
+                BankQueryPlan plan, LLMReq request) {
             this.route = compiled.getRoute();
             this.s2sql = s2sql;
             this.outputColumns = compiled.getOutputColumns();
             this.resultContract = compiled.getResultContract();
             this.fingerprint = compiled.getFingerprint();
             this.bankTelemetry = bankTelemetry(plan, route);
+            this.plan = plan;
+            BankPlanToolResult previous = request.getBankPlanToolResult();
+            int attempt = previous == null ? 1 : previous.getAttempt() + 1;
+            String traceId = previous == null ? UUID.randomUUID().toString()
+                    : previous.getTraceId();
+            this.toolResult = BankPlanToolResult.started(attempt, traceId, fingerprint,
+                    route.name(), outputColumns);
         }
 
         public Map<String, Object> diagnostics() {
@@ -77,6 +87,8 @@ public class BankNl2SqlExecutionCoordinator {
             diagnostics.put("bank.nl2sql.outputColumns", outputColumns);
             diagnostics.put("bank.nl2sql.candidateCount", 1);
             diagnostics.put("bankTelemetry", bankTelemetry);
+            diagnostics.put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+            diagnostics.put(BankPlanToolResult.PLAN_PROPERTY_KEY, plan);
             if (resultContract != null) {
                 diagnostics.put(BankResultProjector.CONTRACT_PROPERTY, resultContract);
             }

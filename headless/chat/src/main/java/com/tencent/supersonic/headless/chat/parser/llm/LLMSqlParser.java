@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.parser.llm;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.util.ContextUtils;
+import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
@@ -11,6 +12,7 @@ import com.tencent.supersonic.headless.chat.parser.SemanticParser;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionCoordinator;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanCompilationException;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
@@ -19,9 +21,11 @@ import org.apache.commons.collections.MapUtils;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * LLMSqlParser uses large language model to understand query semantics and generate S2SQL
@@ -86,8 +90,14 @@ public class LLMSqlParser implements SemanticParser {
         publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false);
         boolean bankConstrainedPlan =
                 LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType());
+        if (bankConstrainedPlan) {
+            maxRetries = Math.max(maxRetries, 3);
+        }
 
         int currentRetry = 1;
+        String bankTraceId = UUID.randomUUID().toString();
+        String lastToolFailureSignature = null;
+        String previousBankPlanJson = null;
         Map<String, LLMSqlResp> sqlRespMap = new HashMap<>();
         Map<String, Object> selectedDiagnostics = Collections.emptyMap();
         ParseResult parseResult = null;
@@ -99,6 +109,9 @@ public class LLMSqlParser implements SemanticParser {
             try {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
+                    if (bankConstrainedPlan && llmResp.getBankQueryPlan() != null) {
+                        previousBankPlanJson = JsonUtil.toString(llmResp.getBankQueryPlan());
+                    }
                     Map<String, Object> attemptDiagnostics = new HashMap<>();
                     if (llmResp.getBankRoutingTelemetry() != null) {
                         attemptDiagnostics.put("bankRoutingTelemetry",
@@ -150,7 +163,26 @@ public class LLMSqlParser implements SemanticParser {
                     candidateValidationErrorType = null;
                     candidateCompilerReason = bankCandidateCompilerReason(e);
                 }
-                if (bankConstrainedPlan && !BankNl2SqlError.allowsParserRetry(e)) {
+                BankPlanCompilationException compilationException =
+                        bankPlanCompilationException(e);
+                if (bankConstrainedPlan && compilationException != null) {
+                    String errorCode = compilationException.getReason() == null
+                            ? "COMPILATION_FAILED" : compilationException.getReason().name();
+                    String signature = BankPlanToolResult.Stage.COMPILE.name() + ":" + errorCode;
+                    if (currentRetry < maxRetries
+                            && !signature.equals(lastToolFailureSignature)) {
+                        llmReq.setBankPlanToolResult(BankPlanToolResult.failed(currentRetry,
+                                bankTraceId, null, BankPlanToolResult.Stage.COMPILE, errorCode,
+                                Map.of(), List.of("根据编译错误码重新生成完整 BankQueryPlan")));
+                        llmReq.setPreviousBankQueryPlanJson(previousBankPlanJson);
+                        lastToolFailureSignature = signature;
+                    } else {
+                        publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
+                                candidateRejectionState, candidateValidationErrorType,
+                                candidateCompilerReason);
+                        throw BankNl2SqlError.compilationFailure(e);
+                    }
+                } else if (bankConstrainedPlan && !BankNl2SqlError.allowsParserRetry(e)) {
                     publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
                             candidateRejectionState, candidateValidationErrorType,
                             candidateCompilerReason);
@@ -164,8 +196,8 @@ public class LLMSqlParser implements SemanticParser {
                 }
             }
             SqlGenStrategy strategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
-            ChatApp chatApp =
-                    strategy == null ? null : llmReq.getChatAppConfig().get(strategy.getAppKey());
+            ChatApp chatApp = strategy == null || llmReq.getChatAppConfig() == null ? null
+                    : llmReq.getChatAppConfig().get(strategy.getAppKey());
             if (chatApp != null && chatApp.getChatModelConfig() != null) {
                 ChatModelConfig chatModelConfig = chatApp.getChatModelConfig();
                 Double temperature = chatModelConfig.getTemperature();

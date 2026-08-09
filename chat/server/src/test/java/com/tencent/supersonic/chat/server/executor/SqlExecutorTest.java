@@ -11,11 +11,13 @@ import com.tencent.supersonic.headless.api.pojo.SqlInfo;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.SemanticQueryReq;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationContext;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,6 +51,9 @@ class SqlExecutorTest {
         SqlInfo sqlInfo = parseInfo.getSqlInfo();
         sqlInfo.setCorrectedS2SQL(correctedS2Sql);
         sqlInfo.setQuerySQL(physicalSql);
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                BankPlanToolResult.started(1, "trace-success", "fingerprint-1", "STRUCT",
+                        List.of("metric_value")));
         ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder()
                 .user(user).chatId(7).queryId(9L).queryText("查询存款余额").build());
         executeContext.setParseInfo(parseInfo);
@@ -63,6 +68,15 @@ class SqlExecutorTest {
         assertSame(sqlInfo, scopeRequest.getSqlInfo());
         assertEquals(physicalSql, scopeRequest.getSqlInfo().getQuerySQL());
         assertTrue(scopeRequest.isTrustedCompiledSql());
+        BankPlanToolResult toolResult =
+                (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(BankPlanToolResult.Status.IN_PROGRESS, toolResult.getStatus());
+        assertEquals(List.of(BankPlanToolResult.Stage.SQL_SAFETY,
+                BankPlanToolResult.Stage.DATABASE_PREPARE,
+                BankPlanToolResult.Stage.DATABASE_EXECUTE),
+                toolResult.getStageResults().stream().map(BankPlanToolResult.StageResult::getStage)
+                        .filter(stage -> stage.ordinal() >= BankPlanToolResult.Stage.SQL_SAFETY.ordinal())
+                        .toList());
     }
 
     @Test
@@ -83,6 +97,9 @@ class SqlExecutorTest {
 
         SemanticParseInfo parseInfo = new SemanticParseInfo();
         parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT metric");
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                BankPlanToolResult.started(1, "trace-failure", "fingerprint-1", "STRUCT",
+                        List.of("metric_value")));
         ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder()
                 .user(user).chatId(7).queryId(9L).queryText("query").build());
         executeContext.setParseInfo(parseInfo);
@@ -97,5 +114,12 @@ class SqlExecutorTest {
         assertTrue(parseInfo.getProperties().values().stream()
                 .noneMatch(value -> String.valueOf(value).contains("opaque-details")));
         assertTrue(!parseInfo.getProperties().containsKey("sqlExecutionFeedback"));
+        BankPlanToolResult toolResult =
+                (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(BankPlanToolResult.Status.FAILED, toolResult.getStatus());
+        assertEquals(BankPlanToolResult.Stage.DATABASE_EXECUTE, toolResult.getFailedStage());
+        assertEquals("JDBC_GRAMMAR", toolResult.getErrorCode());
+        assertTrue(toolResult.toRepairFeedback().contains("JDBC_GRAMMAR"));
+        assertTrue(!toolResult.toRepairFeedback().contains("opaque-details"));
     }
 }

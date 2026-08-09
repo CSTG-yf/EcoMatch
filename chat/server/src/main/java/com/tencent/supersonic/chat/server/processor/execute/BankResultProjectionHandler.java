@@ -6,6 +6,7 @@ import com.tencent.supersonic.chat.server.util.ResultFormatter;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 
 import java.util.List;
@@ -35,6 +36,7 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
         BankResultProjector.Projection projection =
                 projector.project(contract, queryResult.getQueryResults());
         if (!projection.isApplied()) {
+            failResultSemantic(queryResult.getChatContext());
             return false;
         }
         List<QueryColumn> columns = projection.getColumns().stream()
@@ -42,7 +44,34 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
         queryResult.setQueryColumns(columns);
         queryResult.setQueryResults(projection.getRows());
         queryResult.setTextResult(ResultFormatter.transform2TextNew(columns, projection.getRows()));
+        completeToolResult(queryResult.getChatContext(), projection);
         return true;
+    }
+
+    private void failResultSemantic(SemanticParseInfo parseInfo) {
+        BankPlanToolResult toolResult = toolResult(parseInfo);
+        if (toolResult == null || toolResult.getStatus() == BankPlanToolResult.Status.FAILED) {
+            return;
+        }
+        toolResult.fail(BankPlanToolResult.Stage.RESULT_SEMANTIC, "RESULT_CONTRACT_MISMATCH",
+                java.util.Map.of(), List.of("检查输出事实、列契约和查询族是否匹配"));
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+    }
+
+    private void completeToolResult(SemanticParseInfo parseInfo,
+            BankResultProjector.Projection projection) {
+        BankPlanToolResult toolResult = toolResult(parseInfo);
+        if (toolResult == null || toolResult.getStatus() == BankPlanToolResult.Status.FAILED) {
+            return;
+        }
+        toolResult.complete(projection.getColumns(), projection.getRows());
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+    }
+
+    private BankPlanToolResult toolResult(SemanticParseInfo parseInfo) {
+        return parseInfo == null ? null
+                : BankPlanToolResult
+                        .from(parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY));
     }
 
     private BankResultProjector.Contract contract(SemanticParseInfo parseInfo) {

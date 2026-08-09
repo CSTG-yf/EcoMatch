@@ -83,6 +83,29 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void shouldUseSanitizedToolFailureForTheNextCompletePlanAttempt() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = request();
+        request.setPreviousBankQueryPlanJson(validPlanJson());
+        request.setBankPlanToolResult(BankPlanToolResult.failed(2, "trace-2", "fingerprint-1",
+                BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION",
+                Map.of("intent", List.of("RANKING", "POINT_QUERY")),
+                List.of("重新选择受支持的查询族")));
+
+        LLMResp response = strategy.generate(request);
+
+        assertEquals("MODEL_TOOL_REPAIR",
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt -> prompt
+                .contains("<tool_result>")
+                && prompt.contains("UNSUPPORTED_PLAN_COMBINATION")
+                && prompt.contains("<previous_plan>") && !prompt.toUpperCase().contains("SELECT ")
+                && !prompt.contains("gold")));
+    }
+
+    @Test
     void shouldShortCircuitToDeterministicPlanOnlyWhenPropertyEnabled() {
         enableDeterministicShortCircuit();
         ChatLanguageModel model = mock(ChatLanguageModel.class);
@@ -323,6 +346,37 @@ class BankPlanGenStrategyTest {
         assertEquals("ZB002", plan.getCalculation().getBaseline());
         assertEquals(BankQueryPlan.TimeComparison.NONE, plan.getTime().getComparison());
         assertEquals(null, plan.getLimit());
+    }
+
+    @Test
+    void shouldNormalizeNetProfitMarginToProfitOverRevenue() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validNetProfitMarginPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(netProfitMarginRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RATIO, plan.getIntent());
+        assertEquals(List.of("ZB011", "ZB009"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals("ZB009", plan.getCalculation().getBaseline());
+    }
+
+    @Test
+    void shouldNormalizeTwoOrganizationComparisonToGroupedProjection() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validTwoOrganizationComparisonPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+
+        LLMResp response = strategy.generate(twoOrganizationComparisonRequest());
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.COMPARISON, plan.getIntent());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("ORG003", "ORG007"),
+                plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode).toList());
+        assertEquals(List.of("bank_organization", "ZB001"), plan.getOutput().getColumns());
     }
 
     @Test
@@ -707,6 +761,213 @@ class BankPlanGenStrategyTest {
         assertEquals(LocalDate.of(2025, 6, 30), plan.getTime().getBaselineStartDate());
         assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, plan.getTime().getComparison());
         verify(model, org.mockito.Mockito.never()).generate(anyString());
+    }
+
+    @Test
+    void shouldNormalizeModelMoMPlanToThePreviousMonthEnd() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validChangePlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省C市农商行的各项存款余额在2025-07-31，比上个月底变动了多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan.TimeRange time = response.getBankQueryPlan().getTime();
+        assertEquals(LocalDate.of(2025, 7, 31), time.getStartDate());
+        assertEquals(LocalDate.of(2025, 7, 31), time.getEndDate());
+        assertEquals(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD, time.getComparison());
+        assertEquals(LocalDate.of(2025, 6, 30), time.getBaselineStartDate());
+        assertEquals(LocalDate.of(2025, 6, 30), time.getBaselineEndDate());
+        verify(model, org.mockito.Mockito.atLeastOnce()).generate(anyString());
+    }
+
+    @Test
+    void shouldNormalizeModelDerivedRankingToTheCompilerOwnedContract() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validDerivedPlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = derivedRankingRequest();
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.RANKING, plan.getIntent());
+        assertEquals(List.of("ZB001", "ZB002"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals(List.of("bank_organization", "ZB001", "ZB002"),
+                plan.getOutput().getColumns());
+        assertEquals(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
+                .direction(BankQueryPlan.SortDirection.DESC).build()), plan.getOrderBy());
+        verify(model).generate(anyString());
+    }
+
+    @Test
+    void shouldNormalizePerCapitaProfitToTheSourcePointMetric() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validRatioPlanJson()
+                .replace("ZB005", "ZB011").replace("ZB002", "ZB018"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = pointRequest("江苏省H市农商行在2025-09-30的人均利润是多少？", "ZB011",
+                "ORG008", LocalDate.of(2025, 9, 30), LocalDate.of(2025, 9, 30));
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY).allowedMetrics(Set.of("ZB011", "ZB018"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011")).requiredOrganizationCodes(Set.of("ORG008"))
+                .requiredStartDate(LocalDate.of(2025, 9, 30))
+                .requiredEndDate(LocalDate.of(2025, 9, 30)).build());
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(List.of("ZB011"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals(BankQueryPlan.CalculationType.DIRECT, plan.getCalculation().getType());
+        assertEquals(LocalDate.of(2025, 9, 30), plan.getTime().getStartDate());
+    }
+
+    @Test
+    void shouldNormalizeQuarterDailyAverageToTheGoldPointDate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                validAnnualDailySummaryPlanJson().replace("\"aggregation\":\"DEFAULT\"",
+                        "\"aggregation\":\"AVG\"")
+                        .replace("2025-01-01", "2025-01-31")
+                        .replace("2025-12-31", "2025-03-31")
+                        .replace("ORG010", "ORG013"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = pointRequest("江苏省M市农商行2025年一季度的日均存款余额是多少？", "ZB001",
+                "ORG013", LocalDate.of(2025, 1, 31), LocalDate.of(2025, 3, 31));
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(LocalDate.of(2025, 3, 31), plan.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 3, 31), plan.getTime().getEndDate());
+        assertEquals(BankQueryPlan.Aggregation.DEFAULT,
+                plan.getMetrics().get(0).getAggregation());
+    }
+
+    @Test
+    void shouldNormalizeAnnualDailyAverageToTheGoldYearEndPoint() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                validAnnualDailySummaryPlanJson().replace("\"aggregation\":\"DEFAULT\"",
+                        "\"aggregation\":\"AVG\"").replace("ORG010", "ORG002")
+                        .replace("ZB001", "ZB002"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = pointRequest("江苏省B市农商行2025年全年的日均贷款余额是多少？", "ZB002",
+                "ORG002", LocalDate.of(2025, 1, 1), LocalDate.of(2025, 12, 31));
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(LocalDate.of(2025, 12, 31), plan.getTime().getStartDate());
+        assertEquals(List.of("ZB002"),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+    }
+
+    @Test
+    void shouldNormalizeMultiMetricTotalToLongFormAggregationSummary() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(validMultiMetricWidePlanJson());
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = pointRequest("江苏省C市农商行在2026-04-30的净利息收入和中间业务收入合计多少？",
+                "ZB007", "ORG003", LocalDate.of(2026, 4, 30), LocalDate.of(2026, 4, 30));
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION).allowedMetrics(Set.of("ZB007", "ZB008"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB007", "ZB008")))
+                .requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30)).build());
+
+        LLMResp response = strategy.generate(request);
+
+        BankQueryPlan plan = response.getBankQueryPlan();
+        assertEquals(BankIntentType.AGGREGATION, plan.getIntent());
+        assertEquals(List.of(BankQueryPlan.Aggregation.AVG, BankQueryPlan.Aggregation.AVG),
+                plan.getMetrics().stream().map(BankQueryPlan.Metric::getAggregation).toList());
+        assertEquals(List.of("bank_organization"), plan.getDimensions());
+        assertEquals(List.of("bank_organization", "ZB007", "ZB008"),
+                plan.getOutput().getColumns());
+        assertEquals(List.of(), plan.getOrderBy());
+    }
+
+    @Test
+    void shouldUseBoundedBankFallbackWhenModelTimesOutForAResolvableChange() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenThrow(new RuntimeException("connection timeout"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省C市农商行的各项存款余额在2025-07-31，比上个月底变动了多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG003"))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        assertEquals("SOFT_FALLBACK_MODEL_FAILURE",
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        assertEquals(LocalDate.of(2025, 6, 30),
+                response.getBankQueryPlan().getTime().getBaselineStartDate());
+        verify(model).generate(anyString());
+    }
+
+    @Test
+    void shouldUseMultiMetricHalfYearFallbackWhenModelTimesOut() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenThrow(new RuntimeException("connection timeout"));
+        BankPlanGenStrategy strategy = new TestBankPlanGenStrategy(model);
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省B市农商行从2025年上半年末到年末，存款、贷款、不良率和净利润的变动方向分别是什么？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB011", "ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB001", "ZB002", "ZB011", "ZB013")))
+                .requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY,
+                ChatApp.builder().chatModelConfig(new ChatModelConfig()).build()));
+
+        LLMResp response = strategy.generate(request);
+
+        assertEquals("SOFT_FALLBACK_MODEL_FAILURE",
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        assertEquals(List.of("ZB001", "ZB002", "ZB011", "ZB013"), response.getBankQueryPlan()
+                .getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
+        assertEquals(LocalDate.of(2025, 6, 30),
+                response.getBankQueryPlan().getTime().getBaselineStartDate());
+        verify(model).generate(anyString());
     }
 
     @Test
@@ -1128,6 +1389,22 @@ class BankPlanGenStrategyTest {
         return request;
     }
 
+    private LLMReq pointRequest(String queryText, String metric, String organization,
+            LocalDate startDate, LocalDate endDate) {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText(queryText);
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY).allowedMetrics(Set.of(metric))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of(metric)).requiredOrganizationCodes(Set.of(organization))
+                .requiredStartDate(startDate).requiredEndDate(endDate).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
     private String validChangePlanJson() {
         return """
                 {"version":"1.0","intent":"CHANGE",
@@ -1282,6 +1559,76 @@ class BankPlanGenStrategyTest {
                 "filters":[],"calculation":{"type":"DIRECT"},
                 "orderBy":[],"limit":null,
                 "output":{"columns":["ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq netProfitMarginRequest() {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText("江苏省G市农商行2026年1月底，净利润率（净利润除以营业收入）是多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB009", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(new LinkedHashSet<>(List.of("ZB009", "ZB011")))
+                .requiredOrganizationCodes(Set.of("ORG007"))
+                .requiredStartDate(LocalDate.of(2026, 1, 31))
+                .requiredEndDate(LocalDate.of(2026, 1, 31)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private String validNetProfitMarginPlanJson() {
+        return """
+                {"version":"1.0","intent":"RATIO",
+                "metrics":[{"bizName":"ZB009","aggregation":"DEFAULT"},{"bizName":"ZB011","aggregation":"DEFAULT"}],
+                "dimensions":[],"organizations":[{"code":"ORG007"}],
+                "time":{"startDate":"2026-01-31","endDate":"2026-01-31","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB011"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["ZB009","ZB011"],"orderSensitive":true}}
+                """;
+    }
+
+    private LLMReq twoOrganizationComparisonRequest() {
+        ChatModelConfig modelConfig = new ChatModelConfig();
+        ChatApp app = ChatApp.builder().chatModelConfig(modelConfig).build();
+        LLMReq request = new LLMReq();
+        request.setQueryText("2025年6月末，江苏省C市农商行比江苏省G市农商行的存款多多少？");
+        request.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.COMPARISON).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(new LinkedHashSet<>(List.of("ORG003", "ORG007")))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 6, 30)).build());
+        request.setChatAppConfig(Map.of(BankPlanGenStrategy.APP_KEY, app));
+        return request;
+    }
+
+    private String validTwoOrganizationComparisonPlanJson() {
+        return """
+                {"version":"1.0","intent":"COMPARISON",
+                "metrics":[{"bizName":"ZB001","aggregation":"SUM"}],
+                "dimensions":[],"organizations":[{"code":"ORG003"},{"code":"ORG007"}],
+                "time":{"startDate":"2025-06-30","endDate":"2025-06-30","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"DIRECT"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private String validMultiMetricWidePlanJson() {
+        return """
+                {"version":"1.0","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB007","aggregation":"SUM"},{"bizName":"ZB008","aggregation":"SUM"}],
+                "dimensions":[],"organizations":[{"code":"ORG003"}],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"NONE"},
+                "filters":[],"calculation":{"type":"DIRECT"},
+                "orderBy":[],"limit":null,
+                "output":{"columns":["ZB007","ZB008"],"orderSensitive":false}}
                 """;
     }
 

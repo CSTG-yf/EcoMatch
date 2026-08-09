@@ -221,4 +221,80 @@ describe('bank query presentation', () => {
     expect(screen.getByText('Schema 映射证据')).toBeInTheDocument();
     expect(screen.getByText('转换与修正记录')).toBeInTheDocument();
   });
+
+  it('shows the sanitized bank plan tool trace without exposing SQL or private reasoning', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      metrics: [{ id: 1, name: '各项贷款余额' }],
+      dimensions: [{ id: 2, name: '机构' }],
+      sqlInfo: {},
+      properties: {
+        'bank.nl2sql.trace': [
+          {
+            attempt: 1,
+            traceId: 'trace-1',
+            action: 'REPAIRING',
+            actionMessage: '工具返回可修正错误，正在重新生成完整计划。',
+            planSummary: {
+              intent: 'RANKING',
+              metrics: ['ZB002'],
+              organizations: ['ORG001'],
+              timeGranularity: 'MONTH',
+              timeComparison: 'NONE',
+              calculationType: 'DIRECT',
+              outputColumns: ['rank', 'aggregate_value'],
+            },
+            failedStage: 'DATABASE_EXECUTE',
+            errorCode: 'JDBC_GRAMMAR',
+            message: '数据库执行失败，请根据允许值修正完整计划。',
+            stageResults: [
+              { stage: 'COMPILE', status: 'SUCCEEDED', message: '查询编译通过。' },
+              {
+                stage: 'DATABASE_EXECUTE',
+                status: 'FAILED',
+                errorCode: 'JDBC_GRAMMAR',
+                message: '数据库执行失败，请根据允许值修正完整计划。',
+              },
+            ],
+          },
+          {
+            attempt: 2,
+            traceId: 'trace-1',
+            action: 'SUCCEEDED',
+            actionMessage: '计划执行及结果语义检查通过。',
+            planSummary: {
+              intent: 'RANKING',
+              metrics: ['ZB002'],
+              organizations: ['ORG001'],
+              timeGranularity: 'MONTH',
+              timeComparison: 'NONE',
+              calculationType: 'DIRECT',
+              outputColumns: ['rank', 'aggregate_value'],
+            },
+            stageResults: [
+              { stage: 'DATABASE_EXECUTE', status: 'SUCCEEDED', message: '数据库执行通过。' },
+              { stage: 'RESULT_SEMANTIC', status: 'SUCCEEDED', message: '结果语义检查通过。' },
+            ],
+          },
+        ],
+      },
+    } as any;
+
+    render(
+      <TrustExplanationPanel
+        question="查询贷款余额排名"
+        parseInfo={parseInfo}
+        workflowStage="completed"
+      />
+    );
+
+    const trace = screen.getByRole('region', { name: '银行查询工具执行过程' });
+    expect(trace).toHaveTextContent('第 1 次计划');
+    expect(trace).toHaveTextContent('正在重新生成完整计划');
+    expect(trace).toHaveTextContent('数据库执行失败');
+    expect(trace).toHaveTextContent('第 2 次计划');
+    expect(trace).toHaveTextContent('计划执行及结果语义检查通过');
+    expect(trace).not.toHaveTextContent(/select\s/i);
+    expect(trace).not.toHaveTextContent(/思维|推理过程|chain.of.thought/i);
+  });
 });

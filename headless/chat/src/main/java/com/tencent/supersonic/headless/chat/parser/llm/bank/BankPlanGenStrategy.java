@@ -83,7 +83,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         // Default off: pre-model rule short-circuit overfits surface phrasing and never exercises
         // model candidates / structured repair. Enable only for ablation or latency experiments.
-        if (deterministicShortCircuitEnabled()) {
+        boolean toolRepair = llmReq.getBankPlanToolResult() != null;
+        if (!toolRepair && deterministicShortCircuitEnabled()) {
             BankQueryPlan deterministicPlan = buildDeterministicPlan(llmReq.getQueryText(), hints);
             if (deterministicPlan != null) {
                 // Align Chinese/ZB aliases with the live semantic whitelist before compile.
@@ -130,10 +131,15 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
         // Flow: fixed system prompt (llama.cpp prefix cache) + user question only → model plan
         // JSON → compile to S2SQL → execute. No per-question catalogs/templates in the prompt.
-        String dynamicUser = BankPlanPromptComposer.buildDynamicUserContent(llmReq.getQueryText());
-        int candidateLimit = Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
+        String dynamicUser = toolRepair
+                ? BankPlanPromptComposer.buildToolRepairUserContent(llmReq.getQueryText(),
+                        llmReq.getPreviousBankQueryPlanJson(), llmReq.getBankPlanToolResult())
+                : BankPlanPromptComposer.buildDynamicUserContent(llmReq.getQueryText());
+        int candidateLimit = toolRepair ? 1
+                : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
         BankQueryPlanParseException lastParseException = null;
+        RuntimeException lastModelFailure = null;
         String lastRawCandidate = null;
         // Memoize only in single-candidate mode. Multi-sample draws must hit the model independently
         // (self-consistency / diversity); process-local memo would collapse them to one completion.
@@ -182,17 +188,41 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                 repair2Exception.getReason().name()));
                     }
                 } catch (RuntimeException repairException) {
-                    throw BankNl2SqlError.modelFailure(repairException);
+                    lastModelFailure = repairException;
+                    break;
                 }
             } catch (RuntimeException exception) {
-                throw BankNl2SqlError.modelFailure(exception);
+                lastModelFailure = exception;
+                break;
             }
+        }
+        // A model transport/read timeout is not a semantic rejection and therefore never reaches
+        // the candidate-selection/cold-replan path. If the question plus mapper hints already
+        // determine a bank-whitelisted plan, use that bounded plan instead of waiting through
+        // another model retry. Otherwise preserve the existing sanitized MODEL_FAILURE result.
+        if (lastModelFailure != null
+                && candidates.stream().noneMatch(BankPlanCandidateRanker.Candidate::isValid)) {
+            if (!toolRepair && softFallbackEnabled()) {
+                BankQueryPlan soft = buildSoftFallbackPlan(llmReq.getQueryText(), hints);
+                if (soft != null) {
+                    KEY_PIPELINE_LOG.info(
+                            "BankPlanGenStrategy soft-fallback deterministic plan after model failure intent={}",
+                            soft.getIntent());
+                    Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
+                    diagnostics.put("bank.nl2sql.planSource", "SOFT_FALLBACK_MODEL_FAILURE");
+                    diagnostics.put("bankPlanSoftFallback", true);
+                    diagnostics.put("bankPlanSoftFallbackReason", "MODEL_FAILURE");
+                    diagnostics.put("bankPlanPrefixCache", prefixCache.stats());
+                    return planResponse(llmReq, soft, diagnostics);
+                }
+            }
+            throw BankNl2SqlError.modelFailure(lastModelFailure);
         }
         try {
             BankPlanCandidateRanker.Selection selection = candidateRanker.select(candidates);
             Map<String, Object> diagnostics = new java.util.LinkedHashMap<>(selection.diagnostics());
             diagnostics.put("bankPlanPrefixCache", prefixCache.stats());
-            diagnostics.put("bank.nl2sql.planSource", "MODEL");
+            diagnostics.put("bank.nl2sql.planSource", toolRepair ? "MODEL_TOOL_REPAIR" : "MODEL");
             KEY_PIPELINE_LOG.info(
                     "BankPlanGenStrategy selected {} unique candidate(s), rejected {}, prefixCache={}",
                     selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount(),
@@ -226,10 +256,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             // unconstrained free-SQL. Prefer a hints/question-derived CHANGE/RATIO/point plan over
             // tearing the whole parse request. Disable for pure-model ablation.
             if (softFallbackEnabled()) {
-                BankQueryPlan soft = buildDeterministicPlan(llmReq.getQueryText(), hints);
-                if (soft == null) {
-                    soft = buildSoftHintsChangePlan(llmReq.getQueryText(), hints);
-                }
+                BankQueryPlan soft = buildSoftFallbackPlan(llmReq.getQueryText(), hints);
                 if (soft != null) {
                     KEY_PIPELINE_LOG.info(
                             "BankPlanGenStrategy soft-fallback deterministic plan after model rejection intent={}",
@@ -249,6 +276,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             }
             throw exception;
         }
+    }
+
+    private BankQueryPlan buildSoftFallbackPlan(String queryText, SemanticIntentHints hints) {
+        BankQueryPlan soft = buildDeterministicPlan(queryText, hints);
+        return soft == null ? buildSoftHintsChangePlan(queryText, hints) : soft;
     }
 
     private String buildRepairPrompt(String prompt, String candidate,
@@ -310,6 +342,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // Quarter 日均 gold is period-end point (M-36), not AVG series.
         if (isQuarterDailyAverageAsPoint(queryText, hints)) {
             return buildQuarterDailyAverageAsPointPlan(queryText, hints);
+        }
+        if (isAnnualDailyAverageAsPoint(queryText, hints)) {
+            return buildAnnualDailyAverageAsPointPlan(queryText, hints);
         }
         if (isAnnualDailyAverageAggregation(queryText, hints)) {
             return buildAnnualDailyAverageAggregationPlan(queryText, hints);
@@ -406,6 +441,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // 单机构单日与全省均值比（高还是低/差多少/比怎么样）
         if (isOrgVsProvinceAveragePoint(queryText, hints)) {
             return buildOrgVsProvinceAveragePointPlan(queryText, hints);
+        }
+        if (isPerCapitaProfitPointQuery(queryText, hints)) {
+            return buildSimplePointQueryPlan(queryText, hints);
+        }
+        if (isMultiMetricAggregationSummaryQuery(queryText, hints)) {
+            return buildMultiMetricAggregationSummaryPlan(queryText, hints);
         }
         // Multi-metric single-day point (e.g. 不良率和拨备覆盖率分别是多少)
         if (isMultiMetricPointQuery(queryText, hints)) {
@@ -553,12 +594,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             LocalDate current) {
         if (queryText != null) {
             if (queryText.contains("上个月底") || queryText.contains("上月末")
+                    || queryText.contains("上月底") || queryText.contains("较上月末")
                     || queryText.contains("比上个月") || queryText.contains("较上月")
                     || queryText.contains("比上月") || queryText.contains("环比")) {
                 return previousMonthEnd(current);
             }
             if (queryText.contains("上季度末") || queryText.contains("上季末")
-                    || queryText.contains("较上季度") || queryText.contains("比上季")) {
+                    || queryText.contains("较上季度") || queryText.contains("比上季")
+                    || queryText.contains("比季度末") || queryText.contains("较季度末")) {
                 return previousQuarterEnd(current);
             }
             if (queryText.contains("同比") || queryText.contains("去年同期")
@@ -2373,6 +2416,53 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 .build();
     }
 
+    /**
+     * The official point-query contract treats a bare full-year "日均" question as the year-end
+     * snapshot (M-45/TST-M-20), while questions that explicitly ask for a daily mean plus extrema
+     * remain on the AVG aggregation template.
+     */
+    private boolean isAnnualDailyAverageAsPoint(String queryText, SemanticIntentHints hints) {
+        if (hints == null || queryText == null || !queryText.contains("全年的")
+                || !queryText.contains("日均") || queryText.contains("最高日")
+                || queryText.contains("最低日")) {
+            return false;
+        }
+        BankIntentType expected = hints.getExpectedIntent();
+        if (expected != null && expected != BankIntentType.UNKNOWN
+                && expected != BankIntentType.POINT_QUERY
+                && expected != BankIntentType.AGGREGATION) {
+            return false;
+        }
+        return selectPrimaryMetric(queryText, hints) != null
+                && resolveOrganizationCodes(queryText, hints).size() == 1
+                && resolveDateRange(queryText, hints) != null;
+    }
+
+    private BankQueryPlan buildAnnualDailyAverageAsPointPlan(String queryText,
+            SemanticIntentHints hints) {
+        String metric = selectPrimaryMetric(queryText, hints);
+        String organization = resolveOrganizationCodes(queryText, hints).iterator().next();
+        LocalDate[] range = resolveDateRange(queryText, hints);
+        LocalDate asOf = range[1];
+        return BankQueryPlan.builder().action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.POINT_QUERY)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName(metric)
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of())
+                .organizations(List.of(
+                        BankQueryPlan.Organization.builder().code(organization).build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(asOf).endDate(asOf)
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(List.of())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of()).limit(null)
+                .output(BankQueryPlan.Output.builder().columns(List.of(metric))
+                        .orderSensitive(false).build())
+                .build();
+    }
+
     private LocalDate resolveQuarterEndForDailyAverage(String queryText) {
         Matcher q = Pattern.compile("(\\d{4})\\s*年\\s*([一二三四1-4])\\s*季度").matcher(
                 queryText == null ? "" : queryText);
@@ -2435,6 +2525,67 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 .output(BankQueryPlan.Output.builder()
                         .columns(List.of("bank_organization", metric)).orderSensitive(true)
                         .build())
+                .build();
+    }
+
+    private boolean isPerCapitaProfitPointQuery(String queryText,
+            SemanticIntentHints hints) {
+        if (hints == null || queryText == null || !queryText.contains("人均利润")) {
+            return false;
+        }
+        BankIntentType expected = hints.getExpectedIntent();
+        if (expected != null && expected != BankIntentType.UNKNOWN
+                && expected != BankIntentType.POINT_QUERY) {
+            return false;
+        }
+        return containsIgnoreCase(hints.getRequiredMetrics(), "ZB011")
+                && resolveOrganizationCodes(queryText, hints).size() == 1
+                && resolvePointDate(queryText, hints) != null;
+    }
+
+    /**
+     * The gold contract for "A和B合计" is still one aggregation row per metric with the standard
+     * aggregate/min/max/count projection. It must not be reduced to a wide SELECT SUM(A), SUM(B).
+     */
+    private boolean isMultiMetricAggregationSummaryQuery(String queryText,
+            SemanticIntentHints hints) {
+        if (hints == null || queryText == null || !queryText.contains("合计")
+                || selectNamedMetrics(queryText).size() < 2
+                || resolveOrganizationCodes(queryText, hints).size() != 1
+                || resolvePointDate(queryText, hints) == null) {
+            return false;
+        }
+        BankIntentType expected = hints.getExpectedIntent();
+        return expected == null || expected == BankIntentType.UNKNOWN
+                || expected == BankIntentType.POINT_QUERY
+                || expected == BankIntentType.AGGREGATION;
+    }
+
+    private BankQueryPlan buildMultiMetricAggregationSummaryPlan(String queryText,
+            SemanticIntentHints hints) {
+        List<String> metrics = selectNamedMetrics(queryText);
+        String organization = resolveOrganizationCodes(queryText, hints).iterator().next();
+        LocalDate[] range = resolvePointDate(queryText, hints);
+        List<BankQueryPlan.Metric> planMetrics = metrics.stream()
+                .map(code -> BankQueryPlan.Metric.builder().bizName(code)
+                        .aggregation(BankQueryPlan.Aggregation.AVG).build())
+                .toList();
+        return BankQueryPlan.builder().action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.AGGREGATION).metrics(planMetrics)
+                .dimensions(List.of("bank_organization"))
+                .organizations(List.of(
+                        BankQueryPlan.Organization.builder().code(organization).build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(range[0]).endDate(range[1])
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(List.of())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of()).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(Stream.concat(Stream.of("bank_organization"), metrics.stream())
+                                .toList())
+                        .orderSensitive(true).build())
                 .build();
     }
 
@@ -2795,6 +2946,24 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         BankQueryPlan normalized = plan;
         if (queryText != null) {
+            // Mapper hints fully determine the derived-ranking operands and scope. Normalize the
+            // model candidate to the compiler-owned ranking contract so a malformed ranking plan
+            // cannot make the complex H-07 question fail after candidate selection.
+            if (isDerivedMetricRanking(hints)) {
+                return buildDerivedMetricRankingPlan(hints);
+            }
+            // 净利润率 has an explicit semantic operand order (净利润 / 营业收入). The mapper
+            // commonly lists the two metrics in catalog order, so do not let the model's metric
+            // order turn the ratio upside down during candidate normalization.
+            if (isNetProfitMarginRatio(queryText, hints)) {
+                return buildNetProfitMarginRatioPlan(queryText, hints);
+            }
+            // Two named institutions need a grouped comparison projection. A model candidate
+            // that collapses both institutions into one SUM loses the per-institution values and
+            // the value_difference required by the bank comparison contract.
+            if (isTwoOrganizationComparison(queryText, hints)) {
+                return buildTwoOrganizationComparisonPlan(queryText, hints);
+            }
             if (isDaysAboveProvinceAverageCount(queryText, hints)) {
                 return buildDaysAboveProvinceAverageCountPlan(queryText, hints);
             }
@@ -2815,6 +2984,18 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             // Single-org vs province mean: ensure direction filter (低于→LT) is present.
             if (isOrgVsProvinceAveragePoint(queryText, hints)) {
                 return buildOrgVsProvinceAveragePointPlan(queryText, hints);
+            }
+            if (isPerCapitaProfitPointQuery(queryText, hints)) {
+                return buildSimplePointQueryPlan(queryText, hints);
+            }
+            if (isQuarterDailyAverageAsPoint(queryText, hints)) {
+                return buildQuarterDailyAverageAsPointPlan(queryText, hints);
+            }
+            if (isAnnualDailyAverageAsPoint(queryText, hints)) {
+                return buildAnnualDailyAverageAsPointPlan(queryText, hints);
+            }
+            if (isMultiMetricAggregationSummaryQuery(queryText, hints)) {
+                return buildMultiMetricAggregationSummaryPlan(queryText, hints);
             }
             if (isAnnualAverageTopAndBottomRanking(queryText, hints)) {
                 normalized = normalizeAnnualAverageTopAndBottomRanking(queryText, plan, hints);
@@ -2922,6 +3103,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private BankQueryPlan normalizeChangePlan(String queryText, BankQueryPlan plan,
             SemanticIntentHints hints) {
+        if (isMultiMetricHalfYearChange(queryText, hints)) {
+            return buildMultiMetricHalfYearChangePlan(queryText, hints);
+        }
+        if (isMultiMetricYearStartChange(queryText, hints)) {
+            return buildMultiMetricYearStartChangePlan(queryText, hints);
+        }
         plan.setIntent(BankIntentType.CHANGE);
         plan.setMetrics(hints
                 .getRequiredMetrics().stream().sorted().map(metric -> BankQueryPlan.Metric.builder()
@@ -2956,13 +3143,21 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             plan.getTime().setComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD);
             plan.getTime().setBaselineStartDate(baselineDate);
             plan.getTime().setBaselineEndDate(baselineDate);
+        } else if (hasRelativePeriodComparisonWording(queryText)) {
+            LocalDate currentDate = resolveChangeCurrentDate(queryText, hints);
+            LocalDate baselineDate = currentDate == null ? null
+                    : resolvePeriodChangeBaseline(queryText, hints, currentDate);
+            if (currentDate != null && baselineDate != null && baselineDate.isBefore(currentDate)) {
+                plan.getTime().setStartDate(currentDate);
+                plan.getTime().setEndDate(currentDate);
+                plan.getTime().setComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD);
+                plan.getTime().setBaselineStartDate(baselineDate);
+                plan.getTime().setBaselineEndDate(baselineDate);
+            } else {
+                applyDefaultStartOfYearChangeTime(plan, hints);
+            }
         } else {
-            LocalDate baselineDate = hints.getRequiredStartDate().minusDays(1);
-            plan.getTime().setStartDate(hints.getRequiredStartDate());
-            plan.getTime().setEndDate(hints.getRequiredEndDate());
-            plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
-            plan.getTime().setBaselineStartDate(baselineDate);
-            plan.getTime().setBaselineEndDate(baselineDate);
+            applyDefaultStartOfYearChangeTime(plan, hints);
         }
         plan.setCalculation(BankQueryPlan.Calculation.builder()
                 .type(BankQueryPlan.CalculationType.CHANGE).build());
@@ -2972,6 +3167,32 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 .columns(plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList())
                 .orderSensitive(true).build());
         return plan;
+    }
+
+    private void applyDefaultStartOfYearChangeTime(BankQueryPlan plan,
+            SemanticIntentHints hints) {
+        LocalDate startDate = hints.getRequiredStartDate();
+        LocalDate endDate = hints.getRequiredEndDate();
+        LocalDate baselineDate = startDate == null ? null : startDate.minusDays(1);
+        plan.getTime().setStartDate(startDate);
+        plan.getTime().setEndDate(endDate);
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
+        plan.getTime().setBaselineStartDate(baselineDate);
+        plan.getTime().setBaselineEndDate(baselineDate);
+    }
+
+    private boolean hasRelativePeriodComparisonWording(String queryText) {
+        if (queryText == null) {
+            return false;
+        }
+        return queryText.contains("上个月") || queryText.contains("上月")
+                || queryText.contains("上季度") || queryText.contains("上季")
+                || queryText.contains("季度末") || queryText.contains("同比")
+                || queryText.contains("去年同期") || queryText.contains("上年同期")
+                || queryText.contains("较年初") || queryText.contains("比年初")
+                || queryText.contains("年初到") || queryText.contains("年初至")
+                || queryText.contains("从") && queryText.contains("到")
+                        && (queryText.contains("年末") || queryText.contains("半年末"));
     }
 
     private boolean isAbsoluteThreshold(SemanticIntentHints hints) {

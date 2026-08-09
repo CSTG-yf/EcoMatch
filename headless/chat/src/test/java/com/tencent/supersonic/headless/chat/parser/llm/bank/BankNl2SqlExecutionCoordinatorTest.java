@@ -36,6 +36,16 @@ class BankNl2SqlExecutionCoordinatorTest {
         assertEquals(Map.of("generator", "BANK_CONSTRAINED_PLAN", "planIntent", "RANKING",
                 "timeComparison", "NONE", "calculationType", "DIRECT", "route", "STRUCT",
                 "templateCategory", "STRUCT"), candidate.diagnostics().get("bankTelemetry"));
+        BankPlanToolResult toolResult = (BankPlanToolResult) candidate.diagnostics()
+                .get(BankPlanToolResult.PROPERTY_KEY);
+        assertNotNull(toolResult);
+        assertEquals(BankPlanToolResult.Status.IN_PROGRESS, toolResult.getStatus());
+        assertEquals(List.of(BankPlanToolResult.Stage.PLAN_SCHEMA,
+                BankPlanToolResult.Stage.PLAN_SEMANTIC, BankPlanToolResult.Stage.COMPILE),
+                toolResult.getStageResults().stream().map(BankPlanToolResult.StageResult::getStage)
+                        .toList());
+        assertEquals("STRUCT", toolResult.getCompiledQuerySummary().getRoute());
+        assertEquals(rankingPlan(), candidate.diagnostics().get(BankPlanToolResult.PLAN_PROPERTY_KEY));
     }
 
     @Test
@@ -78,6 +88,26 @@ class BankNl2SqlExecutionCoordinatorTest {
         assertEquals("CHANGE", telemetry.get("planIntent"));
         assertEquals("MOM_AND_YOY", telemetry.get("timeComparison"));
         assertEquals("MONTH_AND_YEAR_CHANGE", telemetry.get("templateCategory"));
+    }
+
+    @Test
+    void shouldKeepTraceIdentityAndIncrementAttemptAfterToolRepair() {
+        BankQueryPlan plan = rankingPlan();
+        LLMReq request = request(BankIntentType.RANKING, plan);
+        request.setBankPlanToolResult(BankPlanToolResult.failed(1, "trace-stable",
+                "old-fingerprint", BankPlanToolResult.Stage.COMPILE,
+                "UNSUPPORTED_PLAN_COMBINATION", Map.of(), List.of("修正完整计划")));
+        BankNl2SqlExecutionCoordinator coordinator =
+                new BankNl2SqlExecutionCoordinator(new BankQueryPlanCompiler(),
+                        ignored -> "SELECT bank_organization, SUM(ZB001) FROM 银行指标数据集");
+
+        BankNl2SqlExecutionCoordinator.ExecutionCandidate candidate =
+                coordinator.coordinate(request, response(plan));
+
+        BankPlanToolResult toolResult = (BankPlanToolResult) candidate.diagnostics()
+                .get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(2, toolResult.getAttempt());
+        assertEquals("trace-stable", toolResult.getTraceId());
     }
 
     private LLMReq request(BankIntentType intent, BankQueryPlan plan) {

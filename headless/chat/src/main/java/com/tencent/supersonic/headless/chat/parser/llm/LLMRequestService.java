@@ -3,8 +3,10 @@ package com.tencent.supersonic.headless.chat.parser.llm;
 import com.tencent.supersonic.common.pojo.Pair;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
+import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
@@ -114,8 +116,30 @@ public class LLMRequestService {
         llmReq.setDynamicExemplars(queryCtx.getRequest().getDynamicExemplars());
         llmReq.setSemanticIntentHints(SemanticIntentHints.fromQuery(queryText,
                 queryCtx.getBankIntentResult(), llmSchema, LocalDate.now()));
+        applyBankPlanRepairContext(queryCtx.getRequest(), llmReq);
 
         return llmReq;
+    }
+
+    static void applyBankPlanRepairContext(QueryNLReq queryRequest, LLMReq llmRequest) {
+        if (queryRequest == null || llmRequest == null
+                || queryRequest.getBankPlanRepairContext() == null) {
+            return;
+        }
+        String toolResultJson =
+                queryRequest.getBankPlanRepairContext().getToolResultJson();
+        if (toolResultJson == null || toolResultJson.isBlank()) {
+            return;
+        }
+        BankPlanToolResult toolResult =
+                com.tencent.supersonic.common.util.JsonUtil.toObject(toolResultJson,
+                        BankPlanToolResult.class);
+        if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
+            return;
+        }
+        llmRequest.setBankPlanToolResult(toolResult);
+        llmRequest.setPreviousBankQueryPlanJson(
+                queryRequest.getBankPlanRepairContext().getPreviousPlanJson());
     }
 
     static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,

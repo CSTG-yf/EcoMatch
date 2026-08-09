@@ -31,10 +31,9 @@ public class BankQueryPlanValidator {
             .compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern BASE_METRIC_CODE =
             Pattern.compile("ZB\\d{3}", Pattern.CASE_INSENSITIVE);
-    private static final Set<String> FILTER_OPERATORS =
-            Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "CONTAINS", "COMPARE");
+    private static final Set<String> FILTER_OPERATORS = BankSemanticRegistry.filterOperators();
     private static final Set<String> LOGICAL_FILTER_FIELDS =
-            Set.of("metric_value", "benchmark", "rank", "rank_from_bottom");
+            BankSemanticRegistry.logicalFilterFields();
 
     public ValidationResult validate(BankQueryPlan plan, SemanticIntentHints hints) {
         List<ValidationError> errors = new ArrayList<>();
@@ -234,8 +233,10 @@ public class BankQueryPlanValidator {
             errors.add(error("METRIC_REQUIRED", "at least one metric is required"));
         }
         for (String metric : planMetrics) {
-            if (!hints.getAllowedMetrics().isEmpty()
-                    && !metricAllowed(hints.getAllowedMetrics(), metric)) {
+            String canonical = BankQueryPlanAliasNormalizer.canonicalizeMetric(metric);
+            if (!BankSemanticRegistry.metricCodes().contains(canonical)
+                    || !hints.getAllowedMetrics().isEmpty()
+                            && !metricAllowed(hints.getAllowedMetrics(), metric)) {
                 errors.add(error("UNKNOWN_METRIC",
                         "metric is not available in the semantic schema: " + metric));
             }
@@ -344,6 +345,10 @@ public class BankQueryPlanValidator {
         Set<String> planOrganizations = safe(plan.getOrganizations())
                 .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (!BankSemanticRegistry.organizationCodes().containsAll(planOrganizations)) {
+            errors.add(error("UNKNOWN_ORGANIZATION",
+                    "plan contains an organization outside the official bank registry"));
+        }
         if (!planOrganizations.containsAll(hints.getRequiredOrganizationCodes())) {
             errors.add(error("MISSING_REQUIRED_ORGANIZATION",
                     "plan omitted an organization recognized from the question"));

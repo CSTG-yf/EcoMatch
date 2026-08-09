@@ -6,6 +6,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanCompilationException;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -21,11 +22,11 @@ import static org.mockito.Mockito.when;
 class LLMSqlParserTest {
 
     @Test
-    void shouldTerminateConstrainedPlanAsFailedWhenCompilationFails() {
+    void shouldRetryCompilationOnceWithSanitizedToolFeedbackThenStopOnRepeatedFailure() {
         LLMRequestService requestService = mock(LLMRequestService.class);
         LLMResponseService responseService = mock(LLMResponseService.class);
         LLMParserConfig parserConfig = new LLMParserConfig();
-        parserConfig.setRecallMaxRetries(2);
+        parserConfig.setRecallMaxRetries(3);
 
         ChatQueryContext queryCtx = new ChatQueryContext(new QueryNLReq());
         ParseResp parseResp = new ParseResp("query");
@@ -36,10 +37,8 @@ class LLMSqlParserTest {
 
         when(requestService.getDataSetId(queryCtx)).thenReturn(33L);
         when(requestService.getLlmReq(queryCtx, 33L)).thenReturn(llmReq);
-        when(requestService.runText2SQL(llmReq)).thenThrow(
-                new BankPlanCompilationException(
-                        BankPlanCompilationException.Reason.DIMENSION_UNAVAILABLE,
-                        "opaque-details"));
+        when(requestService.runText2SQL(llmReq)).thenThrow(new BankPlanCompilationException(
+                BankPlanCompilationException.Reason.DIMENSION_UNAVAILABLE, "opaque-details"));
 
         try (MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
             contextUtils.when(() -> ContextUtils.getBean(LLMRequestService.class))
@@ -54,6 +53,10 @@ class LLMSqlParserTest {
 
         assertEquals(ParseResp.ParseState.FAILED, parseResp.getState());
         assertTrue(BankNl2SqlError.isTerminalParserError(parseResp.getErrorMsg()));
-        verify(requestService, times(1)).runText2SQL(llmReq);
+        verify(requestService, times(2)).runText2SQL(llmReq);
+        assertEquals(BankPlanToolResult.Stage.COMPILE,
+                llmReq.getBankPlanToolResult().getFailedStage());
+        assertEquals("DIMENSION_UNAVAILABLE", llmReq.getBankPlanToolResult().getErrorCode());
+        assertTrue(!llmReq.getBankPlanToolResult().toRepairFeedback().contains("opaque-details"));
     }
 }

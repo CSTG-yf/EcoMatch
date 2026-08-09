@@ -5,6 +5,7 @@ import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import lombok.Data;
 import org.apache.commons.collections4.CollectionUtils;
 
@@ -31,6 +32,8 @@ public class LLMReq {
     private Map<String, ChatApp> chatAppConfig;
     private String customPrompt;
     private List<Text2SQLExemplar> dynamicExemplars;
+    private BankPlanToolResult bankPlanToolResult;
+    private String previousBankQueryPlanJson;
 
     @Data
     public static class ElementValue {

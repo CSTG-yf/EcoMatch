@@ -14,116 +14,19 @@ public final class BankPlanPromptComposer {
             你是银行问数「查询计划」生成器。只输出一个 JSON 计划对象，不要解释、不要 Markdown、不要 SQL。
             用户消息只有问题；若含 <repair>，根据 error 与 previous_candidate 修正后再输出 JSON。
 
-            ════════════════════════════════
-            一、可输出顶层字段（只能用这些）
-            ════════════════════════════════
-            version（字符串，固定 "1.0"）—— 计划版本
-            intent（枚举）—— 查询意图，取值见下
-            metrics（数组）—— 要用的指标列表
-            dimensions（数组）—— 分组/序列维度，只能是 bank_organization 或 bank_data_date 或 []
-            organizations（数组）—— 机构过滤，元素为 {"code":"ORG###"}
-            time（对象）—— 查询时间窗与对比基期
-            filters（数组）—— 附加过滤，无则 []
-            calculation（对象）—— 计算方式
-            orderBy（数组）—— 排序，无则 []
-            limit（整数或 null）—— TopN；非排名题用 null
-            output（对象）—— 输出列声明
-            可选：derivedMetrics（派生指标）、action（EXECUTE|CLARIFY，默认 EXECUTE）
-            禁止：time_range、zb_id、org_id、sql、sort、period、org_name 等自造字段
+            {{SEMANTIC_REGISTRY}}
 
             ════════════════════════════════
-            二、intent 枚举与含义
+            计划填写规则
             ════════════════════════════════
-            POINT_QUERY —— 单点查询（某机构某日某指标是多少）
-            COMPARISON —— 机构间对比
-            RANKING —— 排名/前N/后N
-            TREND —— 时间序列趋势（逐日/逐月/逐季）
-            CHANGE —— 相对变化（较上月末/上年末/年初/同比环比）
-            RATIO —— 比率（分子/分母）
-            THRESHOLD —— 阈值判断（是否超过某值）
-            AGGREGATION —— 聚合（日均、合计等）
-
-            ════════════════════════════════
-            三、嵌套字段详表
-            ════════════════════════════════
-            metrics[]：
-              bizName —— 指标代码，必须是 ZB###（见指标表）
-              aggregation —— DEFAULT|SUM|AVG|MAX|MIN|COUNT
-                · DEFAULT：时点取数；AVG：日均/均值；SUM：求和
-              alias —— 可选别名
-
-            organizations[]：
-              code —— 机构代码 ORG001～ORG013
-              bizName —— 可选，一般不填
-
-            time：
-              startDate/endDate —— 查询期起止，格式 YYYY-MM-DD
-              granularity —— DAY|MONTH|QUARTER|YEAR|RANGE（时间粒度）
-              comparison —— 对比类型：
-                NONE —— 无对比
-                PERIOD_OVER_PERIOD —— 相对另一绝对日期（如较上年末）
-                YEAR_OVER_YEAR —— 同比
-                START_OF_YEAR —— 较年初
-                MOM_AND_YOY —— 同时要环比和同比
-              baselineStartDate/baselineEndDate —— 基期；comparison 为 PERIOD_OVER_PERIOD 等时必填（MOM_AND_YOY 可 null）
-
-            calculation：
-              type —— DIRECT（直接取数）| CHANGE（变化）| RATIO（比率）| COUNT_DAYS_ABOVE_PROVINCE_AVERAGE（高于全省均值天数）
-              baseline —— RATIO 时填分母指标代码 ZB###，否则 null
-
-            orderBy[]：
-              field —— 排序字段（ZB### 或维度名）
-              direction —— ASC|DESC（不良率/成本收入比/逾期率「越好」用 ASC）
-
-            output：
-              columns —— 输出列，只能是：已选 dimensions + metrics.bizName（及 derived 码），禁止中文
-              orderSensitive —— 是否关心行序（排名/前后三为 true）
-
-            filters[]：
-              field / operator / value —— 如阈值题 field=metric_value
-
-            ════════════════════════════════
-            四、指标代码全集（bizName → 含义）
-            ════════════════════════════════
-            ZB001 各项存款余额（亿元）
-            ZB002 各项贷款余额（亿元）
-            ZB003 对公存款余额（亿元）
-            ZB004 个人存款余额（亿元）
-            ZB005 对公贷款余额（亿元）
-            ZB006 个人贷款余额（亿元）
-            ZB007 中间业务收入（亿元）
-            ZB008 净利息收入（亿元）
-            ZB009 营业收入（亿元）
-            ZB010 营业支出（亿元）
-            ZB011 净利润（亿元）
-            ZB012 成本收入比（%）
-            ZB013 不良贷款率（%，越小越好）
-            ZB014 不良贷款余额（亿元）
-            ZB015 拨备覆盖率（%）
-            ZB016 资本充足率（%）
-            ZB017 逾期贷款率（%，越小越好）
-            ZB018 员工人数（人）
-            ZB019 网点数量（个）
-            ZB020 个人客户数（户）
-            ZB021 对公客户数（户）
-            派生（仅理解）：存贷比≈ZB002/ZB001；净利润率≈ZB011/ZB009
-
-            ════════════════════════════════
-            五、机构代码全集（code → 含义）
-            ════════════════════════════════
-            ORG001 A市农商行  ORG002 B市农商行  ORG003 C市农商行  ORG004 D市农商行
-            ORG005 E市农商行  ORG006 F市农商行  ORG007 G市农商行  ORG008 H市农商行
-            ORG009 I市农商行  ORG010 J市农商行  ORG011 K市农商行  ORG012 L市农商行
-            ORG013 M市农商行
-            「全省/各家/哪家」→ organizations 常为 [] 或多人，不要只绑一家（除非题面指定）
-
-            ════════════════════════════════
-            六、维度与 output.columns 可用取值
-            ════════════════════════════════
-            bank_organization —— 机构维度（排名/分机构输出时用）
-            bank_data_date —— 数据日期维度（趋势/逐日序列时用）
-            ZB001～ZB021 —— 与 metrics 中已选指标一致
-            禁止：中文列名、deposit_balance、period、org_name 等
+            只能输出注册表中的顶层字段和值；禁止 time_range、zb_id、org_id、sql、sort、period、org_name 等自造字段。
+            metrics[].bizName 使用注册表指标代码；aggregation=DEFAULT 表示时点取数，AVG 表示日均/均值，SUM 表示求和。
+            organizations[].code 使用注册表机构代码；「全省/各家/哪家」通常用 []，题面指定机构时才填写对应代码。
+            time.startDate/endDate 与 baselineStartDate/baselineEndDate 使用 YYYY-MM-DD；非 NONE、非 MOM_AND_YOY 的 comparison 必须给出完整基期。
+            RATIO 的 calculation.baseline 填分母指标代码；其他 calculation 通常为 null。
+            orderBy.field 只能引用已选指标或维度；低值更优指标的“最好”使用 ASC。
+            output.columns 只能包含已选 dimensions、metrics.bizName 以及声明的 derivedMetrics；不得填写结果事实列或中文列名。
+            filters 必须遵循注册表 field/operator/value 契约；无过滤时为 []。
 
             ════════════════════════════════
             七、意图配方（必遵）
@@ -185,10 +88,10 @@ public final class BankPlanPromptComposer {
 
             AGGREGATION 全年高于全省均值天数：
             {"version":"1.0","intent":"AGGREGATION","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":["bank_organization"],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-01-01","endDate":"YYYY-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE"}],"calculation":{"type":"COUNT_DAYS_ABOVE_PROVINCE_AVERAGE","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["bank_organization","ZB###"],"orderSensitive":false}}
-            """.strip();
+            """.replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
     /** 前缀版本：变更 FIXED_SYSTEM_PREFIX 时必须递增。 */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v9-abstract-skeletons";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v10-semantic-registry";
 
     private BankPlanPromptComposer() {}
 
@@ -224,6 +127,33 @@ public final class BankPlanPromptComposer {
                 """.formatted(buildDynamicUserContent(queryText), error,
                 previousCandidate == null ? "" : previousCandidate.strip()).strip();
         assertQuestionOnlyUserContent(repair, "plan repair user");
+        return repair;
+    }
+
+    /**
+     * Full-stage repair message: the model receives one sanitized tool result and the previous
+     * complete plan, then must emit another complete plan instead of a JSON patch or physical SQL.
+     */
+    public static String buildToolRepairUserContent(String queryText, String previousPlan,
+            BankPlanToolResult toolResult) {
+        if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
+            throw new IllegalArgumentException("a failed bank plan tool result is required");
+        }
+        String repair = """
+                %s
+
+                <repair>
+                <tool_result>
+                %s
+                </tool_result>
+                <previous_plan>
+                %s
+                </previous_plan>
+                <instruction>只根据工具返回的失败阶段、错误码、允许值和修正提示调整计划；必须输出修正后的完整 BankQueryPlan JSON，不要输出补丁、解释或 SQL。</instruction>
+                </repair>
+                """.formatted(buildDynamicUserContent(queryText), toolResult.toRepairFeedback(),
+                previousPlan == null ? "" : previousPlan.strip()).strip();
+        assertQuestionOnlyUserContent(repair, "plan tool repair user");
         return repair;
     }
 

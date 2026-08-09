@@ -314,10 +314,46 @@ class BankQueryPlanValidatorTest {
         assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
     }
 
+    @Test
+    void shouldRejectUnknownOfficialMetricWithoutMapperAllowList() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB999")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+        plan.getOrderBy().get(0).setField("ZB999");
+        plan.getOutput().setColumns(List.of("机构", "ZB999"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                unboundCatalogHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNKNOWN_METRIC"));
+    }
+
+    @Test
+    void shouldRejectUnknownOfficialOrganizationWithoutMapperAllowList() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setOrganizations(List.of(
+                BankQueryPlan.Organization.builder().code("ORG999").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                unboundCatalogHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNKNOWN_ORGANIZATION"));
+    }
+
     private SemanticIntentHints hints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+    }
+
+    private SemanticIntentHints unboundCatalogHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of()).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of()).requiredOrganizationCodes(Set.of())
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
     }

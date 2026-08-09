@@ -104,6 +104,33 @@ export type SchemaElementMatchType = {
   llmMatched?: boolean;
 };
 
+export type BankPlanTraceStageType = {
+  stage: string;
+  status: 'SUCCEEDED' | 'FAILED';
+  errorCode?: string;
+  message?: string;
+};
+
+export type BankPlanTraceEventType = {
+  attempt: number;
+  traceId: string;
+  action: 'REPAIRING' | 'SUCCEEDED' | 'STOPPED' | 'FAILED';
+  actionMessage: string;
+  planSummary?: {
+    intent?: string;
+    metrics?: string[];
+    organizations?: string[];
+    timeGranularity?: string;
+    timeComparison?: string;
+    calculationType?: string;
+    outputColumns?: string[];
+  };
+  stageResults?: BankPlanTraceStageType[];
+  failedStage?: string;
+  errorCode?: string;
+  message?: string;
+};
+
 export type ChatContextType = {
   id: number;
   queryId?: number;

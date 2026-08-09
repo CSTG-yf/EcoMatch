@@ -16,6 +16,7 @@ import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import lombok.SneakyThrows;
@@ -23,6 +24,7 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -121,6 +123,7 @@ public class SqlExecutor implements ChatQueryExecutor {
             }
         }
         queryResult.setQueryTimeCost(System.currentTimeMillis() - startTime);
+        persistBankPlanToolExecution(parseInfo, queryResp);
         if (queryResp != null) {
             queryResult.setQueryAuthorization(queryResp.getQueryAuthorization());
             queryResult.setQuerySql(finalSql);
@@ -159,5 +162,61 @@ public class SqlExecutor implements ChatQueryExecutor {
         telemetry.put("repairAttempted", repairAttempted);
         telemetry.put("repaired", repaired);
         parseInfo.getProperties().put("executionTelemetry", telemetry);
+    }
+
+    private void persistBankPlanToolExecution(SemanticParseInfo parseInfo,
+            SemanticQueryResp queryResp) {
+        BankPlanToolResult toolResult = BankPlanToolResult
+                .from(parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY));
+        if (toolResult == null) {
+            return;
+        }
+        if (queryResp != null && StringUtils.isBlank(queryResp.getErrorMsg())) {
+            toolResult.succeed(BankPlanToolResult.Stage.SQL_SAFETY)
+                    .succeed(BankPlanToolResult.Stage.DATABASE_PREPARE)
+                    .succeed(BankPlanToolResult.Stage.DATABASE_EXECUTE);
+            parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+            return;
+        }
+
+        String failureLayer = allowlistedFailureLayer(queryResp);
+        BankPlanToolResult.Stage stage = failureStage(failureLayer);
+        if (stage.ordinal() > BankPlanToolResult.Stage.SQL_SAFETY.ordinal()) {
+            toolResult.succeed(BankPlanToolResult.Stage.SQL_SAFETY);
+        }
+        if (stage.ordinal() > BankPlanToolResult.Stage.DATABASE_PREPARE.ordinal()) {
+            toolResult.succeed(BankPlanToolResult.Stage.DATABASE_PREPARE);
+        }
+        String errorCode = failureLayer == null ? "DATABASE_EXECUTION_FAILED" : failureLayer;
+        toolResult.fail(stage, errorCode, Map.of(), correctionHints(stage));
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+    }
+
+    private String allowlistedFailureLayer(SemanticQueryResp queryResp) {
+        if (queryResp == null || queryResp.getExecutionTelemetry() == null) {
+            return null;
+        }
+        Object value = queryResp.getExecutionTelemetry().get("failureLayer");
+        return value instanceof String layer && EXECUTION_FAILURE_LAYERS.contains(layer) ? layer
+                : null;
+    }
+
+    private BankPlanToolResult.Stage failureStage(String failureLayer) {
+        if ("SQL_SAFETY_POLICY".equals(failureLayer)) {
+            return BankPlanToolResult.Stage.SQL_SAFETY;
+        }
+        if ("QUERY_GATEWAY".equals(failureLayer)) {
+            return BankPlanToolResult.Stage.DATABASE_PREPARE;
+        }
+        return BankPlanToolResult.Stage.DATABASE_EXECUTE;
+    }
+
+    private List<String> correctionHints(BankPlanToolResult.Stage stage) {
+        return switch (stage) {
+            case SQL_SAFETY -> List.of("只修正 BankQueryPlan，不要直接生成或修改物理 SQL");
+            case DATABASE_PREPARE -> List.of("检查计划的机构、指标、时间与查询族组合");
+            case DATABASE_EXECUTE -> List.of("根据失败阶段重新生成完整 BankQueryPlan");
+            default -> List.of("重新生成符合语义目录约束的完整 BankQueryPlan");
+        };
     }
 }

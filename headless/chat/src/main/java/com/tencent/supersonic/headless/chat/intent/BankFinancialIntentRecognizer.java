@@ -241,6 +241,10 @@ public class BankFinancialIntentRecognizer {
                 "表现较好", "表现较差")) {
             score(scores, BankIntentType.RANKING, 0.98D, "命中排名或极值表达");
         }
+        if (text.contains("排名") && containsAny(text, "变化", "变动")
+                && containsAny(text, "从", "到", "较", "比")) {
+            score(scores, BankIntentType.CHANGE, 0.995D, "命中跨期排名变化表达");
+        }
         if (containsAny(text, "日均", "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
             score(scores, BankIntentType.AGGREGATION, 0.91D, "命中聚合统计表达");
         }
