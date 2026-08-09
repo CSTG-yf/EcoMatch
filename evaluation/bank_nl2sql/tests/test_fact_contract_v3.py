@@ -144,6 +144,36 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(zero.derivation, "SUM_DIFFERENCE")
         self.assertEqual(contract.status, "READY")
 
+    def test_condition_count_is_derived_from_meets_condition_column(self) -> None:
+        record = _record(
+            "COUNT-TRUE-1",
+            question="有多少家机构满足条件？",
+            answer_text="2家",
+            columns=["org_code", "meets_condition"],
+            rows=[["ORG001", 1], ["ORG002", 0], ["ORG003", 1]],
+        )
+
+        contract = build_fact_contract(record)
+        scored = score_fact_contract_report(
+            {
+                "items": [
+                    {
+                        "id": "COUNT-TRUE-1",
+                        "resultColumns": record["expected"]["columns"],
+                        "resultRows": record["expected"]["rows"],
+                        "textSummary": "2家",
+                    }
+                ]
+            },
+            [record],
+        )
+
+        count_fact = next(fact for fact in contract.facts if fact.required)
+        self.assertEqual(count_fact.support, "DERIVED_RESULT")
+        self.assertEqual(count_fact.derivation, "COUNT_TRUE")
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_report_keeps_every_record_in_denominator(self) -> None:
         ready = _record(
             "READY-1",
@@ -267,6 +297,76 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
+    def test_complete_gold_rejects_extra_result_row(self) -> None:
+        record = _record(
+            "EXTRA-ROW-1",
+            question="请给出两期余额。",
+            answer_text="两期余额分别为10亿元和20亿元",
+            columns=["data_date", "metric_value"],
+            rows=[["2025-01-31", 10.0], ["2025-02-28", 20.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "EXTRA-ROW-1",
+                    "resultColumns": ["data_date", "metric_value"],
+                    "resultRows": [
+                        ["2025-01-31", 10.0],
+                        ["2025-02-28", 20.0],
+                        ["2099-12-31", 999999.0],
+                    ],
+                    "textSummary": "两期余额分别为10亿元和20亿元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertEqual(build_fact_contract(record).legacyGoldGrade, "GOLD_OK")
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_final_fact_match_rejects_replaced_organization_entity(self) -> None:
+        record = _record(
+            "TEXT-ENTITY-1",
+            question="请给出江苏省I市农商行的不良贷款率。",
+            answer_text="江苏省I市农商行的不良贷款率为1.48%",
+            columns=["org_code", "metric_code", "metric_value"],
+            rows=[["ORG009", "ZB013", 1.48]],
+        )
+        record["normalizedIntent"] = {
+            "organizations": [
+                {
+                    "code": "ORG009",
+                    "name": "江苏省I市农商行",
+                    "matchedText": "江苏省I市农商行",
+                }
+            ],
+            "metrics": [
+                {
+                    "code": "ZB013",
+                    "name": "不良贷款率",
+                    "matchedText": "不良贷款率",
+                }
+            ],
+        }
+        report = {
+            "items": [
+                {
+                    "id": "TEXT-ENTITY-1",
+                    "resultColumns": ["org_code", "metric_code", "metric_value"],
+                    "resultRows": [["ORG009", "ZB013", 1.48]],
+                    "textSummary": "江苏省A市农商行的不良贷款率为1.48%",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["finalFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
     def test_final_fact_match_rejects_extra_number_and_contradictory_semantics(self) -> None:
         record = _record(
             "TEXT-EXACT-1",
@@ -282,6 +382,31 @@ class ScoreFactContractV3Test(unittest.TestCase):
                     "resultColumns": ["metric_value"],
                     "resultRows": [[20.0]],
                     "textSummary": "余额为20亿元，整体上升，同时下降，另有999999亿元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["finalFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_final_fact_match_rejects_opposite_extreme_semantics(self) -> None:
+        record = _record(
+            "TEXT-EXTREME-1",
+            question="哪个月余额最高？",
+            answer_text="最高余额为20亿元",
+            columns=["metric_value"],
+            rows=[[20.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "TEXT-EXTREME-1",
+                    "resultColumns": ["metric_value"],
+                    "resultRows": [[20.0]],
+                    "textSummary": "最低余额为20亿元",
                 }
             ]
         }
