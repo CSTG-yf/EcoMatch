@@ -34,10 +34,30 @@ class BootstrapBankAgentTest(unittest.TestCase):
         self.assertEqual(payload["chatAppConfig"]["EXECUTION_SQL_CORRECTOR"]["chatModelId"], 5)
 
     def test_existing_agent_id_is_preserved_for_idempotent_update(self) -> None:
-        payload = build_agent_payload(data_set_id=88, chat_model_id=3, existing_agent_id=41)
+        existing = {
+            "id": 41,
+            "examples": ["保留示例"],
+            "admins": ["alice"],
+            "viewers": ["bob"],
+            "adminOrgs": ["org-admin"],
+            "viewOrgs": ["org-view"],
+            "visualConfig": {"type": "TABLE"},
+        }
+
+        payload = build_agent_payload(
+            data_set_id=88,
+            chat_model_id=3,
+            existing_agent=existing,
+        )
 
         self.assertEqual(payload["id"], 41)
         self.assertEqual(json.loads(payload["toolConfig"])["tools"][0]["dataSetIds"], [88])
+        self.assertEqual(payload["examples"], ["保留示例"])
+        self.assertEqual(payload["admins"], ["alice"])
+        self.assertEqual(payload["viewers"], ["bob"])
+        self.assertEqual(payload["adminOrgs"], ["org-admin"])
+        self.assertEqual(payload["viewOrgs"], ["org-view"])
+        self.assertEqual(payload["visualConfig"], {"type": "TABLE"})
 
     def test_system_config_patch_updates_and_appends_without_dropping_other_values(self) -> None:
         current = {

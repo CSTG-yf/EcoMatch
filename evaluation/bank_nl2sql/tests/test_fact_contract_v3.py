@@ -218,7 +218,7 @@ class BuildFactContractV3CliTest(unittest.TestCase):
 
 
 class ScoreFactContractV3Test(unittest.TestCase):
-    def test_result_fact_match_ignores_projection_column_names(self) -> None:
+    def test_result_fact_match_fails_closed_when_projection_cannot_be_bound(self) -> None:
         record = _record(
             "STRUCTURE-1",
             question="余额是多少？",
@@ -239,9 +239,58 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         scored = score_fact_contract_report(report, [record])
 
-        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["tableExact"])
-        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_result_fact_match_rejects_wrong_date_binding_with_correct_values(self) -> None:
+        record = _record(
+            "ROW-BINDING-1",
+            question="请给出两期余额及总体趋势。",
+            answer_text="两期余额分别为10亿元和20亿元，整体上升",
+            columns=["data_date", "metric_value"],
+            rows=[["2025-01-31", 10.0], ["2025-02-28", 20.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "ROW-BINDING-1",
+                    "resultColumns": ["data_date", "metric_value"],
+                    "resultRows": [["2099-01-01", 10.0], ["2099-01-01", 20.0]],
+                    "textSummary": "两期余额分别为10亿元和20亿元，整体上升",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_final_fact_match_rejects_extra_number_and_contradictory_semantics(self) -> None:
+        record = _record(
+            "TEXT-EXACT-1",
+            question="余额趋势如何？",
+            answer_text="余额为20亿元，整体上升",
+            columns=["metric_value"],
+            rows=[[20.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "TEXT-EXACT-1",
+                    "resultColumns": ["metric_value"],
+                    "resultRows": [[20.0]],
+                    "textSummary": "余额为20亿元，整体上升，同时下降，另有999999亿元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["finalFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_result_table_cannot_replace_missing_final_answer(self) -> None:
         record = _record(
@@ -292,6 +341,31 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertEqual(build_fact_contract(record).facts[0].support, "MISSING")
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
+        record = _record(
+            "DERIVE-IDENTITY-1",
+            question="人均值是多少？",
+            answer_text="人均值1.02万元",
+            columns=["metric_code", "metric_value"],
+            rows=[["ZB011", 183.02]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "DERIVE-IDENTITY-1",
+                    "resultColumns": ["first", "second"],
+                    "resultRows": [[0.5, 0.52]],
+                    "textSummary": "人均值1.02万元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertEqual(build_fact_contract(record).legacyGoldGrade, "GOLD_BAD")
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_every_record_stays_in_denominator_and_review_contract_fails_closed(self) -> None:
         ready = _record(

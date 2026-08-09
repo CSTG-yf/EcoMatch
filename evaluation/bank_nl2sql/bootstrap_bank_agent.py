@@ -71,7 +71,7 @@ def build_agent_payload(
     data_set_id: int,
     chat_model_id: int,
     *,
-    existing_agent_id: int | None = None,
+    existing_agent: dict[str, Any] | None = None,
     agent_name: str = DEFAULT_AGENT_NAME,
 ) -> dict[str, Any]:
     if data_set_id <= 0:
@@ -154,23 +154,35 @@ def build_agent_payload(
             "chatModelId": chat_model_id,
         },
     }
+    preserved_lists: dict[str, list[Any]] = {}
+    for field in ("examples", "admins", "viewers", "adminOrgs", "viewOrgs"):
+        value = existing_agent.get(field) if existing_agent is not None else None
+        if value is not None and not isinstance(value, list):
+            raise BankAgentBootstrapError(f"existing Agent {field} must be a list")
+        preserved_lists[field] = copy.deepcopy(value) if isinstance(value, list) else []
+
     payload: dict[str, Any] = {
         "name": agent_name,
         "description": "银行业智能问数正式评估 Agent",
         "status": 1,
-        "examples": [],
+        "examples": preserved_lists["examples"],
         "enableSearch": 1,
         "enableFeedback": 0,
         "toolConfig": json.dumps(tool_config, ensure_ascii=False, separators=(",", ":")),
         "chatAppConfig": chat_apps,
-        "visualConfig": None,
-        "admins": [],
-        "viewers": [],
-        "adminOrgs": [],
-        "viewOrgs": [],
+        "visualConfig": copy.deepcopy(existing_agent.get("visualConfig"))
+        if existing_agent is not None
+        else None,
+        "admins": preserved_lists["admins"],
+        "viewers": preserved_lists["viewers"],
+        "adminOrgs": preserved_lists["adminOrgs"],
+        "viewOrgs": preserved_lists["viewOrgs"],
         "isOpen": 1,
     }
-    if existing_agent_id is not None:
+    if existing_agent is not None:
+        existing_agent_id = existing_agent.get("id")
+        if not isinstance(existing_agent_id, int) or existing_agent_id <= 0:
+            raise BankAgentBootstrapError("existing Agent id is invalid")
         payload["id"] = existing_agent_id
     return payload
 
@@ -273,7 +285,7 @@ def resolve_official_release(dataset_dir: Path) -> tuple[dict[str, Any], Path, s
     return manifest, workbook, manifest_sha
 
 
-def _find_existing_agent(agents: Any, agent_name: str) -> int | None:
+def _find_existing_agent(agents: Any, agent_name: str) -> dict[str, Any] | None:
     if not isinstance(agents, list):
         raise BankAgentBootstrapError("Agent list response must be a list")
     matches = [item for item in agents if isinstance(item, dict) and item.get("name") == agent_name]
@@ -284,7 +296,7 @@ def _find_existing_agent(agents: Any, agent_name: str) -> int | None:
     agent_id = matches[0].get("id")
     if not isinstance(agent_id, int) or agent_id <= 0:
         raise BankAgentBootstrapError("existing Agent id is invalid")
-    return agent_id
+    return matches[0]
 
 
 def bootstrap(
@@ -322,14 +334,14 @@ def bootstrap(
         raise BankAgentBootstrapError("semantic import did not return a valid dataSetId")
 
     agents = client.json("GET", "/api/chat/agent/getAgentList?authType=ADMIN")
-    existing_id = _find_existing_agent(agents, agent_name)
+    existing_agent = _find_existing_agent(agents, agent_name)
     agent_payload = build_agent_payload(
         data_set_id,
         chat_model_id,
-        existing_agent_id=existing_id,
+        existing_agent=existing_agent,
         agent_name=agent_name,
     )
-    agent = client.json("PUT" if existing_id else "POST", "/api/chat/agent", agent_payload)
+    agent = client.json("PUT" if existing_agent else "POST", "/api/chat/agent", agent_payload)
     if not isinstance(agent, dict) or not isinstance(agent.get("id"), int):
         raise BankAgentBootstrapError("Agent upsert did not return a valid id")
 
@@ -350,7 +362,7 @@ def bootstrap(
         "agentId": agent["id"],
         "agentName": agent_name,
         "chatModelId": chat_model_id,
-        "createdAgent": existing_id is None,
+        "createdAgent": existing_agent is None,
         "semanticImport": {
             "organizations": import_report.get("organizationCount"),
             "indicators": import_report.get("indicatorCount"),

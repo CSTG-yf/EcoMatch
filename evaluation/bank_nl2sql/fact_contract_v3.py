@@ -335,6 +335,81 @@ def _prediction_values(
     return table_values, text_values
 
 
+def _is_numeric_cell(value: Any) -> bool:
+    return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+def _expected_rows_are_bound(
+    expected: dict[str, Any],
+    *,
+    columns: list[str],
+    rows: list[list[Any]],
+) -> bool:
+    """Prove row identity for complete structured gold without requiring table shape.
+
+    Extra result columns and provenance rows are allowed, but every expected row
+    must be recoverable through the official column names.  This prevents a bag
+    of correct numbers attached to wrong dates, organizations or metrics from
+    being scored as an exact result.
+    """
+
+    expected_columns = expected.get("columns")
+    expected_rows = expected.get("rows")
+    if not isinstance(expected_columns, list) or not isinstance(expected_rows, list):
+        return False
+    expected_names = [str(column) for column in expected_columns]
+    if not expected_names or len(set(columns)) != len(columns):
+        return False
+
+    has_identity = any(
+        cell is not None and not _is_numeric_cell(cell)
+        for row in expected_rows
+        if isinstance(row, (list, tuple))
+        for cell in row
+    )
+    if not has_identity:
+        return True
+    if any(name not in columns for name in expected_names):
+        return False
+
+    indexes = [columns.index(name) for name in expected_names]
+    projected_rows: list[list[Any]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or any(index >= len(row) for index in indexes):
+            return False
+        projected_rows.append([row[index] for index in indexes])
+
+    tolerance_raw = expected.get("numericTolerance")
+    tolerance = float(tolerance_raw) if isinstance(tolerance_raw, numbers.Real) else 0.0
+
+    def cells_equal(left: Any, right: Any) -> bool:
+        if _is_numeric_cell(left) and _is_numeric_cell(right):
+            return abs(float(left) - float(right)) <= tolerance
+        return left == right
+
+    unmatched = list(range(len(projected_rows)))
+    for expected_row in expected_rows:
+        if not isinstance(expected_row, (list, tuple)) or len(expected_row) != len(expected_names):
+            return False
+        matched_index = next(
+            (
+                candidate
+                for candidate in unmatched
+                if all(
+                    cells_equal(expected_value, actual_value)
+                    for expected_value, actual_value in zip(
+                        expected_row, projected_rows[candidate]
+                    )
+                )
+            ),
+            None,
+        )
+        if matched_index is None:
+            return False
+        unmatched.remove(matched_index)
+    return True
+
+
 def _fact_is_grounded_in_result(
     fact: FactDraft,
     *,
@@ -352,6 +427,21 @@ def _fact_is_grounded_in_text(fact: FactDraft, *, text_values: list[float]) -> b
     tolerance = DEFAULT_ABS_TOL
     return any(
         _close(fact.value, value, kind=fact.kind, tolerance=tolerance)
+        for value in text_values
+    )
+
+
+def _text_has_only_allowed_facts(
+    contract: RecordFactContract,
+    *,
+    text_values: list[float],
+) -> bool:
+    allowed_facts = list(contract.facts)
+    return all(
+        any(
+            _close(fact.value, value, kind=fact.kind, tolerance=DEFAULT_ABS_TOL)
+            for fact in allowed_facts
+        )
         for value in text_values
     )
 
@@ -414,13 +504,19 @@ def score_fact_contract_report(
             )
             required_facts = [fact for fact in contract.facts if fact.required]
             if has_table:
-                result_facts_exact = bool(required_facts) and all(
+                facts_grounded = bool(required_facts) and all(
                     _fact_is_grounded_in_result(
                         fact,
                         table_values=table_values,
                     )
                     for fact in required_facts
                 )
+                row_binding_ok = _expected_rows_are_bound(
+                    expected,
+                    columns=[str(column) for column in columns],
+                    rows=rows,
+                )
+                result_facts_exact = facts_grounded and row_binding_ok
             final_numeric_ok = bool(text_summary) and bool(required_facts) and all(
                 _fact_is_grounded_in_text(
                     fact,
@@ -428,8 +524,12 @@ def score_fact_contract_report(
                 )
                 for fact in required_facts
             )
+            final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
+                contract,
+                text_values=text_values,
+            )
             predicted_semantics = set(_semantic_facts(text_summary or ""))
-            semantic_ok = set(contract.semanticFacts).issubset(predicted_semantics)
+            semantic_ok = set(contract.semanticFacts) == predicted_semantics
             final_facts_exact = final_numeric_ok and semantic_ok
 
             if contract.status != "READY":
@@ -483,7 +583,14 @@ def score_fact_contract_report(
         "policy": {
             "primaryMetric": "caseAccuracy",
             "casePass": "resultExact AND finalFactsExact",
-            "resultExact": "required answer facts grounded in captured SQL result",
+            "resultExact": (
+                "required answer facts grounded in captured SQL result and complete "
+                "structured-gold row identities preserved"
+            ),
+            "finalFactsExact": (
+                "all required answer facts present with no extra numeric or contradictory "
+                "semantic facts"
+            ),
             "tableExact": "diagnostic only; projection shape is not scored",
             "denominator": "ALL_SELECTED_RECORDS",
             "sqlTextScored": False,
