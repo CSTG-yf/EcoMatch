@@ -1,15 +1,18 @@
 {
   "name": "bank-path-runtime-ablation",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "purpose": "Compare bank constrained-plan on vs generic ONE_PASS without deleting bank code.",
   "policy": {
     "deleteCode": false,
     "overwriteOfficialGold": false,
     "scoreSqlStructure": false,
-    "primaryMetric": "resultAccuracy",
+    "primaryMetric": "caseAccuracy",
     "diagnosticOnly": [
       "parseSuccessRate",
       "executionSuccessRate",
+      "summarySuccessRate",
+      "resultFactAccuracy",
+      "finalFactAccuracy",
       "errorCategories",
       "bankRouting"
     ]
@@ -35,11 +38,6 @@
       "TRAIN-H-07"
     ],
     "selectionReason": "Stratified smoke: simple point query, ordinary baseline change, hard trend window, multi-metric aggregation, ranking/derived metrics."
-  },
-  "smallTrainProbe": {
-    "split": "train",
-    "maxRecords": 20,
-    "notes": "Only after smoke is green on both modes; use fixed ordering of train.jsonl and the same max-records for both modes."
   },
   "outputs": {
     "bankOffSmoke": ".local-dev/bank-nl2sql/ablation/smoke-bank-off.json",

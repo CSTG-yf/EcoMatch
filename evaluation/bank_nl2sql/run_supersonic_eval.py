@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Evaluate the real SuperSonic parse-and-execute pipeline on DATA-02.
+"""Capture the real SuperSonic parse-and-execute conversation chain.
 
-The evaluator sends only natural-language questions and runtime identifiers to
-SuperSonic.  Gold SQL and expected rows are kept locally for scoring, never
-added to parse or execute requests.  Development defaults to the dev split;
-the frozen test split requires an explicit acknowledgement and local run
-registry entry.
+This module is transport-only.  It sends only natural-language questions and
+runtime identifiers to SuperSonic, then returns parse, execution and final
+answer capture evidence.  Fact v3 scoring is intentionally owned by
+``official_runtime_evaluation.py`` so no alternate score can be produced from
+this low-level helper.
 """
 
 from __future__ import annotations
@@ -13,18 +13,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from answer_contract import assess_gold_contract, score_answer_exact
-from evaluate_predictions import _json_value, _matches_expected
+from evaluate_predictions import _json_value
 from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run
 
 
@@ -238,26 +238,6 @@ def _load_record_ids_file(path: Path) -> list[str]:
     return [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith("#")]
 
 
-def _record_group_metrics(records: list[dict[str, Any]], key: str) -> dict[str, dict[str, Any]]:
-    grouped: dict[str, Counter[str]] = defaultdict(Counter)
-    for item in records:
-        values = item.get(key) if key == "sqlFeatures" else [item.get(key, "UNSPECIFIED")]
-        for value in values or ["UNSPECIFIED"]:
-            grouped[str(value)]["count"] += 1
-            grouped[str(value)]["parse"] += int(item["parse"])
-            grouped[str(value)]["execute"] += int(item["execute"])
-            grouped[str(value)]["match"] += int(item["match"])
-    return {
-        name: {
-            "count": counter["count"],
-            "parseSuccessRate": _rate(counter["parse"], counter["count"]),
-            "executionSuccessRate": _rate(counter["execute"], counter["count"]),
-            "resultAccuracy": _rate(counter["match"], counter["count"]),
-        }
-        for name, counter in sorted(grouped.items())
-    }
-
-
 def _create_conversation(
     *,
     post_json: Callable[[str, dict[str, Any]], Any],
@@ -317,11 +297,6 @@ def _evaluate_record(
         "sqlFeatures": list(record.get("sqlFeatures") or ["UNSPECIFIED"]),
         "parse": False,
         "execute": False,
-        "match": False,
-        "answerExact": False,
-        "tableEX": False,
-        "goldGrade": assess_gold_contract(record).grade,
-        "answerScore": None,
         "parseMs": None,
         "executeMs": None,
         "summaryMs": None,
@@ -413,21 +388,10 @@ def _evaluate_record(
         )
         item["resultColumns"] = columns
         item["resultRows"] = rows
-        item["match"] = _matches_expected(record.get("expected", {}), columns, rows)
-        item["tableEX"] = bool(item["match"])
-        item["errorCategory"] = None if item["match"] else "RESULT_MISMATCH"
+        item["errorCategory"] = None
     except Exception as error:
         item["errorCategory"] = "EXECUTION_ERROR"
         item["errorType"] = type(error).__name__
-        answer_score = score_answer_exact(
-            record,
-            columns=item.get("resultColumns"),
-            rows=item.get("resultRows"),
-            text_summary=None,
-            require_gold_ok=True,
-        )
-        item["answerScore"] = answer_score.to_dict()
-        item["answerExact"] = False
         return finish_query_timing()
 
     try:
@@ -441,27 +405,19 @@ def _evaluate_record(
         item["summaryState"] = summary_state
         item["textSummary"] = text_summary
         item["summaryMs"] = summary_ms
+        if summary_state != "SUCCESS":
+            item["errorCategory"] = (
+                "SUMMARY_TIMEOUT" if summary_state == "TIMEOUT" else "SUMMARY_ERROR"
+            )
     except Exception as error:
         item["summaryState"] = "ERROR"
         item["summaryErrorType"] = type(error).__name__
-
-    answer_score = score_answer_exact(
-        record,
-        columns=item.get("resultColumns"),
-        rows=item.get("resultRows"),
-        text_summary=item.get("textSummary") if isinstance(item.get("textSummary"), str) else None,
-        require_gold_ok=True,
-    )
-    item["answerScore"] = answer_score.to_dict()
-    item["answerExact"] = bool(answer_score.scored and answer_score.answerExact)
-    if item["execute"] and answer_score.scored and not answer_score.answerExact:
-        # Prefer slot miss over bare RESULT_MISMATCH when gold is scorable.
-        if item.get("errorCategory") in {None, "RESULT_MISMATCH"}:
-            item["errorCategory"] = "ANSWER_SLOT_MISS" if item.get("match") else "RESULT_MISMATCH"
+        item["errorCategory"] = "SUMMARY_ERROR"
 
     finish_query_timing()
-    # Cleanup when either legacy table match or official answerExact succeeds.
-    if cleanup_conversations and (item["match"] or item["answerExact"]):
+    # The standard scorer makes the final case-level cleanup decision.  The
+    # transport helper only cleans a fully successful API conversation.
+    if cleanup_conversations and item["execute"] and item["summaryState"] == "SUCCESS":
         try:
             cleaned = _unwrap_api_value(
                 post_json(f"{manage_api_prefix}/delete?chatId={chat_id}", {})
@@ -492,31 +448,17 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     count = len(items)
     parsed = sum(int(item["parse"]) for item in items)
     executed = sum(int(item["execute"]) for item in items)
-    matched = sum(int(item["match"]) for item in items)
-    answer_scored = [
-        item for item in items
-        if isinstance(item.get("answerScore"), dict) and item["answerScore"].get("scored")
-    ]
-    answer_hits = sum(1 for item in answer_scored if item.get("answerExact"))
-    gold_ok = sum(1 for item in items if item.get("goldGrade") == "GOLD_OK")
+    summarized = sum(item.get("summaryState") == "SUCCESS" for item in items)
     return {
         "recordCount": count,
         "metrics": {
             "parseSuccessRate": _rate(parsed, count),
             "executionSuccessRate": _rate(executed, count),
-            "resultAccuracy": _rate(matched, count),
-            "tableEX": _rate(matched, count),
-            "answerExact": _rate(answer_hits, len(answer_scored)),
-            "answerExactHits": answer_hits,
-            "answerExactDenominator": len(answer_scored),
-            "goldOkCount": gold_ok,
-            "goldOkRate": _rate(gold_ok, count),
+            "summarySuccessRate": _rate(summarized, count),
         },
         "policy": {
-            "officialMetric": "answerExact",
-            "officialDenominator": "GOLD_OK items with required answer slots",
-            "legacyMetric": "resultAccuracy/tableEX (structured expected.rows equality)",
-            "sqlStructureScored": False,
+            "transportOnly": True,
+            "score": "NONE",
         },
         "timingMs": {
             "averageParseMs": round(sum(parse_latencies) / len(parse_latencies), 3) if parse_latencies else None,
@@ -534,8 +476,6 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
                 successful_end_to_end_latencies
             ),
         },
-        "byDifficulty": _record_group_metrics(items, "difficulty"),
-        "bySqlFeature": _record_group_metrics(items, "sqlFeatures"),
         "errorCategories": dict(sorted(error_categories.items())),
         "items": items,
     }
@@ -554,7 +494,7 @@ def run_supersonic_evaluation(
     cleanup_conversations: bool = True,
     on_item_complete: Callable[[dict[str, Any], int, int], None] | None = None,
 ) -> dict[str, Any]:
-    """Run the frontend conversation API chain concurrently and score results locally."""
+    """Run the frontend conversation API chain and return transport evidence."""
 
     if concurrency < 1:
         raise SuperSonicEvaluationError("concurrency must be at least 1")
@@ -672,7 +612,7 @@ def _load_resumable_items(
     return items
 
 
-def main() -> None:
+def _legacy_capture_main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Frozen bank_nl2sql directory")
     parser.add_argument("--split", choices=("train", "dev", "test"), default="dev")
@@ -871,5 +811,18 @@ def main() -> None:
     print(json.dumps({"recordCount": report["recordCount"], "metrics": report["metrics"]}, ensure_ascii=False))
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Route direct invocations to the single official Fact v3 protocol.
+
+    The capture helpers above remain importable for the official runner and
+    focused transport tests, but the former score-producing CLI is not a
+    supported public entry point.
+    """
+
+    from run_official_runtime_eval import main as official_main
+
+    return official_main(argv)
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

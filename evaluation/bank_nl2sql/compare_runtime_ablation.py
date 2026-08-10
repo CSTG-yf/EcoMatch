@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare bank-on vs bank-off SuperSonic evaluation reports for runtime ablation."""
+"""Compare two official Fact v3 reports for a bank runtime ablation."""
 
 from __future__ import annotations
 
@@ -32,6 +32,8 @@ def _items_by_id(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for item in items:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise AblationCompareError("Every item must include a string id")
+        if not isinstance(item.get("casePass"), bool):
+            raise AblationCompareError("Every item must include a Fact v3 boolean casePass")
         if item["id"] in by_id:
             raise AblationCompareError(f"Duplicate item id in report: {item['id']}")
         by_id[item["id"]] = item
@@ -85,6 +87,84 @@ def _pair_delta(left: bool, right: bool) -> str:
     return "same"
 
 
+def _require_comparable_official_runs(
+    left_run: dict[str, Any],
+    right_run: dict[str, Any],
+) -> dict[str, Any]:
+    """Fail closed unless both inputs are the same official protocol run shape.
+
+    A bank-on/bank-off experiment deliberately changes a server switch.  It
+    must not also quietly change its model, data release, source revision or
+    selected denominator, otherwise its case-level delta has no meaning.
+    """
+
+    required_keys = (
+        "protocolSchemaVersion",
+        "datasetVersion",
+        "agentId",
+        "modelLabel",
+        "endpointFingerprint",
+        "protocolProfileSha256",
+        "sourceRevision",
+        "captureMethod",
+        "concurrency",
+        "mode",
+        "split",
+        "selectedRecordIds",
+    )
+    for key in required_keys:
+        if key not in left_run or key not in right_run:
+            raise AblationCompareError(
+                f"Compared reports must be complete official Fact v3 runs: missing {key}"
+            )
+        if left_run[key] != right_run[key]:
+            raise AblationCompareError(
+                f"Compared reports differ on required runtime contract field: {key}"
+            )
+    for side, run in (("left", left_run), ("right", right_run)):
+        if run.get("status") != "COMPLETED":
+            raise AblationCompareError(
+                f"Compared {side} report is not a completed official runtime evaluation"
+            )
+    if left_run["captureMethod"] != "openapi-frontend-conversation-chain":
+        raise AblationCompareError("Compared reports do not use the official frontend capture method")
+    if left_run["concurrency"] != 1:
+        raise AblationCompareError("Compared reports do not use required serial execution")
+    selected_ids = left_run["selectedRecordIds"]
+    if (
+        not isinstance(selected_ids, list)
+        or not selected_ids
+        or not all(isinstance(sample_id, str) and sample_id for sample_id in selected_ids)
+        or len(selected_ids) != len(set(selected_ids))
+    ):
+        raise AblationCompareError("Compared reports have an invalid selectedRecordIds contract")
+    left_receipt = left_run.get("setupReceipt")
+    right_receipt = right_run.get("setupReceipt")
+    if not isinstance(left_receipt, dict) or not isinstance(right_receipt, dict):
+        raise AblationCompareError("Compared reports must contain an official bootstrap receipt")
+    receipt_keys = (
+        "agentId",
+        "modelId",
+        "chatModelId",
+        "dataSetId",
+        "officialManifestSha256",
+        "agentProfileSha256",
+    )
+    for key in receipt_keys:
+        if left_receipt.get(key) != right_receipt.get(key):
+            raise AblationCompareError(
+                f"Compared reports differ on required bootstrap receipt field: {key}"
+            )
+    return {
+        **{key: left_run[key] for key in required_keys},
+        "bootstrapReceipt": {key: left_receipt[key] for key in receipt_keys},
+        "systemParametersSha256": {
+            "left": left_receipt.get("systemParametersSha256"),
+            "right": right_receipt.get("systemParametersSha256"),
+        },
+    }
+
+
 def compare_runtime_ablation(
     left_report: dict[str, Any],
     right_report: dict[str, Any],
@@ -96,6 +176,7 @@ def compare_runtime_ablation(
     right_run = right_report.get("run") if isinstance(right_report.get("run"), dict) else {}
     left_mode = left_label or left_run.get("runtimeMode")
     right_mode = right_label or right_run.get("runtimeMode")
+    comparability = _require_comparable_official_runs(left_run, right_run)
     left_items = _items_by_id(left_report)
     right_items = _items_by_id(right_report)
 
@@ -107,56 +188,63 @@ def compare_runtime_ablation(
             f"only-left={sorted(left_ids - right_ids)}, only-right={sorted(right_ids - left_ids)}"
         )
 
-    ordered_ids = left_run.get("selectedRecordIds")
-    if not isinstance(ordered_ids, list) or set(ordered_ids) != left_ids:
-        ordered_ids = sorted(left_ids)
+    ordered_ids = comparability["selectedRecordIds"]
+    if set(ordered_ids) != left_ids:
+        raise AblationCompareError("Official run metadata does not match the report item denominator")
 
     pairs = []
-    both_match = 0
-    only_left_match = 0
-    only_right_match = 0
-    neither_match = 0
+    both_case_pass = 0
+    only_left_case_pass = 0
+    only_right_case_pass = 0
+    neither_case_pass = 0
     for sample_id in ordered_ids:
         left = left_items[sample_id]
         right = right_items[sample_id]
-        left_match = bool(left.get("match"))
-        right_match = bool(right.get("match"))
-        if left_match and right_match:
-            both_match += 1
-        elif left_match:
-            only_left_match += 1
-        elif right_match:
-            only_right_match += 1
+        left_case_pass = left["casePass"]
+        right_case_pass = right["casePass"]
+        if left_case_pass and right_case_pass:
+            both_case_pass += 1
+        elif left_case_pass:
+            only_left_case_pass += 1
+        elif right_case_pass:
+            only_right_case_pass += 1
         else:
-            neither_match += 1
+            neither_case_pass += 1
         pairs.append(
             {
                 "id": sample_id,
                 "left": {
                     "parse": bool(left.get("parse")),
                     "execute": bool(left.get("execute")),
-                    "match": left_match,
+                    "casePass": left_case_pass,
                     "errorCategory": left.get("errorCategory"),
                     "bankRouting": left.get("bankRouting"),
                 },
                 "right": {
                     "parse": bool(right.get("parse")),
                     "execute": bool(right.get("execute")),
-                    "match": right_match,
+                    "casePass": right_case_pass,
                     "errorCategory": right.get("errorCategory"),
                     "bankRouting": right.get("bankRouting"),
                 },
-                "resultDelta": _pair_delta(left_match, right_match),
+                "caseDelta": _pair_delta(left_case_pass, right_case_pass),
             }
         )
 
     left_metrics = left_report.get("metrics") if isinstance(left_report.get("metrics"), dict) else {}
     right_metrics = right_report.get("metrics") if isinstance(right_report.get("metrics"), dict) else {}
-    left_result = float(left_metrics.get("resultAccuracy") or 0.0)
-    right_result = float(right_metrics.get("resultAccuracy") or 0.0)
+    if not isinstance(left_metrics.get("caseAccuracy"), (int, float)):
+        raise AblationCompareError("Left report must contain Fact v3 caseAccuracy")
+    if not isinstance(right_metrics.get("caseAccuracy"), (int, float)):
+        raise AblationCompareError("Right report must contain Fact v3 caseAccuracy")
+    left_case_accuracy = float(left_metrics["caseAccuracy"])
+    right_case_accuracy = float(right_metrics["caseAccuracy"])
+    if not 0.0 <= left_case_accuracy <= 1.0 or not 0.0 <= right_case_accuracy <= 1.0:
+        raise AblationCompareError("Fact v3 caseAccuracy must be between 0 and 1")
 
     return {
         "recordCount": len(ordered_ids),
+        "comparability": {"verified": True, **comparability},
         "left": {
             "runtimeMode": left_mode,
             "metrics": left_metrics,
@@ -170,19 +258,19 @@ def compare_runtime_ablation(
             ),
         },
         "deltas": {
-            "resultAccuracy": round(right_result - left_result, 6),
-            "bothMatch": both_match,
-            "onlyLeftMatch": only_left_match,
-            "onlyRightMatch": only_right_match,
-            "neitherMatch": neither_match,
+            "caseAccuracy": round(right_case_accuracy - left_case_accuracy, 6),
+            "bothCasePass": both_case_pass,
+            "onlyLeftCasePass": only_left_case_pass,
+            "onlyRightCasePass": only_right_case_pass,
+            "neitherCasePass": neither_case_pass,
         },
         "recommendation": _recommendation(
             left_mode if isinstance(left_mode, str) else None,
             right_mode if isinstance(right_mode, str) else None,
-            left_result,
-            right_result,
-            only_left_match,
-            only_right_match,
+            left_case_accuracy,
+            right_case_accuracy,
+            only_left_case_pass,
+            only_right_case_pass,
         ),
         "items": pairs,
     }
@@ -191,21 +279,21 @@ def compare_runtime_ablation(
 def _recommendation(
     left_mode: str | None,
     right_mode: str | None,
-    left_result: float,
-    right_result: float,
-    only_left_match: int,
-    only_right_match: int,
+    left_case_accuracy: float,
+    right_case_accuracy: float,
+    only_left_case_pass: int,
+    only_right_case_pass: int,
 ) -> dict[str, Any]:
     modes = {left_mode, right_mode}
     if modes == {"bank-on", "bank-off"}:
         bank_on_is_right = right_mode == "bank-on"
-        bank_on_score = right_result if bank_on_is_right else left_result
-        bank_off_score = left_result if bank_on_is_right else right_result
-        bank_only = only_right_match if bank_on_is_right else only_left_match
-        generic_only = only_left_match if bank_on_is_right else only_right_match
+        bank_on_score = right_case_accuracy if bank_on_is_right else left_case_accuracy
+        bank_off_score = left_case_accuracy if bank_on_is_right else right_case_accuracy
+        bank_only = only_right_case_pass if bank_on_is_right else only_left_case_pass
+        generic_only = only_left_case_pass if bank_on_is_right else only_right_case_pass
         if bank_on_score > bank_off_score:
             decision = "prefer-bank-on-for-now"
-            rationale = "Bank constrained-plan scored higher resultAccuracy on the shared sample."
+            rationale = "Bank constrained-plan scored higher Fact v3 caseAccuracy on the shared sample."
         elif bank_off_score > bank_on_score:
             decision = "investigate-bank-on-regressions"
             rationale = (
@@ -214,14 +302,14 @@ def _recommendation(
             )
         else:
             decision = "tie-on-sample"
-            rationale = "Result accuracy tied on this sample; expand sample or inspect latency/error mix."
+            rationale = "Fact v3 caseAccuracy tied on this sample; expand the standard split or inspect runtime diagnostics."
         return {
             "decision": decision,
             "rationale": rationale,
-            "bankOnResultAccuracy": bank_on_score,
-            "bankOffResultAccuracy": bank_off_score,
-            "bankOnlyMatches": bank_only,
-            "genericOnlyMatches": generic_only,
+            "bankOnCaseAccuracy": bank_on_score,
+            "bankOffCaseAccuracy": bank_off_score,
+            "bankOnlyCasePasses": bank_only,
+            "genericOnlyCasePasses": generic_only,
             "doNotDeleteCode": True,
         }
     return {

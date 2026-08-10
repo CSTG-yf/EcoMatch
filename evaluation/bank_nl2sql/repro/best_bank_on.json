@@ -32,53 +32,26 @@
     "EXECUTION_SQL_CORRECTOR": {
       "enable": true,
       "chatModelId": 1,
-      "note": "Resilience for physical exec failures; not required when templates already tableEX-pass."
+      "note": "Resilience for physical execution failures."
     },
     "S2SQL_CORRECTOR": { "enable": false },
     "PHYSICAL_SQL_CORRECTOR": { "enable": false }
   },
   "eval": {
-    "runtimeModeLabel": "bank-on",
-    "baseUrl": "http://127.0.0.1:9080",
-    "dataset": "evaluation/bank_nl2sql",
-    "concurrency": 1,
-    "timeoutSeconds": 300,
-    "primaryMetrics": ["answerExact", "tableEX", "executionSuccessRate", "parseSuccessRate"],
-    "smokeIdsFiles": {
-      "hard20": "evaluation/bank_nl2sql/repro/ids-train-hard20.txt",
-      "h04Family": "evaluation/bank_nl2sql/repro/ids-train-h04-family.txt",
-      "reg21": "evaluation/bank_nl2sql/repro/ids-train-reg21.txt"
-    }
+    "officialEntry": "evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1",
+    "datasetVersion": "2.0.1",
+    "primaryMetric": "caseAccuracy",
+    "diagnosticMetrics": ["resultExact", "finalFactsExact", "parseSuccessRate", "executionSuccessRate"],
+    "fixedSmokeProfile": "evaluation/bank_nl2sql/official_runtime_evaluation_v3.json"
   },
-  "evidence": {
-    "hard20": {
-      "report": ".local-dev/bank-nl2sql/ablation/train-hard20-ablation-sc0-fb1-c1-post-h04.json",
-      "metrics": {
-        "tableEX": 1.0,
-        "answerExact": 1.0,
-        "answerExactHits": "14/14",
-        "executionSuccessRate": 1.0,
-        "parseSuccessRate": 1.0,
-        "durationSecondsApprox": 515
-      },
-      "cell": "sc0-fb1-c1 (short-circuit off, soft-fallback on, max-candidates=1)"
-    },
-    "reg21_v48weak_plus_h04": {
-      "report": ".local-dev/bank-nl2sql/ablation/train-reg-v48weak-post-fix2.json",
-      "metrics": {
-        "tableEX": 1.0,
-        "answerExact": 1.0,
-        "answerExactHits": "15/15",
-        "executionSuccessRate": 1.0,
-        "parseSuccessRate": 1.0
-      }
-    },
-    "ablationSummary": ".local-dev/bank-nl2sql/ablation/train-hard20-ablation-summary.json"
+  "evidencePolicy": {
+    "historicalLocalReportsAreNotComparable": true,
+    "requiredForNewClaim": "A fresh official Fact v3 run with bootstrap receipt and v2.0.1 package verification."
   },
   "notRecommended": {
     "s2.parser.bank.plan.deterministic-short-circuit.enable": "true",
     "s2.parser.bank.max-candidates": "2",
     "s2.parser.bank.plan.soft-fallback.enable": "false",
-    "why": "Ablation: SC-on same tableEX only saves latency; cand=2 doubles latency without tableEX gain; FB-off halves parse/tableEX on hard20."
+    "why": "Use only as engineering comparison cells; promote no configuration without a fresh official Fact v3 run."
   }
 }

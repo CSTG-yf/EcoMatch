@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Validate that structured gold results can prove official answer text (L2 ⊇ L1).
+"""Audit historical structured-answer support (L2 ⊇ L1).
 
-Official accuracy should only be computed on ``GOLD_OK`` items. This command is a
-CI / pre-score gate and does not execute models or SQL.
+This is a data-audit gate, not a model scorer.  It does not produce an official
+runtime score; use the Fact v3 protocol for that purpose.
 """
 
 from __future__ import annotations
@@ -57,10 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("scanning test requires --acknowledge-final-test")
 
     reports: dict[str, Any] = {"splits": {}, "policy": {
-        "officialScoreUses": "GOLD_OK only",
-        "primaryMetric": "answerExact",
-        "auxiliaryMetric": "tableEX",
-        "sqlStructureScored": False,
+        "kind": "historical-structured-contract-audit",
+        "modelScoreProduced": False,
+        "supersededBy": "official Fact v3 caseAccuracy runtime protocol",
     }}
     incomplete = 0
     total = 0

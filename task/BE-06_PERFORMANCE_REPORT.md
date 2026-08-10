@@ -142,7 +142,7 @@ mvn -pl headless/server -am `
 
 ## QA-03 应用端验收工具
 
-完整 NL2SQL 链路使用 `run_supersonic_eval.py`。报告对解析、执行、解释以及解析开始至解释完成的端到端耗时输出平均值、P50、P95、P99 和最大值，并单列执行及解释均成功的样本，避免失败请求稀释成功链路性能结论。执行方法见 `evaluation/bank_nl2sql/README.md`。
+完整 NL2SQL 链路的运行时证据由 `Run-OfficialBankEvaluation.ps1` 固定协议采集。报告记录解析、执行、解释以及端到端耗时分布；性能诊断不替代 Fact v3 `caseAccuracy`，执行方法见 `evaluation/bank_nl2sql/README.md`。
 
 语义缓存使用 `run_qa03_cache_eval.py`。运行器：
 

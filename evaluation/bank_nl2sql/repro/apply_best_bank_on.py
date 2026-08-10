@@ -186,13 +186,12 @@ def main() -> int:
         print("agent touched: (none or skipped)")
     print(out.strip())
 
-    print("\n# Restart standalone with JVM flags, then:")
+    print("\n# Restart standalone with JVM flags, bootstrap the Agent, then run the fixed official smoke:")
     print(
-        ".local-dev\\eval-venv\\Scripts\\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py "
-        "evaluation/bank_nl2sql --split train --base-url http://127.0.0.1:9080 "
-        f"--agent-id {agent_id} --ids-file evaluation/bank_nl2sql/repro/ids-train-hard20.txt "
-        "--runtime-mode bank-on --concurrency 1 --timeout-seconds 300 --no-resume "
-        "--output .local-dev/bank-nl2sql/ablation/repro-hard20.json"
+        "powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 "
+        f"-Mode smoke -RunId <RUN_ID> -BaseUrl http://127.0.0.1:9080 -AgentId {agent_id} "
+        "-ModelLabel '<MODEL_LABEL>' "
+        "-BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json"
     )
     return 0
 

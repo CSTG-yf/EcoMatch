@@ -23,7 +23,6 @@ from answer_contract import (
     DEFAULT_ABS_TOL,
     DEFAULT_REL_TOL,
     assess_gold_contract,
-    equal_table,
     extract_answer_slots,
     values_close,
 )
@@ -658,14 +657,12 @@ def score_fact_contract_report(
     result_hits = 0
     final_fact_hits = 0
     ready_count = 0
-    table_exact_hits = 0
 
     for record in records:
         sample_id = str(record.get("id") or "")
         contract = build_fact_contract(record)
         prediction = prediction_by_id.get(sample_id)
         result_facts_exact = False
-        table_exact = False
         final_facts_exact = False
         result_evidence = "MISSING"
         reason = "ok"
@@ -680,14 +677,7 @@ def score_fact_contract_report(
             has_table = isinstance(columns, list) and isinstance(rows, list)
             expected = record.get("expected") if isinstance(record.get("expected"), dict) else {}
             if has_table:
-                table_exact = bool(
-                    equal_table(expected, [str(column) for column in columns], rows)
-                )
                 result_evidence = "CAPTURED_ROWS"
-            elif isinstance(prediction.get("match"), bool):
-                result_facts_exact = bool(prediction["match"])
-                table_exact = bool(prediction["match"])
-                result_evidence = "LEGACY_MATCH"
 
             summary = prediction.get("textSummary")
             text_summary = str(summary) if isinstance(summary, str) else None
@@ -747,7 +737,6 @@ def score_fact_contract_report(
         case_hits += int(case_pass)
         result_hits += int(result_facts_exact)
         final_fact_hits += int(final_facts_exact)
-        table_exact_hits += int(table_exact)
         scored_items.append(
             {
                 "id": sample_id,
@@ -755,7 +744,6 @@ def score_fact_contract_report(
                 "contractReasons": list(contract.reasons),
                 "resultExact": result_facts_exact,
                 "resultFactsExact": result_facts_exact,
-                "tableExact": table_exact,
                 "resultEvidence": result_evidence,
                 "finalFactsExact": final_facts_exact,
                 "casePass": case_pass,
@@ -771,12 +759,9 @@ def score_fact_contract_report(
             "caseAccuracy": _rate(case_hits, denominator),
             "casePassHits": case_hits,
             "caseDenominator": denominator,
-            "resultAccuracy": _rate(result_hits, denominator),
             "resultExactHits": result_hits,
             "resultFactAccuracy": _rate(result_hits, denominator),
             "resultFactsExactHits": result_hits,
-            "tableExactAccuracy": _rate(table_exact_hits, denominator),
-            "tableExactHits": table_exact_hits,
             "finalFactAccuracy": _rate(final_fact_hits, denominator),
             "finalFactsExactHits": final_fact_hits,
             "contractReadyRate": _rate(ready_count, denominator),
@@ -794,7 +779,6 @@ def score_fact_contract_report(
                 "all required answer facts and answer entities present with no extra numeric, "
                 "out-of-context entity or contradictory semantic facts"
             ),
-            "tableExact": "diagnostic only; projection shape is not scored",
             "denominator": "ALL_SELECTED_RECORDS",
             "sqlTextScored": False,
             "reviewRequiredBehavior": "FAIL_CLOSED",

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1.0",
+  "protocolVersion": "3.0.0",
+  "name": "official-bank-runtime-evaluation",
+  "datasetVersion": "2.0.1",
+  "minimumSourceCommit": "565bc74ed313acff1b192aef4ab9a974893e1a53",
+  "capture": {
+    "method": "openapi-frontend-conversation-chain",
+    "perRecordConversation": "isolated",
+    "concurrency": 1,
+    "timeoutSeconds": 300,
+    "summaryTimeoutSeconds": 300,
+    "summaryPollIntervalSeconds": 0.5,
+    "networkRetries": 2,
+    "retryBackoffSeconds": 0.5
+  },
+  "score": {
+    "primaryMetric": "caseAccuracy",
+    "casePass": "resultExact AND finalFactsExact",
+    "denominator": "ALL_SELECTED_RECORDS",
+    "sqlTextScored": false
+  },
+  "smoke": {
+    "split": "train",
+    "recordIds": [
+      "TRAIN-S-01",
+      "TRAIN-M-01",
+      "TRAIN-H-01",
+      "TRAIN-H-04",
+      "TRAIN-H-07"
+    ],
+    "requiredCaseAccuracy": 1.0
+  },
+  "splits": {
+    "train": 119,
+    "dev": 40,
+    "test": 40
+  }
+}

@@ -99,6 +99,8 @@ class BootstrapBankAgentTest(unittest.TestCase):
 
         self.assertIn(r"evaluation\.venv\Scripts\python.exe", launcher)
         self.assertIn('set "ECOMATCH_AUTH_TOKEN="', launcher)
+        self.assertIn("--output", launcher)
+        self.assertIn("bootstrap-receipt.json", launcher)
         self.assertNotIn("local-no-key", launcher)
 
 

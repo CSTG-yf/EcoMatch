@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Score SuperSonic (or offline) evaluation items with answerExact.
+"""Historical answer-contract compatibility helpers.
 
-Primary official metric: all required answerText numeric slots appear in the
-prediction result table (sign-insensitive, numeric tolerance). Items whose gold
-contract is not GOLD_OK are excluded from the official denominator.
+The Python functions remain for migration tests and frozen-artifact audits.
+Their former CLI is intentionally retired: the only supported runtime score is
+Fact v3 ``caseAccuracy`` through ``Run-OfficialBankEvaluation.ps1``.
 """
 
 from __future__ import annotations
@@ -21,9 +21,6 @@ from answer_contract import (
     equal_table,
     score_answer_exact,
 )
-from evaluation_policy import EvaluationAccessError, load_evaluation_records
-
-
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -142,37 +139,13 @@ def score_report_against_dataset(
 
 
 def main(argv: list[str] | None = None) -> int:
+    del argv
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("dataset", type=Path)
-    parser.add_argument("report", type=Path, help="run_supersonic_eval JSON report")
-    parser.add_argument("--split", choices=("train", "dev", "test"), default="train")
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--acknowledge-final-test", action="store_true")
-    parser.add_argument(
-        "--allow-incomplete-gold",
-        action="store_true",
-        help="Score answerExact even when gold contract is not GOLD_OK (debug only)",
+    parser.error(
+        "Historical answer-contract scoring is retired. "
+        "Use evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 for Fact v3 caseAccuracy."
     )
-    args = parser.parse_args(argv)
-
-    try:
-        records = load_evaluation_records(
-            args.dataset,
-            split=args.split,
-            acknowledge_final_test=args.acknowledge_final_test,
-        )
-    except EvaluationAccessError as error:
-        parser.error(str(error))
-
-    report = _read_json(args.report)
-    scored = score_report_against_dataset(
-        report,
-        records,
-        require_gold_ok=not args.allow_incomplete_gold,
-    )
-    _write_json(args.output, scored)
-    print(json.dumps({"metrics": scored["metrics"], "policy": scored["policy"]}, ensure_ascii=False))
-    return 0
+    return 2
 
 
 if __name__ == "__main__":

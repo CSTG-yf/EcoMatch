@@ -77,14 +77,38 @@ class RuntimeAblationHelpersTest(unittest.TestCase):
 class CompareRuntimeAblationTest(unittest.TestCase):
     def test_compares_shared_ids_and_recommends_without_deletion(self) -> None:
         left = {
-            "run": {"runtimeMode": "bank-off", "selectedRecordIds": ["A", "B"]},
-            "metrics": {"resultAccuracy": 0.5, "parseSuccessRate": 1.0, "executionSuccessRate": 1.0},
+            "run": {
+                "runtimeMode": "bank-off",
+                "status": "COMPLETED",
+                "protocolSchemaVersion": "3.0.0",
+                "datasetVersion": "2.0.1",
+                "agentId": 33,
+                "modelLabel": "test-model",
+                "endpointFingerprint": "a" * 64,
+                "protocolProfileSha256": "b" * 64,
+                "sourceRevision": "c" * 40,
+                "captureMethod": "openapi-frontend-conversation-chain",
+                "concurrency": 1,
+                "mode": "smoke",
+                "split": "train",
+                "selectedRecordIds": ["A", "B"],
+                "setupReceipt": {
+                    "agentId": 33,
+                    "modelId": 1,
+                    "chatModelId": 1,
+                    "dataSetId": 17,
+                    "officialManifestSha256": "d" * 64,
+                    "agentProfileSha256": "e" * 64,
+                    "systemParametersSha256": "f" * 64,
+                },
+            },
+            "metrics": {"caseAccuracy": 0.5, "parseSuccessRate": 1.0, "executionSuccessRate": 1.0},
             "items": [
                 {
                     "id": "A",
                     "parse": True,
                     "execute": True,
-                    "match": True,
+                    "casePass": True,
                     "errorCategory": None,
                     "bankRouting": {
                         "bankConstrainedPlanEnabled": False,
@@ -97,8 +121,8 @@ class CompareRuntimeAblationTest(unittest.TestCase):
                     "id": "B",
                     "parse": True,
                     "execute": True,
-                    "match": False,
-                    "errorCategory": "RESULT_MISMATCH",
+                    "casePass": False,
+                    "errorCategory": "RESULT_FACT_MISMATCH",
                     "bankRouting": {
                         "bankConstrainedPlanEnabled": False,
                         "bankDatasetQualified": True,
@@ -109,14 +133,38 @@ class CompareRuntimeAblationTest(unittest.TestCase):
             ],
         }
         right = {
-            "run": {"runtimeMode": "bank-on", "selectedRecordIds": ["A", "B"]},
-            "metrics": {"resultAccuracy": 1.0, "parseSuccessRate": 1.0, "executionSuccessRate": 1.0},
+            "run": {
+                "runtimeMode": "bank-on",
+                "status": "COMPLETED",
+                "protocolSchemaVersion": "3.0.0",
+                "datasetVersion": "2.0.1",
+                "agentId": 33,
+                "modelLabel": "test-model",
+                "endpointFingerprint": "a" * 64,
+                "protocolProfileSha256": "b" * 64,
+                "sourceRevision": "c" * 40,
+                "captureMethod": "openapi-frontend-conversation-chain",
+                "concurrency": 1,
+                "mode": "smoke",
+                "split": "train",
+                "selectedRecordIds": ["A", "B"],
+                "setupReceipt": {
+                    "agentId": 33,
+                    "modelId": 1,
+                    "chatModelId": 1,
+                    "dataSetId": 17,
+                    "officialManifestSha256": "d" * 64,
+                    "agentProfileSha256": "e" * 64,
+                    "systemParametersSha256": "f" * 64,
+                },
+            },
+            "metrics": {"caseAccuracy": 1.0, "parseSuccessRate": 1.0, "executionSuccessRate": 1.0},
             "items": [
                 {
                     "id": "A",
                     "parse": True,
                     "execute": True,
-                    "match": True,
+                    "casePass": True,
                     "errorCategory": None,
                     "bankRouting": {
                         "bankConstrainedPlanEnabled": True,
@@ -129,7 +177,7 @@ class CompareRuntimeAblationTest(unittest.TestCase):
                     "id": "B",
                     "parse": True,
                     "execute": True,
-                    "match": True,
+                    "casePass": True,
                     "errorCategory": None,
                     "bankRouting": {
                         "bankConstrainedPlanEnabled": True,
@@ -142,8 +190,9 @@ class CompareRuntimeAblationTest(unittest.TestCase):
         }
 
         comparison = compare_runtime_ablation(left, right)
-        self.assertEqual(comparison["deltas"]["resultAccuracy"], 0.5)
-        self.assertEqual(comparison["deltas"]["onlyRightMatch"], 1)
+        self.assertEqual(comparison["deltas"]["caseAccuracy"], 0.5)
+        self.assertEqual(comparison["deltas"]["onlyRightCasePass"], 1)
+        self.assertTrue(comparison["comparability"]["verified"])
         self.assertTrue(comparison["left"]["routing"]["routingLooksConsistent"])
         self.assertTrue(comparison["right"]["routing"]["routingLooksConsistent"])
         self.assertEqual(comparison["recommendation"]["decision"], "prefer-bank-on-for-now")
@@ -153,14 +202,87 @@ class CompareRuntimeAblationTest(unittest.TestCase):
         with self.assertRaises(AblationCompareError):
             compare_runtime_ablation(
                 {
-                    "metrics": {"resultAccuracy": 0.0},
-                    "items": [{"id": "A", "parse": False, "execute": False, "match": False}],
+                    "metrics": {"caseAccuracy": 0.0},
+                    "items": [{"id": "A", "parse": False, "execute": False, "casePass": False}],
                 },
                 {
-                    "metrics": {"resultAccuracy": 0.0},
-                    "items": [{"id": "B", "parse": False, "execute": False, "match": False}],
+                    "metrics": {"caseAccuracy": 0.0},
+                    "items": [{"id": "B", "parse": False, "execute": False, "casePass": False}],
                 },
             )
+
+    def test_rejects_different_official_runtime_contracts(self) -> None:
+        base_run = {
+            "status": "COMPLETED",
+            "protocolSchemaVersion": "3.0.0",
+            "datasetVersion": "2.0.1",
+            "agentId": 33,
+            "modelLabel": "test-model",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "captureMethod": "openapi-frontend-conversation-chain",
+            "concurrency": 1,
+            "mode": "smoke",
+            "split": "train",
+            "selectedRecordIds": ["A"],
+            "setupReceipt": {
+                "agentId": 33,
+                "modelId": 1,
+                "chatModelId": 1,
+                "dataSetId": 17,
+                "officialManifestSha256": "d" * 64,
+                "agentProfileSha256": "e" * 64,
+                "systemParametersSha256": "f" * 64,
+            },
+        }
+        left = {
+            "run": {**base_run, "runtimeMode": "bank-off"},
+            "metrics": {"caseAccuracy": 1.0},
+            "items": [{"id": "A", "casePass": True}],
+        }
+        right = {
+            "run": {**base_run, "runtimeMode": "bank-on", "modelLabel": "another-model"},
+            "metrics": {"caseAccuracy": 1.0},
+            "items": [{"id": "A", "casePass": True}],
+        }
+
+        with self.assertRaises(AblationCompareError):
+            compare_runtime_ablation(left, right)
+
+    def test_rejects_a_running_checkpoint(self) -> None:
+        run = {
+            "status": "RUNNING",
+            "protocolSchemaVersion": "3.0.0",
+            "datasetVersion": "2.0.1",
+            "agentId": 33,
+            "modelLabel": "test-model",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "captureMethod": "openapi-frontend-conversation-chain",
+            "concurrency": 1,
+            "mode": "smoke",
+            "split": "train",
+            "selectedRecordIds": ["A"],
+            "setupReceipt": {
+                "agentId": 33,
+                "modelId": 1,
+                "chatModelId": 1,
+                "dataSetId": 17,
+                "officialManifestSha256": "d" * 64,
+                "agentProfileSha256": "e" * 64,
+                "systemParametersSha256": "f" * 64,
+            },
+        }
+        report = {
+            "run": run,
+            "metrics": {"caseAccuracy": 1.0},
+            "items": [{"id": "A", "casePass": True}],
+        }
+
+        with self.assertRaises(AblationCompareError):
+            compare_runtime_ablation(report, report)
 
 
 if __name__ == "__main__":
