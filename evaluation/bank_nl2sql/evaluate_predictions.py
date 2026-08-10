@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Blindly score predicted SQL against the held-out DATA-02 gold results."""
+"""Historical direct-SQL comparison helpers.
+
+They are retained for unit-level compatibility checks only.  Direct SQL
+comparison cannot score the final user-visible answer, so its CLI is retired
+in favor of the single Fact v3 runtime protocol.
+"""
 
 from __future__ import annotations
 
@@ -170,15 +175,10 @@ def evaluate_prediction_file(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("dataset", type=Path)
-    parser.add_argument("predictions", type=Path, help="JSONL records containing id and predicted sql")
-    parser.add_argument("database", type=Path)
-    parser.add_argument("--report", type=Path, help="Optional JSON report output")
-    args = parser.parse_args()
-    report = evaluate_prediction_file(args.dataset, args.predictions, args.database)
-    if args.report:
-        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    parser.error(
+        "Direct-SQL scoring is retired. "
+        "Use evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 for Fact v3 caseAccuracy."
+    )
 
 
 if __name__ == "__main__":

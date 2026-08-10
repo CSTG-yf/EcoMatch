@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Score a structured capture produced by the authenticated chat page.
+"""Historical structured UI-capture comparison helpers.
 
 The browser runner is responsible for creating a real conversation, submitting
 each question and collecting every visible result page.  This module deliberately
-does not call the chat APIs: it validates and scores the page capture after the
-fact, keeping the UI acceptance path separate from backend diagnostics.
+does not call the chat APIs.  It is retained for focused UI compatibility tests;
+its CLI is retired because it cannot score the final answer under the Fact v3
+runtime contract.
 """
 
 from __future__ import annotations
@@ -17,9 +18,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from evaluate_predictions import _matches_expected
-from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run
-
-
 class UiCaptureEvaluationError(ValueError):
     """A UI capture cannot be safely compared with the evaluation gold."""
 
@@ -208,39 +206,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("dataset", type=Path)
-    parser.add_argument("capture", type=Path)
-    parser.add_argument("--split", choices=("train", "dev", "test"), default="dev")
-    parser.add_argument("--acknowledge-final-test", action="store_true")
-    parser.add_argument("--run-registry", type=Path)
-    parser.add_argument(
-        "--captured-only",
-        action="store_true",
-        help="Score only captured records; intended for development smoke checks, not final split scoring.",
+    parser.error(
+        "Structured UI-capture scoring is retired. "
+        "Use evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 for Fact v3 caseAccuracy."
     )
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    if args.split == "test" and args.run_registry is None:
-        parser.error("--split test requires --run-registry to audit the final evaluation")
-    try:
-        records = load_evaluation_records(
-            args.dataset, split=args.split, acknowledge_final_test=args.acknowledge_final_test
-        )
-        report = evaluate_ui_capture(records, _read_json(args.capture), captured_only=args.captured_only)
-    except (EvaluationAccessError, UiCaptureEvaluationError) as error:
-        parser.error(str(error))
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    if args.split == "test":
-        record_final_test_run(
-            args.run_registry,
-            run_metadata={
-                "split": "test",
-                "capture": str(args.capture),
-                "report": str(args.output),
-                "metrics": report["metrics"],
-            },
-        )
 
 
 if __name__ == "__main__":

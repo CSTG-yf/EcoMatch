@@ -69,7 +69,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(_latency_distribution([])["count"], 0)
         self.assertIsNone(_latency_distribution([])["p95"])
 
-    def test_runs_the_frontend_conversation_chain_without_sending_gold_fields(self) -> None:
+    def test_captures_the_frontend_conversation_chain_without_scoring_or_sending_gold(self) -> None:
         requests: list[tuple[str, dict]] = []
 
         def post_json(path: str, payload: dict) -> dict:
@@ -173,16 +173,16 @@ class RunSuperSonicEvalTest(unittest.TestCase):
 
         self.assertEqual(report["metrics"]["parseSuccessRate"], 1.0)
         self.assertEqual(report["metrics"]["executionSuccessRate"], 1.0)
-        self.assertEqual(report["metrics"]["resultAccuracy"], 1.0)
-        self.assertEqual(report["metrics"]["answerExact"], 1.0)
-        self.assertEqual(report["policy"]["officialMetric"], "answerExact")
+        self.assertEqual(report["metrics"]["summarySuccessRate"], 1.0)
+        self.assertEqual(report["policy"], {"transportOnly": True, "score": "NONE"})
         self.assertEqual(report["items"][0]["s2sql"], "SELECT metric_value FROM semantic_dataset")
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
         self.assertEqual(report["items"][0]["resultColumns"], ["metric_value"])
         self.assertEqual(report["items"][0]["resultRows"], [[42.02]])
-        self.assertTrue(report["items"][0]["answerExact"])
+        for score_field in ("match", "answerExact", "tableEX", "answerScore", "goldGrade"):
+            self.assertNotIn(score_field, report["items"][0])
         self.assertEqual(
             report["items"][0]["bankRouting"],
             {
@@ -200,7 +200,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertTrue(report["items"][0]["conversationCleaned"])
 
 
-    def test_keeps_result_mismatch_conversation_for_diagnosis(self) -> None:
+    def test_transport_capture_does_not_compare_rows_against_gold(self) -> None:
         requests: list[str] = []
 
         def post_json(path: str, payload: dict) -> dict:
@@ -220,6 +220,8 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 }
             if path.endswith("/getExecuteSummary"):
                 return {"code": 200, "data": {"queryMode": "METRIC", "textSummary": "done"}}
+            if path == "/openapi/chat/manage/delete?chatId=503":
+                return {"code": 200, "data": True}
             raise AssertionError(f"Unexpected path: {path}")
 
         report = run_supersonic_evaluation(
@@ -234,9 +236,9 @@ class RunSuperSonicEvalTest(unittest.TestCase):
             post_json=post_json,
         )
 
-        self.assertEqual(report["items"][0]["errorCategory"], "RESULT_MISMATCH")
-        self.assertFalse(report["items"][0]["conversationCleaned"])
-        self.assertFalse(any("/delete?" in path for path in requests))
+        self.assertIsNone(report["items"][0]["errorCategory"])
+        self.assertTrue(report["items"][0]["conversationCleaned"])
+        self.assertTrue(any("/delete?" in path for path in requests))
 
     def test_backend_error_message_is_an_execution_failure_even_when_state_is_success(self) -> None:
         def post_json(path: str, payload: dict) -> dict:

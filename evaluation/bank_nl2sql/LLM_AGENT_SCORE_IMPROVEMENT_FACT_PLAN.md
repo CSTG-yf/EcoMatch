@@ -1,6 +1,8 @@
 # 银行问数 LLM Agent 提分改造事实方案
 
 > 状态：`FACTUAL_DRAFT`，用于继续需求对齐，不代表已实施、已部署或已取得新分数。
+> 评测口径已收口：本文任何历史局部结果均不再可用；唯一当前成绩由
+> `Run-OfficialBankEvaluation.ps1` 产生的 Fact v3 `caseAccuracy` 决定。
 > 事实快照：Git `c7c1f59`（`experiment/bank-path-ablation` 的已提交 HEAD），2026-08-09。
 > 规划分支：`codex/llm-agent-score-plan`。
 > 本文只新增方案文档，不修改业务代码、运行时配置、Agent 33、H2、正式数据集或评测结果。
@@ -56,9 +58,9 @@
 - 当前正式评估库版本为 `2.0.1`；`2.0.0` 作为不可变父版本保留。
 - 正式题目总数为 199，切分固定为：TRAIN 119、DEV 40、TEST 40。
 - 另有 12 条 `augmentation.jsonl` 增强样本，不参与官方评分。
-- 赛题文件没有定义总分公式；`answerExact` 是仓库历史内部指标，且只统计 `GOLD_OK`，不能称为官方主指标。
-- v3 候选协议主指标为全分母 `caseAccuracy = resultExact AND finalFactsExact`；SQL 文本和 AST 不计分。
-- `tableEX`（旧名 `resultAccuracy`）继续作为 `resultExact` 的结构化证据。
+- 赛题文件没有定义总分公式；历史的缩小分母与严格行结构口径均不能作为当前成绩。
+- 当前协议主指标为全分母 `caseAccuracy = resultExact AND finalFactsExact`；SQL 文本和 AST 不计分。
+- 结构化执行结果仅作为 `resultExact` 的事实证据，不单独形成成绩。
 - 批量评测器通过 `/openapi` 模拟前端链路，每题使用独立新会话；页面采集器只作为手工 UI 诊断工具。
 - TEST 金标具有显式读取门禁，最终测试需要 `--acknowledge-final-test`。
 
@@ -66,7 +68,7 @@
 
 - `evaluation/bank_nl2sql/README.md`
 - `evaluation/bank_nl2sql/official/2.0.1/official-manifest.json`
-- `evaluation/bank_nl2sql/run_supersonic_eval.py`
+- `evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1`
 
 ### 3.2 当前最佳已提交 bank-on 配置
 
@@ -84,11 +86,10 @@
 
 已记录证据：
 
-- hard20：`tableEX=1.0`、`answerExact=14/14`、执行和解析均为 1.0。
-- reg21：`tableEX=1.0`、`answerExact=15/15`、执行和解析均为 1.0。
+- hard20 与 reg21 仅保留为历史局部工程观察，不能导出当前效果结论。
 - 这些是局部消融证据，不等于 TRAIN 119、DEV 40 或 TEST 40 的全量正式成绩。
-- 当前记录显示 `max-candidates=2` 没有提高 hard20 的 `tableEX`，但增加了延迟。
-- 当前记录显示关闭 `soft-fallback` 会使 hard20 的解析和 `tableEX` 显著下降。
+- 当前记录显示 `max-candidates=2` 没有改善历史局部结果，但增加了延迟。
+- 当前记录显示关闭 `soft-fallback` 会造成历史局部解析和执行回归。
 
 ### 3.3 当前全量 TRAIN 报告
 
@@ -106,7 +107,7 @@
 | 完成数 | 119 |
 | 解析成功率 | 100% |
 | 执行成功率 | 95.7983%（114/119） |
-| 旧 `resultAccuracy/tableEX` | 85.7143%（102/119） |
+| 历史严格行结构结果 | 85.7143%（102/119） |
 | 执行错误 | 5 |
 | 结果不匹配 | 12 |
 | 平均端到端耗时 | 18.879 秒 |
@@ -114,7 +115,7 @@
 
 证据边界：
 
-- 该报告统计的是严格列名/行结构相等的旧 `resultAccuracy/tableEX`，没有可直接作为新主基线的事实级结果与最终文本摘要。
+- 该报告统计的是严格列名/行结构相等的历史口径，没有可直接作为新主基线的事实级结果与最终文本摘要。
 - 因此 `102/119=85.7143%` 不能直接称为当前官方主指标成绩。
 - 在任何提分宣称前，必须用冻结后的 v3 评分器重新建立全量 TRAIN `caseAccuracy` baseline。
 
@@ -399,12 +400,12 @@ caseAccuracy = casePass / split 全部题数
 casePass = resultExact AND finalFactsExact
 ```
 
-其中 `resultExact` 按 SQL 执行结果中的必答事实评分，列名、投影结构、SQL 文本和 AST 不参与主判定；`tableExact` 仅作旧结构兼容诊断。`finalFactsExact` 必须由最终文本自身满足，不能用正确结果表替代缺失文本。
+其中 `resultExact` 按 SQL 执行结果中的必答事实评分，列名、投影结构、SQL 文本和 AST 不参与主判定；`finalFactsExact` 必须由最终文本自身满足，不能用正确结果表替代缺失文本。
 
 Secondary：
 
 ```text
-resultExact / tableEX
+resultExact
 finalFactsExact
 contractReadyRate
 parseSuccessRate
@@ -422,11 +423,11 @@ previouslyPassingRegressions
 
 1. 固定 Git commit、Agent 33 配置、模型端点/模型名、H2 数据库版本、数据集 manifest、提示词版本和语义目录版本。
 2. 使用当前最佳 bank-on 配置运行 TRAIN 119。
-3. 先运行 `build_fact_contract_v3.py`，要求 train/dev 的事实合同全部完成审查，不允许通过排除题目缩小分母。
-4. 对报告运行 `score_fact_contract_v3.py`，得到全分母 `caseAccuracy` baseline。
+3. 先运行固定 smoke，要求全绿；再由 `Run-OfficialBankEvaluation.ps1` 顺序运行 train 与 dev，保证全分母。
+4. 从统一运行报告读取 `caseAccuracy` baseline，不允许通过排除题目缩小分母。
 5. 保存运行元数据、结果和分类型失败清单。
 
-当前 `85.7143%` 只能作为旧 `tableEX` 参考，不能作为新 baseline。
+当前 `85.7143%` 只能作为历史行结构参考，不能作为新 baseline。
 
 ### 8.3 消融顺序
 
@@ -521,8 +522,8 @@ TEST 40：代码、配置、数据全部冻结后的最终验收
 
 ### 评测与复现
 
-- `evaluation/bank_nl2sql/run_supersonic_eval.py`
-- `evaluation/bank_nl2sql/score_answer_exact.py`
+- `evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1`
+- `evaluation/bank_nl2sql/official_runtime_evaluation.py`
 - `evaluation/bank_nl2sql/repro/best_bank_on.json`
 - 消融报告输出和 trace 统计
 

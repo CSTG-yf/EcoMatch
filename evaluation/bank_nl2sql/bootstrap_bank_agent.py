@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 import sys
@@ -29,6 +30,19 @@ DEFAULT_AGENT_NAME = "银行问数"
 
 class BankAgentBootstrapError(RuntimeError):
     """The portable runtime package could not be validated or imported."""
+
+
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def unwrap_api_response(payload: Any) -> Any:
@@ -380,6 +394,7 @@ def bootstrap(
         raise BankAgentBootstrapError("system parameter update was not acknowledged")
 
     return {
+        "receiptSchemaVersion": "1.0",
         "officialVersion": manifest["datasetVersion"],
         "officialManifestSha256": manifest_sha,
         "modelId": model_id,
@@ -394,6 +409,13 @@ def bootstrap(
             "factsValidated": import_report.get("factCount"),
         },
         "systemParameterCount": len(wanted),
+        "agentProfileSha256": _canonical_sha256(
+            {
+                "toolConfig": agent_payload["toolConfig"],
+                "chatAppConfig": agent_payload["chatAppConfig"],
+            }
+        ),
+        "systemParametersSha256": _canonical_sha256(wanted),
     }
 
 
@@ -416,6 +438,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--indicator-code-field", default="metric_code")
     parser.add_argument("--indicator-value-field", default="metric_value")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Write the successful, secret-free bootstrap receipt to this local JSON path",
+    )
     args = parser.parse_args(argv)
     try:
         manifest, workbook, manifest_sha = resolve_official_release(args.dataset.resolve())
@@ -450,6 +477,8 @@ def main(argv: list[str] | None = None) -> int:
             )
     except BankAgentBootstrapError as exc:
         parser.error(str(exc))
+    if args.output is not None:
+        _write_json(args.output, output)
     print(json.dumps(output, ensure_ascii=False, sort_keys=True))
     return 0
 

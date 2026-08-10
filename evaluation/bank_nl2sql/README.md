@@ -236,165 +236,102 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 结构化 rows 一致。它不参与模型得分，也不比较 SQL 文本；模型效果仍以结果事实合同和
 最终答案为准。`freeze_dataset.py` 同时记录事实合同与上述完整性结果。
 
-## 冻结与盲测
+## 官方运行时评测（唯一入口）
 
-```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+所有成员只能通过 `Run-OfficialBankEvaluation.ps1` 产出可比较的成绩。它使用
+`official_runtime_evaluation_v3.json` 固定：v2.0.1 数据库包、Fact v3 评分、独立会话、
+串行执行、固定 smoke 和完整分母。它按前端真实顺序调用：新建会话 → 解析 → 执行 →
+轮询最终回答；金标 SQL、结果和答案文本始终只在本地评分，绝不发送给服务端。
 
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.py `
-  evaluation/bank_nl2sql <predictions.jsonl> .local-dev/bank-nl2sql/bank_benchmark.sqlite `
-  --report .local-dev/bank-nl2sql/evaluation-report.json
-```
-
-预测文件每行只含 `id` 与 `sql`。评测器只读取 `test.jsonl` 作为评测金标，拒绝任何写 SQL，并报告解析成功率、执行成功率、结果一致率、难度与 SQL 能力分布。代码中的 `dataset_access.load_records(..., purpose="training")` 只会返回 train/dev，读取测试金标必须显式传入 `allow_test_gold=True`。
-
-## 真实模型盲测
-
-`run_model_blind_eval.py` 只将保留题的 `id`、`question` 和 SQLite schema/机构/指标元数据发送给 OpenAI 兼容模型；它不会把金标 SQL、标准结果或答案文本放入请求。预测生成与评分必须分两步执行：
-
-```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_model_blind_eval.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite `
-  --base-url http://<model-host>:<port>/v1 --model <model-id> `
-  --output .local-dev/bank-nl2sql/model-blind-predictions.jsonl `
-  --metadata-output .local-dev/bank-nl2sql/model-blind-run.json
-
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_predictions.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/model-blind-predictions.jsonl `
-  .local-dev/bank-nl2sql/bank_benchmark.sqlite `
-  --report .local-dev/bank-nl2sql/model-blind-report.json
-```
-
-2026-07-23 的首个真实模型基线使用局域网 `Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`、温度 0，对 49 道保留题完成了全量预测：解析成功率 100%，执行成功率 91.8367%，结果一致率 0%。这是失败基线而非验收通过；在改进语义翻译/提示词链路前不得将其用于发布结论。生成的预测、运行元数据和报告仅存放在 `.local-dev/bank-nl2sql/`。
-
-## SuperSonic 端到端评测
-
-`run_supersonic_eval.py` 直接调用本地开发环境的 `/openapi` 接口，不需要浏览器、Bearer Token 或 Cookie。每道题使用独立会话，按前端真实顺序执行：
-
-1. `POST /openapi/chat/manage/save`；
-2. `POST /openapi/chat/query/parse`；
-3. `POST /openapi/chat/query/execute`；
-4. 轮询 `POST /openapi/chat/query/getExecuteSummary`；
-5. 结果匹配时删除临时会话，失败会话保留用于排查。
-
-样本之间并发，单条样本内部保持上述顺序。默认并发数为 4，`--concurrency` 可调整；网络错误会按指数退避重试，模型、解析、SQL、执行和结果错误不会被掩盖。每完成一条就更新输出 checkpoint，默认可从同一报告续跑。金标 SQL、标准结果和答案文本只在本地评分，不会发送给服务端。
-
-```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
-  evaluation/bank_nl2sql `
-  --split train `
-  --base-url http://127.0.0.1:9080 `
-  --agent-id 33 `
-  --concurrency 4 `
-  --max-records 5 `
-  --output .local-dev/bank-nl2sql/api-train-smoke.json
-```
-
-smoke 通过后，去掉 `--max-records 5` 即可运行完整训练集。重复相同命令会从输出 checkpoint 续跑；需要从头重跑时显式传入 `--no-resume`。测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
-
-### 银行路径 on/off 对照（不删代码）
-
-当需要验证「银行受约束计划」相对通用 `ONE_PASS` 是否加分时，使用固定 smoke 与对比脚本，**不要删除**银行运行时类：
-
-- 协议：`RUNTIME_ABLATION.md`
-- 清单：`runtime_ablation_manifest.json`
-- 对比：`compare_runtime_ablation.py`
-
-关键开关是系统参数 `s2.parser.bank.constrained-plan.enable`；评测参数 `--runtime-mode bank-on|bank-off` 只给报告打标签，不改服务端配置。
-
-## 答案契约评估
-
-`answerExact` 是仓库历史内部指标，不是赛题文件明确定义的官方计分公式。它检查原始 `answerText` 中的数值槽位是否出现在预测结果中，**不比较** SQL 文本。结构化 `expected.rows` 全等指标为 `tableEX` / 旧名 `resultAccuracy`。
-
-### 金标门禁：L2 ⊇ L1
-
-旧 v2 协议要求结构化结果能够直接证明答案文案中的全部数字，否则将题目排除出 `answerExact` 分母：
-
-| grade | 含义 |
-| --- | --- |
-| `GOLD_OK` | rows 覆盖全部必答数值 → 进入旧 `answerExact` 分母 |
-| `GOLD_PARTIAL` / `GOLD_BAD` | 覆盖不全 / 全无 → 旧协议只诊断、不计分 |
-| `GOLD_NON_NUMERIC` | 答案无可抽取数值（v1 不进 answerExact） |
-
-```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold_contract.py `
-  evaluation/bank_nl2sql `
-  --split train `
-  --output .local-dev/bank-nl2sql/gold-contract-train.json
-```
-
-扫描含 test 时需加 `--acknowledge-final-test`。可用 `--fail-on-incomplete` 做 CI 阻断。
-
-### 运行时评分
-
-`run_supersonic_eval.py` 会在每题上写：
-
-- `goldGrade` / `answerExact` / `answerScore`
-- `tableEX`（= 旧 `match`）
-- `resultColumns` / `resultRows`（供 answerExact 与复评）
-
-报告 `metrics.answerExact` 仅在 `GOLD_OK` 且可抽取必答槽位的题目上统计。
-
-### Fact contract v3（正式发布门禁与评分迁移）
-
-v3 不再通过 `GOLD_PARTIAL` / `GOLD_BAD` 缩小分母。单题主判定为：
+正式单题判定为：
 
 ```text
 casePass = resultExact AND finalFactsExact
 ```
 
-- `resultExact` / `resultFactsExact`：SQL 执行结果包含源答案要求的全部数值事实，或能通过白名单确定性投影（如 `SUM`、`DIFFERENCE`）推导；不要求列名、投影结构或 SQL 文本相同。
-- `finalFactsExact`：最终文本独立包含源答案的全部必答数值事实和方向语义；正确结果表不能替代缺失的最终文本。
-- `tableExact`：仅保留为旧冻结结构化结果的诊断项，不参与 `casePass`。
-- `REVIEW_REQUIRED`：源答案本身存在语义矛盾或没有可评分事实；该题按失败处理，绝不排除。旧结果表缺项和需要语义绑定只作为 warning，不再缩小分母。
-- 分母始终是所选 split 的全部记录。
+- `resultExact`：SQL 执行结果可证明源答案要求的全部结果事实及其实体绑定；不比较 SQL
+  文本、AST、列顺序或展示表形态。
+- `finalFactsExact`：最终回答文本独立包含全部必答事实和方向语义，且不得添加题目外的
+  数字、日期、机构、指标或矛盾表述。
+- `caseAccuracy`：唯一正式成绩，分母永远是当前所选集合的全部题目。
 
-先生成仅含 train/dev 的审查清单；命令不会读取 test，也不会修改 JSONL、manifest 或正式发布资产：
+### 0. 一次性准备
 
-```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_fact_contract_v3.py `
-  evaluation/bank_nl2sql `
-  --split both --legacy-incomplete-only `
-  --output .local-dev/bank-nl2sql/fact-contract-v3/legacy-incomplete-train-dev.json
-```
-
-对已有运行报告执行全分母 v3 评分：
+1. 停止 standalone，使用上文 `Import-OfficialBankData.ps1` 导入 v2.0.1；再启动服务。
+2. 创建目标环境的语义模型与聊天模型。
+3. 导入 Agent，并保存不含密钥的启动回执：
 
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_fact_contract_v3.py `
-  evaluation/bank_nl2sql `
-  .local-dev/bank-nl2sql/some-report.json `
-  --split train `
-  --output .local-dev/bank-nl2sql/some-report.fact-v3.json
+$env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
+  evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
+  --model-id 1 --chat-model-id 1 `
+  --output .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
+Remove-Item Env:ECOMATCH_AUTH_TOKEN
 ```
 
-2.0.1 的train/dev已经达到159/159 `READY`，`freeze_dataset.py` 使用v3作为
-正式发布门禁。运行时报告主入口仍需在下一阶段从旧 `answerExact/tableEX`
-切换到 `caseAccuracy`；切换前两套指标并行保留，禁止把旧指标称为正式成绩。
+也可以双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`；成功后它会在相同位置生成
+`bootstrap-receipt.json`。回执只记录 Agent、模型 ID 和配置指纹，不含 Token、模型地址或
+密钥。正式评测会将该回执与当前官方 manifest 及导入计数（13 家机构、21 个指标、132678 条
+事实）逐项校验；不一致时拒绝运行。
 
-对历史报告补分（需含 `resultColumns`/`resultRows`）：
+### 1. 固定 smoke
+
+使用干净、且包含正式评测基线的 Git 工作树。`RunId` 在同一轮 smoke、train、dev、test 中
+必须保持相同，模型标签也必须保持相同。
 
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_answer_exact.py `
-  evaluation/bank_nl2sql `
-  .local-dev/bank-nl2sql/some-report.json `
-  --split train `
-  --output .local-dev/bank-nl2sql/some-report.answer-exact.json
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
+  -Mode smoke -RunId qwen66-20260810 `
+  -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
+  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 ```
+
+smoke 固定为 5 道分层 train 题，并强制 `caseAccuracy = 1.0`。未全绿时命令以非零退出，
+不会允许随后运行 train、dev 或 test。
+
+### 2. Train 与 Dev
 
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `
-  evaluation/bank_nl2sql `
-  --split test --acknowledge-final-test `
-  --base-url http://127.0.0.1:9080 `
-  --agent-id <绑定银行数据集的助理ID> `
-  --concurrency 4 `
-  --run-registry .local-dev/bank-nl2sql/supersonic-final-test-runs.json `
-  --output .local-dev/bank-nl2sql/supersonic-final-report.json
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
+  -Mode train -RunId qwen66-20260810 `
+  -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
+  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
+
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
+  -Mode dev -RunId qwen66-20260810 `
+  -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
+  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 ```
 
-报告包含解析、执行、结果一致率、按难度和 SQL 能力分组的指标、标准错误类别、S2SQL 与物理 SQL 摘要；解析、执行、解释和“解析开始至解释完成”的端到端耗时分别输出样本数、平均值、P50、P95、P99 和最大值，并单列完整成功链路，失败请求不会混入成功链路性能门禁。报告不会写出实际查询行或金标答案。
+每题都有独立会话；只有 `casePass=true` 的临时会话会被删除，所有失败会话保留。中断后重跑
+相同命令会从同一 `run-id` 的兼容 checkpoint 续跑。正式运行固定为串行，不能通过命令改成
+并发，因此模型服务负载不会改变可比较成绩。
+
+### 3. 冻结 Test
+
+Test 只能在 smoke 全绿、train 和 dev 已完成后显式运行；它必须写入本地运行登记：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
+  -Mode test -RunId qwen66-20260810 `
+  -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
+  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json `
+  -AcknowledgeFinalTest `
+  -RunRegistry .local-dev/bank-nl2sql/official-v3/final-test-runs.json
+```
+
+### 4. 唯一报告格式
+
+输出固定在 `.local-dev/bank-nl2sql/official-v3/<RunId>/`，每个模式同时生成 JSON 与 Markdown。
+报告必须记录代码提交、数据版本与哈希、数据库包哈希、Agent 配置指纹、模型标签、端点指纹、
+串行策略和完整题目清单。正式报告只包含 `caseAccuracy`、结果事实准确率和最终回答事实准确率；
+页面采集、离线实验和消融工具只能用于排障，不能产出或替代正式成绩。
+仓库内既有 `reports/` 快照仅作历史排障留档，标准运行器不会读取或续跑其中任何文件。
 
 ## QA-03 语义缓存验收
 
@@ -426,18 +363,20 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_qa03_cache_eval.p
 
 ## 页面问答诊断（手工备用）
 
-页面采集器保留为手工 UI/渲染诊断工具，不再作为批量效果评测的默认入口。需要排查页面独有问题时分两步：
+页面采集器只保留为 UI/渲染排障工具，不能计算或展示任何效果分数。需要排查页面独有问题时，
+`run_ui_chat_capture.mjs` 连接一个已登录、已打开银行问数页面的 Chromium 调试会话，在
+`#chatInput` 输入 dev 问题，并从页面渲染的表格读取表头、所有分页和终态；它不会自行调用
+`/api/chat/query/*`。
 
-1. `run_ui_chat_capture.mjs` 连接一个已登录、已打开银行问数页面的 Chromium 调试会话，在 `#chatInput` 输入 dev 问题，并从页面渲染的表格读取表头、所有分页和终态；它不会自行调用 `/api/chat/query/*`。
-2. `evaluate_ui_capture.py` 将页面采集报告与本地 dev 金标比较。展示中的千位分隔符、空值和后续分页会在评分前归一化，输出是有效 JSON，且不包含金标行。
-
-页面采集运行器只允许 `train` 或 `dev`，因此不会因误操作读取冻结 test。需要验证单一已知开发题时可传入 `--record-id <ID>`；先启动专用浏览器并在其中登录一次：
+页面采集运行器只允许 `train` 或 `dev`，因此不会因误操作读取冻结 test。需要验证单一已知开发题
+时可传入 `--record-id <ID>`；先启动专用浏览器并在其中登录一次：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/Start-Ui-Evaluation-Browser.ps1 -AgentId 33
 ```
 
-随后运行采集和评分：
+随后运行采集并人工检查渲染状态；若需要可比较的结果，重新从“官方运行时评测（唯一入口）”的
+固定 smoke 开始：
 
 ```powershell
 node evaluation/bank_nl2sql/run_ui_chat_capture.mjs `
@@ -447,11 +386,6 @@ node evaluation/bank_nl2sql/run_ui_chat_capture.mjs `
   --page-url http://127.0.0.1:9000/webapp/chat?agentId=33 `
   --agent-id 33 `
   --output .local-dev/bank-nl2sql/ui-dev-capture.json
-
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/evaluate_ui_capture.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/ui-dev-capture.json `
-  --split dev `
-  --output .local-dev/bank-nl2sql/ui-dev-score.json
 ```
 
 页面表格使用 `data-testid="ui-chat-result-table"` 和列语义标识供采集器定位；这些属性不改变用户界面或查询行为。

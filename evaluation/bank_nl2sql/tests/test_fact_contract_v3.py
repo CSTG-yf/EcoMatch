@@ -248,6 +248,32 @@ class BuildFactContractV3CliTest(unittest.TestCase):
 
 
 class ScoreFactContractV3Test(unittest.TestCase):
+    def test_score_emits_only_fact_v3_score_fields(self) -> None:
+        record = _record(
+            "V3-ONLY-1",
+            question="余额是多少？",
+            answer_text="余额42.02亿元",
+            columns=["metric_value"],
+            rows=[[42.02]],
+        )
+        scored = score_fact_contract_report(
+            {
+                "items": [
+                    {
+                        "id": "V3-ONLY-1",
+                        "resultColumns": ["metric_value"],
+                        "resultRows": [[42.02]],
+                        "textSummary": "余额42.02亿元",
+                    }
+                ]
+            },
+            [record],
+        )
+
+        for key in ("resultAccuracy", "tableExactAccuracy", "tableExactHits"):
+            self.assertNotIn(key, scored["metrics"])
+        self.assertNotIn("tableExact", scored["items"][0])
+
     def test_result_fact_match_fails_closed_when_projection_cannot_be_bound(self) -> None:
         record = _record(
             "STRUCTURE-1",
@@ -270,7 +296,6 @@ class ScoreFactContractV3Test(unittest.TestCase):
         scored = score_fact_contract_report(report, [record])
 
         self.assertFalse(scored["items"][0]["resultFactsExact"])
-        self.assertFalse(scored["items"][0]["tableExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
     def test_result_fact_match_rejects_wrong_date_binding_with_correct_values(self) -> None:
@@ -585,7 +610,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["finalFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
-    def test_legacy_match_is_explicit_fallback_when_rows_were_not_captured(self) -> None:
+    def test_missing_captured_rows_fails_closed(self) -> None:
         record = _record(
             "LEGACY-1",
             question="余额是多少？",
@@ -597,7 +622,6 @@ class ScoreFactContractV3Test(unittest.TestCase):
             "items": [
                 {
                     "id": "LEGACY-1",
-                    "match": True,
                     "textSummary": "余额为42.02亿元",
                 }
             ]
@@ -605,8 +629,9 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         scored = score_fact_contract_report(report, [record])
 
-        self.assertTrue(scored["items"][0]["casePass"])
-        self.assertEqual(scored["items"][0]["resultEvidence"], "LEGACY_MATCH")
+        self.assertFalse(scored["items"][0]["resultExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+        self.assertEqual(scored["items"][0]["resultEvidence"], "MISSING")
 
     def test_cli_writes_full_denominator_score(self) -> None:
         record = _record(
