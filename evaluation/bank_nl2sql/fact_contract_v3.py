@@ -39,7 +39,7 @@ _GOOD_SEGMENT = re.compile(r"表现较好(?:指标)?[:：](.*?)(?:表现较差|$
 _RANK_REQUEST = re.compile(r"排第几|排名|表现较好|表现较差")
 _MEAN_REQUEST = re.compile(r"均值|平均值|对比|比较|比.*(?:全省|省)均")
 _COUNT_REQUEST = re.compile(r"多少家|有几家|几家机构")
-_ISO_DATE_FACT = re.compile(r"\d{4}-\d{1,2}(?:-\d{1,2})?")
+_ISO_DATE_FACT = re.compile(r"\d{4}[-/]\d{1,2}(?:[-/]\d{1,2})?")
 _CHINESE_DATE_FACT = re.compile(
     r"(?P<year>\d{4})年(?:"
     r"(?P<month>\d{1,2})月(?:(?P<day>\d{1,2})日|末)?"
@@ -146,8 +146,21 @@ def _close(left: float, right: float, *, kind: str, tolerance: float) -> bool:
     return values_close(left, right, abs_tol=fact_tolerance, rel_tol=DEFAULT_REL_TOL)
 
 
+def _non_date_slots(text: str) -> list[Any]:
+    """Extract numeric answer slots without interpreting date components as facts.
+
+    ``extract_answer_slots`` correctly recognizes the year portion of a date, but
+    month/day tokens in Chinese dates (for example ``2025年6月15日``) are otherwise
+    ordinary quantities.  Dates are identity entities, not answer values, and are
+    checked separately by ``_normalized_date_facts``.
+    """
+
+    without_dates = _CHINESE_DATE_FACT.sub(" ", _ISO_DATE_FACT.sub(" ", text))
+    return [slot for slot in extract_answer_slots(without_dates) if slot.kind != "year"]
+
+
 def _question_values(question: str) -> list[float]:
-    return [slot.value for slot in extract_answer_slots(question) if slot.kind != "year"]
+    return [slot.value for slot in _non_date_slots(question)]
 
 
 def _derive(value: float, candidates: list[float], *, kind: str, tolerance: float) -> str | None:
@@ -234,9 +247,7 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
 
     facts: list[FactDraft] = []
     seen: set[tuple[float, str]] = set()
-    for slot in extract_answer_slots(answer_text):
-        if slot.kind == "year":
-            continue
+    for slot in _non_date_slots(answer_text):
 
         value = float(slot.value)
         if value in rank_values:
@@ -381,11 +392,7 @@ def _prediction_values(
     text_summary: str | None,
 ) -> tuple[list[float], list[float]]:
     table_values = _numeric_table_values({"columns": columns or [], "rows": rows or []})
-    text_values = [
-        slot.value
-        for slot in extract_answer_slots(text_summary or "")
-        if slot.kind != "year"
-    ]
+    text_values = [slot.value for slot in _non_date_slots(text_summary or "")]
     return table_values, text_values
 
 
@@ -577,7 +584,7 @@ def _entity_codes_in_text(
 def _normalized_date_facts(text: str) -> set[str]:
     dates: set[str] = set()
     for token in _ISO_DATE_FACT.findall(text):
-        parts = token.split("-")
+        parts = re.split(r"[-/]", token)
         dates.add("-".join([parts[0], *(part.zfill(2) for part in parts[1:])]))
     quarter_month = {"一": 3, "1": 3, "二": 6, "2": 6, "三": 9, "3": 9, "四": 12, "4": 12}
     quarter_day = {3: 31, 6: 30, 9: 30, 12: 31}

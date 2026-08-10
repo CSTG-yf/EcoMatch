@@ -112,6 +112,15 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "data": {
                         "queryMode": "METRIC",
                         "textSummary": "A bank deposit balance is 42.02",
+                        "chatContext": {
+                            "properties": {
+                                "bank.nl2sql.finalAnswerTrace": {
+                                    "status": "SUCCEEDED",
+                                    "attempts": 1,
+                                    "errors": [],
+                                }
+                            }
+                        },
                     },
                 }
             if path == "/openapi/chat/manage/delete?chatId=501":
@@ -179,6 +188,10 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
+        self.assertEqual(
+            report["items"][0]["finalAnswerTrace"],
+            {"status": "SUCCEEDED", "attempts": 1, "errors": []},
+        )
         self.assertEqual(report["items"][0]["resultColumns"], ["metric_value"])
         self.assertEqual(report["items"][0]["resultRows"], [[42.02]])
         for score_field in ("match", "answerExact", "tableEX", "answerScore", "goldGrade"):

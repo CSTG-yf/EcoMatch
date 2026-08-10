@@ -460,7 +460,10 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
-        if args.mode == "smoke" and final_report["metrics"]["caseAccuracy"] != profile["smoke"]["requiredCaseAccuracy"]:
+        if args.mode == "smoke" and (
+            final_report["metrics"]["caseAccuracy"] != profile["smoke"]["requiredCaseAccuracy"]
+            or final_report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"] != 1.0
+        ):
             return 2
         return 0
     except (OfficialRuntimeEvaluationError, OfficialRuntimeRunError, SuperSonicEvaluationError) as error:

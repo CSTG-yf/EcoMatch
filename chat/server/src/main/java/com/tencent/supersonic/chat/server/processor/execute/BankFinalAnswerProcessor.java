@@ -9,6 +9,7 @@ import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankSemanticRegistry;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.input.Prompt;
@@ -37,43 +38,55 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
     static final int MAX_ANSWER_CHARACTERS = 4_096;
     static final int MAX_RESULT_CHARACTERS = 200_000;
 
-    public static final String INSTRUCTION = """
-            # Role
-            你是银行问数 Agent 的最终回答器。根据用户问题、已经通过校验的 BankQueryPlan 和数据库执行结果，直接回答用户。
+    public static final String INSTRUCTION =
+            """
+                    # Role
+                    你是银行问数 Agent 的最终回答器。根据用户问题、已经通过校验的 BankQueryPlan 和数据库执行结果，直接回答用户。
 
-            # Hard rules
-            1. 只回答问题明确询问的事实，不复述问题，不解释查询过程。
-            2. 禁止输出记录数、数据范围、首末记录、额外最大最小值、免责声明、SQL、字段分析或推理过程，除非问题明确询问对应事实。
-            3. 每个数字都必须来自 Result；日期和题面阈值可以来自 Question。不得编造或引入额外数字。
-            4. 百分比和业务数值通常四舍五入到小数点后两位，整数保持整数；用正负号判断增长/上升或下降。
-            5. percent_change 表示变化率，absolute_change 表示变化额，ratio_percent 表示占比，rank_position 表示名次；current_value/baseline_value 只是支撑值，问题未询问时不要输出。
-            6. 问“增幅、变化百分比”只回答 percent_change；问“增加/减少/变动了多少”优先回答 absolute_change；问“占比/比重”回答 ratio_percent。
-            7. 同时询问环比和同比时必须分别回答两者；排名、趋势、多机构或多指标问题按 Result 的行身份逐项回答。
-            8. 使用与 Question 相同的语言，输出一至三句纯文本，不要 Markdown、JSON、标签或前后缀。
+                    # Hard rules
+                    1. 只回答问题明确询问的事实，不复述问题，不解释查询过程。
+                    2. 禁止输出记录数、数据范围、首末记录、额外最大最小值、免责声明、SQL、字段分析或推理过程，除非问题明确询问对应事实。
+                    3. 每个数字都必须来自 Result；日期和题面阈值可以来自 Question。不得编造或引入额外数字。
+                    4. 百分比和业务数值通常四舍五入到小数点后两位，整数保持整数；用正负号判断增长/上升或下降。
+                    5. percent_change 表示变化率，absolute_change 表示变化额，ratio_percent 表示占比，rank_position 表示名次；current_value/baseline_value 只是支撑值，问题未询问时不要输出。
+                    6. 问“增幅、变化百分比”只回答 percent_change；只问“增加/减少/变动了多少”时只回答 absolute_change，不要附带 current_value、baseline_value 或 percent_change；问“占比/比重”回答 ratio_percent。
+                    7. 同时询问环比和同比时必须分别回答两者；排名、趋势、多机构或多指标问题按 Result 的行身份逐项回答。对逐期序列，必须根据首末值明确写出整体上升、下降或持平；不能只罗列数值。
+                    8. 使用与 Question 相同的语言，输出一至三句纯文本，不要 Markdown、JSON、标签或前后缀。
 
-            # Question
-            {{question}}
-            # BankQueryPlan
-            {{plan}}
-            # Result
-            {{data}}
-            # Previous answer
-            {{previous_answer}}
-            # validation_feedback
-            {{validation_feedback}}
-            # Direct answer
-            """;
+                    # Question
+                    {{question}}
+                    # BankQueryPlan
+                    {{plan}}
+                    # Metric catalog (code -> business meaning / unit / ranking direction)
+                    {{metric_catalog}}
+                    # Result
+                    {{data}}
+                    # Previous answer
+                    {{previous_answer}}
+                    # validation_feedback
+                    {{validation_feedback}}
+                    # Direct answer
+                    """;
 
     private static final Logger keyPipelineLog = LoggerFactory.getLogger("keyPipeline");
     private static final Pattern DATE = Pattern.compile("\\d{4}[-年/]\\d{1,2}(?:[-月/]\\d{1,2}日?)?");
     private static final Pattern YEAR = Pattern.compile("(?<!\\d)(?:20[2-3]\\d)年?(?!\\d)");
     private static final Pattern CODE = Pattern.compile("(?i)(?:ORG|ZB)\\d{3}");
     private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:\\.\\d+)?");
-    private static final List<String> GENERIC_INSIGHT_MARKERS = List.of("问题范围：", "查询返回",
-            "范围为", "首条记录", "末条记录", "结论仅适用于", "结果少于", "指标口径：");
-    private static final List<String> TECHNICAL_FIELD_MARKERS = List.of("current_value",
-            "baseline_value", "absolute_change", "percent_change", "metric_value",
-            "ratio_percent", "rank_position", "observation_count");
+    private static final List<String> UPWARD_TREND_MARKERS =
+            List.of("上升", "上行", "增长", "增加", "上涨", "走高");
+    private static final List<String> DOWNWARD_TREND_MARKERS =
+            List.of("下降", "下行", "减少", "下跌", "走低");
+    private static final List<String> FLAT_TREND_MARKERS = List.of("持平", "不变", "稳定");
+    private static final List<String> GENERIC_INSIGHT_MARKERS =
+            List.of("问题范围：", "查询返回", "范围为", "首条记录", "末条记录", "结论仅适用于", "结果少于", "指标口径：");
+    private static final List<String> TECHNICAL_FIELD_MARKERS =
+            List.of("current_value", "baseline_value", "absolute_change", "percent_change",
+                    "metric_value", "ratio_percent", "rank_position", "observation_count");
+    private static final String METRIC_CATALOG_SECTION = """
+            # Metric catalog (code -> business meaning / unit / ranking direction)
+            {{metric_catalog}}
+            """;
 
     private final AnswerGenerator answerGenerator;
 
@@ -85,8 +98,8 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
         });
         ChatAppManager.register(APP_KEY,
                 ChatApp.builder().prompt(INSTRUCTION).name("银行问数直接回答")
-                        .description("基于已验证计划和查询结果生成简洁、可校验的最终答案")
-                        .appModule(AppModule.CHAT).enable(false).build());
+                        .description("基于已验证计划和查询结果生成简洁、可校验的最终答案").appModule(AppModule.CHAT)
+                        .enable(false).build());
     }
 
     BankFinalAnswerProcessor(AnswerGenerator answerGenerator) {
@@ -95,21 +108,31 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext context) {
-        if (context == null || context.getResponse() == null || context.getAgent() == null
-                || context.getParseInfo() == null || context.getParseInfo().getProperties() == null
-                || context.getResponse().getQueryState() == null
-                || !com.tencent.supersonic.headless.api.pojo.response.QueryState.SUCCESS
-                        .equals(context.getResponse().getQueryState())
-                || StringUtils.isNotBlank(context.getResponse().getTextSummary())
-                || !context.getParseInfo().getProperties()
-                        .containsKey(BankPlanToolResult.PLAN_PROPERTY_KEY)) {
+        if (context == null || context.getParseInfo() == null
+                || context.getParseInfo().getProperties() == null || !context.getParseInfo()
+                        .getProperties().containsKey(BankPlanToolResult.PLAN_PROPERTY_KEY)) {
             return false;
+        }
+        if (context.getResponse() == null || context.getAgent() == null) {
+            return reject(context, "FINAL_ANSWER_CONTEXT_INCOMPLETE");
+        }
+        if (!com.tencent.supersonic.headless.api.pojo.response.QueryState.SUCCESS
+                .equals(context.getResponse().getQueryState())) {
+            return reject(context, "FINAL_ANSWER_QUERY_NOT_SUCCESSFUL");
+        }
+        if (StringUtils.isNotBlank(context.getResponse().getTextSummary())) {
+            return reject(context, "FINAL_ANSWER_SUMMARY_ALREADY_PRESENT");
         }
         ChatApp chatApp = context.getAgent().getChatAppConfig() == null ? null
                 : context.getAgent().getChatAppConfig().get(APP_KEY);
-        return chatApp != null && chatApp.isEnable() && StringUtils.isNotBlank(chatApp.getPrompt())
-                && context.getResponse().getQueryResults() != null
-                && context.getResponse().getQueryColumns() != null;
+        if (chatApp == null || !chatApp.isEnable() || StringUtils.isBlank(chatApp.getPrompt())) {
+            return reject(context, "FINAL_ANSWER_APP_DISABLED_OR_UNCONFIGURED");
+        }
+        if (context.getResponse().getQueryResults() == null
+                || context.getResponse().getQueryColumns() == null) {
+            return reject(context, "FINAL_ANSWER_RESULT_SHAPE_MISSING");
+        }
+        return true;
     }
 
     @Override
@@ -118,8 +141,7 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
         String question = DataInterpretProcessor.resolveQuestion(context);
         String data = resultPayload(result);
         if (StringUtils.isBlank(question) || data.length() > MAX_RESULT_CHARACTERS) {
-            recordTrace(context, "FAILED", 0,
-                    List.of("问题为空或结果超过最终回答输入上限"));
+            recordTrace(context, "FAILED", 0, List.of("问题为空或结果超过最终回答输入上限"));
             return;
         }
         ChatApp chatApp = context.getAgent().getChatAppConfig().get(APP_KEY);
@@ -152,17 +174,42 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
 
     private Prompt prompt(ChatApp chatApp, ExecuteContext context, String question, String data,
             String previousAnswer, List<String> feedback) {
-        Object plan = context.getParseInfo().getProperties()
-                .get(BankPlanToolResult.PLAN_PROPERTY_KEY);
+        Object plan =
+                context.getParseInfo().getProperties().get(BankPlanToolResult.PLAN_PROPERTY_KEY);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("question", question);
         variables.put("plan", plan == null ? "{}" : JsonUtil.toString(plan));
+        variables.put("metric_catalog", metricCatalog());
         variables.put("data", data);
         variables.put("previous_answer", previousAnswer);
         variables.put("validation_feedback", feedback.isEmpty() ? "无"
-                : "上一次回答未通过：" + String.join("；", feedback) + "。请只修正这些问题。"
-                        + "不要输出查询记录数、范围或首末记录。");
-        return PromptTemplate.from(chatApp.getPrompt()).apply(variables);
+                : "上一次回答未通过：" + String.join("；", feedback) + "。请只修正这些问题。" + "不要输出查询记录数、范围或首末记录。");
+        String template = withMetricCatalog(chatApp.getPrompt());
+        return PromptTemplate.from(template).apply(variables);
+    }
+
+    private String withMetricCatalog(String template) {
+        if (template.contains("{{metric_catalog}}")) {
+            return template;
+        }
+        int directAnswer = template.indexOf("# Direct answer");
+        if (directAnswer < 0) {
+            directAnswer = template.indexOf("#Direct answer");
+        }
+        if (directAnswer < 0) {
+            return template + "\n" + METRIC_CATALOG_SECTION;
+        }
+        return template.substring(0, directAnswer) + METRIC_CATALOG_SECTION
+                + template.substring(directAnswer);
+    }
+
+    private String metricCatalog() {
+        return java.util.stream.Stream
+                .concat(BankSemanticRegistry.metrics().values().stream(),
+                        BankSemanticRegistry.derivedMetrics().values().stream())
+                .map(metric -> "%s=%s（单位=%s，排名方向=%s）".formatted(metric.code(), metric.name(),
+                        metric.unit(), metric.direction()))
+                .collect(java.util.stream.Collectors.joining("；"));
     }
 
     private String resultPayload(QueryResult result) {
@@ -191,8 +238,8 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
             errors.add("回答暴露了技术字段名");
         }
         List<BigDecimal> grounded = groundedNumbers(question, result);
-        List<BigDecimal> ungrounded = numbers(answer).stream()
-                .filter(value -> grounded.stream().noneMatch(source -> roundedEquals(source, value)))
+        List<BigDecimal> ungrounded = numbers(answer).stream().filter(
+                value -> grounded.stream().noneMatch(source -> roundedEquals(source, value)))
                 .toList();
         if (!ungrounded.isEmpty()) {
             errors.add("存在无法由问题或结果证明的数字：" + ungrounded);
@@ -215,7 +262,74 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
                 && !answer.matches("(?s).*(最低|最小).*")) {
             errors.add("缺少最低值结论");
         }
+        BigDecimal absoluteChange = absoluteChange(result);
+        if (absoluteChange != null && isAbsoluteChangeOnlyQuestion(question)) {
+            List<BigDecimal> unsupported = numbers(answer).stream()
+                    .filter(value -> !roundedEquals(absoluteChange, value)).toList();
+            if (!unsupported.isEmpty()) {
+                errors.add("变化额问题包含未询问的支撑数值：" + unsupported);
+            }
+        }
+        String requiredTrend = requiredTrend(question, result);
+        if (requiredTrend != null && !containsTrend(answer, requiredTrend)) {
+            errors.add("缺少或错误的整体" + requiredTrend + "趋势结论");
+        }
         return new Validation(errors.isEmpty(), List.copyOf(errors));
+    }
+
+    private boolean isAbsoluteChangeOnlyQuestion(String question) {
+        boolean asksForAmount = question.contains("变化了多少") || question.contains("变动了多少")
+                || question.contains("增加了多少") || question.contains("减少了多少")
+                || question.contains("变化多少") || question.contains("变动多少");
+        boolean asksForSupportingValues = question.contains("增幅") || question.contains("变化率")
+                || question.contains("百分比") || question.contains("比例") || question.contains("分别")
+                || question.contains("当前值") || question.contains("基期") || question.contains("原值")
+                || question.contains("数值");
+        return asksForAmount && !asksForSupportingValues;
+    }
+
+    private BigDecimal absoluteChange(QueryResult result) {
+        if (result.getQueryResults() == null) {
+            return null;
+        }
+        for (Map<String, Object> row : result.getQueryResults()) {
+            if (row != null && row.get("absolute_change")instanceof Number number) {
+                return new BigDecimal(number.toString());
+            }
+        }
+        return null;
+    }
+
+    private String requiredTrend(String question, QueryResult result) {
+        boolean asksForTrend =
+                question.contains("趋势") || (question.contains("逐季") && question.contains("变化"));
+        if (!asksForTrend || result.getQueryResults() == null) {
+            return null;
+        }
+        List<Map<String, Object>> points =
+                result.getQueryResults().stream().filter(Objects::nonNull)
+                        .filter(row -> row.get("data_date") != null
+                                && row.get("metric_value") instanceof Number)
+                        .sorted((left, right) -> String.valueOf(left.get("data_date"))
+                                .compareTo(String.valueOf(right.get("data_date"))))
+                        .toList();
+        if (points.size() < 2) {
+            return null;
+        }
+        BigDecimal first = new BigDecimal(String.valueOf(points.get(0).get("metric_value")));
+        BigDecimal last =
+                new BigDecimal(String.valueOf(points.get(points.size() - 1).get("metric_value")));
+        int comparison = last.compareTo(first);
+        return comparison > 0 ? "上升" : comparison < 0 ? "下降" : "持平";
+    }
+
+    private boolean containsTrend(String answer, String requiredTrend) {
+        List<String> markers = switch (requiredTrend) {
+            case "上升" -> UPWARD_TREND_MARKERS;
+            case "下降" -> DOWNWARD_TREND_MARKERS;
+            default -> FLAT_TREND_MARKERS;
+        };
+        return markers.stream().anyMatch(answer::contains);
     }
 
     private List<BigDecimal> groundedNumbers(String question, QueryResult result) {
@@ -254,6 +368,11 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
                 return true;
             }
         }
+        return false;
+    }
+
+    private boolean reject(ExecuteContext context, String reason) {
+        recordTrace(context, "SKIPPED", 0, List.of(reason));
         return false;
     }
 

@@ -417,6 +417,65 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["finalFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
+    def test_final_fact_match_allows_complete_question_dates_in_direct_answer(self) -> None:
+        cases = (
+            (
+                "DATE-CN-1",
+                "江苏省A市农商行在2025年6月15日的各项存款余额是多少？",
+                "42.02亿元",
+                "江苏省A市农商行在2025年6月15日的各项存款余额为42.02亿元。",
+                42.02,
+            ),
+            (
+                "DATE-ISO-1",
+                "截至2025-03-31，较2024年末变化了多少？",
+                "增加0.2亿元",
+                "截至2025-03-31，较2024年末增加0.2亿元。",
+                0.2,
+            ),
+        )
+        for sample_id, question, answer_text, text_summary, value in cases:
+            with self.subTest(sample_id=sample_id):
+                record = _record(
+                    sample_id,
+                    question=question,
+                    answer_text=answer_text,
+                    columns=["metric_value"],
+                    rows=[[value]],
+                )
+                scored = score_fact_contract_report(
+                    {
+                        "items": [
+                            {
+                                "id": sample_id,
+                                "resultColumns": ["metric_value"],
+                                "resultRows": [[value]],
+                                "textSummary": text_summary,
+                            }
+                        ]
+                    },
+                    [record],
+                )
+
+                self.assertTrue(scored["items"][0]["resultFactsExact"])
+                self.assertTrue(scored["items"][0]["finalFactsExact"])
+                self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_question_date_parts_do_not_downgrade_same_numeric_answer_fact(self) -> None:
+        record = _record(
+            "DATE-PART-1",
+            question="2025年6月15日的余额是多少？",
+            answer_text="15亿元",
+            columns=["metric_value"],
+            rows=[[15.0]],
+        )
+
+        contract = build_fact_contract(record)
+        fact = next(fact for fact in contract.facts if fact.value == 15.0)
+
+        self.assertTrue(fact.required)
+        self.assertEqual(fact.support, "DIRECT_RESULT")
+
     def test_final_fact_match_rejects_opposite_extreme_semantics(self) -> None:
         record = _record(
             "TEXT-EXTREME-1",

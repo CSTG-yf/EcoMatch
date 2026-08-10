@@ -59,6 +59,7 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
                 "execute": True,
                 "summaryState": "SUCCESS",
                 "textSummary": "2025年末，江苏省A市农商行存款余额42.02亿元。",
+                "finalAnswerTrace": {"status": "SUCCEEDED", "attempts": 1, "errors": []},
                 "resultColumns": ["metric_value"],
                 "resultRows": [[42.02]],
                 "chatId": 501,
@@ -102,6 +103,27 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
     def test_rejects_a_capture_that_omits_or_adds_records(self) -> None:
         with self.assertRaises(OfficialRuntimeEvaluationError):
             build_official_runtime_report(_capture("UNEXPECTED"), [_record()])
+
+    def test_rejects_a_capture_without_final_answer_stage_attestation(self) -> None:
+        capture = _capture()
+        del capture["items"][0]["finalAnswerTrace"]
+
+        with self.assertRaisesRegex(OfficialRuntimeEvaluationError, "final-answer stage attestation"):
+            build_official_runtime_report(capture, [_record()])
+
+    def test_reports_a_skipped_final_answer_stage_as_a_runtime_failure(self) -> None:
+        capture = _capture()
+        capture["items"][0]["finalAnswerTrace"] = {
+            "status": "SKIPPED",
+            "attempts": 0,
+            "errors": ["FINAL_ANSWER_APP_DISABLED_OR_UNCONFIGURED"],
+        }
+
+        report = build_official_runtime_report(capture, [_record()])
+
+        self.assertEqual(report["items"][0]["errorCategory"], "FINAL_ANSWER_SKIPPED")
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"], 0.0)
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorStates"], {"SKIPPED": 1})
 
     def test_bootstrap_receipt_binds_the_agent_to_the_official_dataset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

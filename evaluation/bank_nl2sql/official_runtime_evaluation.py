@@ -56,6 +56,7 @@ _RUNTIME_ITEM_KEYS = (
     "endToEndMs",
     "summaryState",
     "textSummary",
+    "finalAnswerTrace",
     "errorType",
     "backendError",
     "summaryErrorType",
@@ -378,12 +379,25 @@ def _runtime_diagnostics(
         str(item.get("errorCategory") or "NONE")
         for item in items
     )
+    final_answer_states = Counter(
+        str((item.get("finalAnswerTrace") or {}).get("status") or "MISSING")
+        for item in items
+    )
     return {
         "parseSuccessRate": _rate(sum(bool(item.get("parse")) for item in items), count),
         "executionSuccessRate": _rate(sum(bool(item.get("execute")) for item in items), count),
         "summarySuccessRate": _rate(
             sum(item.get("summaryState") == "SUCCESS" for item in items), count
         ),
+        "finalAnswerProcessorSuccessRate": _rate(
+            sum(
+                isinstance(item.get("finalAnswerTrace"), dict)
+                and item["finalAnswerTrace"].get("status") == "SUCCEEDED"
+                for item in items
+            ),
+            count,
+        ),
+        "finalAnswerProcessorStates": dict(sorted(final_answer_states.items())),
         "errorCategories": dict(sorted(errors.items())),
         "timingMs": capture_report.get("timingMs"),
         "timingDistributionsMs": capture_report.get("timingDistributionsMs"),
@@ -404,13 +418,36 @@ def _public_item(runtime_item: dict[str, Any], scored_item: dict[str, Any]) -> d
         }
     )
     runtime_error = runtime_item.get("errorCategory")
+    final_answer_trace = item.get("finalAnswerTrace")
+    final_answer_status = (
+        final_answer_trace.get("status") if isinstance(final_answer_trace, dict) else None
+    )
     if runtime_error in {"RESULT_MISMATCH", "ANSWER_SLOT_MISS"}:
         runtime_error = None
     if isinstance(runtime_error, str) and runtime_error:
         item["errorCategory"] = runtime_error
+    elif final_answer_status != "SUCCEEDED":
+        item["errorCategory"] = "FINAL_ANSWER_" + str(final_answer_status or "MISSING")
     else:
         item["errorCategory"] = _FACT_FAILURE_CATEGORIES.get(scored_item.get("reason"))
     return item
+
+
+def _validate_final_answer_attestation(capture_items: list[dict[str, Any]]) -> None:
+    for item in capture_items:
+        trace = item.get("finalAnswerTrace")
+        if not isinstance(trace, dict):
+            raise OfficialRuntimeEvaluationError(
+                "runtime capture lacks final-answer stage attestation; deploy the current backend "
+                "and bootstrap the Agent before evaluation"
+            )
+        if (
+            not isinstance(trace.get("status"), str)
+            or not isinstance(trace.get("attempts"), int)
+            or not isinstance(trace.get("errors"), list)
+            or not all(isinstance(error, str) for error in trace["errors"])
+        ):
+            raise OfficialRuntimeEvaluationError("runtime capture final-answer stage attestation is invalid")
 
 
 def build_official_runtime_report(
@@ -423,6 +460,7 @@ def build_official_runtime_report(
     """
 
     capture_items, expected_ids = _validated_capture_items(capture_report, records)
+    _validate_final_answer_attestation(capture_items)
     fact_report = score_fact_contract_report(capture_report, records)
     scored_items = fact_report.get("items")
     if not isinstance(scored_items, list):

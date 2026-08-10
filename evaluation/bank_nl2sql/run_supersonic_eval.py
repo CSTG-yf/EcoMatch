@@ -261,7 +261,7 @@ def _poll_execute_summary(
     query_id: int,
     timeout_seconds: float,
     poll_interval_seconds: float,
-) -> tuple[str, str | None, float]:
+) -> tuple[str, str | None, float, dict[str, Any] | None]:
     started = time.perf_counter()
     deadline = started + timeout_seconds
     while True:
@@ -272,10 +272,33 @@ def _poll_execute_summary(
                 "SUCCESS",
                 str(summary) if isinstance(summary, str) else None,
                 round((time.perf_counter() - started) * 1000, 3),
+                _final_answer_trace(response),
             )
         if time.perf_counter() >= deadline:
-            return "TIMEOUT", None, round((time.perf_counter() - started) * 1000, 3)
+            return "TIMEOUT", None, round((time.perf_counter() - started) * 1000, 3), None
         time.sleep(poll_interval_seconds)
+
+
+def _final_answer_trace(summary_response: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the safe final-answer stage attestation from a persisted result."""
+
+    context = summary_response.get("chatContext")
+    if not isinstance(context, dict):
+        return None
+    properties = context.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    raw = properties.get("bank.nl2sql.finalAnswerTrace")
+    if not isinstance(raw, dict):
+        return None
+    status = raw.get("status")
+    attempts = raw.get("attempts")
+    errors = raw.get("errors")
+    if not isinstance(status, str) or not isinstance(attempts, int):
+        return None
+    if not isinstance(errors, list) or not all(isinstance(error, str) for error in errors):
+        return None
+    return {"status": status, "attempts": attempts, "errors": list(errors)}
 
 
 def _evaluate_record(
@@ -303,6 +326,7 @@ def _evaluate_record(
         "endToEndMs": None,
         "summaryState": None,
         "textSummary": None,
+        "finalAnswerTrace": None,
         "errorCategory": None,
         "s2sql": None,
         "physicalSql": None,
@@ -395,7 +419,7 @@ def _evaluate_record(
         return finish_query_timing()
 
     try:
-        summary_state, text_summary, summary_ms = _poll_execute_summary(
+        summary_state, text_summary, summary_ms, final_answer_trace = _poll_execute_summary(
             post_json=post_json,
             summary_endpoint=f"{query_api_prefix}/getExecuteSummary",
             query_id=query_id,
@@ -405,6 +429,7 @@ def _evaluate_record(
         item["summaryState"] = summary_state
         item["textSummary"] = text_summary
         item["summaryMs"] = summary_ms
+        item["finalAnswerTrace"] = final_answer_trace
         if summary_state != "SUCCESS":
             item["errorCategory"] = (
                 "SUMMARY_TIMEOUT" if summary_state == "TIMEOUT" else "SUMMARY_ERROR"
