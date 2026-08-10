@@ -1,69 +1,37 @@
 {
+  "answerAmendment": {
+    "canonicalWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
+    "canonicalWorkbookSha256": "B19F2DF98CE4CD7A4D7B16B37C220CDB85047D24EB30360D08A37F59105B6706",
+    "count": 6,
+    "ledgerSha256": "60D1294BDF3A7F8AC5FF2EE7E5C98836255E0BD05B6196950D462CBB6AF266F4",
+    "officialManifestSha256": "919557612BAC04C7FCB00FD1DA0CCBF1383F0909F8FEB3078C15E0E43B3477DD"
+  },
   "augmentationCount": 12,
   "evaluationSplitCounts": {
-    "dev": 36,
-    "test": 49,
-    "train": 115
+    "dev": 40,
+    "test": 40,
+    "train": 119
   },
-  "officialCount": 200,
-  "reassignedForTemplateIsolation": [
-    {
-      "id": "TRAIN-M-25",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-26",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-27",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-36",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "TRAIN-M-45",
-      "sourceSplit": "train",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-04",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-05",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-M-06",
-      "sourceSplit": "dev",
-      "split": "test"
-    },
-    {
-      "id": "VAL-S-06",
-      "sourceSplit": "dev",
-      "split": "test"
-    }
-  ],
-  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "officialCount": 199,
+  "parentVersion": "2.0.0",
+  "reassignedForTemplateIsolation": [],
+  "sourceSha256": "b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
-    "train": 120
+    "train": 119
   },
-  "sourceWorkbook": "基于大模型与NL2SQL的银行业智能问数系统构建与应用_数据集.xlsx",
+  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
   "templateOverlap": {
-    "devTest": [],
+    "devTest": [
+      "15664243130b4506",
+      "d1e4e92198127158"
+    ],
     "trainDev": [],
-    "trainTest": []
+    "trainTest": [
+      "86a881de4989ff33",
+      "b92432933806f5fa"
+    ]
   },
-  "version": "0.1.0"
+  "version": "2.0.1"
 }

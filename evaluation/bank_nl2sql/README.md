@@ -2,12 +2,77 @@
 
 此目录包含 DATA-02 的可复现产物：
 
+- `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
-- `build_dataset.py`：冻结官方题、意图标注和模板隔离后的评测切分；
-- `train.jsonl`、`dev.jsonl`、`test.jsonl`：200 道官方题；
+- `build_dataset.py`：冻结官方题、意图标注和来源评测切分；
+- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（当前 2.0.1 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
+
+## 正式评估库 2.0.1
+
+`evaluation/bank_nl2sql/official/CURRENT.json` 当前指向
+`evaluation/bank_nl2sql/official/2.0.1/`。2.0.1 是**唯一当前正式评分依据**，
+2.0.0 作为不可变父版本继续保留。
+
+2.0.1 包含：
+
+- `bank-nl2sql-ground-truth-v2.0.1.xlsx`：正式 ground-truth 工作簿（199 题）；
+- `official-manifest.json`：`datasetVersion=2.0.1`、`canonicalReady=true`、
+  `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
+  父版本、候选/事实区哈希与变更计数；
+- `contract-change-ledger.json`：从原始工作簿到2.0.0的既有题目/答案契约账本；
+- `answer-amendment-ledger.json`：从2.0.0到2.0.1的6条答案语义修正账本；
+- `answer-amendment-audit-summary.json`：只改声明答案单元格、test未变、事实区未变的审计摘要；
+- 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
+
+正式库相对冻结原始工作簿（`source.xlsx`，只读、永不修改）只包含账本声明的变更：
+
+- 5 个答案修正（`ANSWER_CORRECTION`）；
+- 10 个题目澄清（`QUESTION_CLARIFICATION`）；
+- 1 个训练题删除（`QUESTION_REMOVAL`）：该训练题因缺失同比基期证据而无法复核，
+  已从正式库移除（`removedIds` 仅含账本声明的这一条）；
+- 0 个契约错误，事实区域哈希不变。
+
+2.0.1 在2.0.0基础上修正5条train和1条dev答案：三条“高出负数”的
+方向矛盾，以及三条不符合“前三/后四”规则的排名分类。没有修改题目、SQL、
+结构化rows、test或事实区域。
+
+正式统计：`officialCount=199`，来源与正式评测均为 train/dev/test =
+119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），增强样本
+12 条（不参与官方评分）。`manifest.json` 的 `templateOverlap` 仅披露
+模板重叠风险，不改变任何题目归属。
+
+### 生成增量正式评估库
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/amend_official_ground_truth.py `
+  --parent-dir evaluation/bank_nl2sql/official/2.0.0 `
+  --corrections evaluation/bank_nl2sql/answer-amendments/2.0.1.json `
+  --output evaluation/bank_nl2sql/official/2.0.1 `
+  --update-current
+```
+
+生成器验证父包全部 sidecar、父答案哈希、修正ID/split、工作簿逐单元格差异、
+事实区哈希和test不变性；任何异常都在切换 `CURRENT.json` 前失败。
+
+### 历史2.0.0一次性生成流程（promote）
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/promote_ground_truth.py `
+  --candidate-dir .local-dev/gt-audit/codex-hash-contract `
+  --audit-dir .local-dev/gt-audit/codex-hash-audit-two `
+  --version 2.0.0 `
+  --output evaluation/bank_nl2sql/official/2.0.0
+```
+
+promote 对候选 manifest/sidecar、候选工作簿/sidecar、变更账本/sidecar、
+源工作簿哈希、199 条全量 VERIFIED 审查证据、空 correction ledger、事实区
+哈希以及账本声明的变更逐项 fail-closed 验证，输出确定性且不含时间戳；
+任何一项不匹配都不产出任何文件。
+
+## 标准基准库
 
 `db/build_database.py` 将比赛工作簿转换为可重复生成的标准基准库：
 
@@ -23,7 +88,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py 
   --h2-script-output .local-dev/bank-nl2sql/bank_benchmark_h2.sql
 ```
 
-需要生成本地 H2 文件库时，再传入 `--h2-database-output`、`--java-path` 和 `--h2-jar-path`。生成的数据库文件只放在 `.local-dev`，不提交二进制产物。
+需要生成本地 H2 文件库时，再传入 `--h2-database-output`、`--java-path` 和 `--h2-jar-path`。普通本地生成物只放在 `.local-dev`；唯一例外是经完整发布门禁后、由生成器写入的 `db/releases/<version>/` 官方伴随包。
 
 ## 校验标准库
 
@@ -34,30 +99,142 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 校验器检查机构、指标和事实表数量，联合键、外键、完整日期序列以及每天完整的 `机构 × 指标` 立方体。
 
-## 构建标注数据集
+## 官方数据库伴随导入包（companion import package）
+
+`db/releases/2.0.1/` 是基于当前 2.0.1 官方工作簿冻结的**伴随导入包**，**不是运行时
+`semantic.mv.db`**：它只包含不可变产物与导入器，运行时数据库由导入器按需生成。
+包内文件：
+
+- `bank.sqlite`：SQLite 标准基准库（13 家机构、21 个指标、132678 条事实）；
+- `bank-h2.sql`：H2 脚本（`bank_organization`、`bank_metric_definition`、
+  `bank_metric_daily` 三张表及 `bank_benchmark.*` 三个兼容视图）；
+- `database-manifest.json`：`schemaVersion`、官方版本/路径/SHA-256、来源日期范围
+  （2024-12-31 至 2026-04-30）、每个产物的 SHA-256 与字节数、精确行数
+  （organizations=13、metrics=21、facts=132678）。
+
+`db/Import-OfficialBankData.ps1`（及双击包装 `Import-OfficialBankData.cmd`）把该包
+导入本地 H2：默认目标为仓库内 `.local-dev/state/semantic`（与运行时
+`S2_METADATA_DB_PATH=.local-dev/state/semantic` 一致），可显式传入
+`-TargetDatabase`/`-JavaPath`/`-H2JarPath`，缺省时自动发现项目本地 JDK/H2 jar
+（`JAVA_HOME`、`.local-dev/jdk`、`ECOMATCH_H2_JAR`、`.local-dev` Maven 仓库、
+`~/.m2`）。导入前校验 manifest 与全部产物哈希；目标库被占用/锁定（
+`<base>.lock.db`）时直接拒绝并退出（不会停止任何进程、不删除任何文件）；只通过
+`org.h2.tools.RunScript` 以项目标准 `root`/`semantic` 凭据应用包内 H2 脚本（仅
+bank 基准表/视图，幂等）；导入后再次校验三个精确行数。它不会删除或覆盖任意数据库
+文件，也不会触碰 Agent/model/chat 配置或会话。
+
+一键导入（默认目标）：
 
 ```powershell
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py <workbook.xlsx> `
-  --intent-root evaluation/bank_intent `
-  --output evaluation/bank_nl2sql
-
-evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
-  evaluation/bank_nl2sql
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-OfficialBankData.ps1
 ```
 
-当前冻结版本基于源文件 SHA-256 `c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`：官方题来源划分为 train/dev/test = 120/40/40，模板隔离后的实际评测划分为 115/36/49。9 道题的调整可在 `manifest.json` 中逐题追溯，三个官方评测切分之间没有模板重叠。
+或直接双击 `evaluation/bank_nl2sql/db/Import-OfficialBankData.cmd`。指定自定义目标：
 
-## 生成并验证金标
+```powershell
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-OfficialBankData.ps1 `
+  -TargetDatabase .local-dev/state/semantic `
+  -JavaPath C:\path\to\java.exe -H2JarPath C:\path\to\h2-2.2.224.jar
+```
+
+`db/releases/**` 已在 `.gitattributes` 标记为 `-text`，保证包内产物校验和在
+跨平台检出时保持稳定。
+
+从 v2.0.1 唯一事实源重建该包时，必须由生成器同时写入 SQLite、H2 脚本和
+`database-manifest.json`，不得手工修改其中任一产物：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py `
+  evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx `
+  --sqlite-output evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite `
+  --h2-script-output evaluation/bank_nl2sql/db/releases/2.0.1/bank-h2.sql `
+  --database-manifest-output evaluation/bank_nl2sql/db/releases/2.0.1/database-manifest.json `
+  --official-version 2.0.1 `
+  --source-relative-path evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx
+```
+
+## 可移植「银行问数」Agent 导入
+
+事实表导入包不会复制本机 `semantic.mv.db`，因此也不会夹带用户、会话、历史自增 ID
+或密钥。完成事实表导入并启动服务后，使用 `bootstrap_bank_agent.py` 将当前正式工作簿
+导入一个已经创建好的银行语义模型，并按接口返回的真实 `dataSetId` 创建或更新
+「银行问数」Agent。脚本同时应用 `repro/best_bank_on.json` 中的系统参数；Agent 不含
+训练题示例或 gold 内容，模型和数据集 ID 都由目标环境显式指定/动态发现。
+
+前置条件：
+
+1. 停止 standalone，运行上面的 `Import-OfficialBankData.ps1`，再启动服务；
+2. 在目标环境创建指向 `bank_metric_daily` 的语义模型，字段至少包含
+   `data_date`、`org_code`、`metric_code`、`metric_value`；
+3. 已配置一个可用的聊天模型，并准备管理员 Token。Token 只通过环境变量读取，
+   不会写入文件或报告。
+
+先做零写入检查：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
+  evaluation/bank_nl2sql --model-id 1 --chat-model-id 1 --dry-run
+```
+
+正式导入：
+
+```powershell
+$env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
+  evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
+  --model-id 1 --chat-model-id 1
+Remove-Item Env:ECOMATCH_AUTH_TOKEN
+```
+
+Windows 队友也可以直接双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`，按提示
+输入语义模型 ID、聊天模型 ID 和管理员 Token；脚本退出前会清空进程内 Token。
+
+导入是幂等的：语义资源按稳定业务键更新，Agent 按名称更新；目标环境生成的 Agent ID
+不要求等于本机历史 ID 33。命令输出最终 `modelId`、`dataSetId`、`agentId`、正式版本和
+manifest 哈希，队友应使用输出的 `agentId` 打开页面或运行评测。
+
+## 构建标注数据集
+
+正式版必须使用 `official/CURRENT.json` 指向的2.0.1工作簿与
+`official-manifest.json`（manifest严格
+匹配工作簿名称/SHA-256/题数/来源切分/`canonicalReady` 后，才允许忽略
+`removedIds`；无 manifest 时保持原严格未知意图行为；除 `removedIds` 外
+任何未知/缺失 ID 一律失败）：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
+  evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx `
+  --intent-root evaluation/bank_intent `
+  --official-manifest evaluation/bank_nl2sql/official/2.0.1/official-manifest.json `
+  --output .local-dev/bank-nl2sql/rebuild-2.0.1
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
+  .local-dev/bank-nl2sql/rebuild-2.0.1
+```
+
+正式版基于 v2.0.1 唯一事实源 SHA-256
+`b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706`
+（工作簿只读、永不手工修改）。199 条官方题的来源
+与正式评测均为 train/dev/test = 119/40/40，增强样本 12 条。
+`manifest.json` 记录 v2.0.1 的答案修正溯源与 `templateOverlap` 风险披露，
+绝不改变题目归属。
+
+## 发布完整性校验
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_gold.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
 ```
 
-`gold_manifest.json` 记录金标依赖的 SQLite 文件哈希。物理 SQL 已在 SQLite 与 H2 各执行 200 次且全部通过；`s2sql` 目前保存与物理 SQL 对应的可审计 SQL 模板。将其交给 SuperSonic 的正式语义翻译器前，需要先在运行环境注册银行 H2 数据源及语义 Dataset。
+`validate_gold.py` 是发布完整性门禁：199 条生成 SQL 必须全部可执行，且查询结果与
+结构化 rows 一致。它不参与模型得分，也不比较 SQL 文本；模型效果仍以结果事实合同和
+最终答案为准。`freeze_dataset.py` 同时记录事实合同与上述完整性结果。
 
 ## 冻结与盲测
 
@@ -115,6 +292,96 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.p
 ```
 
 smoke 通过后，去掉 `--max-records 5` 即可运行完整训练集。重复相同命令会从输出 checkpoint 续跑；需要从头重跑时显式传入 `--no-resume`。测试集只能用于冻结后的最终验收，命令必须同时传入 `--acknowledge-final-test` 和本地运行登记文件；每次运行会写入递增的 `runNumber`。
+
+### 银行路径 on/off 对照（不删代码）
+
+当需要验证「银行受约束计划」相对通用 `ONE_PASS` 是否加分时，使用固定 smoke 与对比脚本，**不要删除**银行运行时类：
+
+- 协议：`RUNTIME_ABLATION.md`
+- 清单：`runtime_ablation_manifest.json`
+- 对比：`compare_runtime_ablation.py`
+
+关键开关是系统参数 `s2.parser.bank.constrained-plan.enable`；评测参数 `--runtime-mode bank-on|bank-off` 只给报告打标签，不改服务端配置。
+
+## 答案契约评估
+
+`answerExact` 是仓库历史内部指标，不是赛题文件明确定义的官方计分公式。它检查原始 `answerText` 中的数值槽位是否出现在预测结果中，**不比较** SQL 文本。结构化 `expected.rows` 全等指标为 `tableEX` / 旧名 `resultAccuracy`。
+
+### 金标门禁：L2 ⊇ L1
+
+旧 v2 协议要求结构化结果能够直接证明答案文案中的全部数字，否则将题目排除出 `answerExact` 分母：
+
+| grade | 含义 |
+| --- | --- |
+| `GOLD_OK` | rows 覆盖全部必答数值 → 进入旧 `answerExact` 分母 |
+| `GOLD_PARTIAL` / `GOLD_BAD` | 覆盖不全 / 全无 → 旧协议只诊断、不计分 |
+| `GOLD_NON_NUMERIC` | 答案无可抽取数值（v1 不进 answerExact） |
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold_contract.py `
+  evaluation/bank_nl2sql `
+  --split train `
+  --output .local-dev/bank-nl2sql/gold-contract-train.json
+```
+
+扫描含 test 时需加 `--acknowledge-final-test`。可用 `--fail-on-incomplete` 做 CI 阻断。
+
+### 运行时评分
+
+`run_supersonic_eval.py` 会在每题上写：
+
+- `goldGrade` / `answerExact` / `answerScore`
+- `tableEX`（= 旧 `match`）
+- `resultColumns` / `resultRows`（供 answerExact 与复评）
+
+报告 `metrics.answerExact` 仅在 `GOLD_OK` 且可抽取必答槽位的题目上统计。
+
+### Fact contract v3（正式发布门禁与评分迁移）
+
+v3 不再通过 `GOLD_PARTIAL` / `GOLD_BAD` 缩小分母。单题主判定为：
+
+```text
+casePass = resultExact AND finalFactsExact
+```
+
+- `resultExact` / `resultFactsExact`：SQL 执行结果包含源答案要求的全部数值事实，或能通过白名单确定性投影（如 `SUM`、`DIFFERENCE`）推导；不要求列名、投影结构或 SQL 文本相同。
+- `finalFactsExact`：最终文本独立包含源答案的全部必答数值事实和方向语义；正确结果表不能替代缺失的最终文本。
+- `tableExact`：仅保留为旧冻结结构化结果的诊断项，不参与 `casePass`。
+- `REVIEW_REQUIRED`：源答案本身存在语义矛盾或没有可评分事实；该题按失败处理，绝不排除。旧结果表缺项和需要语义绑定只作为 warning，不再缩小分母。
+- 分母始终是所选 split 的全部记录。
+
+先生成仅含 train/dev 的审查清单；命令不会读取 test，也不会修改 JSONL、manifest 或正式发布资产：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_fact_contract_v3.py `
+  evaluation/bank_nl2sql `
+  --split both --legacy-incomplete-only `
+  --output .local-dev/bank-nl2sql/fact-contract-v3/legacy-incomplete-train-dev.json
+```
+
+对已有运行报告执行全分母 v3 评分：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_fact_contract_v3.py `
+  evaluation/bank_nl2sql `
+  .local-dev/bank-nl2sql/some-report.json `
+  --split train `
+  --output .local-dev/bank-nl2sql/some-report.fact-v3.json
+```
+
+2.0.1 的train/dev已经达到159/159 `READY`，`freeze_dataset.py` 使用v3作为
+正式发布门禁。运行时报告主入口仍需在下一阶段从旧 `answerExact/tableEX`
+切换到 `caseAccuracy`；切换前两套指标并行保留，禁止把旧指标称为正式成绩。
+
+对历史报告补分（需含 `resultColumns`/`resultRows`）：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/score_answer_exact.py `
+  evaluation/bank_nl2sql `
+  .local-dev/bank-nl2sql/some-report.json `
+  --split train `
+  --output .local-dev/bank-nl2sql/some-report.answer-exact.json
+```
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/run_supersonic_eval.py `

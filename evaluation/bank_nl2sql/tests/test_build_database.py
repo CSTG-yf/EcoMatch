@@ -15,7 +15,7 @@ from openpyxl import Workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from db.build_database import build_database  # noqa: E402
+from db.build_database import build_database, build_release_manifest, write_release_manifest  # noqa: E402
 from db.validate_database import validate_database  # noqa: E402
 
 
@@ -101,6 +101,35 @@ class BuildDatabaseTest(unittest.TestCase):
                 "SELECT * FROM PUBLIC.bank_metric_daily;",
                 h2_script,
             )
+
+    def test_builds_manifest_from_generated_release_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path = temp_path / "source.xlsx"
+            sqlite_path = temp_path / "bank.sqlite"
+            h2_path = temp_path / "bank-h2.sql"
+            manifest_path = temp_path / "database-manifest.json"
+            self.create_workbook(workbook_path)
+
+            report = build_database(workbook_path, sqlite_path, h2_path)
+            manifest = build_release_manifest(
+                workbook_path,
+                sqlite_path,
+                h2_path,
+                report,
+                "2.0.1",
+                "evaluation/bank_nl2sql/official/2.0.1/source.xlsx",
+            )
+            write_release_manifest(manifest_path, manifest)
+
+            self.assertEqual(manifest["officialVersion"], "2.0.1")
+            self.assertEqual(manifest["source"]["dateRange"], report["dateRange"])
+            self.assertEqual(manifest["counts"], report["counts"])
+            self.assertEqual(
+                set(manifest["artifacts"]), {"bank.sqlite", "bank-h2.sql"}
+            )
+            self.assertTrue(manifest_path.is_file())
+            self.assertNotIn(b"\r\n", manifest_path.read_bytes())
 
 
 if __name__ == "__main__":

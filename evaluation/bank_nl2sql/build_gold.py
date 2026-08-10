@@ -40,6 +40,31 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     )
 
 
+def _dataset_manifest(dataset_path: Path) -> dict[str, Any]:
+    """Read the optional generated dataset manifest without widening its contract."""
+    manifest_path = dataset_path / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            manifest = None
+        if isinstance(manifest, dict):
+            return manifest
+    return {}
+
+
+def _dataset_version(dataset_path: Path) -> str:
+    """Release version derives from the dataset source manifest, never hardcoded.
+
+    Falls back to the legacy ``0.1.0`` only when no manifest exists (partial
+    materialisation into a bare directory must keep working).
+    """
+    version = _dataset_manifest(dataset_path).get("version")
+    if isinstance(version, str) and version:
+        return version
+    return "0.1.0"
+
+
 def build_gold_dataset(
     dataset_path: Path | str,
     database_path: Path | str,
@@ -84,13 +109,22 @@ def build_gold_dataset(
 
     for split, records in records_by_split.items():
         _write_jsonl(dataset_path / f"{split}.jsonl", records)
+    source_manifest = _dataset_manifest(dataset_path)
     report = {
-        "version": "0.1.0",
+        "version": _dataset_version(dataset_path),
         "databaseSha256": _sha256(database_path),
         "officialCount": sum(len(records) for records in records_by_split.values()),
         "splitCounts": {split: len(records) for split, records in records_by_split.items()},
         "sqlExecution": "PASS",
     }
+    parent_version = source_manifest.get("parentVersion")
+    if isinstance(parent_version, str) and parent_version:
+        report["parentVersion"] = parent_version
+    amendment = source_manifest.get("answerAmendment")
+    if isinstance(amendment, dict):
+        ledger_sha = amendment.get("ledgerSha256")
+        if isinstance(ledger_sha, str) and len(ledger_sha) == 64:
+            report["answerAmendmentLedgerSha256"] = ledger_sha.upper()
     if write_gold_manifest:
         (dataset_path / "gold_manifest.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"

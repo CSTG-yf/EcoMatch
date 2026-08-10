@@ -1,0 +1,6 @@
+{
+  "currentVersion": "2.0.1",
+  "directory": "2.0.1",
+  "groundTruthWorkbook": "2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx",
+  "officialManifest": "2.0.1/official-manifest.json"
+}

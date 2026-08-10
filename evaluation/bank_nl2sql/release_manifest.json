@@ -12,32 +12,54 @@
       "dev.jsonl"
     ]
   },
+  "answerContractValidation": {
+    "excludedCount": 0,
+    "inputRecordCount": 159,
+    "legacyIncompleteCount": 41,
+    "readyCount": 159,
+    "recordCount": 159,
+    "reviewRequiredCount": 0,
+    "schemaVersion": "3.0-dry-run",
+    "splits": [
+      "train",
+      "dev"
+    ]
+  },
   "augmentationCount": 12,
   "contentSha256": {
     "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
-    "dev.jsonl": "369f7864c1951ab3a77aacdc30258147b177aa97f19457c31923da00131424ef",
-    "gold_manifest.json": "dcc650e261482a910f8fb352291342b8338777664c25fff075849b7fcce0919f",
-    "manifest.json": "1e50a583c41b77fe0f96640cdfda37e04cf4826676d0331390c6d436c767a9f4",
+    "dev.jsonl": "e0bac57ec531420915f5f13b1402fae957850f437408137f5a835db4a5b1ea65",
+    "gold_manifest.json": "c42792b7795edb78bfe010649ee4235f1019dbb60598e05df770c16abab89c4b",
+    "manifest.json": "8e60b5cf075b89a5ddcc8293ac5f140bc05f7ad3be6f412347ed754ba6100ea0",
     "schema.json": "56d0db738ad0748927fa7ef78eb92efe0c2b0fb8301869d9c427caf71ee9a334",
-    "test.jsonl": "f8102dce081eaf5c33021d8c7466df02adffb1c90e0e45d9bad1232bafb72989",
-    "train.jsonl": "de9a6d56f64681fb8162e263478f81c31606fcf3c763ae5ba6b6dc2180d83ed3"
+    "test.jsonl": "af85036a64346bcdeccb0cc756eaeabc3acc0a548041019b26656781d4c47cf0",
+    "train.jsonl": "7df6b346e47a4c827a4c8cd41d33466d3adf1fc43969c4c33b9684b718d9f40f"
   },
   "evaluationSplitCounts": {
-    "dev": 36,
-    "test": 49,
-    "train": 115
+    "dev": 40,
+    "test": 40,
+    "train": 119
   },
   "goldValidation": {
-    "officialCount": 200,
+    "officialCount": 199,
     "result": "PASS",
-    "sqlExecutionCount": 200
+    "resultMatchCount": 199,
+    "sqlExecutionCount": 199,
+    "timingMs": {
+      "average": 0.892,
+      "count": 199,
+      "max": 26.154,
+      "p50": 0.132,
+      "p95": 6.73,
+      "p99": 18.061
+    }
   },
-  "officialCount": 200,
-  "sourceSha256": "c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c",
+  "officialCount": 199,
+  "sourceSha256": "b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
-    "train": 120
+    "train": 119
   },
-  "version": "0.1.0"
+  "version": "2.0.1"
 }

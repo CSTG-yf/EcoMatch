@@ -25,6 +25,8 @@ public class ComplexSqlValidator {
     private static final Pattern DATE_LITERAL =
             Pattern.compile("'\\d{4}[-/]\\d{1,2}(?:[-/]\\d{1,2})?'");
     private static final Pattern JOIN = Pattern.compile("\\bjoin\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CROSS_JOIN =
+            Pattern.compile("\\bcross\\s+join\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern JOIN_CONDITION =
             Pattern.compile("\\b(?:on|using)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern AGGREGATE =
@@ -68,7 +70,7 @@ public class ComplexSqlValidator {
             issues.add("The query does not reference any available semantic field.");
             errorType = SqlErrorType.MAPPING_ERROR;
         }
-        if (count(JOIN, sql) > count(JOIN_CONDITION, sql)) {
+        if (count(JOIN, sql) - count(CROSS_JOIN, sql) > count(JOIN_CONDITION, sql)) {
             issues.add("Every JOIN must provide an ON or USING condition.");
             errorType = SqlErrorType.JOIN_ERROR;
         }

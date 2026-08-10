@@ -11,6 +11,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,14 +40,20 @@ public class BankResultProjector {
             case COMPARISON -> projectComparison(contract, sourceRows);
             case PROVINCIAL_AVERAGE_THRESHOLD -> projectProvinceAverageThreshold(contract,
                     sourceRows);
+            case MULTI_METRIC_PROVINCIAL_AVERAGE -> projectMultiMetricProvinceAverage(contract,
+                    sourceRows);
             case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
             case AGGREGATION_SUMMARY -> projectAggregationSummary(contract, sourceRows);
+            case DAILY_EXTREMA_ORG -> projectDailyExtremaOrg(contract, sourceRows);
+            case COUNT_DAYS_ABOVE_PROVINCE_AVERAGE -> projectDaysAboveProvinceAverage(contract,
+                    sourceRows);
             case TREND -> projectTrend(contract, sourceRows);
             case LONG_FORM -> projectLongForm(contract, sourceRows);
             case RANKED_LONG_FORM -> projectRankedLongForm(contract, sourceRows);
             case DAILY_AVERAGE_RANKING -> projectDailyAverageRanking(contract, sourceRows);
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
+            case DERIVED_RANKING -> projectDerivedRanking(contract, sourceRows);
         };
     }
 
@@ -96,12 +103,24 @@ public class BankResultProjector {
         if (contract.getMetrics().isEmpty()) {
             return Projection.notApplied();
         }
+        boolean withShare = contract.getMetrics().size() >= 2 && structureShareTotalCode(contract) != null;
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
             String organizationCode = resolveOrganizationCode(contract, sourceRow);
             if (StringUtils.isBlank(organizationCode)) {
                 return Projection.notApplied();
+            }
+            BigDecimal totalNumeric = null;
+            if (withShare) {
+                String totalCode = structureShareTotalCode(contract);
+                for (MetricBinding metric : contract.getMetrics()) {
+                    if (totalCode.equalsIgnoreCase(metric.getMetricCode())) {
+                        ValueLookup totalValue = value(sourceRow, metric.getSemanticColumn());
+                        totalNumeric = totalValue.found() ? decimal(totalValue.value()) : null;
+                        break;
+                    }
+                }
             }
             for (MetricBinding metric : contract.getMetrics()) {
                 ValueLookup value = value(sourceRow, metric.getSemanticColumn());
@@ -114,10 +133,261 @@ public class BankResultProjector {
                         organizationCode));
                 row.put("metric_code", metric.getMetricCode());
                 row.put("metric_value", value.value());
+                if (withShare) {
+                    BigDecimal part = decimal(value.value());
+                    row.put("ratio_percent",
+                            part == null || totalNumeric == null
+                                    || totalNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
+                                            : part.multiply(BigDecimal.valueOf(100)).divide(
+                                                    totalNumeric, 15, RoundingMode.HALF_UP));
+                    if (totalNumeric != null) {
+                        row.put("numerator_value", value.value());
+                        row.put("denominator_value", totalNumeric);
+                    }
+                }
                 rows.add(row);
             }
         }
+        // Loan structure share gold (S-24): metric_role + numerator/denominator/ratio.
+        if (withShare && isLoanStructureShare(contract)) {
+            return projectLoanStructureShare(contract, rows, totalFromRows(rows, "ZB002"));
+        }
+        // Deposit structure share (M-31 分别占比): parts + total with ratio_percent. Prefer this
+        // whenever the dual-share plan marks structureShare, even if SQL metric order is total-first
+        // for physical stability. S-22 (plain equality/差额) keeps structureShare=false.
+        if (withShare && isDepositStructureShare(contract)
+                && (contract.isStructureShare() || !isTotalMetricFirst(contract))) {
+            return projectDepositStructureShare(contract, rows, totalFromRows(rows, "ZB001"));
+        }
+        // Deposit multi-metric with total first (S-22): plain metric_value, no ratio.
+        if (withShare && isDepositStructureShare(contract) && isTotalMetricFirst(contract)) {
+            List<Map<String, Object>> plain = new ArrayList<>();
+            for (Map<String, Object> source : rows) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("org_code", source.get("org_code"));
+                row.put("org_name", source.get("org_name"));
+                row.put("metric_code", source.get("metric_code"));
+                row.put("metric_value", source.get("metric_value"));
+                plain.add(row);
+            }
+            return Projection.applied(
+                    List.of("org_code", "org_name", "metric_code", "metric_value"), plain);
+        }
+        // Point multi-metric gold (H-04 / S-23 / M-58) uses aggregation summary columns.
+        // Dual rate pairs (M-37 不良+拨备, M-46 不良+逾期) keep plain metric_value.
+        // Multi-org single-metric breakdown (S-21) also uses aggregate shape, sorted by value DESC.
+        if (!withShare && rows.size() >= 2) {
+            boolean multiOrgSingleMetric = contract.getMetrics().size() == 1;
+            if (prefersPlainMultiMetricPoint(contract) && !multiOrgSingleMetric) {
+                List<Map<String, Object>> plain = new ArrayList<>();
+                for (Map<String, Object> source : rows) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("org_code", source.get("org_code"));
+                    row.put("org_name", source.get("org_name"));
+                    row.put("metric_code", source.get("metric_code"));
+                    row.put("metric_value", source.get("metric_value"));
+                    plain.add(row);
+                }
+                return Projection.applied(
+                        List.of("org_code", "org_name", "metric_code", "metric_value"), plain);
+            }
+            List<Map<String, Object>> aggregateRows = toPointAggregateRows(rows);
+            if (multiOrgSingleMetric) {
+                aggregateRows.sort((left, right) -> {
+                    BigDecimal lv = decimal(left.get("aggregate_value"));
+                    BigDecimal rv = decimal(right.get("aggregate_value"));
+                    if (lv == null || rv == null) {
+                        return 0;
+                    }
+                    int cmp = rv.compareTo(lv);
+                    if (cmp != 0) {
+                        return cmp;
+                    }
+                    return String.valueOf(left.get("org_code"))
+                            .compareTo(String.valueOf(right.get("org_code")));
+                });
+            }
+            return Projection.applied(pointAggregateColumns(), aggregateRows);
+        }
         return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Rate-like multi-metric points that gold scores as plain metric_value long-form (not
+     * aggregate summary). Covers M-37 不良+拨备、M-46 逾期 vs 不良、VAL-H-07 风险四率.
+     */
+    private static boolean prefersPlainMultiMetricPoint(Contract contract) {
+        Set<String> codes = metricCodes(contract);
+        if (codes.isEmpty()) {
+            return false;
+        }
+        Set<String> rateLike = Set.of("ZB012", "ZB013", "ZB015", "ZB016", "ZB017");
+        return rateLike.containsAll(codes);
+    }
+
+    private Projection projectDepositStructureShare(Contract contract,
+            List<Map<String, Object>> rows, BigDecimal total) {
+        // Gold M-31 order: corporate (ZB003), personal (ZB004), total (ZB001) + ratio_percent.
+        List<String> order = List.of("ZB003", "ZB004", "ZB001");
+        Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            byCode.put(StringUtils.upperCase(String.valueOf(row.get("metric_code"))), row);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (String code : order) {
+            Map<String, Object> source = byCode.get(code);
+            if (source == null) {
+                continue;
+            }
+            Object metricValue = source.get("metric_value");
+            BigDecimal num = decimal(metricValue);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", source.get("org_code"));
+            row.put("org_name", source.get("org_name"));
+            row.put("metric_code", code);
+            row.put("metric_value", metricValue);
+            row.put("ratio_percent",
+                    num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                                    RoundingMode.HALF_UP));
+            out.add(row);
+        }
+        return Projection.applied(
+                List.of("org_code", "org_name", "metric_code", "metric_value", "ratio_percent"),
+                out);
+    }
+
+    private static boolean isLoanStructureShare(Contract contract) {
+        Set<String> codes = metricCodes(contract);
+        return codes.contains("ZB002") && codes.contains("ZB005") && codes.contains("ZB006");
+    }
+
+    private static boolean isDepositStructureShare(Contract contract) {
+        Set<String> codes = metricCodes(contract);
+        return codes.contains("ZB001") && codes.contains("ZB003") && codes.contains("ZB004");
+    }
+
+    private static boolean isTotalMetricFirst(Contract contract) {
+        if (contract.getMetrics() == null || contract.getMetrics().isEmpty()) {
+            return false;
+        }
+        String first = contract.getMetrics().get(0).getMetricCode();
+        String total = structureShareTotalCode(contract);
+        return first != null && total != null && first.equalsIgnoreCase(total);
+    }
+
+    private static Set<String> metricCodes(Contract contract) {
+        Set<String> codes = new java.util.HashSet<>();
+        for (MetricBinding metric : contract.getMetrics()) {
+            if (metric != null && metric.getMetricCode() != null) {
+                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+            }
+        }
+        return codes;
+    }
+
+    private static BigDecimal totalFromRows(List<Map<String, Object>> rows, String totalCode) {
+        for (Map<String, Object> row : rows) {
+            if (totalCode.equalsIgnoreCase(String.valueOf(row.get("metric_code")))) {
+                return decimalStatic(row.get("metric_value"));
+            }
+        }
+        return null;
+    }
+
+    private static BigDecimal decimalStatic(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private Projection projectLoanStructureShare(Contract contract, List<Map<String, Object>> rows,
+            BigDecimal total) {
+        // Gold S-24 order: personal (ZB006), corporate (ZB005), total (ZB002).
+        List<String> order = List.of("ZB006", "ZB005", "ZB002");
+        Map<String, String> roles = Map.of("ZB006", "personal", "ZB005", "corporate", "ZB002",
+                "total");
+        Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            byCode.put(StringUtils.upperCase(String.valueOf(row.get("metric_code"))), row);
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (String code : order) {
+            Map<String, Object> source = byCode.get(code);
+            if (source == null) {
+                continue;
+            }
+            Object metricValue = source.get("metric_value");
+            BigDecimal num = decimal(metricValue);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", source.get("org_code"));
+            row.put("org_name", source.get("org_name"));
+            row.put("metric_code", code);
+            row.put("metric_role", roles.get(code));
+            row.put("numerator_value", metricValue);
+            row.put("denominator_value", total);
+            row.put("ratio_percent",
+                    num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                                    RoundingMode.HALF_UP));
+            out.add(row);
+        }
+        return Projection.applied(List.of("org_code", "org_name", "metric_code", "metric_role",
+                "numerator_value", "denominator_value", "ratio_percent"), out);
+    }
+
+    private static List<String> pointAggregateColumns() {
+        return List.of("org_code", "org_name", "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count");
+    }
+
+    private static List<Map<String, Object>> toPointAggregateRows(List<Map<String, Object>> rows) {
+        List<Map<String, Object>> aggregateRows = new ArrayList<>();
+        for (Map<String, Object> source : rows) {
+            Object value = source.get("metric_value");
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", source.get("org_code"));
+            row.put("org_name", source.get("org_name"));
+            row.put("metric_code", source.get("metric_code"));
+            row.put("aggregate_value", value);
+            row.put("min_value", value);
+            row.put("max_value", value);
+            row.put("observation_count", 1);
+            aggregateRows.add(row);
+        }
+        return aggregateRows;
+    }
+
+    private static boolean isCustomerCountPair(Contract contract) {
+        Set<String> codes = new java.util.HashSet<>();
+        for (MetricBinding metric : contract.getMetrics()) {
+            if (metric != null && metric.getMetricCode() != null) {
+                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+            }
+        }
+        return codes.contains("ZB020") && codes.contains("ZB021");
+    }
+
+    /** Prefer deposit total ZB001, else loan total ZB002, when both parts and total are present. */
+    private static String structureShareTotalCode(Contract contract) {
+        Set<String> codes = new java.util.HashSet<>();
+        for (MetricBinding metric : contract.getMetrics()) {
+            if (metric != null && metric.getMetricCode() != null) {
+                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+            }
+        }
+        if (codes.contains("ZB001") && (codes.contains("ZB003") || codes.contains("ZB004"))) {
+            return "ZB001";
+        }
+        if (codes.contains("ZB002") && (codes.contains("ZB005") || codes.contains("ZB006"))) {
+            return "ZB002";
+        }
+        return null;
     }
 
     private Projection projectRankedLongForm(Contract contract,
@@ -147,6 +417,7 @@ public class BankResultProjector {
             }
             values.sort(comparator.thenComparing(RankedValue::organizationCode));
 
+            List<Map<String, Object>> metricRows = new ArrayList<>();
             BigDecimal previous = null;
             int rank = 0;
             for (int index = 0; index < values.size(); index++) {
@@ -174,8 +445,14 @@ public class BankResultProjector {
                 }
                 row.put("metric_value", value.value());
                 row.put("rank_position", rank);
-                rankedRows.add(row);
+                metricRows.add(row);
             }
+            // Bottom-only gold contract is ORDER BY rank_position DESC (worst first / 后N名).
+            // Top+bottom combined keeps natural ascending rank (top then bottom).
+            if (isBottomOnlyRanking(contract)) {
+                Collections.reverse(metricRows);
+            }
+            rankedRows.addAll(metricRows);
         }
         return Projection.applied(columns(contract), rankedRows);
     }
@@ -250,7 +527,18 @@ public class BankResultProjector {
             row.put("rank_position", rank);
             rows.add(row);
         }
+        if (isBottomOnlyRanking(contract)) {
+            Collections.reverse(rows);
+        }
         return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Pure bottom-N presentation matches gold ORDER BY rank_position DESC. When top is also
+     * requested, keep ascending rank (top slice then bottom slice).
+     */
+    private boolean isBottomOnlyRanking(Contract contract) {
+        return contract.getTopRankLimit() == null && contract.getBottomRankLimit() != null;
     }
 
     private Projection projectMomYoyChange(Contract contract,
@@ -289,6 +577,7 @@ public class BankResultProjector {
 
     private Projection projectRatio(Contract contract, List<Map<String, Object>> sourceRows) {
         List<Map<String, Object>> rows = new ArrayList<>();
+        boolean depositPerOutlet = isDepositPerOutletRatio(contract, sourceRows);
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
             String organizationCode = resolveOrganizationCode(contract, sourceRow);
@@ -303,16 +592,49 @@ public class BankResultProjector {
             row.put("org_code", organizationCode);
             row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
                     organizationCode));
-            row.put("numerator_value", numerator.value());
-            row.put("denominator_value", denominator.value());
-            row.put("ratio_percent", ratio.value());
+            if (depositPerOutlet) {
+                // Gold M-43/M-44: deposit_value, outlet_count, deposit_per_outlet_wanyuan
+                row.put("deposit_value", numerator.value());
+                row.put("outlet_count", denominator.value());
+                row.put("deposit_per_outlet_wanyuan", ratio.value());
+            } else {
+                row.put("numerator_value", numerator.value());
+                row.put("denominator_value", denominator.value());
+                row.put("ratio_percent", ratio.value());
+            }
             rows.add(row);
+        }
+        if (depositPerOutlet) {
+            return Projection.applied(
+                    List.of("org_code", "org_name", "deposit_value", "outlet_count",
+                            "deposit_per_outlet_wanyuan"),
+                    rows);
         }
         return Projection.applied(columns(contract), rows);
     }
 
+    /**
+     * 网点平均存款规模 is only ZB001/ZB019 (*10000). Do not infer from magnitude — inverted ratios
+     * like 贷款/不良 (S-06) can also produce large percent values and must keep numerator/denominator.
+     */
+    private boolean isDepositPerOutletRatio(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics() == null) {
+            return false;
+        }
+        Set<String> codes = new java.util.HashSet<>();
+        for (MetricBinding metric : contract.getMetrics()) {
+            if (metric != null && metric.getMetricCode() != null) {
+                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+            }
+        }
+        return codes.contains("ZB001") && codes.contains("ZB019");
+    }
+
     private Projection projectMultiMetricChange(Contract contract,
             List<Map<String, Object>> sourceRows) {
+        String fallbackMetricCode = contract.getMetrics().isEmpty() ? null
+                : contract.getMetrics().get(0).getMetricCode();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
@@ -322,21 +644,117 @@ public class BankResultProjector {
             ValueLookup baseline = value(sourceRow, "baseline_value");
             ValueLookup absoluteChange = value(sourceRow, "absolute_change");
             ValueLookup percentChange = value(sourceRow, "percent_change");
-            if (StringUtils.isBlank(organizationCode) || !metricCode.found() || !current.found()
-                    || !baseline.found() || !absoluteChange.found() || !percentChange.found()) {
+            if (StringUtils.isBlank(organizationCode) || !current.found() || !baseline.found()
+                    || !absoluteChange.found() || !percentChange.found()) {
+                return Projection.notApplied();
+            }
+            String code = metricCode.found() && metricCode.value() != null
+                    ? StringUtils.upperCase(String.valueOf(metricCode.value()))
+                    : fallbackMetricCode;
+            if (StringUtils.isBlank(code)) {
                 return Projection.notApplied();
             }
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("org_code", organizationCode);
             row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
                     organizationCode));
-            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
+            row.put("metric_code", code);
             row.put("current_value", current.value());
             row.put("baseline_value", baseline.value());
             row.put("absolute_change", absoluteChange.value());
             row.put("percent_change", percentChange.value());
             rows.add(row);
         }
+        // Province-wide growth (H-16, empty selected orgs): gold is full org list ordered by
+        // percent_change DESC then org_code. Single-org multi-metric change keeps metric_code ASC.
+        boolean provinceWide = contract.getSelectedOrganizationCodes() == null
+                || contract.getSelectedOrganizationCodes().isEmpty();
+        if (provinceWide) {
+            rows.sort((left, right) -> {
+                BigDecimal lp = decimal(left.get("percent_change"));
+                BigDecimal rp = decimal(right.get("percent_change"));
+                if (lp == null && rp == null) {
+                    return String.valueOf(left.get("org_code"))
+                            .compareTo(String.valueOf(right.get("org_code")));
+                }
+                if (lp == null) {
+                    return 1;
+                }
+                if (rp == null) {
+                    return -1;
+                }
+                int percentOrder = rp.compareTo(lp);
+                if (percentOrder != 0) {
+                    return percentOrder;
+                }
+                int metricOrder = String.valueOf(left.get("metric_code"))
+                        .compareTo(String.valueOf(right.get("metric_code")));
+                if (metricOrder != 0) {
+                    return metricOrder;
+                }
+                return String.valueOf(left.get("org_code"))
+                        .compareTo(String.valueOf(right.get("org_code")));
+            });
+        } else {
+            rows.sort((left, right) -> {
+                int metricOrder = String.valueOf(left.get("metric_code"))
+                        .compareTo(String.valueOf(right.get("metric_code")));
+                if (metricOrder != 0) {
+                    return metricOrder;
+                }
+                return String.valueOf(left.get("org_code"))
+                        .compareTo(String.valueOf(right.get("org_code")));
+            });
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Pass-through projection for the compiler-owned derived-metric ranking template. The SQL
+     * already ranks over the full organization population with stable ROW_NUMBER ordinals and
+     * restricts the selected organization outside that ranking, so this projection preserves the
+     * source rank_position verbatim instead of recomputing ranks from the returned rows. A
+     * missing source field or a non-usable source rank fails closed; no row is ever dropped or
+     * re-ranked silently. The emitted rows are re-ordered to the deterministic metric_code ASC,
+     * org_code ASC contract.
+     */
+    private Projection projectDerivedRanking(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup metricValue = value(sourceRow, "metric_value");
+            ValueLookup rankPosition = value(sourceRow, "rank_position");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !metricValue.found()
+                    || metricValue.value() == null || !rankPosition.found()
+                    || decimal(rankPosition.value()) == null) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty() && !contract
+                    .getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_value", metricValue.value());
+            row.put("rank_position", rankPosition.value());
+            rows.add(row);
+        }
+        rows.sort((left, right) -> {
+            int metricOrder = String.valueOf(left.get("metric_code"))
+                    .compareTo(String.valueOf(right.get("metric_code")));
+            if (metricOrder != 0) {
+                return metricOrder;
+            }
+            return String.valueOf(left.get("org_code"))
+                    .compareTo(String.valueOf(right.get("org_code")));
+        });
         return Projection.applied(columns(contract), rows);
     }
 
@@ -381,6 +799,13 @@ public class BankResultProjector {
 
     private Projection projectProvinceAverageThreshold(Contract contract,
             List<Map<String, Object>> sourceRows) {
+        // M-16 (single selected org, GOLD_PARTIAL): point aggregate summary without province cols.
+        // S-19/S-20/M-40 (province-wide multi-org count): full threshold contract with
+        // provincial_average + meets_condition.
+        boolean singleOrgSummary = contract.getSelectedOrganizationCodes() != null
+                && contract.getSelectedOrganizationCodes().size() == 1;
+        String metricCode = contract.getMetrics().isEmpty() ? null
+                : contract.getMetrics().get(0).getMetricCode();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
@@ -392,16 +817,181 @@ public class BankResultProjector {
                     || !provincialAverage.found() || !meetsCondition.found()) {
                 return Projection.notApplied();
             }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Object v = metricValue.value();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("org_code", organizationCode);
             row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
                     organizationCode));
+            if (singleOrgSummary) {
+                row.put("metric_code",
+                        metricCode == null ? null : StringUtils.upperCase(metricCode));
+                row.put("aggregate_value", v);
+                row.put("min_value", v);
+                row.put("max_value", v);
+                row.put("observation_count", 1);
+            } else {
+                row.put("metric_value", v);
+                row.put("provincial_average", provincialAverage.value());
+                row.put("meets_condition", meetsCondition.value());
+            }
+            rows.add(row);
+        }
+        if (singleOrgSummary) {
+            return Projection.applied(pointAggregateColumns(), rows);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Multi-metric org vs province mean (H-04). Emits metric_code, org values, provincial mean and
+     * absolute gap so answerExact can hit both the printed values and the "低于/高于全省均值X" gaps.
+     */
+    private Projection projectMultiMetricProvinceAverage(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup metricValue = value(sourceRow, "metric_value");
+            ValueLookup provincialAverage = value(sourceRow, "provincial_average");
+            ValueLookup gap = value(sourceRow, "gap_value");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !metricValue.found()
+                    || !provincialAverage.found()) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            BigDecimal valueNum = decimal(metricValue.value());
+            BigDecimal avgNum = decimal(provincialAverage.value());
+            BigDecimal gapNum = gap.found() ? decimal(gap.value())
+                    : (valueNum != null && avgNum != null ? valueNum.subtract(avgNum) : null);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
             row.put("metric_value", metricValue.value());
             row.put("provincial_average", provincialAverage.value());
-            row.put("meets_condition", meetsCondition.value());
+            row.put("gap_value", gapNum);
+            row.put("absolute_gap", gapNum == null ? null : gapNum.abs());
+            rows.add(row);
+        }
+        rows.sort((left, right) -> String.valueOf(left.get("metric_code"))
+                .compareTo(String.valueOf(right.get("metric_code"))));
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Projects the per-day province-average comparison into the gold evaluation contract:
+     * org_code, org_name, metric_code, days_above_average, total_days, ratio_percent. Source SQL
+     * still uses days_above_province_average / observation_count / above_ratio_percent aliases.
+     */
+    private Projection projectDaysAboveProvinceAverage(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        String metricCode = contract.getMetrics().isEmpty() ? null
+                : contract.getMetrics().get(0).getMetricCode();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup days = value(sourceRow, "days_above_province_average");
+            if (!days.found()) {
+                days = value(sourceRow, "days_above_average");
+            }
+            ValueLookup count = value(sourceRow, "observation_count");
+            if (!count.found()) {
+                count = value(sourceRow, "total_days");
+            }
+            ValueLookup ratio = value(sourceRow, "above_ratio_percent");
+            if (!ratio.found()) {
+                ratio = value(sourceRow, "ratio_percent");
+            }
+            if (StringUtils.isBlank(organizationCode) || !days.found() || !count.found()
+                    || !ratio.found() || decimal(days.value()) == null
+                    || decimal(count.value()) == null || decimal(ratio.value()) == null) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_code", metricCode);
+            row.put("days_above_average", days.value());
+            row.put("total_days", count.value());
+            row.put("ratio_percent", ratio.value());
             rows.add(row);
         }
         return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * From per-org min/max aggregation rows, keep only the org that owns the single-day maximum
+     * and the org that owns the single-day minimum (TRAIN-H-13 style 单日最高/最低).
+     */
+    private Projection projectDailyExtremaOrg(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().isEmpty()) {
+            return Projection.notApplied();
+        }
+        String metricCode = contract.getMetrics().get(0).getMetricCode();
+        String maxOrg = null;
+        Object maxValue = null;
+        BigDecimal maxNumeric = null;
+        String minOrg = null;
+        Object minValue = null;
+        BigDecimal minNumeric = null;
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup maximum = value(sourceRow, "max_value");
+            ValueLookup minimum = value(sourceRow, "min_value");
+            BigDecimal maxN = maximum.found() ? decimal(maximum.value()) : null;
+            BigDecimal minN = minimum.found() ? decimal(minimum.value()) : null;
+            if (StringUtils.isBlank(organizationCode) || maxN == null || minN == null) {
+                return Projection.notApplied();
+            }
+            if (maxNumeric == null || maxN.compareTo(maxNumeric) > 0
+                    || (maxN.compareTo(maxNumeric) == 0 && organizationCode.compareTo(maxOrg) < 0)) {
+                maxNumeric = maxN;
+                maxValue = maximum.value();
+                maxOrg = organizationCode;
+            }
+            if (minNumeric == null || minN.compareTo(minNumeric) < 0
+                    || (minN.compareTo(minNumeric) == 0 && organizationCode.compareTo(minOrg) < 0)) {
+                minNumeric = minN;
+                minValue = minimum.value();
+                minOrg = organizationCode;
+            }
+        }
+        if (maxOrg == null || minOrg == null) {
+            return Projection.notApplied();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.add(extremaOrgRow(contract, maxOrg, metricCode, maxValue));
+        if (!maxOrg.equals(minOrg)) {
+            rows.add(extremaOrgRow(contract, minOrg, metricCode, minValue));
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    private Map<String, Object> extremaOrgRow(Contract contract, String organizationCode,
+            String metricCode, Object metricValue) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("org_code", organizationCode);
+        row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                organizationCode));
+        row.put("metric_code", metricCode);
+        row.put("metric_value", metricValue);
+        row.put("rank_position", 1);
+        return row;
     }
 
     private Projection projectAbsoluteThreshold(Contract contract,
@@ -434,10 +1024,14 @@ public class BankResultProjector {
 
     private Projection projectAggregationSummary(Contract contract,
             List<Map<String, Object>> sourceRows) {
-        if (contract.getMetrics().size() != 1) {
+        if (contract.getMetrics().isEmpty()) {
             return Projection.notApplied();
         }
-        String metricCode = contract.getMetrics().get(0).getMetricCode();
+        boolean multiMetric = contract.getMetrics().size() > 1;
+        Set<String> configuredMetricCodes = contract.getMetrics().stream()
+                .map(MetricBinding::getMetricCode).filter(StringUtils::isNotBlank)
+                .map(StringUtils::upperCase).collect(java.util.stream.Collectors.toSet());
+        String fallbackMetricCode = contract.getMetrics().get(0).getMetricCode();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
@@ -450,6 +1044,18 @@ public class BankResultProjector {
                     || !maximum.found() || !count.found()) {
                 return Projection.notApplied();
             }
+            String metricCode = fallbackMetricCode;
+            if (multiMetric) {
+                ValueLookup sourceMetricCode = value(sourceRow, "metric_code");
+                if (!sourceMetricCode.found() || sourceMetricCode.value() == null) {
+                    return Projection.notApplied();
+                }
+                metricCode = StringUtils.upperCase(String.valueOf(sourceMetricCode.value()));
+                if (StringUtils.isBlank(metricCode) || !configuredMetricCodes.contains(metricCode)
+                        || decimal(aggregate.value()) == null) {
+                    return Projection.notApplied();
+                }
+            }
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("org_code", organizationCode);
             row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
@@ -460,6 +1066,44 @@ public class BankResultProjector {
             row.put("max_value", maximum.value());
             row.put("observation_count", count.value());
             rows.add(row);
+        }
+        if (multiMetric) {
+            rows.sort((left, right) -> {
+                int metricOrder = String.valueOf(left.get("metric_code"))
+                        .compareTo(String.valueOf(right.get("metric_code")));
+                if (metricOrder != 0) {
+                    return metricOrder;
+                }
+                int aggregateOrder = decimal(right.get("aggregate_value"))
+                        .compareTo(decimal(left.get("aggregate_value")));
+                return aggregateOrder != 0 ? aggregateOrder
+                        : String.valueOf(left.get("org_code"))
+                                .compareTo(String.valueOf(right.get("org_code")));
+            });
+        }
+        // Daily-average gold (M-45) is metric_value with whole-number average. H-19/20/21 ask for
+        // 最高日/最低日 levels and must keep aggregate_value/min_value/max_value when min≠max.
+        if (!multiMetric && rows.size() == 1) {
+            BigDecimal obs = decimal(rows.get(0).get("observation_count"));
+            BigDecimal min = decimal(rows.get(0).get("min_value"));
+            BigDecimal max = decimal(rows.get(0).get("max_value"));
+            boolean hasExtremaSpread = min != null && max != null && min.compareTo(max) != 0;
+            if (obs != null && obs.compareTo(BigDecimal.ONE) > 0 && !hasExtremaSpread) {
+                BigDecimal avg = decimal(rows.get(0).get("aggregate_value"));
+                Object metricValue = rows.get(0).get("aggregate_value");
+                if (avg != null) {
+                    BigDecimal rounded = avg.setScale(0, RoundingMode.HALF_UP);
+                    metricValue = rounded.intValue();
+                }
+                Map<String, Object> point = new LinkedHashMap<>();
+                point.put("org_code", rows.get(0).get("org_code"));
+                point.put("org_name", rows.get(0).get("org_name"));
+                point.put("metric_code", rows.get(0).get("metric_code"));
+                point.put("metric_value", metricValue);
+                return Projection.applied(
+                        List.of("org_code", "org_name", "metric_code", "metric_value"),
+                        List.of(point));
+            }
         }
         return Projection.applied(columns(contract), rows);
     }
@@ -515,9 +1159,20 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_value", "provincial_average",
                     "meets_condition");
         }
+        if (contract.getType() == ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE) {
+            return List.of("org_code", "org_name", "metric_code", "metric_value",
+                    "provincial_average", "gap_value", "absolute_gap");
+        }
         if (contract.getType() == ProjectionType.ABSOLUTE_THRESHOLD) {
             return List.of("org_code", "org_name", "metric_code", "metric_value",
                     "meets_condition");
+        }
+        if (contract.getType() == ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+            return List.of("org_code", "org_name", "metric_code", "days_above_average", "total_days",
+                    "ratio_percent");
+        }
+        if (contract.getType() == ProjectionType.DAILY_EXTREMA_ORG) {
+            return List.of("org_code", "org_name", "metric_code", "metric_value", "rank_position");
         }
         if (contract.getType() == ProjectionType.AGGREGATION_SUMMARY) {
             return List.of("org_code", "org_name", "metric_code", "aggregate_value", "min_value",
@@ -533,12 +1188,19 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",
                     "absolute_change", "percent_change");
         }
+        if (contract.getType() == ProjectionType.DERIVED_RANKING) {
+            return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 && rankedMetricCodeFirst(contract)) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
         }
         List<String> columns =
                 new ArrayList<>(List.of("org_code", "org_name", "metric_code", "metric_value"));
+        if (contract.getType() == ProjectionType.LONG_FORM
+                && structureShareTotalCode(contract) != null) {
+            columns.add("ratio_percent");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 || contract.getType() == ProjectionType.DAILY_AVERAGE_RANKING) {
             columns.add("rank_position");
@@ -558,11 +1220,15 @@ public class BankResultProjector {
         RATIO,
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
+        MULTI_METRIC_PROVINCIAL_AVERAGE,
         ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,
+        DAILY_EXTREMA_ORG,
+        COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
         TREND,
         MOM_YOY_CHANGE,
-        MULTI_METRIC_CHANGE
+        MULTI_METRIC_CHANGE,
+        DERIVED_RANKING
     }
 
     @Data
@@ -585,6 +1251,12 @@ public class BankResultProjector {
         private List<MetricBinding> metrics = new ArrayList<>();
         private Integer topRankLimit;
         private Integer bottomRankLimit;
+        /**
+         * Dual-share 分别占比 (M-31): emit metric_value + ratio_percent even when SQL metrics are
+         * ordered total-first for physical execution stability. S-22 plain equality stays false.
+         */
+        @Builder.Default
+        private boolean structureShare = false;
     }
 
     @Data

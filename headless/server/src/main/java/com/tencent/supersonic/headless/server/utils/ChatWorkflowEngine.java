@@ -13,6 +13,7 @@ import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
 import com.tencent.supersonic.headless.chat.corrector.SemanticCorrector;
 import com.tencent.supersonic.headless.chat.mapper.SchemaMapper;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
@@ -54,7 +55,14 @@ public class ChatWorkflowEngine {
                     break;
                 case PARSING:
                     performParsing(queryCtx);
-                    if (queryCtx.getCandidateQueries().isEmpty()) {
+                    // A terminal bank constrained-plan failure must stay failed: do not let residual
+                    // free/rule candidates overwrite the bank error and win the parse.
+                    if (ParseResp.ParseState.FAILED.equals(parseResult.getState())
+                            && BankNl2SqlError.isTerminalParserError(parseResult.getErrorMsg())) {
+                        queryCtx.getCandidateQueries().clear();
+                        parseResult.setSelectedParses(new ArrayList<>());
+                        queryCtx.setChatWorkflowState(ChatWorkflowState.FINISHED);
+                    } else if (queryCtx.getCandidateQueries().isEmpty()) {
                         parseResult.setState(ParseResp.ParseState.FAILED);
                         parseResult.setErrorMsg("No semantic queries can be parsed out.");
                         queryCtx.setChatWorkflowState(ChatWorkflowState.FINISHED);
@@ -160,8 +168,17 @@ public class ChatWorkflowEngine {
                         SensitiveLogUtils.summarize(
                                 StringUtils.normalizeSpace(parseInfo.getSqlInfo().getQuerySQL())));
             } catch (Exception e) {
-                log.warn("SQL translation failed: type={}, error=[{}]",
-                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+                // Surface the real translation message in local bank ablation debugging; still
+                // keep the user-facing parse error generic.
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) {
+                    root = root.getCause();
+                }
+                log.warn(
+                        "SQL translation failed: type={}, rootType={}, rootMsg=[{}], topMsg=[{}]",
+                        e.getClass().getSimpleName(), root.getClass().getSimpleName(),
+                        StringUtils.left(String.valueOf(root.getMessage()), 800),
+                        StringUtils.left(String.valueOf(e.getMessage()), 800));
                 errorMsg.add("Semantic query translation failed");
             }
         });

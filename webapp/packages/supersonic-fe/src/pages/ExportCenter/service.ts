@@ -1,6 +1,6 @@
 import request from '@/services/request';
 import { normalizeApiResult } from './model';
-import { ExportCreateReq, ExportDownload, ExportTaskResp } from './types';
+import { ExportCreateReq, ExportDownload, ExportTaskPage, ExportTaskResp } from './types';
 
 const exportBase = `${process.env.API_BASE_URL || '/api/semantic/'}export`;
 
@@ -17,6 +17,19 @@ export const getExportTask = async (taskId: string): Promise<ExportTaskResp> => 
     `${exportBase}/${encodeURIComponent(taskId)}`,
     { method: 'GET' },
   );
+  return normalizeApiResult(response);
+};
+
+export const getExportTasks = async (
+  params: {
+    pageNum?: number;
+    pageSize?: number;
+  } = {},
+): Promise<ExportTaskPage> => {
+  const response = await request<ExportTaskPage | Result<ExportTaskPage>>(exportBase, {
+    method: 'GET',
+    params,
+  });
   return normalizeApiResult(response);
 };
 
@@ -66,6 +79,7 @@ export const saveDownload = ({ blob, fileName }: ExportDownload) => {
 export const exportApi = {
   create: createExportTask,
   get: getExportTask,
+  list: getExportTasks,
   download: downloadExportFile,
   saveDownload,
 };

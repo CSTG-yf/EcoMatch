@@ -12,23 +12,27 @@ import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
-import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
-import com.tencent.supersonic.headless.chat.parser.llm.validation.ComplexSqlErrorClassifier;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.Date;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 public class SqlExecutor implements ChatQueryExecutor {
+
+    private static final Set<String> EXECUTION_FAILURE_LAYERS = Set.of("SQL_SAFETY_POLICY",
+            "QUERY_GATEWAY", "JDBC_GRAMMAR", "JDBC_DATA_ACCESS", "JDBC_OTHER");
 
     @Override
     public boolean accept(ExecuteContext executeContext) {
@@ -80,14 +84,18 @@ public class SqlExecutor implements ChatQueryExecutor {
             return null;
         }
 
-        // 使用querySQL，它已经包含了所有修正（包括物理SQL修正）
+        // Keep the S2SQL request for model-scope authorization; querySQL remains the physical SQL
+        // consumed by S2SemanticLayerService when it builds the executable query statement.
+        String scopeSql = parseInfo.getSqlInfo().getCorrectedS2SQL();
         String finalSql = StringUtils.isNotBlank(parseInfo.getSqlInfo().getQuerySQL())
                 ? parseInfo.getSqlInfo().getQuerySQL()
-                : parseInfo.getSqlInfo().getCorrectedS2SQL();
+                : scopeSql;
 
-        QuerySqlReq sqlReq = QuerySqlReq.builder().sql(finalSql).build();
+        QuerySqlReq sqlReq = QuerySqlReq.builder().sql(scopeSql).build();
         sqlReq.setSqlInfo(parseInfo.getSqlInfo());
         sqlReq.setDataSetId(parseInfo.getDataSetId());
+        sqlReq.setTrustedCompiledSql(StringUtils
+                .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
 
         long startTime = System.currentTimeMillis();
         QueryResult queryResult = new QueryResult();
@@ -107,14 +115,15 @@ public class SqlExecutor implements ChatQueryExecutor {
                     executeContext.getRequest().getQueryText(), finalSql, originalError);
             if (StringUtils.isNotBlank(repairedSql)) {
                 repairAttempted = true;
-                sqlReq.setSql(repairedSql);
-                queryResp = semanticLayer.queryByReq(sqlReq, executeContext.getRequest().getUser());
-                finalSql = repairedSql;
                 parseInfo.getSqlInfo().setCorrectedQuerySQL(repairedSql);
                 parseInfo.getSqlInfo().setQuerySQL(repairedSql);
+                sqlReq.setTrustedCompiledSql(false);
+                queryResp = semanticLayer.queryByReq(sqlReq, executeContext.getRequest().getUser());
+                finalSql = repairedSql;
             }
         }
         queryResult.setQueryTimeCost(System.currentTimeMillis() - startTime);
+        persistBankPlanToolExecution(parseInfo, queryResp);
         if (queryResp != null) {
             queryResult.setQueryAuthorization(queryResp.getQueryAuthorization());
             queryResult.setQuerySql(finalSql);
@@ -126,33 +135,88 @@ public class SqlExecutor implements ChatQueryExecutor {
             if (StringUtils.isBlank(queryResp.getErrorMsg())) {
                 queryResult.setQueryState(QueryState.SUCCESS);
                 if (repairAttempted) {
-                    Map<String, Object> feedback = new HashMap<>();
-                    feedback.put("errorType",
-                            ComplexSqlErrorClassifier.classifyExecutionError(originalError).name());
-                    feedback.put("retryable", false);
-                    feedback.put("repairAttempted", true);
-                    feedback.put("repaired", true);
-                    feedback.put("originalError", originalError);
-                    parseInfo.getProperties().put("sqlExecutionFeedback", feedback);
+                    persistExecutionTelemetry(parseInfo, queryResp, true, true);
                 }
                 chatCtx.setParseInfo(parseInfo);
                 chatContextService.updateContext(chatCtx);
             } else {
                 queryResult.setQueryState(QueryState.SEARCH_EXCEPTION);
-                SqlErrorType errorType =
-                        ComplexSqlErrorClassifier.classifyExecutionError(queryResp.getErrorMsg());
-                Map<String, Object> feedback = new HashMap<>();
-                feedback.put("errorType", errorType.name());
-                feedback.put("retryable", true);
-                feedback.put("repairAttempted", repairAttempted);
-                feedback.put("originalError", originalError);
-                feedback.put("finalError", queryResp.getErrorMsg());
-                parseInfo.getProperties().put("sqlExecutionFeedback", feedback);
+                persistExecutionTelemetry(parseInfo, queryResp, repairAttempted, false);
             }
         } else {
             queryResult.setQueryState(QueryState.INVALID);
         }
 
         return queryResult;
+    }
+
+    private void persistExecutionTelemetry(SemanticParseInfo parseInfo,
+            SemanticQueryResp queryResp, boolean repairAttempted, boolean repaired) {
+        Map<String, Object> telemetry = new LinkedHashMap<>();
+        Map<String, Object> responseTelemetry = queryResp.getExecutionTelemetry();
+        Object failureLayer = responseTelemetry == null
+                ? null : responseTelemetry.get("failureLayer");
+        if (failureLayer instanceof String layer && EXECUTION_FAILURE_LAYERS.contains(layer)) {
+            telemetry.put("failureLayer", layer);
+        }
+        telemetry.put("repairAttempted", repairAttempted);
+        telemetry.put("repaired", repaired);
+        parseInfo.getProperties().put("executionTelemetry", telemetry);
+    }
+
+    private void persistBankPlanToolExecution(SemanticParseInfo parseInfo,
+            SemanticQueryResp queryResp) {
+        BankPlanToolResult toolResult = BankPlanToolResult
+                .from(parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY));
+        if (toolResult == null) {
+            return;
+        }
+        if (queryResp != null && StringUtils.isBlank(queryResp.getErrorMsg())) {
+            toolResult.succeed(BankPlanToolResult.Stage.SQL_SAFETY)
+                    .succeed(BankPlanToolResult.Stage.DATABASE_PREPARE)
+                    .succeed(BankPlanToolResult.Stage.DATABASE_EXECUTE);
+            parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+            return;
+        }
+
+        String failureLayer = allowlistedFailureLayer(queryResp);
+        BankPlanToolResult.Stage stage = failureStage(failureLayer);
+        if (stage.ordinal() > BankPlanToolResult.Stage.SQL_SAFETY.ordinal()) {
+            toolResult.succeed(BankPlanToolResult.Stage.SQL_SAFETY);
+        }
+        if (stage.ordinal() > BankPlanToolResult.Stage.DATABASE_PREPARE.ordinal()) {
+            toolResult.succeed(BankPlanToolResult.Stage.DATABASE_PREPARE);
+        }
+        String errorCode = failureLayer == null ? "DATABASE_EXECUTION_FAILED" : failureLayer;
+        toolResult.fail(stage, errorCode, Map.of(), correctionHints(stage));
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+    }
+
+    private String allowlistedFailureLayer(SemanticQueryResp queryResp) {
+        if (queryResp == null || queryResp.getExecutionTelemetry() == null) {
+            return null;
+        }
+        Object value = queryResp.getExecutionTelemetry().get("failureLayer");
+        return value instanceof String layer && EXECUTION_FAILURE_LAYERS.contains(layer) ? layer
+                : null;
+    }
+
+    private BankPlanToolResult.Stage failureStage(String failureLayer) {
+        if ("SQL_SAFETY_POLICY".equals(failureLayer)) {
+            return BankPlanToolResult.Stage.SQL_SAFETY;
+        }
+        if ("QUERY_GATEWAY".equals(failureLayer)) {
+            return BankPlanToolResult.Stage.DATABASE_PREPARE;
+        }
+        return BankPlanToolResult.Stage.DATABASE_EXECUTE;
+    }
+
+    private List<String> correctionHints(BankPlanToolResult.Stage stage) {
+        return switch (stage) {
+            case SQL_SAFETY -> List.of("只修正 BankQueryPlan，不要直接生成或修改物理 SQL");
+            case DATABASE_PREPARE -> List.of("检查计划的机构、指标、时间与查询族组合");
+            case DATABASE_EXECUTE -> List.of("根据失败阶段重新生成完整 BankQueryPlan");
+            default -> List.of("重新生成符合语义目录约束的完整 BankQueryPlan");
+        };
     }
 }

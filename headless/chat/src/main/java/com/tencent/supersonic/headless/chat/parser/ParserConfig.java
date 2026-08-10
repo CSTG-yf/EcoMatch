@@ -58,6 +58,27 @@ public class ParserConfig extends ParameterConfig {
             "s2.parser.bank.constrained-plan.enable", "false", "是否对银行语义数据集启用受约束计划",
             "仅对同时具备 bank_organization 和 bank_data_date 维度的数据集生效；关闭即可回退原有策略", "bool", "语义解析配置");
 
+    public static final Parameter PARSER_BANK_FREE_SQL_THINKING_ENABLE = new Parameter(
+            "s2.parser.bank.free-sql.thinking.enable", "true", "银行 free-SQL 是否开启深度思考",
+            "仅 bank-off 自由 SQL 前缀路径生效；提升复杂题准确率，但会明显增加时延与生成 token", "bool",
+            "语义解析配置");
+
+    public static final Parameter PARSER_BANK_PLAN_THINKING_ENABLE = new Parameter(
+            "s2.parser.bank.plan.thinking.enable", "false", "银行受约束计划是否开启深度思考",
+            "仅 BANK_CONSTRAINED_PLAN 前缀路径生效；也可用 -Ds2.parser.bank.plan.thinking.enable=true 覆盖；会增加时延",
+            "bool", "语义解析配置");
+
+    public static final Parameter PARSER_BANK_PLAN_DETERMINISTIC_SHORT_CIRCUIT_ENABLE =
+            new Parameter("s2.parser.bank.plan.deterministic-short-circuit.enable", "false",
+                    "银行计划是否启用规则短路跳过模型",
+                    "默认 false：一律走受约束模型候选与多步修复；true 时命中规则计划直接编译（消融/时延实验）；也可用 -D 同名系统属性覆盖",
+                    "bool", "语义解析配置");
+
+    public static final Parameter PARSER_BANK_PLAN_SOFT_FALLBACK_ENABLE = new Parameter(
+            "s2.parser.bank.plan.soft-fallback.enable", "true", "银行计划模型全拒后是否规则软回退",
+            "默认 true：模型候选与 cold-replan 全失败时用白名单规则计划兜底；false 仅用于纯模型消融；也可用 -D 同名系统属性覆盖",
+            "bool", "语义解析配置");
+
     public static final Parameter PARSER_SHOW_COUNT =
             new Parameter("s2.parser.show.count", "3", "解析结果展示个数", "前端展示的解析个数", "number", "语义解析配置");
 
@@ -74,7 +95,10 @@ public class ParserConfig extends ParameterConfig {
         return Lists.newArrayList(PARSER_STRATEGY_TYPE, PARSER_LINKING_VALUE_ENABLE,
                 PARSER_RULE_CORRECTOR_ENABLE, PARSER_FEW_SHOT_NUMBER,
                 PARSER_SELF_CONSISTENCY_NUMBER, PARSER_BANK_MAX_CANDIDATES,
-                PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_SHOW_COUNT,
+                PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_BANK_FREE_SQL_THINKING_ENABLE,
+                PARSER_BANK_PLAN_THINKING_ENABLE,
+                PARSER_BANK_PLAN_DETERMINISTIC_SHORT_CIRCUIT_ENABLE,
+                PARSER_BANK_PLAN_SOFT_FALLBACK_ENABLE, PARSER_SHOW_COUNT,
                 PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

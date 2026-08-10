@@ -23,6 +23,7 @@ public class BankIntentResult implements Serializable {
     private boolean clarificationRequired;
     private List<IntentCandidate> intentCandidates = new ArrayList<>();
     private List<MetricCandidate> metrics = new ArrayList<>();
+    private List<DerivedMetricCandidate> derivedMetrics = new ArrayList<>();
     private List<OrganizationSlot> organizations = new ArrayList<>();
     private TimeSlot time;
     private List<FilterSlot> filters = new ArrayList<>();
@@ -50,6 +51,22 @@ public class BankIntentResult implements Serializable {
 
         private String code;
         private String name;
+        private String matchedText;
+        private double confidence;
+        private String reason;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DerivedMetricCandidate implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        private String code;
+        private String name;
+        private String numerator;
+        private String denominator;
         private String matchedText;
         private double confidence;
         private String reason;

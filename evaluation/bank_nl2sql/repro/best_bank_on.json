@@ -1,0 +1,84 @@
+{
+  "name": "best_bank_on",
+  "description": "Best-known SuperSonic bank-on NL2SQL runtime for EcoMatch bank path (post H-04 / dual-share / province-LT routing).",
+  "asOf": "2026-08-08",
+  "branchHint": "experiment/bank-path-ablation",
+  "antiCheat": {
+    "noTrainGoldFewShots": true,
+    "noTrainIdHardcodedBuilders": true,
+    "noGoldSqlInPrompts": true,
+    "rulesDoc": "AGENTS.md"
+  },
+  "agent": {
+    "agentId": 33,
+    "note": "Local bank 问数 agent; chat apps must enable BANK_CONSTRAINED_PLAN."
+  },
+  "systemParameters": {
+    "s2.parser.bank.constrained-plan.enable": "true",
+    "s2.parser.bank.max-candidates": "1",
+    "s2.parser.bank.plan.thinking.enable": "false",
+    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false",
+    "s2.parser.bank.plan.soft-fallback.enable": "true",
+    "s2.parser.bank.free-sql.thinking.enable": "true"
+  },
+  "jvmSystemProperties": {
+    "s2.parser.bank.plan.thinking.enable": "false",
+    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false",
+    "s2.parser.bank.plan.soft-fallback.enable": "true"
+  },
+  "agentChatApps": {
+    "BANK_CONSTRAINED_PLAN": { "enable": true },
+    "S2SQL_PARSER": { "enable": true, "chatModelId": 1 },
+    "EXECUTION_SQL_CORRECTOR": {
+      "enable": true,
+      "chatModelId": 1,
+      "note": "Resilience for physical exec failures; not required when templates already tableEX-pass."
+    },
+    "S2SQL_CORRECTOR": { "enable": false },
+    "PHYSICAL_SQL_CORRECTOR": { "enable": false }
+  },
+  "eval": {
+    "runtimeModeLabel": "bank-on",
+    "baseUrl": "http://127.0.0.1:9080",
+    "dataset": "evaluation/bank_nl2sql",
+    "concurrency": 1,
+    "timeoutSeconds": 300,
+    "primaryMetrics": ["answerExact", "tableEX", "executionSuccessRate", "parseSuccessRate"],
+    "smokeIdsFiles": {
+      "hard20": "evaluation/bank_nl2sql/repro/ids-train-hard20.txt",
+      "h04Family": "evaluation/bank_nl2sql/repro/ids-train-h04-family.txt",
+      "reg21": "evaluation/bank_nl2sql/repro/ids-train-reg21.txt"
+    }
+  },
+  "evidence": {
+    "hard20": {
+      "report": ".local-dev/bank-nl2sql/ablation/train-hard20-ablation-sc0-fb1-c1-post-h04.json",
+      "metrics": {
+        "tableEX": 1.0,
+        "answerExact": 1.0,
+        "answerExactHits": "14/14",
+        "executionSuccessRate": 1.0,
+        "parseSuccessRate": 1.0,
+        "durationSecondsApprox": 515
+      },
+      "cell": "sc0-fb1-c1 (short-circuit off, soft-fallback on, max-candidates=1)"
+    },
+    "reg21_v48weak_plus_h04": {
+      "report": ".local-dev/bank-nl2sql/ablation/train-reg-v48weak-post-fix2.json",
+      "metrics": {
+        "tableEX": 1.0,
+        "answerExact": 1.0,
+        "answerExactHits": "15/15",
+        "executionSuccessRate": 1.0,
+        "parseSuccessRate": 1.0
+      }
+    },
+    "ablationSummary": ".local-dev/bank-nl2sql/ablation/train-hard20-ablation-summary.json"
+  },
+  "notRecommended": {
+    "s2.parser.bank.plan.deterministic-short-circuit.enable": "true",
+    "s2.parser.bank.max-candidates": "2",
+    "s2.parser.bank.plan.soft-fallback.enable": "false",
+    "why": "Ablation: SC-on same tableEX only saves latency; cand=2 doubles latency without tableEX gain; FB-off halves parse/tableEX on hard20."
+  }
+}

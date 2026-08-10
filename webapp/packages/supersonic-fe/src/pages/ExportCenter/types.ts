@@ -65,6 +65,14 @@ export interface ExportTaskResp {
   downloadable: boolean;
 }
 
+export interface ExportTaskPage {
+  list: ExportTaskResp[];
+  pageNum?: number;
+  pageSize?: number;
+  total?: number;
+  pages?: number;
+}
+
 export interface ExportTaskItem extends ExportTaskResp {
   request?: ExportCreateReq;
   actionError?: ExportError;

@@ -1,7 +1,9 @@
 package com.tencent.supersonic.chat.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.request.BankPlanRepairContext;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilters;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,4 +25,8 @@ public class ChatParseReq {
     private boolean disableLLM = false;
     private Long queryId;
     private SemanticParseInfo selectedParse;
+    @JsonIgnore
+    private boolean internalBankPlanRepair;
+    @JsonIgnore
+    private BankPlanRepairContext bankPlanRepairContext;
 }

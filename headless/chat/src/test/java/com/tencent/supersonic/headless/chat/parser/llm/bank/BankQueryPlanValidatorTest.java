@@ -43,6 +43,49 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void shouldAcceptFullYearPlanWhenMapperClampedEndDateWithinSameYear() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.AGGREGATION)
+                .metrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.AVG).build()))
+                .dimensions(List.of("bank_organization")).organizations(List.of())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                        .endDate(LocalDate.of(2025, 12, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(List.of()).output(BankQueryPlan.Output.builder()
+                        .columns(List.of("bank_organization", "ZB002")).orderSensitive(true).build())
+                .build();
+        // Mapper evidence said RANKING (highest/lowest wording) with a clamped end date.
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB002")).allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 8, 7)).maxLimit(1000).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
+    void shouldAcceptPlanWhenMapperProvidedNoTimeRange() {
+        BankQueryPlan plan = completeRankingPlan();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredLimit(3).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
     void shouldRejectPhysicalSqlAndUnknownOrganizationInsteadOfExecutingThem() {
         BankQueryPlan plan = completeRankingPlan();
         plan.getMetrics().get(0).setBizName("sum(deposit_balance)");
@@ -229,10 +272,88 @@ class BankQueryPlanValidatorTest {
         assertTrue(result.codes().contains("TREND_TIME_DIMENSION_REQUIRED"));
     }
 
+    @Test
+    void shouldRejectOutputThatDropsASelectedDimension() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setDimensions(List.of("机构", "数据日期"));
+        plan.getOutput().setColumns(List.of("机构", "ZB001"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+        assertFalse(result.codes().contains("UNKNOWN_OUTPUT_COLUMN"));
+    }
+
+    @Test
+    void shouldRejectOutputContainingAValidButUnselectedField() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.getOutput().setColumns(List.of("机构", "ZB001", "ZB002"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+        assertFalse(result.codes().contains("UNKNOWN_OUTPUT_COLUMN"));
+    }
+
+    @Test
+    void shouldRejectOutputWithDuplicateColumns() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.getOutput().setColumns(List.of("机构", "ZB001", "机构"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("OUTPUT_EXTRA_COLUMN"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_DIMENSION"));
+        assertFalse(result.codes().contains("OUTPUT_MISSING_METRIC"));
+    }
+
+    @Test
+    void shouldRejectUnknownOfficialMetricWithoutMapperAllowList() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB999")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+        plan.getOrderBy().get(0).setField("ZB999");
+        plan.getOutput().setColumns(List.of("机构", "ZB999"));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                unboundCatalogHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNKNOWN_METRIC"));
+    }
+
+    @Test
+    void shouldRejectUnknownOfficialOrganizationWithoutMapperAllowList() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setOrganizations(List.of(
+                BankQueryPlan.Organization.builder().code("ORG999").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                unboundCatalogHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNKNOWN_ORGANIZATION"));
+    }
+
     private SemanticIntentHints hints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+    }
+
+    private SemanticIntentHints unboundCatalogHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of()).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of()).requiredOrganizationCodes(Set.of())
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
     }
@@ -262,5 +383,255 @@ class BankQueryPlanValidatorTest {
                 .limit(3).output(BankQueryPlan.Output.builder().columns(List.of("机构", "ZB001"))
                         .orderSensitive(true).build())
                 .build();
+    }
+
+    @Test
+    void shouldAcceptRankingPlanPreservingTheDerivedMetricContract() {
+        BankQueryPlan plan = derivedRankingPlan();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertTrue(result.isValid(), result::summary);
+    }
+
+    @Test
+    void shouldRejectPlanThatDropsTheRecognizedDerivedMetric() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of());
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISSING"));
+    }
+
+    @Test
+    void shouldRejectIllegalDerivedMetricCodeAndOperands() {
+        BankQueryPlan codeOperandConflict = derivedRankingPlan();
+        codeOperandConflict.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB001")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(codeOperandConflict, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+
+        BankQueryPlan sameOperands = derivedRankingPlan();
+        sameOperands.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB001_DIV_ZB001").numerator("ZB001")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(sameOperands, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+
+        BankQueryPlan nonBaseOperand = derivedRankingPlan();
+        nonBaseOperand.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("贷款余额")
+                .denominator("ZB001").name("存贷比").build()));
+        assertTrue(validator.validate(nonBaseOperand, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INVALID"));
+    }
+
+    @Test
+    void shouldRejectDuplicateDerivedMetricEntries() {
+        BankQueryPlan plan = derivedRankingPlan();
+        BankQueryPlan.DerivedMetric derived = plan.getDerivedMetrics().get(0);
+        plan.setDerivedMetrics(List.of(derived, derived));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_DUPLICATE"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricThatDoesNotMatchMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB013_DIV_ZB001").numerator("ZB013")
+                .denominator("ZB001").name("不良贷款率").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISMATCH"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricsReorderedAgainstMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setDerivedMetrics(List.of(
+                BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB001_DIV_ZB002")
+                        .numerator("ZB001").denominator("ZB002").name("存贷比倒数").build(),
+                BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                        .numerator("ZB002").denominator("ZB001").name("存贷比").build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, twoDerivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_MISMATCH"));
+    }
+
+    @Test
+    void shouldRejectUnexpectedDerivedMetricWithoutMapperEvidence() {
+        BankQueryPlan plan = derivedRankingPlan();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_UNEXPECTED"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricWhoseOperandsAreNotDirectMetrics() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, derivedHints());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_OPERAND_REQUIRED"));
+    }
+
+    @Test
+    void shouldRejectDerivedMetricOutsideTheRankingDirectContract() {
+        BankQueryPlan nonDirectCalculation = derivedRankingPlan();
+        nonDirectCalculation.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).build());
+        assertTrue(validator.validate(nonDirectCalculation, derivedHints()).codes()
+                .contains("DERIVED_METRIC_CALCULATION_REQUIRED"));
+
+        BankQueryPlan nonRankingIntent = derivedRankingPlan();
+        nonRankingIntent.setIntent(BankIntentType.POINT_QUERY);
+        assertTrue(validator.validate(nonRankingIntent, derivedHints()).codes()
+                .contains("DERIVED_METRIC_INTENT_REQUIRED"));
+    }
+
+    private SemanticIntentHints derivedHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .build();
+    }
+
+    private SemanticIntentHints twoDerivedHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002")).allowedDimensions(Set.of("机构", "数据日期"))
+                .requiredMetrics(Set.of("ZB001", "ZB002")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100)
+                .requiredDerivedMetrics(List.of(
+                        new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB002_DIV_ZB001",
+                                "ZB002", "ZB001", "存贷比"),
+                        new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB001_DIV_ZB002",
+                                "ZB001", "ZB002", "存贷比倒数")))
+                .build();
+    }
+
+    private BankQueryPlan derivedRankingPlan() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setMetrics(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()));
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002")
+                .denominator("ZB001").name("存贷比").build()));
+        plan.getOutput().setColumns(List.of("机构", "ZB002", "ZB001"));
+        return plan;
+    }
+
+    @Test
+    void shouldAcceptAsOfDayPlanWhenMapperOnlyBoundEndDate() {
+        BankQueryPlan plan = completeRankingPlan();
+        plan.setOrganizations(List.of());
+        plan.getTime().setStartDate(LocalDate.of(2026, 3, 31));
+        plan.getTime().setEndDate(LocalDate.of(2026, 3, 31));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("机构", "数据日期")).requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(Set.of()).requiredStartDate(null)
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("TIME_RANGE_MISMATCH"));
+    }
+
+    @Test
+    void shouldAcceptLoanToDepositRatioWithoutDerivedBlockWhenOperandsSelected() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RATIO)
+                .metrics(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB002")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of())
+                .organizations(List.of(BankQueryPlan.Organization.builder().code("ORG001").build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 31))
+                        .endDate(LocalDate.of(2025, 1, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build())
+                .orderBy(List.of())
+                .output(BankQueryPlan.Output.builder().columns(List.of("ZB002", "ZB001"))
+                        .orderSensitive(true).build())
+                .build();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG001"))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .requiredStartDate(LocalDate.of(2025, 1, 31))
+                .requiredEndDate(LocalDate.of(2025, 1, 31)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("DERIVED_METRIC_MISSING"));
+    }
+
+    @Test
+    void shouldAcceptStructureShareRatioWhenRecognizerLabeledPointQuery() {
+        BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .intent(BankIntentType.RATIO)
+                .metrics(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB003")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
+                .dimensions(List.of())
+                .organizations(List.of(BankQueryPlan.Organization.builder().code("ORG002").build()))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 6, 30))
+                        .endDate(LocalDate.of(2025, 6, 30))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build())
+                .orderBy(List.of())
+                .output(BankQueryPlan.Output.builder().columns(List.of("ZB003", "ZB001"))
+                        .orderSensitive(true).build())
+                .build();
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 6, 30))
+                .requiredEndDate(LocalDate.of(2025, 6, 30)).maxLimit(100).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertTrue(result.isValid(), result::summary);
+        assertFalse(result.codes().contains("INTENT_MISMATCH"));
+        assertFalse(result.codes().contains("CALCULATION_MISMATCH"));
     }
 }

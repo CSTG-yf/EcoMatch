@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.tencent.supersonic.common.pojo.ChatApp;
@@ -32,6 +33,8 @@ public class QueryNLReq extends SemanticQueryReq implements Serializable {
     private SemanticParseInfo contextParseInfo;
     private SemanticParseInfo selectedParseInfo;
     private boolean descriptionMapped;
+    @JsonIgnore
+    private BankPlanRepairContext bankPlanRepairContext;
 
     @Override
     public String toCustomizedString() {

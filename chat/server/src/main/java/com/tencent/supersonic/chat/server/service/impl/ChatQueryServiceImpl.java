@@ -37,6 +37,7 @@ import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.SqlInfo;
+import com.tencent.supersonic.headless.api.pojo.request.BankPlanRepairContext;
 import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
@@ -46,6 +47,8 @@ import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SearchResult;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanTraceEvent;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
@@ -86,6 +89,10 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ChatQueryServiceImpl implements ChatQueryService {
+
+    private static final int MAX_BANK_PLAN_ATTEMPTS = 3;
+    private static final Set<String> REPAIRABLE_BANK_PLAN_ERRORS = Set.of("SQL_SAFETY_POLICY",
+            "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH");
 
     @Autowired
     private ChatManageService chatManageService;
@@ -151,7 +158,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 }
             }
 
-            if (!parseContext.needFeedback()) {
+            if (!parseContext.needFeedback() && !chatParseReq.isInternalBankPlanRepair()) {
                 parseContext.getResponse().getParseTimeCost()
                         .setParseTime(System.currentTimeMillis() - parseContext.getResponse()
                                 .getParseTimeCost().getParseStartTime());
@@ -190,24 +197,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             storedQuery = requireAuthorizedStoredQuery(chatExecuteReq.getQueryId(),
                     chatExecuteReq.getUser());
             bindStoredQuery(chatExecuteReq, storedQuery);
-            QueryResult queryResult = new QueryResult();
-            ExecuteContext executeContext = buildExecuteContext(chatExecuteReq, storedQuery);
-            for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
-                if (chatQueryExecutor.accept(executeContext)) {
-                    queryResult = chatQueryExecutor.execute(executeContext);
-                    if (queryResult != null) {
-                        break;
-                    }
-                }
-            }
-
-            executeContext.setResponse(queryResult);
+            QueryResult queryResult = executeWithBankPlanRepair(chatExecuteReq, storedQuery);
             if (queryResult != null) {
-                for (ExecuteResultProcessor processor : executeResultProcessors) {
-                    if (processor.accept(executeContext)) {
-                        processor.process(executeContext);
-                    }
-                }
                 saveQueryResult(chatExecuteReq, queryResult);
             }
             boolean succeeded = isExecutionSuccessful(queryResult);
@@ -227,6 +218,139 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                     "CHAT_EXECUTE_FAILED");
             throw e;
         }
+    }
+
+    QueryResult executeWithBankPlanRepair(ChatExecuteReq request, ChatQueryDO storedQuery) {
+        Set<String> seenFailureSignatures = new HashSet<>();
+        Set<String> seenPlanFingerprints = new HashSet<>();
+        List<BankPlanTraceEvent> traceEvents = new ArrayList<>();
+        SemanticParseInfo parseOverride = null;
+        QueryResult lastResult = null;
+        for (int executionAttempt = 1; executionAttempt <= MAX_BANK_PLAN_ATTEMPTS;
+                executionAttempt++) {
+            lastResult = executeOnce(request, storedQuery, parseOverride);
+            BankPlanToolResult toolResult = bankPlanToolResult(lastResult);
+            BankPlanTraceEvent traceEvent = captureBankPlanTrace(lastResult, toolResult);
+            if (traceEvent != null) {
+                traceEvents.add(traceEvent);
+            }
+            if (!traceEvents.isEmpty()) {
+                attachBankPlanTrace(lastResult, traceEvents);
+            }
+            if (!shouldRepairBankPlan(toolResult)) {
+                return lastResult;
+            }
+            String failureSignature = toolResult.getFailedStage() + ":"
+                    + toolResult.getErrorCode();
+            String fingerprint = toolResult.getPreviousPlanFingerprint();
+            boolean repeatedFailure = !seenFailureSignatures.add(failureSignature);
+            boolean repeatedPlan = StringUtils.isNotBlank(fingerprint)
+                    && !seenPlanFingerprints.add(fingerprint);
+            if (repeatedFailure || repeatedPlan || toolResult.getAttempt() >= MAX_BANK_PLAN_ATTEMPTS
+                    || executionAttempt >= MAX_BANK_PLAN_ATTEMPTS) {
+                traceEvent.markStopped("REPAIR_LIMIT_REACHED");
+                return lastResult;
+            }
+            ChatParseReq repairRequest = buildBankPlanRepairRequest(request, storedQuery,
+                    lastResult.getChatContext(), toolResult);
+            if (repairRequest == null) {
+                traceEvent.markStopped("REPAIR_CONTEXT_UNAVAILABLE");
+                return lastResult;
+            }
+            traceEvent.markRepairing();
+            try {
+                ChatParseResp repairResponse = parse(repairRequest);
+                if (repairResponse == null
+                        || CollectionUtils.isEmpty(repairResponse.getSelectedParses())) {
+                    traceEvent.markStopped("REPAIR_NO_VALID_PLAN");
+                    return lastResult;
+                }
+                parseOverride = repairResponse.getSelectedParses().get(0);
+            } catch (RuntimeException exception) {
+                traceEvent.markStopped("REPAIR_MODEL_UNAVAILABLE");
+                log.warn("Bank plan repair stopped: type={}",
+                        exception.getClass().getSimpleName());
+                return lastResult;
+            }
+        }
+        return lastResult;
+    }
+
+    private BankPlanTraceEvent captureBankPlanTrace(QueryResult result,
+            BankPlanToolResult toolResult) {
+        if (result == null || result.getChatContext() == null || toolResult == null) {
+            return null;
+        }
+        Object plan = result.getChatContext().getProperties()
+                .get(BankPlanToolResult.PLAN_PROPERTY_KEY);
+        return BankPlanTraceEvent.capture(plan, toolResult);
+    }
+
+    private void attachBankPlanTrace(QueryResult result, List<BankPlanTraceEvent> traceEvents) {
+        if (result == null || result.getChatContext() == null) {
+            return;
+        }
+        result.getChatContext().getProperties().put(BankPlanTraceEvent.PROPERTY_KEY,
+                List.copyOf(traceEvents));
+    }
+
+    QueryResult executeOnce(ChatExecuteReq request, ChatQueryDO storedQuery,
+            SemanticParseInfo parseOverride) {
+        QueryResult queryResult = new QueryResult();
+        ExecuteContext executeContext = buildExecuteContext(request, storedQuery, parseOverride);
+        for (ChatQueryExecutor chatQueryExecutor : chatQueryExecutors) {
+            if (chatQueryExecutor.accept(executeContext)) {
+                queryResult = chatQueryExecutor.execute(executeContext);
+                if (queryResult != null) {
+                    break;
+                }
+            }
+        }
+        executeContext.setResponse(queryResult);
+        if (queryResult != null) {
+            for (ExecuteResultProcessor processor : executeResultProcessors) {
+                if (processor.accept(executeContext)) {
+                    processor.process(executeContext);
+                }
+            }
+        }
+        return queryResult;
+    }
+
+    private BankPlanToolResult bankPlanToolResult(QueryResult result) {
+        if (result == null || result.getChatContext() == null
+                || result.getChatContext().getProperties() == null) {
+            return null;
+        }
+        return BankPlanToolResult.from(result.getChatContext().getProperties()
+                .get(BankPlanToolResult.PROPERTY_KEY));
+    }
+
+    private boolean shouldRepairBankPlan(BankPlanToolResult toolResult) {
+        return toolResult != null && toolResult.getStatus() == BankPlanToolResult.Status.FAILED
+                && toolResult.getFailedStage() != null
+                && toolResult.getErrorCode() != null
+                && REPAIRABLE_BANK_PLAN_ERRORS.contains(toolResult.getErrorCode());
+    }
+
+    private ChatParseReq buildBankPlanRepairRequest(ChatExecuteReq request,
+            ChatQueryDO storedQuery, SemanticParseInfo failedParse,
+            BankPlanToolResult toolResult) {
+        if (failedParse == null || failedParse.getProperties() == null) {
+            return null;
+        }
+        Object previousPlan =
+                failedParse.getProperties().get(BankPlanToolResult.PLAN_PROPERTY_KEY);
+        if (previousPlan == null) {
+            return null;
+        }
+        return ChatParseReq.builder().queryId(storedQuery.getQuestionId())
+                .chatId(storedQuery.getChatId().intValue()).agentId(storedQuery.getAgentId())
+                .queryText(storedQuery.getQueryText()).user(request.getUser()).saveAnswer(false)
+                .internalBankPlanRepair(true)
+                .bankPlanRepairContext(BankPlanRepairContext.of(toolResult.toRepairFeedback(),
+                        JsonUtil.toString(previousPlan)))
+                .build();
     }
 
     @Override
@@ -274,9 +398,16 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     private ExecuteContext buildExecuteContext(ChatExecuteReq chatExecuteReq,
             ChatQueryDO storedQuery) {
+        return buildExecuteContext(chatExecuteReq, storedQuery, null);
+    }
+
+    private ExecuteContext buildExecuteContext(ChatExecuteReq chatExecuteReq,
+            ChatQueryDO storedQuery, SemanticParseInfo parseOverride) {
         ExecuteContext executeContext = new ExecuteContext(chatExecuteReq);
-        SemanticParseInfo parseInfo = chatManageService.getParseInfo(chatExecuteReq.getQueryId(),
-                chatExecuteReq.getParseId());
+        SemanticParseInfo parseInfo = parseOverride == null
+                ? chatManageService.getParseInfo(chatExecuteReq.getQueryId(),
+                        chatExecuteReq.getParseId())
+                : parseOverride;
         Agent agent = getAuthorizedAgent(storedQuery.getAgentId(), chatExecuteReq.getUser());
         executeContext.setAgent(agent);
         executeContext.setParseInfo(parseInfo);

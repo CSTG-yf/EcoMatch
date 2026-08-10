@@ -1,5 +1,8 @@
 package com.tencent.supersonic.headless.server.service.impl;
 
+import com.github.pagehelper.Page;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
@@ -156,6 +159,39 @@ class ExportTaskServiceImplTest {
     }
 
     @Test
+    void listExpiresFilesBeforeTheyCanBeDownloaded() {
+        ExportTaskDO newest = task("newest-task", "alice", ExportStatus.SUCCEEDED,
+                new java.util.Date(System.currentTimeMillis() + 60_000));
+        newest.setStorageKey("cfba75d5-5a22-4b5d-9f46-68f561ea9141.xlsx");
+        ExportTaskDO expired = task("expired-task", "alice", ExportStatus.SUCCEEDED,
+                new java.util.Date(System.currentTimeMillis() - 60_000));
+        expired.setStorageKey("d78f79fe-0a1c-4e0f-a8d8-09ea3a7b5c30.xlsx");
+        when(mapper.selectList(any())).thenAnswer(invocation -> {
+            Page<ExportTaskDO> taskPage = PageHelper.getLocalPage();
+            taskPage.add(newest);
+            taskPage.add(expired);
+            taskPage.setTotal(2);
+            return taskPage;
+        });
+
+        PageInfo<ExportTaskResp> page = service.list(1, 20, user("alice"));
+
+        assertEquals(List.of("newest-task", "expired-task"),
+                page.getList().stream().map(ExportTaskResp::getTaskId).toList());
+        assertTrue(page.getList().get(0).isDownloadable());
+        assertEquals(ExportStatus.EXPIRED, page.getList().get(1).getStatus());
+        assertFalse(page.getList().get(1).isDownloadable());
+        verify(mapper).selectList(any());
+        verify(mapper).updateById(expired);
+    }
+
+    @Test
+    void listRejectsUnsafePagination() {
+        assertThrows(InvalidArgumentException.class, () -> service.list(0, 20, user("alice")));
+        assertThrows(InvalidArgumentException.class, () -> service.list(1, 101, user("alice")));
+    }
+
+    @Test
     void auditRecordsStartedAndSucceededWithoutCellValues() throws Exception {
         QueryStructReq structured = mock(QueryStructReq.class);
         when(structured.getLimit()).thenReturn(10L);
@@ -245,6 +281,19 @@ class ExportTaskServiceImplTest {
         request.setTitle("Bank report");
         request.setQueries(List.of(structured));
         return request;
+    }
+
+    private ExportTaskDO task(String taskId, String owner, ExportStatus status,
+            java.util.Date expiresAt) {
+        ExportTaskDO task = new ExportTaskDO();
+        task.setTaskId(taskId);
+        task.setOwner(owner);
+        task.setStatus(status.name());
+        task.setResourceType(ExportResourceType.QUERY.name());
+        task.setFormat(ExportFormat.XLSX.name());
+        task.setCreatedAt(new java.util.Date());
+        task.setExpiresAt(expiresAt);
+        return task;
     }
 
     private SemanticQueryResp maskedResult(String value) {

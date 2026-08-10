@@ -28,6 +28,7 @@ public class SemanticIntentHints {
     Set<String> allowedDimensions;
     Set<String> requiredMetrics;
     Set<String> requiredOrganizationCodes;
+    List<DerivedMetricSpec> requiredDerivedMetrics;
     LocalDate requiredStartDate;
     LocalDate requiredEndDate;
     List<RequiredFilter> requiredFilters;
@@ -37,14 +38,16 @@ public class SemanticIntentHints {
     @Builder
     public SemanticIntentHints(BankIntentType expectedIntent, Set<String> allowedMetrics,
             Set<String> allowedDimensions, Set<String> requiredMetrics,
-            Set<String> requiredOrganizationCodes, LocalDate requiredStartDate,
-            LocalDate requiredEndDate, List<RequiredFilter> requiredFilters, Integer requiredLimit,
-            int maxLimit) {
+            Set<String> requiredOrganizationCodes, List<DerivedMetricSpec> requiredDerivedMetrics,
+            LocalDate requiredStartDate, LocalDate requiredEndDate,
+            List<RequiredFilter> requiredFilters, Integer requiredLimit, int maxLimit) {
         this.expectedIntent = expectedIntent;
         this.allowedMetrics = immutableSet(allowedMetrics);
         this.allowedDimensions = immutableSet(allowedDimensions);
         this.requiredMetrics = immutableSet(requiredMetrics);
         this.requiredOrganizationCodes = immutableSet(requiredOrganizationCodes);
+        this.requiredDerivedMetrics = requiredDerivedMetrics == null ? Collections.emptyList()
+                : List.copyOf(requiredDerivedMetrics);
         this.requiredStartDate = requiredStartDate;
         this.requiredEndDate = requiredEndDate;
         this.requiredFilters =
@@ -70,10 +73,28 @@ public class SemanticIntentHints {
                         schemaElementNames(schema == null ? null : schema.getDimensions(),
                                 schema == null ? null : schema.getPartitionTime()))
                 .requiredMetrics(requiredMetrics).requiredOrganizationCodes(requiredOrganizations)
+                .requiredDerivedMetrics(requiredDerivedMetrics(intent, schema))
                 .requiredStartDate(time == null ? null : time.getStartDate())
                 .requiredEndDate(time == null ? null : time.getEndDate())
                 .requiredFilters(requiredFilters(intent)).requiredLimit(requiredLimit(intent))
                 .build();
+    }
+
+    /**
+     * Derived metric specifications are carried verbatim from the recognizer in stable insertion
+     * order; only the base operands are resolved to their schema canonical identifiers so the
+     * validator can match them against the plan deterministically.
+     */
+    private static List<DerivedMetricSpec> requiredDerivedMetrics(BankIntentResult intent,
+            LLMReq.LLMSchema schema) {
+        if (intent == null || intent.getDerivedMetrics() == null) {
+            return Collections.emptyList();
+        }
+        return intent.getDerivedMetrics().stream().filter(Objects::nonNull).map(candidate ->
+                new DerivedMetricSpec(candidate.getCode(),
+                        canonicalMetricIdentifier(candidate.getNumerator(), schema),
+                        canonicalMetricIdentifier(candidate.getDenominator(), schema),
+                        candidate.getName())).collect(Collectors.toList());
     }
 
     private static String canonicalMetricIdentifier(String code, LLMReq.LLMSchema schema) {
@@ -152,4 +173,11 @@ public class SemanticIntentHints {
     }
 
     public record RequiredFilter(String field, String operator, String value) {}
+
+    /**
+     * Immutable derived metric specification carried from intent recognition into plan
+     * validation. Operands are schema canonical identifiers; order matches the recognizer output.
+     */
+    public record DerivedMetricSpec(String code, String numerator, String denominator,
+            String name) {}
 }

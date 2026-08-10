@@ -12,6 +12,7 @@ import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,10 +25,30 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BusinessInsightProcessorTest {
+
+    @Test
+    void processesCanonicalCountDaysResultWithoutTreatingNumericMetricAsDate() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(bankColumn("org_code"), bankColumn("org_name"),
+                bankColumn("days_above_province_average"), bankColumn("observation_count"),
+                bankColumn("above_ratio_percent")));
+        result.setQueryResults(List.of(Map.of("org_code", "ORG008", "org_name", "江苏省H市农商行",
+                "days_above_province_average", 17, "observation_count", 30,
+                "above_ratio_percent", new BigDecimal("56.67"))));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("KPI_CARD", result.getRecommendedChart().getChartType());
+        assertNull(result.getBusinessExplanation().getTimeRange());
+    }
 
     @Test
     void recommendsTrendChartAndBuildsEvidenceFromActualValues() {
@@ -46,6 +67,23 @@ class BusinessInsightProcessorTest {
         assertEquals("2026-01至2026-03", result.getBusinessExplanation().getTimeRange());
         assertTrue(result.getBusinessExplanation().getEvidence().contains("balance范围为100至150"));
         assertTrue(result.getTextSummary().contains("balance首末记录变化50%"));
+    }
+
+    @Test
+    void preservesAnExistingBankDirectAnswerWhileBuildingSeparateInsights() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(
+                List.of(row("2026-01", 100), row("2026-02", 120), row("2026-03", 150)));
+        result.setTextSummary("余额增长50%。");
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("余额增长50%。", result.getTextSummary());
+        assertTrue(result.getBusinessExplanation().getSummary().contains("查询返回3条记录"));
     }
 
     @Test
@@ -533,6 +571,10 @@ class BusinessInsightProcessorTest {
                         Path.of("../../../evaluation/bank_chart_explanation/test.jsonl"))
                 .filter(Files::exists).findFirst()
                 .orElseThrow(() -> new IllegalStateException("DATA-03 test dataset not found"));
+    }
+
+    private QueryColumn bankColumn(String name) {
+        return new QueryColumn(name, "STRING", name);
     }
 
     private QueryColumn column(String name, String showType) {

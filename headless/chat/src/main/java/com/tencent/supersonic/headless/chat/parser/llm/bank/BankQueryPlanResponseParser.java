@@ -35,7 +35,11 @@ public class BankQueryPlanResponseParser {
                         BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
                         "model response must contain one JSON object");
             }
-            BankQueryPlan plan = OBJECT_MAPPER.readValue(json, BankQueryPlan.class);
+            // Map common model mistakes (time_range, zb_id, extra keys) onto BankQueryPlan before
+            // strict Jackson deserialization + evidence validation.
+            JsonNode canonical = BankQueryPlanJsonCanonicalizer.canonicalize(node);
+            BankQueryPlan plan = OBJECT_MAPPER.treeToValue(canonical, BankQueryPlan.class);
+            plan = BankQueryPlanAliasNormalizer.normalize(plan, hints);
             BankQueryPlanValidator.ValidationResult validation = validator.validate(plan, hints);
             if (!validation.isValid()) {
                 throw new BankQueryPlanParseException(
@@ -64,6 +68,10 @@ public class BankQueryPlanResponseParser {
         } catch (JsonProcessingException exception) {
             throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MALFORMED_JSON,
                     "model response is not complete strict JSON", exception);
+        } catch (IllegalArgumentException exception) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, exception.getMessage(),
+                    exception);
         }
     }
 

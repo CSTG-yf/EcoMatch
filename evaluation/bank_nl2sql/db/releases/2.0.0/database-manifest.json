@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "packageName": "bank-nl2sql-official-db-import-package",
+  "officialVersion": "2.0.0",
+  "source": {
+    "officialVersion": "2.0.0",
+    "path": "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx",
+    "sha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
+    "dateRange": {
+      "min": "2024-12-31",
+      "max": "2026-04-30"
+    }
+  },
+  "artifacts": {
+    "bank.sqlite": {
+      "sha256": "868ee86db7a84ada9c11c3a1d38c9f5a8709940d11c90806094073de3cb613e4",
+      "bytes": 17424384
+    },
+    "bank-h2.sql": {
+      "sha256": "5ae57d78480c82c59c580e8efa194be9843da9f8790a2af0f7e77baa6b2e18bc",
+      "bytes": 18096684
+    }
+  },
+  "counts": {
+    "organizations": 13,
+    "metrics": 21,
+    "facts": 132678
+  }
+}

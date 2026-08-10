@@ -24,36 +24,8 @@ public class BankQueryPlan {
 
     public static final String CURRENT_VERSION = "1.0";
 
-    /** A strict JSON Schema used by the plan generation strategy in T3. */
-    public static final String JSON_SCHEMA =
-            """
-                    {"type":"object","additionalProperties":false,"required":["version","intent",
-                    "metrics","dimensions","organizations","time","calculation","orderBy","output"],
-                    "properties":{"version":{"const":"1.0"},"intent":{"enum":["POINT_QUERY","COMPARISON",
-                    "RANKING","TREND","CHANGE","RATIO","THRESHOLD","AGGREGATION"]},
-                    "metrics":{"type":"array","items":{"type":"object","additionalProperties":false,
-                    "required":["bizName","aggregation"],"properties":{"bizName":{"type":"string"},
-                    "aggregation":{"enum":["DEFAULT","SUM","AVG","MAX","MIN","COUNT"]},
-                    "alias":{"type":"string"}}}},"dimensions":{"type":"array","items":{"type":"string"}},
-                    "organizations":{"type":"array","items":{"type":"object","additionalProperties":false,
-                    "properties":{"code":{"type":"string"},"bizName":{"type":"string"}}}},
-                    "time":{"type":"object","additionalProperties":false,"required":["startDate","endDate",
-                    "granularity","comparison"],"properties":{"startDate":{"type":"string","format":"date"},
-                    "endDate":{"type":"string","format":"date"},"granularity":{"enum":["DAY","MONTH",
-                    "QUARTER","HALF_YEAR","YEAR","RANGE"]},"comparison":{"enum":["NONE","YEAR_OVER_YEAR",
-                    "PERIOD_OVER_PERIOD","START_OF_YEAR","MOM_AND_YOY"]},"baselineStartDate":{"type":"string","format":"date"},
-                    "baselineEndDate":{"type":"string","format":"date"}}},"filters":{"type":"array",
-                    "items":{"type":"object","additionalProperties":false,"properties":{"field":{"type":"string"},
-                    "operator":{"type":"string"},"value":{"type":"string"},"values":{"type":"array",
-                    "items":{"type":"string"}}}}},"calculation":{"type":"object","additionalProperties":false,
-                    "required":["type"],"properties":{"type":{"enum":["DIRECT","CHANGE","RATIO"]},
-                    "baseline":{"type":"string"}}},"orderBy":{"type":"array","items":{"type":"object",
-                    "additionalProperties":false,"required":["field","direction"],"properties":{"field":{"type":"string"},
-                    "direction":{"enum":["ASC","DESC"]}}}},"limit":{"type":"integer","minimum":1},
-                    "output":{"type":"object","additionalProperties":false,"required":["columns","orderSensitive"],
-                    "properties":{"columns":{"type":"array","items":{"type":"string"}},
-                    "orderSensitive":{"type":"boolean"}}}}}
-                    """;
+    /** Strict JSON Schema generated from the same registry used by prompt and validation. */
+    public static final String JSON_SCHEMA = BankSemanticRegistry.jsonSchema();
 
     @Builder.Default
     private String version = CURRENT_VERSION;
@@ -61,6 +33,8 @@ public class BankQueryPlan {
     private BankIntentType intent;
     @Builder.Default
     private List<Metric> metrics = new ArrayList<>();
+    @Builder.Default
+    private List<DerivedMetric> derivedMetrics = new ArrayList<>();
     @Builder.Default
     private List<String> dimensions = new ArrayList<>();
     @Builder.Default
@@ -91,7 +65,7 @@ public class BankQueryPlan {
     }
 
     public enum CalculationType {
-        DIRECT, CHANGE, RATIO
+        DIRECT, CHANGE, RATIO, COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
     }
 
     public enum SortDirection {
@@ -106,6 +80,17 @@ public class BankQueryPlan {
         private String bizName;
         private Aggregation aggregation;
         private String alias;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DerivedMetric {
+        private String metricCode;
+        private String numerator;
+        private String denominator;
+        private String name;
     }
 
     @Data

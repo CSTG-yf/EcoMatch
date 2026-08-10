@@ -130,8 +130,9 @@ final class BusinessInsightConsistencyValidator {
         Set<String> numericFields =
                 result.getQueryColumns().stream().filter(column -> isNumericColumn(result, column))
                         .map(this::fieldName).collect(Collectors.toSet());
-        Set<String> dateFields = result.getQueryColumns().stream().filter(this::isDateColumn)
-                .map(this::fieldName).collect(Collectors.toSet());
+        Set<String> dateFields = result.getQueryColumns().stream()
+                .filter(column -> isDateColumn(result, column)).map(this::fieldName)
+                .collect(Collectors.toSet());
         List<String> invalidDimensions =
                 chart.getDimensionFields().stream().filter(numericFields::contains).toList();
         List<String> invalidMetrics = chart.getMetricFields().stream()
@@ -193,9 +194,6 @@ final class BusinessInsightConsistencyValidator {
             throw inconsistent("business explanation is missing");
         }
         validateConfidence(explanation.getConfidence(), "business explanation");
-        if (!Objects.equals(result.getTextSummary(), explanation.getSummary())) {
-            throw inconsistent("text summary differs from business explanation");
-        }
         if (explanation.getEvidence() == null || explanation.getWarnings() == null
                 || explanation.getMetricDefinitions() == null) {
             throw inconsistent("business explanation collections are missing");
@@ -274,7 +272,8 @@ final class BusinessInsightConsistencyValidator {
                 resolveContributionReference(result, matcher.group(1), metricLabels);
         List<String> categoryFields = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
-                .filter(column -> !isNumericColumn(result, column) && !isDateColumn(column))
+                .filter(column -> !isNumericColumn(result, column)
+                        && !isDateColumn(result, column))
                 .map(this::fieldName).toList();
         if (categoryFields.size() != 1) {
             throw inconsistent("contribution category is ambiguous");
@@ -342,8 +341,8 @@ final class BusinessInsightConsistencyValidator {
             Map<String, String> metricLabels) {
         String metric = resolveMetricField(result, matcher.group(1), metricLabels);
         List<String> dateFields = result.getQueryColumns().stream()
-                .filter(column -> !isMasked(result, fieldName(column))).filter(this::isDateColumn)
-                .map(this::fieldName).toList();
+                .filter(column -> !isMasked(result, fieldName(column)))
+                .filter(column -> isDateColumn(result, column)).map(this::fieldName).toList();
         if (dateFields.size() != 1) {
             throw inconsistent("temporal evidence date field is ambiguous");
         }
@@ -412,9 +411,11 @@ final class BusinessInsightConsistencyValidator {
                         .map(row -> row.get(field)).anyMatch(Number.class::isInstance);
     }
 
-    private boolean isDateColumn(QueryColumn column) {
-        return SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
-                || looksLikeDateField(fieldName(column));
+    private boolean isDateColumn(QueryResult result, QueryColumn column) {
+        if (SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())) {
+            return true;
+        }
+        return !isNumericColumn(result, column) && looksLikeDateField(fieldName(column));
     }
 
     private List<BigDecimal> percentagesForStatement(NumericFacts facts, String statement) {
@@ -516,9 +517,8 @@ final class BusinessInsightConsistencyValidator {
             List<BigDecimal> percentages) {
         String dateField = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
-                .filter(column -> SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
-                        || looksLikeDateField(fieldName(column)))
-                .map(this::fieldName).findFirst().orElse(null);
+                .filter(column -> isDateColumn(result, column)).map(this::fieldName).findFirst()
+                .orElse(null);
         if (dateField == null) {
             return;
         }
@@ -565,9 +565,8 @@ final class BusinessInsightConsistencyValidator {
     private String resolveTimeRange(QueryResult result) {
         String dateField = result.getQueryColumns().stream()
                 .filter(column -> !isMasked(result, fieldName(column)))
-                .filter(column -> SemanticType.DATE.name().equalsIgnoreCase(column.getShowType())
-                        || looksLikeDateField(fieldName(column)))
-                .map(this::fieldName).findFirst().orElse(null);
+                .filter(column -> isDateColumn(result, column)).map(this::fieldName).findFirst()
+                .orElse(null);
         if (dateField == null) {
             return null;
         }

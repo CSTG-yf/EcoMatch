@@ -21,7 +21,7 @@ import {
   Timeline,
 } from 'antd';
 import { useState } from 'react';
-import { ChatContextType } from '../../common/type';
+import { BankPlanTraceEventType, ChatContextType } from '../../common/type';
 import { PREFIX_CLS } from '../../common/constants';
 import { isMobile } from '../../utils/utils';
 import { QueryWorkflowStage } from './workflow';
@@ -64,9 +64,58 @@ const FEATURE_LABELS: Record<string, string> = {
   MOM: '环比',
 };
 
+const BANK_STAGE_LABELS: Record<string, string> = {
+  PLAN_SCHEMA: '计划结构',
+  PLAN_SEMANTIC: '计划语义',
+  COMPILE: '查询编译',
+  SQL_SAFETY: 'SQL 安全',
+  DATABASE_PREPARE: '数据库预检查',
+  DATABASE_EXECUTE: '数据库执行',
+  RESULT_SEMANTIC: '结果语义',
+};
+
+const bankPlanTrace = (properties?: Record<string, any>): BankPlanTraceEventType[] => {
+  const trace = properties?.['bank.nl2sql.trace'];
+  return Array.isArray(trace) ? trace : [];
+};
+
+const planSummary = (event: BankPlanTraceEventType) => {
+  const summary = event.planSummary;
+  if (!summary) {
+    return '未提供计划摘要';
+  }
+  return [
+    summary.intent ? `意图 ${summary.intent}` : '',
+    summary.metrics?.length ? `指标 ${summary.metrics.join('、')}` : '',
+    summary.organizations?.length ? `机构 ${summary.organizations.join('、')}` : '',
+    summary.timeGranularity ? `粒度 ${summary.timeGranularity}` : '',
+    summary.timeComparison && summary.timeComparison !== 'NONE'
+      ? `对比 ${summary.timeComparison}`
+      : '',
+    summary.calculationType ? `计算 ${summary.calculationType}` : '',
+    summary.outputColumns?.length ? `输出 ${summary.outputColumns.join('、')}` : '',
+  ]
+    .filter(Boolean)
+    .join('；');
+};
+
+const traceColor = (action: BankPlanTraceEventType['action']) => {
+  if (action === 'SUCCEEDED') {
+    return 'green';
+  }
+  if (action === 'REPAIRING') {
+    return 'blue';
+  }
+  return 'red';
+};
+
 const diagnosticProperties = (properties?: Record<string, any>) =>
   Object.entries(properties || {})
-    .filter(([key]) => key.startsWith('bank.nl2sql.') || key === 'complexSqlFeatures')
+    .filter(
+      ([key]) =>
+        (key.startsWith('bank.nl2sql.') && key !== 'bank.nl2sql.trace') ||
+        key === 'complexSqlFeatures'
+    )
     .map(([key, value]) => ({ key, value: Array.isArray(value) ? value.join('、') : `${value}` }));
 
 const TrustExplanationPanel: React.FC<Props> = ({
@@ -93,6 +142,7 @@ const TrustExplanationPanel: React.FC<Props> = ({
   const filters = filterSummaries(parseInfo);
   const records = correctionRecords(parseInfo.sqlInfo, parseInfo.sqlEvaluation?.isValidated);
   const properties = diagnosticProperties(parseInfo.properties);
+  const toolTrace = bankPlanTrace(parseInfo.properties);
   const sqlItems = [
     { key: 'parsed', label: '生成 S2SQL', sql: parseInfo.sqlInfo?.parsedS2SQL },
     { key: 'corrected', label: '修正 S2SQL', sql: parseInfo.sqlInfo?.correctedS2SQL },
@@ -168,6 +218,50 @@ const TrustExplanationPanel: React.FC<Props> = ({
           },
         ]}
       />
+      {toolTrace.length > 0 && (
+        <section
+          className={`${prefixCls}-trust-tool-trace`}
+          aria-label="银行查询工具执行过程"
+        >
+          <strong>工具执行过程</strong>
+          <Timeline
+            items={toolTrace.map(event => ({
+              color: traceColor(event.action),
+              dot:
+                event.action === 'SUCCEEDED' ? (
+                  <CheckCircleOutlined />
+                ) : event.action === 'REPAIRING' ? (
+                  <EditOutlined />
+                ) : (
+                  <CloseCircleOutlined />
+                ),
+              children: (
+                <div className={`${prefixCls}-trust-tool-attempt`}>
+                  <Space wrap size={6}>
+                    <strong>第 {event.attempt} 次计划</strong>
+                    <Tag color={traceColor(event.action)}>{event.action}</Tag>
+                    {event.errorCode && <Tag>{event.errorCode}</Tag>}
+                  </Space>
+                  <div>{event.actionMessage}</div>
+                  <div className={`${prefixCls}-trust-tool-plan`}>{planSummary(event)}</div>
+                  {(event.stageResults?.length || 0) > 0 && (
+                    <Space wrap size={[6, 6]}>
+                      {event.stageResults?.map((stage, index) => (
+                        <Tag
+                          key={`${event.attempt}-${stage.stage}-${index}`}
+                          color={stage.status === 'SUCCEEDED' ? 'success' : 'error'}
+                        >
+                          {BANK_STAGE_LABELS[stage.stage] || stage.stage}：{stage.message}
+                        </Tag>
+                      ))}
+                    </Space>
+                  )}
+                </div>
+              ),
+            }))}
+          />
+        </section>
+      )}
       {(metrics.length > 0 || dimensions.length > 0) && (
         <div className={`${prefixCls}-trust-definitions`}>
           {[

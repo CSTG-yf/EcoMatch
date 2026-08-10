@@ -6,7 +6,10 @@ import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.common.util.StringUtil;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
+import net.sf.jsqlparser.expression.AnalyticExpression;
+import net.sf.jsqlparser.expression.AnyComparisonExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
 import net.sf.jsqlparser.expression.Function;
 import net.sf.jsqlparser.expression.LongValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
@@ -697,52 +700,31 @@ public class SqlReplaceHelper {
     public static String replaceSqlByExpression(String tableName, String sql,
             Map<String, String> replace) {
         Select selectStatement = SqlSelectHelper.getSelect(sql);
-        List<PlainSelect> plainSelectList = new ArrayList<>();
-        if (selectStatement instanceof PlainSelect) {
-            // if with statement exists, replace expression in the with statement.
-            if (!CollectionUtils.isEmpty(selectStatement.getWithItemsList())) {
-                selectStatement.getWithItemsList().forEach(withItem -> {
-                    plainSelectList.add(withItem.getSelect().getPlainSelect());
-                });
-            }
-            plainSelectList.add((PlainSelect) selectStatement);
-        } else if (selectStatement instanceof SetOperationList) {
-            SetOperationList setOperationList = (SetOperationList) selectStatement;
-            if (!CollectionUtils.isEmpty(setOperationList.getSelects())) {
-                setOperationList.getSelects().forEach(subSelectBody -> {
-                    PlainSelect subPlainSelect = (PlainSelect) subSelectBody;
-                    plainSelectList.add(subPlainSelect);
-                });
-            }
-            List<Select> selects = setOperationList.getSelects();
-            if (!CollectionUtils.isEmpty(selects)) {
-                for (Select select : selects) {
-                    if (select instanceof PlainSelect) {
-                        plainSelectList.add((PlainSelect) select);
-                    }
-                }
-            }
-            List<WithItem> withItems = setOperationList.getWithItemsList();
-            if (!CollectionUtils.isEmpty(withItems)) {
-                for (WithItem withItem : withItems) {
-                    Select select = withItem.getSelect();
-                    if (select instanceof PlainSelect) {
-                        plainSelectList.add((PlainSelect) select);
-                    } else if (select instanceof ParenthesedSelect) {
-                        plainSelectList.add(select.getPlainSelect());
-                    }
-                }
-            }
-        } else {
+        if (!(selectStatement instanceof PlainSelect)
+                && !(selectStatement instanceof SetOperationList)) {
             return sql;
         }
-
-        List<PlainSelect> plainSelects = SqlSelectHelper.getPlainSelects(plainSelectList);
-        for (PlainSelect plainSelect : plainSelects) {
+        List<PlainSelect> plainSelectList = new ArrayList<>();
+        Set<String> cteNames = new HashSet<>();
+        collectPlainSelects(selectStatement, plainSelectList, cteNames);
+        // a Table alias referring to a known CTE is also part of the CTE output scope; collect
+        // these aliases in a second pass so the WITH/SetOperation traversal order does not matter
+        for (PlainSelect plainSelect : plainSelectList) {
+            collectCteTableAlias(plainSelect.getFromItem(), cteNames);
+            if (!CollectionUtils.isEmpty(plainSelect.getJoins())) {
+                for (Join join : plainSelect.getJoins()) {
+                    collectCteTableAlias(join.getFromItem(), cteNames);
+                }
+            }
+        }
+        // rewrite nested select bodies (sub-queries, CTEs) before their parents so that parent
+        // expressions deparsed afterwards already contain the rewritten sub-queries
+        for (int i = plainSelectList.size() - 1; i >= 0; i--) {
+            PlainSelect plainSelect = plainSelectList.get(i);
             if (Objects.nonNull(plainSelect.getFromItem())) {
                 Table table = SqlSelectHelper.getTable(plainSelect.getFromItem());
-                if (table.getName().equals(tableName)) {
-                    replacePlainSelectByExpr(plainSelect, replace);
+                if (Objects.nonNull(table) && table.getName().equals(tableName)) {
+                    replacePlainSelectByExpr(plainSelect, replace, cteNames);
                     if (SqlSelectHelper.hasAggregateFunction(plainSelect)) {
                         SqlSelectHelper.addMissingGroupby(plainSelect);
                     }
@@ -810,27 +792,175 @@ public class SqlReplaceHelper {
     }
 
     private static void replacePlainSelectByExpr(PlainSelect plainSelect,
-            Map<String, String> replace) {
+            Map<String, String> replace, Set<String> cteNames) {
+        Set<String> aliasFields = SqlSelectHelper.getAliasFields(plainSelect);
         QueryExpressionReplaceVisitor expressionReplaceVisitor =
-                new QueryExpressionReplaceVisitor(replace);
+                new QueryExpressionReplaceVisitor(replace, aliasFields, cteNames);
         for (SelectItem selectItem : plainSelect.getSelectItems()) {
             selectItem.accept(expressionReplaceVisitor);
         }
         Expression having = plainSelect.getHaving();
         if (Objects.nonNull(having)) {
-            having.accept(expressionReplaceVisitor);
+            plainSelect.setHaving(QueryExpressionReplaceVisitor.replace(having, replace,
+                    aliasFields, cteNames));
         }
 
         Expression where = plainSelect.getWhere();
         if (Objects.nonNull(where)) {
-            where.accept(expressionReplaceVisitor);
+            plainSelect.setWhere(QueryExpressionReplaceVisitor.replace(where, replace,
+                    aliasFields, cteNames));
+        }
+
+        GroupByElement groupBy = plainSelect.getGroupBy();
+        if (Objects.nonNull(groupBy)) {
+            ExpressionList groupByExpressionList = groupBy.getGroupByExpressionList();
+            for (int i = 0; i < groupByExpressionList.size(); i++) {
+                Object groupByExpression = groupByExpressionList.get(i);
+                if (groupByExpression instanceof Expression) {
+                    groupByExpressionList.set(i, QueryExpressionReplaceVisitor.replace(
+                            (Expression) groupByExpression, replace, aliasFields, cteNames));
+                }
+            }
         }
 
         List<OrderByElement> orderByElements = plainSelect.getOrderByElements();
         if (!CollectionUtils.isEmpty(orderByElements)) {
             for (OrderByElement orderByElement : orderByElements) {
-                orderByElement.setExpression(QueryExpressionReplaceVisitor
-                        .replace(orderByElement.getExpression(), replace));
+                orderByElement.setExpression(QueryExpressionReplaceVisitor.replace(
+                        orderByElement.getExpression(), replace, aliasFields, cteNames));
+            }
+        }
+
+        List<Join> joins = plainSelect.getJoins();
+        if (!CollectionUtils.isEmpty(joins)) {
+            for (Join join : joins) {
+                if (!CollectionUtils.isEmpty(join.getOnExpressions())) {
+                    join.setOnExpressions(join.getOnExpressions().stream()
+                            .map(onExpression -> QueryExpressionReplaceVisitor.replace(
+                                    onExpression, replace, aliasFields, cteNames))
+                            .collect(Collectors.toList()));
+                }
+            }
+        }
+    }
+
+    private static void collectPlainSelects(Select select, List<PlainSelect> plainSelectList,
+            Set<String> cteNames) {
+        if (Objects.isNull(select)) {
+            return;
+        }
+        if (select instanceof PlainSelect) {
+            PlainSelect plainSelect = (PlainSelect) select;
+            plainSelectList.add(plainSelect);
+            collectWithItemPlainSelects(plainSelect.getWithItemsList(), plainSelectList, cteNames);
+            collectFromItemPlainSelects(plainSelect.getFromItem(), plainSelectList, cteNames);
+            if (!CollectionUtils.isEmpty(plainSelect.getJoins())) {
+                for (Join join : plainSelect.getJoins()) {
+                    collectFromItemPlainSelects(join.getFromItem(), plainSelectList, cteNames);
+                }
+            }
+            collectSubSelectExpressions(plainSelect, plainSelectList, cteNames);
+        } else if (select instanceof SetOperationList) {
+            SetOperationList setOperationList = (SetOperationList) select;
+            if (!CollectionUtils.isEmpty(setOperationList.getSelects())) {
+                setOperationList.getSelects().forEach(subSelectBody ->
+                        collectPlainSelects(subSelectBody, plainSelectList, cteNames));
+            }
+            collectWithItemPlainSelects(setOperationList.getWithItemsList(), plainSelectList,
+                    cteNames);
+        } else if (select instanceof ParenthesedSelect) {
+            collectPlainSelects(((ParenthesedSelect) select).getSelect(), plainSelectList,
+                    cteNames);
+        }
+    }
+
+    private static void collectWithItemPlainSelects(List<WithItem> withItems,
+            List<PlainSelect> plainSelectList, Set<String> cteNames) {
+        if (CollectionUtils.isEmpty(withItems)) {
+            return;
+        }
+        for (WithItem withItem : withItems) {
+            if (Objects.nonNull(withItem.getAlias())) {
+                cteNames.add(withItem.getAlias().getName());
+            }
+            collectPlainSelects(withItem.getSelect(), plainSelectList, cteNames);
+        }
+    }
+
+    private static void collectFromItemPlainSelects(FromItem fromItem,
+            List<PlainSelect> plainSelectList, Set<String> cteNames) {
+        if (fromItem instanceof ParenthesedSelect) {
+            ParenthesedSelect parenthesedSelect = (ParenthesedSelect) fromItem;
+            if (Objects.nonNull(parenthesedSelect.getAlias())) {
+                cteNames.add(parenthesedSelect.getAlias().getName());
+            }
+            collectPlainSelects(parenthesedSelect.getSelect(), plainSelectList, cteNames);
+        }
+    }
+
+    private static void collectCteTableAlias(FromItem fromItem, Set<String> cteNames) {
+        if (fromItem instanceof Table) {
+            Table table = (Table) fromItem;
+            if (Objects.nonNull(table.getAlias()) && cteNames.contains(table.getName())) {
+                cteNames.add(table.getAlias().getName());
+            }
+        }
+    }
+
+    private static void collectSubSelectExpressions(PlainSelect plainSelect,
+            List<PlainSelect> plainSelectList, Set<String> cteNames) {
+        ExpressionVisitorAdapter subSelectVisitor = new ExpressionVisitorAdapter() {
+            @Override
+            public void visit(ParenthesedSelect selectBody) {
+                collectPlainSelects(selectBody.getSelect(), plainSelectList, cteNames);
+            }
+
+            @Override
+            public void visit(Select selectBody) {
+                collectPlainSelects(selectBody, plainSelectList, cteNames);
+            }
+
+            @Override
+            public void visit(AnalyticExpression expr) {
+                if (Objects.nonNull(expr.getPartitionExpressionList())) {
+                    for (Object partitionExpression : expr.getPartitionExpressionList()) {
+                        if (partitionExpression instanceof Expression) {
+                            ((Expression) partitionExpression).accept(this);
+                        }
+                    }
+                }
+                super.visit(expr);
+            }
+
+            @Override
+            public void visit(AnyComparisonExpression anyComparisonExpression) {
+                collectPlainSelects(anyComparisonExpression.getSelect(), plainSelectList,
+                        cteNames);
+            }
+        };
+        if (Objects.nonNull(plainSelect.getWhere())) {
+            plainSelect.getWhere().accept(subSelectVisitor);
+        }
+        if (Objects.nonNull(plainSelect.getHaving())) {
+            plainSelect.getHaving().accept(subSelectVisitor);
+        }
+        if (!CollectionUtils.isEmpty(plainSelect.getSelectItems())) {
+            for (SelectItem selectItem : plainSelect.getSelectItems()) {
+                selectItem.accept(subSelectVisitor);
+            }
+        }
+        if (Objects.nonNull(plainSelect.getGroupBy())) {
+            ExpressionList groupByExpressionList =
+                    plainSelect.getGroupBy().getGroupByExpressionList();
+            for (Object groupByExpression : groupByExpressionList) {
+                if (groupByExpression instanceof Expression) {
+                    ((Expression) groupByExpression).accept(subSelectVisitor);
+                }
+            }
+        }
+        if (!CollectionUtils.isEmpty(plainSelect.getOrderByElements())) {
+            for (OrderByElement orderByElement : plainSelect.getOrderByElements()) {
+                orderByElement.getExpression().accept(subSelectVisitor);
             }
         }
     }

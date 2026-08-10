@@ -3,8 +3,10 @@ package com.tencent.supersonic.headless.chat.parser.llm;
 import com.tencent.supersonic.common.pojo.Pair;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.headless.api.pojo.*;
+import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
@@ -33,7 +35,27 @@ public class LLMRequestService {
 
     public Long getDataSetId(ChatQueryContext queryCtx) {
         DataSetResolver dataSetResolver = ComponentFactory.getModelResolver();
-        return dataSetResolver.resolve(queryCtx, queryCtx.getRequest().getDataSetIds());
+        Long resolved = dataSetResolver.resolve(queryCtx, queryCtx.getRequest().getDataSetIds());
+        boolean bankEnabled = Boolean.parseBoolean(
+                parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE));
+        if (!bankEnabled || queryCtx.getSemanticSchema() == null) {
+            return resolved;
+        }
+        Set<Long> requested = queryCtx.getRequest().getDataSetIds();
+        if (CollectionUtils.isEmpty(requested)) {
+            return resolved;
+        }
+        List<SchemaElement> dimensions = queryCtx.getSemanticSchema().getDimensions();
+        // Prefer a bank-qualified dataset so bank constrained planning is not skipped when the
+        // agent binds both a bank dataset and an unrelated fallback dataset.
+        if (resolved == null || !isBankDataset(dimensions, resolved)) {
+            for (Long dataSetId : requested) {
+                if (isBankDataset(dimensions, dataSetId)) {
+                    return dataSetId;
+                }
+            }
+        }
+        return resolved;
     }
 
     public LLMReq getLlmReq(ChatQueryContext queryCtx, Long dataSetId) {
@@ -45,16 +67,22 @@ public class LLMRequestService {
         LLMReq.LLMSchema llmSchema = new LLMReq.LLMSchema();
         int fieldCntThreshold =
                 Integer.valueOf(parserConfig.getParameterValue(PARSER_FIELDS_COUNT_THRESHOLD));
-        if (queryCtx.getMapInfo().getMatchedElements(dataSetId).size() <= fieldCntThreshold) {
+        BankRoutingDecision bankRouting = selectBankRouting(configuredSqlGenType,
+                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
+                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
+        LLMReq.SqlGenType sqlGenType = bankRouting.selectedSqlGenType();
+        // Bank constrained planning recovers metrics from question keywords; a mapped-only field
+        // subset would mark those recovered codes as UNKNOWN_METRIC at validation time. Free SQL
+        // on bank datasets also needs the full metric catalog so the model can resolve 存贷比/不良率等.
+        boolean bankDatasetQualified = bankRouting.bankDatasetQualified();
+        if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType) || bankDatasetQualified
+                || queryCtx.getMapInfo().getMatchedElements(dataSetId).size() <= fieldCntThreshold) {
             llmSchema.setMetrics(queryCtx.getSemanticSchema().getMetrics());
             llmSchema.setDimensions(queryCtx.getSemanticSchema().getDimensions());
         } else {
             llmSchema.setMetrics(getMappedMetrics(queryCtx, dataSetId));
             llmSchema.setDimensions(getMappedDimensions(queryCtx, dataSetId));
         }
-        LLMReq.SqlGenType sqlGenType = selectSqlGenType(configuredSqlGenType,
-                queryCtx.getSemanticSchema().getDimensions(), dataSetId, Boolean.parseBoolean(
-                        parserConfig.getParameterValue(PARSER_BANK_CONSTRAINED_PLAN_ENABLE)));
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmSchema.setDimensions(ensureBankOrganizationDimension(llmSchema.getDimensions(),
                     queryCtx.getSemanticSchema().getDimensions(), dataSetId));
@@ -80,6 +108,7 @@ public class LLMRequestService {
         llmReq.setCurrentDate(DateUtils.getBeforeDate(0));
         llmReq.setTerms(getMappedTerms(queryCtx, dataSetId));
         llmReq.setSqlGenType(sqlGenType);
+        llmReq.setBankRoutingTelemetry(bankRouting.telemetry());
         if (LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(sqlGenType)) {
             llmReq.setBankMaxCandidates(bankMaxCandidates());
         }
@@ -87,17 +116,47 @@ public class LLMRequestService {
         llmReq.setDynamicExemplars(queryCtx.getRequest().getDynamicExemplars());
         llmReq.setSemanticIntentHints(SemanticIntentHints.fromQuery(queryText,
                 queryCtx.getBankIntentResult(), llmSchema, LocalDate.now()));
+        applyBankPlanRepairContext(queryCtx.getRequest(), llmReq);
 
         return llmReq;
+    }
+
+    static void applyBankPlanRepairContext(QueryNLReq queryRequest, LLMReq llmRequest) {
+        if (queryRequest == null || llmRequest == null
+                || queryRequest.getBankPlanRepairContext() == null) {
+            return;
+        }
+        String toolResultJson =
+                queryRequest.getBankPlanRepairContext().getToolResultJson();
+        if (toolResultJson == null || toolResultJson.isBlank()) {
+            return;
+        }
+        BankPlanToolResult toolResult =
+                com.tencent.supersonic.common.util.JsonUtil.toObject(toolResultJson,
+                        BankPlanToolResult.class);
+        if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
+            return;
+        }
+        llmRequest.setBankPlanToolResult(toolResult);
+        llmRequest.setPreviousBankQueryPlanJson(
+                queryRequest.getBankPlanRepairContext().getPreviousPlanJson());
     }
 
     static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,
             List<SchemaElement> availableDimensions, Long dataSetId,
             boolean bankConstrainedPlanEnabled) {
-        if (bankConstrainedPlanEnabled && isBankDataset(availableDimensions, dataSetId)) {
-            return LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN;
-        }
-        return configuredSqlGenType;
+        return selectBankRouting(configuredSqlGenType, availableDimensions, dataSetId,
+                bankConstrainedPlanEnabled).selectedSqlGenType();
+    }
+
+    static BankRoutingDecision selectBankRouting(LLMReq.SqlGenType configuredSqlGenType,
+            List<SchemaElement> availableDimensions, Long dataSetId,
+            boolean bankConstrainedPlanEnabled) {
+        boolean bankDatasetQualified = isBankDataset(availableDimensions, dataSetId);
+        LLMReq.SqlGenType selectedSqlGenType = bankConstrainedPlanEnabled && bankDatasetQualified
+                ? LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN : configuredSqlGenType;
+        return new BankRoutingDecision(bankConstrainedPlanEnabled, bankDatasetQualified,
+                selectedSqlGenType);
     }
 
     private static boolean isBankDataset(List<SchemaElement> availableDimensions, Long dataSetId) {
@@ -130,6 +189,7 @@ public class LLMRequestService {
         SqlGenStrategy sqlGenStrategy = SqlGenStrategyFactory.get(llmReq.getSqlGenType());
         String dataSet = llmReq.getSchema().getDataSetName();
         LLMResp result = sqlGenStrategy.generate(llmReq);
+        result.setBankRoutingTelemetry(llmReq.getBankRoutingTelemetry());
         result.setQuery(llmReq.getQueryText());
         result.setDataSet(dataSet);
         return result;
@@ -245,5 +305,15 @@ public class LLMRequestService {
         Map<Long, DataSetSchema> dataSetSchemaMap = semanticSchema.getDataSetSchemaMap();
         DataSetSchema dataSetSchema = dataSetSchemaMap.get(dataSetId);
         return new Pair(dataSetSchema.getDatabaseType(), dataSetSchema.getDatabaseVersion());
+    }
+
+    record BankRoutingDecision(boolean bankConstrainedPlanEnabled, boolean bankDatasetQualified,
+            LLMReq.SqlGenType selectedSqlGenType) {
+
+        Map<String, Object> telemetry() {
+            return Map.of("bankConstrainedPlanEnabled", bankConstrainedPlanEnabled,
+                    "bankDatasetQualified", bankDatasetQualified, "selectedSqlGenType",
+                    selectedSqlGenType.name());
+        }
     }
 }

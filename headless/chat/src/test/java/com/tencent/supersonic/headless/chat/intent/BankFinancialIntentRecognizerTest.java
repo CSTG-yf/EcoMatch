@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankFinancialIntentRecognizerTest {
@@ -154,6 +155,47 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldRecognizeADailyAverageQuestionAsAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额日均是多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.AGGREGATION, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenRankingIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年全年各项存款余额日均排名前3和后3的农商行？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenTrendIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行各项存款余额日均的逐月趋势？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+    }
+
+    @Test
+    void shouldNotTreatDailyAverageAsAggregationWhenChangeIsExpressed() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行2025年各项存款余额日均较上季度末变化了多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+    }
+
+    @Test
+    void shouldPreferChangeWhenTheQuestionAsksForRankingMovement() {
+        BankIntentResult result = recognizer.recognize(
+                "从去年末到今年末，各项存款余额的排名变化了多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.CHANGE, result.getIntent());
+    }
+
+    @Test
     void shouldNotTreatAMinimumRegulatoryRequirementAsARankingFilter() {
         BankIntentResult result = recognizer.recognize("2026年一季度末，江苏省H市农商行的资本充足率满足10.5%的最低要求吗？",
                 LocalDate.of(2026, 7, 22));
@@ -165,6 +207,72 @@ class BankFinancialIntentRecognizerTest {
                 .anyMatch(filter -> "metric_value".equals(filter.getField())
                         && "GTE".equals(filter.getOperator())
                         && "10.5%".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldRecognizeDaysAboveProvinceAverageAsAggregationWithBenchmark() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额有多少天高于全省均值？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.AGGREGATION, result.getIntent());
+        assertEquals(Set.of("ZB001"), metricCodes(result));
+        assertEquals("ORG010", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 1, 1), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+        assertTrue(result.getFilters().stream().anyMatch(filter -> "benchmark".equals(
+                filter.getField()) && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue())));
+        assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
+    void shouldKeepRankingStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年全年各项存款余额有多少天在省均值以上，排名前3的农商行？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+    }
+
+    @Test
+    void shouldKeepTrendStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年各项存款余额有多少天高于全省均值的逐月趋势？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.TREND, result.getIntent());
+    }
+
+    @Test
+    void shouldKeepChangeStrongerThanDaysAboveProvinceAverageAggregation() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额有多少天高于全省均值，较上季变化了多少？",
+                LocalDate.of(2026, 7, 22));
+
+        assertNotEquals(BankIntentType.AGGREGATION, result.getIntent());
+    }
+
+    @Test
+    void shouldNotRecognizeDaysAboveProvinceAverageWithoutADayCountExpression() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省J市农商行2025年全年各项存款余额高于全省均值吗？", LocalDate.of(2026, 7, 22));
+
+        assertNotEquals(BankIntentType.AGGREGATION, result.getIntent());
+    }
+
+    @Test
+    void shouldRecognizeDerivedLoanToDepositRatioWithRankingSemantics() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年一季度末全省哪家农商行的存贷比最高？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(1, result.getDerivedMetrics().size());
+        BankIntentResult.DerivedMetricCandidate derived = result.getDerivedMetrics().get(0);
+        assertEquals("DERIVED_ZB002_DIV_ZB001", derived.getCode());
+        assertEquals("存贷比", derived.getName());
+        assertEquals("ZB002", derived.getNumerator());
+        assertEquals("ZB001", derived.getDenominator());
+        assertTrue(result.getMetrics().stream().noneMatch(
+                metric -> metric.getCode().startsWith("DERIVED_")));
+        assertEquals(Set.of("ZB002", "ZB001"), metricCodes(result));
     }
 
     private Set<String> metricCodes(BankIntentResult result) {

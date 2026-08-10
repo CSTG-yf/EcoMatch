@@ -1,0 +1,251 @@
+package com.tencent.supersonic.chat.server.service.impl;
+
+import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
+import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
+import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
+import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanTraceEvent;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class ChatQueryServiceBankPlanRepairTest {
+
+    @Test
+    void retriesDatabaseGrammarFailureWithinTheSameQuestionAndReturnsSuccess() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "fingerprint-1", "JDBC_GRAMMAR"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+        ChatExecuteReq request = executeRequest();
+
+        QueryResult result = service.executeWithBankPlanRepair(request, storedQuery());
+
+        assertEquals(QueryState.SUCCESS, result.getQueryState());
+        assertEquals(2, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+        ChatParseReq repairRequest = service.repairRequests.get(0);
+        assertEquals(20L, repairRequest.getQueryId());
+        assertTrue(repairRequest.isInternalBankPlanRepair());
+        assertTrue(repairRequest.getBankPlanRepairContext().getToolResultJson()
+                .contains("trace-1"));
+        assertTrue(repairRequest.getBankPlanRepairContext().getPreviousPlanJson()
+                .contains("POINT_QUERY"));
+        assertFalse(repairRequest.getBankPlanRepairContext().getToolResultJson()
+                .toLowerCase().contains("select "));
+        assertSame(service.repairedParse, service.executionParses.get(1));
+        @SuppressWarnings("unchecked")
+        List<BankPlanTraceEvent> trace = (List<BankPlanTraceEvent>) result.getChatContext()
+                .getProperties().get(BankPlanTraceEvent.PROPERTY_KEY);
+        assertEquals(2, trace.size());
+        assertEquals(BankPlanTraceEvent.Action.REPAIRING, trace.get(0).getAction());
+        assertEquals(BankPlanTraceEvent.Action.SUCCEEDED, trace.get(1).getAction());
+        assertEquals("POINT_QUERY", trace.get(0).getPlanSummary().getIntent());
+        assertFalse(com.tencent.supersonic.common.util.JsonUtil.toString(trace)
+                .toLowerCase().contains("select "));
+    }
+
+    @Test
+    void stopsWhenAPlanFingerprintOrFailureSignatureRepeats() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "same-fingerprint", "JDBC_GRAMMAR"),
+                failed(2, "trace-1", "same-fingerprint", "JDBC_GRAMMAR"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+        assertEquals(2, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+        assertEquals(BankPlanTraceEvent.Action.STOPPED, trace(result).get(1).getAction());
+    }
+
+    @Test
+    void stopsAfterThreeDistinctAttempts() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "fingerprint-1", "JDBC_GRAMMAR"),
+                failed(2, "trace-1", "fingerprint-2", "QUERY_GATEWAY"),
+                failed(3, "trace-1", "fingerprint-3", "SQL_SAFETY_POLICY"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+        service.addRepairParse(parseResponse(20L, 1));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+        assertEquals(3, service.executeCount);
+        assertEquals(2, service.repairRequests.size());
+    }
+
+    @Test
+    void doesNotAskTheModelToRepairDatabaseAvailabilityFailures() {
+        StubService service = new StubService(
+                List.of(failed(1, "trace-1", "fingerprint-1", "JDBC_DATA_ACCESS")));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+        assertEquals(1, service.executeCount);
+        assertTrue(service.repairRequests.isEmpty());
+    }
+
+    @Test
+    void retriesResultContractFailuresEvenWhenDatabaseExecutionSucceeded() {
+        StubService service = new StubService(List.of(
+                resultContractFailure(1, "trace-1", "fingerprint-1"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SUCCESS, result.getQueryState());
+        assertEquals(2, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+    }
+
+    @Test
+    void keepsTheLastExecutionFailureWhenTheRepairModelIsUnavailable() {
+        StubService service = new StubService(
+                List.of(failed(1, "trace-1", "fingerprint-1", "JDBC_GRAMMAR")));
+        service.repairFailure = new IllegalStateException("model unavailable: secret endpoint");
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+        assertEquals(1, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+        BankPlanTraceEvent traceEvent = trace(result).get(0);
+        assertEquals(BankPlanTraceEvent.Action.STOPPED, traceEvent.getAction());
+        assertFalse(traceEvent.getActionMessage().contains("secret endpoint"));
+    }
+
+    private static QueryResult failed(int attempt, String traceId, String fingerprint,
+            String errorCode) {
+        BankPlanToolResult.Stage stage = "SQL_SAFETY_POLICY".equals(errorCode)
+                ? BankPlanToolResult.Stage.SQL_SAFETY
+                : "QUERY_GATEWAY".equals(errorCode)
+                        ? BankPlanToolResult.Stage.DATABASE_PREPARE
+                        : BankPlanToolResult.Stage.DATABASE_EXECUTE;
+        BankPlanToolResult toolResult = BankPlanToolResult.failed(attempt, traceId, fingerprint,
+                stage, errorCode, Map.of(), List.of("regenerate the complete plan"));
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("version", "1.0");
+        plan.put("intent", "POINT_QUERY");
+        parseInfo.getProperties().put(BankPlanToolResult.PLAN_PROPERTY_KEY, plan);
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SEARCH_EXCEPTION);
+        result.setErrorMsg("opaque database error");
+        result.setChatContext(parseInfo);
+        return result;
+    }
+
+    private static QueryResult succeeded() {
+        BankPlanToolResult toolResult = BankPlanToolResult.started(2, "trace-1", "fingerprint-2",
+                "STRUCT", List.of("aggregate_value"))
+                .succeed(BankPlanToolResult.Stage.SQL_SAFETY)
+                .succeed(BankPlanToolResult.Stage.DATABASE_PREPARE)
+                .succeed(BankPlanToolResult.Stage.DATABASE_EXECUTE)
+                .complete(List.of("aggregate_value"), List.of(Map.of("aggregate_value", 1)));
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+        parseInfo.getProperties().put(BankPlanToolResult.PLAN_PROPERTY_KEY,
+                Map.of("version", "1.0", "intent", "POINT_QUERY"));
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setChatContext(parseInfo);
+        return result;
+    }
+
+    private static QueryResult resultContractFailure(int attempt, String traceId,
+            String fingerprint) {
+        BankPlanToolResult toolResult = BankPlanToolResult.failed(attempt, traceId, fingerprint,
+                BankPlanToolResult.Stage.RESULT_SEMANTIC, "RESULT_CONTRACT_MISMATCH", Map.of(),
+                List.of("regenerate the complete plan"));
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
+        parseInfo.getProperties().put(BankPlanToolResult.PLAN_PROPERTY_KEY,
+                Map.of("version", "1.0", "intent", "POINT_QUERY"));
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setChatContext(parseInfo);
+        return result;
+    }
+
+    private static ChatParseResp parseResponse(long queryId, int parseId) {
+        ChatParseResp response = new ChatParseResp(queryId);
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.setId(parseId);
+        response.setSelectedParses(List.of(parseInfo));
+        return response;
+    }
+
+    private static ChatExecuteReq executeRequest() {
+        return ChatExecuteReq.builder().queryId(20L).chatId(10).agentId(7).parseId(1)
+                .queryText("trusted question").user(User.get(2L, "analyst")).build();
+    }
+
+    private static ChatQueryDO storedQuery() {
+        ChatQueryDO storedQuery = new ChatQueryDO();
+        storedQuery.setQuestionId(20L);
+        storedQuery.setChatId(10L);
+        storedQuery.setAgentId(7);
+        storedQuery.setQueryText("trusted question");
+        return storedQuery;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<BankPlanTraceEvent> trace(QueryResult result) {
+        return (List<BankPlanTraceEvent>) result.getChatContext().getProperties()
+                .get(BankPlanTraceEvent.PROPERTY_KEY);
+    }
+
+    private static final class StubService extends ChatQueryServiceImpl {
+        private final Deque<QueryResult> results;
+        private final Deque<ChatParseResp> repairParses = new ArrayDeque<>();
+        private final List<ChatParseReq> repairRequests = new ArrayList<>();
+        private final List<SemanticParseInfo> executionParses = new ArrayList<>();
+        private int executeCount;
+        private RuntimeException repairFailure;
+        private SemanticParseInfo repairedParse;
+
+        private StubService(List<QueryResult> results) {
+            this.results = new ArrayDeque<>(results);
+        }
+
+        private void addRepairParse(ChatParseResp response) {
+            repairParses.add(response);
+            repairedParse = response.getSelectedParses().get(0);
+        }
+
+        @Override
+        QueryResult executeOnce(ChatExecuteReq request, ChatQueryDO storedQuery,
+                SemanticParseInfo parseOverride) {
+            executeCount++;
+            executionParses.add(parseOverride);
+            return results.removeFirst();
+        }
+
+        @Override
+        public ChatParseResp parse(ChatParseReq request) {
+            repairRequests.add(request);
+            if (repairFailure != null) {
+                throw repairFailure;
+            }
+            return repairParses.removeFirst();
+        }
+    }
+}

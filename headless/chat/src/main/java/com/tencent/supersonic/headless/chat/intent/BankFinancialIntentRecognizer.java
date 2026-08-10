@@ -1,8 +1,10 @@
 package com.tencent.supersonic.headless.chat.intent;
 
+import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.DerivedMetricDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.MetricDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.OrganizationDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.Clarification;
+import com.tencent.supersonic.headless.chat.intent.BankIntentResult.DerivedMetricCandidate;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.FilterSlot;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.IntentCandidate;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.MetricCandidate;
@@ -60,6 +62,7 @@ public class BankFinancialIntentRecognizer {
         result.setOriginalText(original);
         result.setNormalizedText(normalized);
         result.setMetrics(extractMetrics(original));
+        result.setDerivedMetrics(extractDerivedMetrics(original));
         result.setOrganizations(extractOrganizations(original));
         result.setTime(extractTime(normalized, effectiveReference));
         result.setFilters(extractFilters(normalized));
@@ -171,6 +174,28 @@ public class BankFinancialIntentRecognizer {
                 .matchedText(metric.getName()).confidence(0.94D).reason(reason).build());
     }
 
+    /**
+     * Extracts derived metric candidates from the lexicon. A derived metric is a runtime-defined
+     * ratio contract (e.g. 存贷比 = ZB002 / ZB001) and is never exposed as a schema base metric:
+     * the base operands stay in {@link BankIntentResult#getMetrics()} while the derived
+     * specification lives in its own candidate list.
+     */
+    private List<DerivedMetricCandidate> extractDerivedMetrics(String text) {
+        List<DerivedMetricCandidate> result = new ArrayList<>();
+        for (DerivedMetricDefinition derived : BankFinancialLexicon.derivedMetrics().values()) {
+            String matched = derived.getAliases().stream().filter(text::contains)
+                    .max(Comparator.comparingInt(String::length)).orElse(null);
+            if (matched != null) {
+                result.add(DerivedMetricCandidate.builder().code(derived.getCode())
+                        .name(derived.getName()).numerator(derived.getNumerator())
+                        .denominator(derived.getDenominator()).matchedText(matched)
+                        .confidence(matched.equals(derived.getName()) ? 1D : 0.96D)
+                        .reason("银行派生指标名称匹配").build());
+            }
+        }
+        return result;
+    }
+
     private boolean isComprehensivePerformanceRanking(String text) {
         return text.contains("\u6307\u6807")
                 && containsAny(text, "\u8868\u73b0\u8f83\u597d", "\u8868\u73b0\u8f83\u5dee");
@@ -216,11 +241,24 @@ public class BankFinancialIntentRecognizer {
                 "表现较好", "表现较差")) {
             score(scores, BankIntentType.RANKING, 0.98D, "命中排名或极值表达");
         }
-        if (containsAny(text, "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
+        if (text.contains("排名") && containsAny(text, "变化", "变动")
+                && containsAny(text, "从", "到", "较", "比")) {
+            score(scores, BankIntentType.CHANGE, 0.995D, "命中跨期排名变化表达");
+        }
+        if (containsAny(text, "日均", "平均", "均值", "合计", "总和", "加起来", "多少家", "有几家", "多少天")) {
             score(scores, BankIntentType.AGGREGATION, 0.91D, "命中聚合统计表达");
         }
         if (annualDailyExtremaSummary) {
             score(scores, BankIntentType.AGGREGATION, 0.995D, "命中单机构全年日均及极值统计表达");
+        }
+        // Province-wide "which org hit the single-day max/min" must beat RANKING (highest/lowest
+        // wording) so the compiler-owned aggregation-summary template is selected.
+        if (isAnnualDailyExtremaRanking(text)) {
+            score(scores, BankIntentType.AGGREGATION, 0.996D, "命中全年单日极值机构定位表达");
+        }
+        if (isDailyProvinceAverageCount(text, organizationCount)) {
+            score(scores, BankIntentType.AGGREGATION, 0.995D,
+                    "命中单机构逐日高于全省均值的天数统计表达");
         }
         if ((organizationCount >= 2 && containsAny(text, "谁", "更", "比", "差"))
                 || containsAny(text, "两家相比", "机构间比较")) {
@@ -347,8 +385,11 @@ public class BankFinancialIntentRecognizer {
             filters.add(FilterSlot.builder().field("benchmark").operator("COMPARE")
                     .value("PROVINCE_AVERAGE").sourceText("全省均值").build());
         }
+        // Annual single-day extrema placement ("单日最高值出现在哪家…最低值…") is an aggregation-summary
+        // contract, not a TopN rank filter; "最高/最低" here must not inject rank LTE 1.
         if (!comprehensivePerformanceProfile && !isAnnualDailyExtremaSummary(text)
-                && !isTrendExtremaSummary(text) && !isThresholdRequirement(text)) {
+                && !isAnnualDailyExtremaRanking(text) && !isTrendExtremaSummary(text)
+                && !isThresholdRequirement(text)) {
             Matcher topRank = Pattern.compile("(?:排名)?前([1-9]\\d*|[一二三四五六七八九十])").matcher(text);
             if (topRank.find()) {
                 filters.add(FilterSlot.builder().field("rank").operator("LTE")
@@ -375,6 +416,41 @@ public class BankFinancialIntentRecognizer {
     private boolean isAnnualDailyExtremaSummary(String text) {
         return text.contains("全年") && containsAny(text, "日均", "均值", "平均") && text.contains("最高日")
                 && text.contains("最低日");
+    }
+
+    /**
+     * "2025年全年，各项贷款余额的单日最高值出现在哪家？单日最低值在哪家？" — no per-org daily average wording,
+     * only which institution owns the single-day extremes over the full year.
+     */
+    private boolean isAnnualDailyExtremaRanking(String text) {
+        if (text == null || !text.contains("全年") || isAnnualDailyExtremaSummary(text)) {
+            return false;
+        }
+        boolean hasMax = containsAny(text, "单日最高", "最高值");
+        boolean hasMin = containsAny(text, "单日最低", "最低值");
+        return hasMax && hasMin && containsAny(text, "哪家", "哪一", "哪个");
+    }
+
+    /**
+     * Recognizes the fully determined per-day province-average comparison: one organization asks
+     * how many days in the range its metric stayed above the daily province average. The score is
+     * only granted when the question combines a province-average benchmark, an explicit day-count
+     * expression, and a comparison word; stronger ranking, trend, or change semantics are never
+     * overridden by this aggregation.
+     */
+    private boolean isDailyProvinceAverageCount(String text, int organizationCount) {
+        if (organizationCount != 1) {
+            return false;
+        }
+        boolean benchmark = containsAny(text, "全省均值", "全省平均", "平均水平");
+        boolean dayCount = containsAny(text, "多少天", "几天", "天数", "多少个交易日");
+        boolean comparison = containsAny(text, "高于", "超过", "大于");
+        if (!benchmark || !dayCount || !comparison) {
+            return false;
+        }
+        return !containsAny(text, "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续",
+                "全年变化", "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动",
+                "变化");
     }
 
     private boolean isTrendExtremaSummary(String text) {

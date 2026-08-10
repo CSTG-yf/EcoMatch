@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.ToString;
 
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -25,6 +26,7 @@ public class SemanticQueryResp extends QueryResult<Map<String, Object>> {
     boolean useCache;
     boolean dataMasked;
     Set<String> maskedColumns = new LinkedHashSet<>();
+    Map<String, Object> executionTelemetry = new LinkedHashMap<>();
     private String errorMsg;
 
     public List<QueryColumn> getMetricColumns() {

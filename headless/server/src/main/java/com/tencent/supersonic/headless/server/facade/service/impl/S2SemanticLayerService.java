@@ -491,6 +491,10 @@ public class S2SemanticLayerService implements SemanticLayerService {
             queryStatement.setIsTranslated(true);
         }
         if (queryStatement != null) {
+            boolean trustedCompiledSql = semanticQueryReq.isTrustedCompiledSql()
+                    && (semanticQueryReq.getSqlInfo() == null || StringUtils
+                            .isBlank(semanticQueryReq.getSqlInfo().getCorrectedQuerySQL()));
+            queryStatement.setTrustedCompiledSql(trustedCompiledSql);
             queryStatement.setUser(user);
         }
         return queryStatement;

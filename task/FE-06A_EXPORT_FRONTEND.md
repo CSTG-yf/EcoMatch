@@ -4,17 +4,18 @@
 
 本模块提供导出中心页面、可复用创建组件、正式接口服务层、纯模型函数及 Jest 单元测试，并已接入路由、菜单、问数 SDK 和看板模块。实现不依赖模拟数据。
 
-由于 BE-13 未提供任务列表接口，导出中心只展示本次浏览器会话创建或通过任务 ID 查询到的任务，不虚构全量历史记录。
+导出中心展示当前登录账号的历史任务，不依赖浏览器会话缓存；服务端只返回任务创建者本人的记录。
 
 ## 2. BE-13 正式契约
 
 基础路径：`/api/semantic/export`
 
-| 操作     | 方法与路径                                   | 请求/响应                           |
-| -------- | -------------------------------------------- | ----------------------------------- |
-| 创建     | `POST /api/semantic/export`                  | `ExportCreateReq -> ExportTaskResp` |
-| 查询状态 | `GET /api/semantic/export/{taskId}`          | `ExportTaskResp`                    |
-| 下载     | `GET /api/semantic/export/{taskId}/download` | XLSX/PDF 二进制流                   |
+| 操作     | 方法与路径                                       | 请求/响应                                |
+| -------- | ------------------------------------------------ | ---------------------------------------- |
+| 历史列表 | `GET /api/semantic/export?pageNum=1&pageSize=20` | `PageInfo<ExportTaskResp>`，仅当前创建者 |
+| 创建     | `POST /api/semantic/export`                      | `ExportCreateReq -> ExportTaskResp`      |
+| 查询状态 | `GET /api/semantic/export/{taskId}`              | `ExportTaskResp`                         |
+| 下载     | `GET /api/semantic/export/{taskId}/download`     | XLSX/PDF 二进制流                        |
 
 `ExportCreateReq`：
 
@@ -33,8 +34,8 @@
 
 ### 服务与类型
 
-- `types.ts` 对齐 `ExportCreateReq`、`ExportChartReq`、`ExportTaskResp` 和全部枚举。
-- `service.ts` 封装创建、状态查询和下载 API，并导出可复用 `exportApi`。
+- `types.ts` 对齐 `ExportCreateReq`、`ExportChartReq`、`ExportTaskResp`、分页列表和全部枚举。
+- `service.ts` 封装历史列表、创建、状态查询和下载 API，并导出可复用 `exportApi`。
 - 下载使用仓库共享 `request` 客户端的 `responseType: 'blob'` 和 `getResponse: true`，因此请求拦截器会携带当前 `Authorization`/`auth` Token。未使用裸 `<a href>` 下载接口。
 - 文件名从服务端 `Content-Disposition` 解析，Blob 仅通过临时对象 URL 保存。
 
@@ -53,7 +54,7 @@
 
 ### UI 与复用入口
 
-- `ExportCenter`：创建任务、按任务 ID 查询、每 2 秒轮询 PENDING/RUNNING、手动刷新、安全下载、失败/过期重试、明确错误和空状态。
+- `ExportCenter`：初次加载当前账号最近 20 个任务，支持手动刷新；创建任务、按任务 ID 查询、每 2 秒轮询 PENDING/RUNNING、安全下载、失败/过期重试、明确错误和空状态。
 - `CreateExport`：从 `ExportCenter/index.tsx` 具名导出。调用方可传入正式 `initialRequest` 并设置 `lockedSource`，用于问数结果或看板页发起导出。
 - `lockedSource=true` 时不渲染底层结构化 JSON、看板 ID 或来源编辑控件，只展示来源名称、数据范围及脱敏说明。提交始终使用 `initialRequest` 的 `queries`、`dashboardId`、`charts`，仅允许选择输出格式，避免可信集成入口被表单值篡改。
 - 页面在桌面和移动端使用稳定的单列/多列响应式布局；任务操作在窄屏下保持可点击且不溢出。
@@ -82,9 +83,11 @@
 - 仓库全量 `tsc` 未能执行到业务源码：项目固定 TypeScript 4.9.5 无法解析当前 `@ant-design/pro-form` 声明；使用已安装 TypeScript 5.9.3 时又被仓库 `tsconfig.json` 中已移除的 `suppressImplicitAnyIndexErrors` 选项阻断。两项均为既有工具链问题，本任务未按约束修改依赖或 tsconfig。
 - 定向 ESLint 被仓库混用 ESLint 7.32.0/8.57.1 导致的 `getScope` 异常阻断；非本模块规则错误。
 
-## 5. 集成收口（2026-08-01）
+## 5. 集成收口与任务历史（2026-08-01）
 
 - 已注册 `/exports` 路由和导航菜单，Chat 查询结果与发布看板均可以锁定的结构化语义查询发起导出。
 - 看板导出由服务端对照持久化组件校验数据集、模型、分组、聚合、筛选和日期配置，防止前端替换查询。
+- 历史任务接口统一校验登录态和分页范围，查询条件固定为 `owner = currentUser.name`，按创建时间和任务 ID 倒序返回；过期成功任务在列表中同步转为不可下载的 `EXPIRED` 状态。
+- 当前增量的后端服务测试 `9/9`、前端联合竞赛套件 `10/10`（`55/55`）以及 ExportCenter 格式检查通过。
 - 联合竞赛测试与 FE-06B 共 9 个套件、48 个用例通过；Chat SDK 9 个套件、36 个用例通过；主应用生产构建通过。
 - `/exports` 在 1440x900 和 390x844 视口完成浏览器检查，无横向溢出。

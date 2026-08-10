@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.server.rest;
 
+import com.github.pagehelper.PageInfo;
 import com.tencent.supersonic.auth.api.authentication.utils.UserHolder;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.api.pojo.request.ExportCreateReq;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -28,6 +30,14 @@ public class ExportController {
     public ExportTaskResp create(@RequestBody ExportCreateReq createReq, HttpServletRequest request,
             HttpServletResponse response) {
         return exportTaskService.create(createReq, user(request, response));
+    }
+
+    @GetMapping
+    public PageInfo<ExportTaskResp> list(
+            @RequestParam(value = "pageNum", defaultValue = "1") int pageNum,
+            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize,
+            HttpServletRequest request, HttpServletResponse response) {
+        return exportTaskService.list(pageNum, pageSize, user(request, response));
     }
 
     @GetMapping("/{taskId}")

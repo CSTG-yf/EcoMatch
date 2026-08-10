@@ -17,6 +17,7 @@ from typing import Any
 
 
 LOWER_IS_BETTER = {"ZB012", "ZB013", "ZB017"}
+METRIC_CODE_PATTERN = re.compile(r"^ZB\d{3}$")
 CHINESE_RANK_NUMBERS = {
     "一": 1,
     "二": 2,
@@ -134,19 +135,76 @@ def _latest_date_from_record(record: dict[str, Any]) -> str:
 
 
 def _metric_codes(record: dict[str, Any]) -> list[str]:
+    """Return the record's declared base metric codes, or infer them from text.
+
+    Directly supplied ``normalizedIntent.metrics`` fail closed: every entry
+    must be an object carrying a valid ``ZB###`` code, duplicates are
+    rejected, and any violation raises ``GoldSqlError`` before SQL can be
+    generated.  An empty metrics list keeps the historical question-text
+    inference behavior (``METRIC_ALIASES``).
+    """
     metrics = record.get("normalizedIntent", {}).get("metrics", [])
-    codes = [str(metric.get("code")) for metric in metrics if metric.get("code")]
-    if codes:
-        return codes
-    question = str(record.get("question", ""))
-    aliases = sorted(METRIC_ALIASES, key=len, reverse=True)
-    found: list[str] = []
-    for alias in aliases:
-        if alias in question and METRIC_ALIASES[alias] not in found:
-            found.append(METRIC_ALIASES[alias])
-    if not found:
-        raise GoldSqlError(f"No metric annotation or recognized metric text for {record.get('id')}")
-    return found
+    if not isinstance(metrics, list):
+        raise GoldSqlError(f"Invalid metrics for {record.get('id')}")
+    if not metrics:
+        question = str(record.get("question", ""))
+        aliases = sorted(METRIC_ALIASES, key=len, reverse=True)
+        found: list[str] = []
+        for alias in aliases:
+            if alias in question and METRIC_ALIASES[alias] not in found:
+                found.append(METRIC_ALIASES[alias])
+        if not found:
+            raise GoldSqlError(f"No metric annotation or recognized metric text for {record.get('id')}")
+        return found
+    codes: list[str] = []
+    for metric in metrics:
+        if not isinstance(metric, dict):
+            raise GoldSqlError(f"Invalid metric entry for {record.get('id')}: {metric!r}")
+        code = metric.get("code")
+        if not isinstance(code, str) or not code or METRIC_CODE_PATTERN.fullmatch(code) is None:
+            raise GoldSqlError(f"Invalid metric code {code!r} for {record.get('id')}")
+        codes.append(code)
+    if len(set(codes)) != len(codes):
+        raise GoldSqlError(f"Duplicate metric codes for {record.get('id')}: {sorted(set(codes))}")
+    return codes
+
+
+def _derived_metrics(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Validate and return the record's declared derived ratio specs.
+
+    Derived specs come exclusively from the official change ledger projection
+    (``normalizedIntent.derivedMetrics``); nothing is guessed from the
+    question text.  Directly supplied specs fail closed: each must be an
+    object declaring numerator/denominator as distinct valid ``ZB###`` base
+    metric codes, and any violation raises ``GoldSqlError`` before SQL can be
+    generated.  Each spec receives the stable metric code
+    ``DERIVED_<numerator>_DIV_<denominator>``.
+    """
+    specs = record.get("normalizedIntent", {}).get("derivedMetrics", [])
+    if not isinstance(specs, list):
+        raise GoldSqlError(f"Invalid derivedMetrics for {record.get('id')}")
+    validated: list[dict[str, Any]] = []
+    for spec in specs:
+        if not isinstance(spec, dict):
+            raise GoldSqlError(f"Invalid derived metric spec for {record.get('id')}: {spec!r}")
+        numerator = spec.get("numerator")
+        denominator = spec.get("denominator")
+        if not isinstance(numerator, str) or METRIC_CODE_PATTERN.fullmatch(numerator) is None:
+            raise GoldSqlError(f"Invalid derived numerator {numerator!r} for {record.get('id')}")
+        if not isinstance(denominator, str) or METRIC_CODE_PATTERN.fullmatch(denominator) is None:
+            raise GoldSqlError(f"Invalid derived denominator {denominator!r} for {record.get('id')}")
+        if numerator == denominator:
+            raise GoldSqlError(
+                f"Derived numerator and denominator must differ for {record.get('id')}: {numerator!r}"
+            )
+        validated.append(
+            {
+                "metricCode": f"DERIVED_{numerator}_DIV_{denominator}",
+                "numerator": numerator,
+                "denominator": denominator,
+            }
+        )
+    return validated
 
 
 def _organization_codes(record: dict[str, Any]) -> list[str]:
@@ -323,12 +381,20 @@ def _is_subset_winner(question: str, organizations: list[str]) -> bool:
 
 
 def _ranking_query(record: dict[str, Any]) -> GoldSqlSpec:
+    derived_metrics = _derived_metrics(record)
+    metrics = record.get("normalizedIntent", {}).get("metrics", [])
     try:
         metric_codes = _metric_codes(record)
     except GoldSqlError:
-        metric_codes = _status_metrics()
-    if len(metric_codes) != 1:
-        return _multi_metric_rank_query(record, metric_codes or _status_metrics())
+        # 仅当 metrics 确为 list 且为空（题干文本推断也失败）时保留历史
+        # 状态指标回退；任何非 list 值（""、None、{} 等）或非空但非法的
+        # list 都必须 fail closed re-raise，绝不生成回退 ranking SQL。
+        if isinstance(metrics, list) and not metrics:
+            metric_codes = _status_metrics()
+        else:
+            raise
+    if len(metric_codes) != 1 or derived_metrics:
+        return _multi_metric_rank_query(record, metric_codes or _status_metrics(), derived_metrics)
     metric_code = metric_codes[0]
     direction = _rank_direction(record, metric_code)
     question = str(record.get("question", ""))
@@ -379,7 +445,47 @@ ORDER BY rank_position{" DESC" if _bottom_rank_requested(question) else ""}"""
     return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK"])
 
 
-def _multi_metric_rank_query(record: dict[str, Any], metric_codes: list[str]) -> GoldSqlSpec:
+def _derived_ratio_rank_query(
+    record: dict[str, Any], derived: dict[str, Any], date_value: str, organizations: list[str]
+) -> str:
+    """Rank one declared derived ratio (numerator/denominator*100).
+
+    The stable metric code is ``DERIVED_<numerator>_DIV_<denominator>``, the
+    ratio ranks by ``metric_value DESC, org_code`` (tie-break), and a zero or
+    missing denominator yields NULL via ``NULLIF``.  Rows without a valid
+    ratio are filtered out before ranking, so NULLs can never rank ahead of
+    valid values; when no requested organization has a valid ratio the
+    derived query returns no rows.  Output columns match the existing
+    multi-metric rank contract: ``metric_code, org_code, org_name,
+    metric_value, rank_position``.
+    """
+    numerator = derived["numerator"]
+    denominator = derived["denominator"]
+    metric_code = derived["metricCode"]
+    selected = ""
+    if organizations:
+        selected = " WHERE org_code IN (" + ", ".join(_sql_literal(code) for code in organizations) + ")"
+    return f"""SELECT {_sql_literal(metric_code)} AS metric_code, org_code, org_name, metric_value, rank_position
+FROM (
+  SELECT org_code, org_name, metric_value,
+         ROW_NUMBER() OVER (ORDER BY metric_value DESC, org_code) AS rank_position
+  FROM (
+    SELECT o.org_code, o.org_name,
+           MAX(CASE WHEN d.metric_code = {_sql_literal(numerator)} THEN d.metric_value END) * 100.0 /
+               NULLIF(MAX(CASE WHEN d.metric_code = {_sql_literal(denominator)} THEN d.metric_value END), 0) AS metric_value
+    FROM bank_metric_daily d
+    JOIN bank_organization o ON o.org_code = d.org_code
+    WHERE d.data_date = {_sql_literal(date_value)}
+      AND d.metric_code IN ({_sql_literal(numerator)}, {_sql_literal(denominator)})
+    GROUP BY o.org_code, o.org_name
+  ) ratios
+  WHERE ratios.metric_value IS NOT NULL
+) ranked{selected}"""
+
+
+def _multi_metric_rank_query(
+    record: dict[str, Any], metric_codes: list[str], derived_metrics: list[dict[str, Any]] | None = None
+) -> GoldSqlSpec:
     date_value = _date_from_record(record)
     organizations = _organization_codes(record)
     queries: list[str] = []
@@ -398,8 +504,13 @@ FROM (
   WHERE d.data_date = {_sql_literal(date_value)} AND d.metric_code = {_sql_literal(metric_code)}
 ) ranked{selected}"""
         )
+    for derived in derived_metrics or []:
+        queries.append(_derived_ratio_rank_query(record, derived, date_value, organizations))
     sql = "\nUNION ALL\n".join(queries) + "\nORDER BY metric_code, org_code"
-    return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK", "MULTI_METRIC"])
+    features = ["RANKING", "WINDOW_RANK", "MULTI_METRIC"]
+    if derived_metrics:
+        features.append("DERIVED_METRIC")
+    return GoldSqlSpec(sql, sql, features)
 
 
 def _previous_month(value: date) -> date:
@@ -419,8 +530,20 @@ def _baseline_date(record: dict[str, Any], current_date: str) -> str:
     question = str(record.get("question", ""))
     expressions = [str(value) for value in record.get("normalizedIntent", {}).get("time", {}).get("expressions", [])]
     current = date.fromisoformat(current_date)
+    explicit_year_ends = sorted(
+        {
+            date(int(year), 12, 31).isoformat()
+            for text in [*expressions, question]
+            for year in re.findall(r"(20\d{2})年(?:底|末)", text)
+            if date(int(year), 12, 31) < current
+        }
+    )
+    if explicit_year_ends:
+        # An explicit year-end in the question is an absolute source date.
+        # It must not be replaced by the year preceding the current date.
+        return explicit_year_ends[0]
     for expression in expressions:
-        if "2024年末" in expression or "年初" in expression:
+        if "年初" in expression:
             return date(current.year - 1, 12, 31).isoformat()
         if "去年同期" in expression or "同比" in expression:
             return current.replace(year=current.year - 1).isoformat()
@@ -681,13 +804,79 @@ ORDER BY d.metric_code, aggregate_value DESC, o.org_code"""
     return GoldSqlSpec(sql, sql, ["AGGREGATION", "DATE_RANGE"])
 
 
+def _days_above_province_average_query(
+    record: dict[str, Any], metric_codes: list[str]
+) -> GoldSqlSpec:
+    """Count full-year days a single organization stays above the provincial
+    daily average for one base metric.
+
+    The provincial average is computed per day across ALL organizations
+    (``AVG(metric_value)`` grouped by ``data_date``); only afterwards is the
+    target organization's daily series summarized.  This is fail-closed: a
+    DAYS_ABOVE question that is not exactly one base metric, one
+    organization, and an explicit ``YYYY年全年`` range raises
+    ``GoldSqlError`` instead of falling through to the multi-metric
+    threshold branch.
+    """
+    question = str(record.get("question", ""))
+    organizations = _organization_codes(record)
+    if len(metric_codes) != 1:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires exactly one metric for {record.get('id')}: {metric_codes}"
+        )
+    if len(organizations) != 1:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires exactly one organization for {record.get('id')}: {organizations}"
+        )
+    expressions = " ".join(
+        str(value)
+        for value in record.get("normalizedIntent", {}).get("time", {}).get("expressions", [])
+    )
+    year = re.search(r"(20\d{2})年全年", expressions + " " + question)
+    if year is None:
+        raise GoldSqlError(
+            f"DAYS_ABOVE requires an explicit full-year range for {record.get('id')}"
+        )
+    metric_code = metric_codes[0]
+    org_code = organizations[0]
+    start_date, end_date = f"{year.group(1)}-01-01", f"{year.group(1)}-12-31"
+    compare = "<" if any(token in question for token in ("低于", "小于")) else ">"
+    sql = f"""WITH daily_provincial AS (
+  SELECT d.data_date, AVG(d.metric_value) AS provincial_average
+  FROM bank_metric_daily d
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+  GROUP BY d.data_date
+), target_daily AS (
+  SELECT d.data_date, d.org_code, d.metric_value
+  FROM bank_metric_daily d
+  WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+    AND d.metric_code = {_sql_literal(metric_code)}
+    AND d.org_code = {_sql_literal(org_code)}
+)
+SELECT o.org_code, o.org_name,
+       SUM(CASE WHEN t.metric_value {compare} p.provincial_average THEN 1 ELSE 0 END)
+         AS days_above_province_average,
+       COUNT(*) AS observation_count,
+       SUM(CASE WHEN t.metric_value {compare} p.provincial_average THEN 1 ELSE 0 END) * 100.0
+         / COUNT(*) AS above_ratio_percent
+FROM target_daily t
+JOIN daily_provincial p ON p.data_date = t.data_date
+JOIN bank_organization o ON o.org_code = t.org_code
+GROUP BY o.org_code, o.org_name
+ORDER BY o.org_code"""
+    return GoldSqlSpec(sql, sql, ["THRESHOLD", "PROVINCIAL_AVERAGE", "DAYS_ABOVE"])
+
+
 def _threshold_query(record: dict[str, Any]) -> GoldSqlSpec:
     metric_codes = _metric_codes(record)
-    if len(metric_codes) > 1 and "同时" in str(record.get("question", "")):
+    question = str(record.get("question", ""))
+    if "多少天" in question and "全省均值" in question:
+        return _days_above_province_average_query(record, metric_codes)
+    if len(metric_codes) > 1 and "同时" in question:
         return _multi_metric_threshold_query(record, metric_codes)
     metric_code = metric_codes[0]
     date_value = _date_from_record(record)
-    question = str(record.get("question", ""))
     organizations = _organization_codes(record)
     if "全省" in question or "均值" in question:
         compare = "<" if any(token in question for token in ("低于", "小于")) else ">"

@@ -1,6 +1,8 @@
 package com.tencent.supersonic.headless.server.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
@@ -76,6 +78,7 @@ import java.util.concurrent.TimeUnit;
 public class ExportTaskServiceImpl implements ExportTaskService {
 
     static final int MAX_QUERIES = 20;
+    static final int MAX_LIST_PAGE_SIZE = 100;
     static final long MAX_ROWS = 10_000;
     static final int MAX_PDF_ROWS = 500;
     static final long MAX_FILE_BYTES = 25L * 1024 * 1024;
@@ -180,6 +183,24 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     @Override
     public ExportTaskResp get(String taskId, User user) {
         return toResponse(requireOwned(taskId, user));
+    }
+
+    @Override
+    public PageInfo<ExportTaskResp> list(int pageNum, int pageSize, User user) {
+        requireAuthenticated(user);
+        validatePage(pageNum, pageSize);
+        LambdaQueryWrapper<ExportTaskDO> query =
+                new LambdaQueryWrapper<ExportTaskDO>().eq(ExportTaskDO::getOwner, user.getName())
+                        .orderByDesc(ExportTaskDO::getCreatedAt).orderByDesc(ExportTaskDO::getId);
+        PageInfo<ExportTaskDO> page = PageHelper.startPage(pageNum, pageSize)
+                .doSelectPageInfo(() -> exportTaskMapper.selectList(query));
+        PageInfo<ExportTaskResp> response = new PageInfo<>();
+        BeanUtils.copyProperties(page, response, "list");
+        response.setList(page.getList().stream().map(task -> {
+            expireIfNeeded(task);
+            return toResponse(task);
+        }).toList());
+        return response;
     }
 
     @Override
@@ -398,6 +419,12 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 throw new InvalidArgumentException(
                         "Export chart title cannot exceed 200 characters");
             }
+        }
+    }
+
+    private void validatePage(int pageNum, int pageSize) {
+        if (pageNum < 1 || pageSize < 1 || pageSize > MAX_LIST_PAGE_SIZE) {
+            throw new InvalidArgumentException("Export pagination is invalid");
         }
     }
 
