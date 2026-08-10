@@ -70,6 +70,23 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void preservesAnExistingBankDirectAnswerWhileBuildingSeparateInsights() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(
+                List.of(row("2026-01", 100), row("2026-02", 120), row("2026-03", 150)));
+        result.setTextSummary("余额增长50%。");
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        context.setResponse(result);
+
+        new BusinessInsightProcessor().process(context);
+
+        assertEquals("余额增长50%。", result.getTextSummary());
+        assertTrue(result.getBusinessExplanation().getSummary().contains("查询返回3条记录"));
+    }
+
+    @Test
     void warnsInsteadOfClaimingTrendForSmallSamples() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);

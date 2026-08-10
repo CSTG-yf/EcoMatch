@@ -114,6 +114,24 @@ def build_agent_payload(
         "5. Output only S2SQL, without Markdown or explanation.\n"
         "#Query: Question:{{question}},Schema:{{schema}},SideInfo:{{information}}"
     )
+    final_answer_prompt = (
+        "#Role: 你是银行问数 Agent 的最终回答器。\n"
+        "#Task: 根据 Question、已验证的 BankQueryPlan 和数据库 Result 直接回答用户。\n"
+        "#Rules:\n"
+        "1. 只回答问题明确询问的事实，不复述问题，不解释查询过程。\n"
+        "2. 禁止输出记录数、数据范围、首末记录、额外最大最小值、免责声明、SQL、字段分析或推理过程。\n"
+        "3. 每个数字必须来自 Result；日期和题面阈值可以来自 Question，不得编造额外数字。\n"
+        "4. 百分比和业务数值通常四舍五入到两位小数；根据正负号明确回答增长/上升或下降。\n"
+        "5. percent_change=变化率，absolute_change=变化额，ratio_percent=占比，rank_position=名次；"
+        "current_value/baseline_value 未被询问时不要输出。\n"
+        "6. 问增幅/变化百分比只回答 percent_change；问增加/减少/变动多少优先回答 absolute_change；"
+        "问占比/比重回答 ratio_percent。\n"
+        "7. 同时询问环比和同比时分别回答；排名、趋势、多机构或多指标按 Result 行身份逐项回答。\n"
+        "8. 输出一至三句纯文本，不要 Markdown、JSON、标签或前后缀。\n"
+        "#Question: {{question}}\n#BankQueryPlan: {{plan}}\n#Result: {{data}}\n"
+        "#Previous answer: {{previous_answer}}\n#validation_feedback: {{validation_feedback}}\n"
+        "#Direct answer:"
+    )
     chat_apps = {
         "REWRITE_MULTI_TURN": {
             "name": "多轮对话改写",
@@ -126,6 +144,13 @@ def build_agent_payload(
             "name": "银行受约束查询计划",
             "description": "通过大模型生成经过白名单约束的银行查询计划",
             "enable": True,
+        },
+        "BANK_FINAL_ANSWER": {
+            "name": "银行问数直接回答",
+            "description": "基于已验证计划和查询结果生成简洁、可校验的最终答案",
+            "prompt": final_answer_prompt,
+            "enable": True,
+            "chatModelId": chat_model_id,
         },
         "S2SQL_PARSER": {
             "name": "语义 SQL 解析",

@@ -74,7 +74,9 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
             BusinessExplanation explanation = explain(executeContext, result, profile, rules);
             result.setBusinessExplanation(explanation);
-            result.setTextSummary(explanation.getSummary());
+            if (StringUtils.isBlank(result.getTextSummary())) {
+                result.setTextSummary(explanation.getSummary());
+            }
             consistencyValidator.validate(result, profile.metricLabels);
         } finally {
             QueryPerformanceMonitor.record(QueryPerformanceMonitor.Stage.EXPLAIN,

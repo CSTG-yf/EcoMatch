@@ -194,9 +194,6 @@ final class BusinessInsightConsistencyValidator {
             throw inconsistent("business explanation is missing");
         }
         validateConfidence(explanation.getConfidence(), "business explanation");
-        if (!Objects.equals(result.getTextSummary(), explanation.getSummary())) {
-            throw inconsistent("text summary differs from business explanation");
-        }
         if (explanation.getEvidence() == null || explanation.getWarnings() == null
                 || explanation.getMetricDefinitions() == null) {
             throw inconsistent("business explanation collections are missing");
