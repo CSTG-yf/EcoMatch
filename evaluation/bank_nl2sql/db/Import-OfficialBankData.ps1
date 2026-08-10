@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Imports the frozen official Bank NL2SQL v2.0.0 benchmark tables/views into a
+    Imports the frozen official Bank NL2SQL v2.0.1 benchmark tables/views into a
     local H2 database (companion import package, NOT a runtime semantic.mv.db).
 
 .DESCRIPTION
     This importer is part of the immutable companion import package in
-    evaluation/bank_nl2sql/db/releases/2.0.0/. It:
+    evaluation/bank_nl2sql/db/releases/<ReleaseVersion>/. It:
       - verifies database-manifest.json and the SHA-256 of every packaged
         artifact (and of the official source workbook) BEFORE any import;
       - defaults to the repository-local semantic H2 base path
@@ -47,16 +47,20 @@
 param(
     [string]$TargetDatabase,
     [string]$JavaPath,
-    [string]$H2JarPath
+    [string]$H2JarPath,
+    [string]$ReleaseVersion = "2.0.1"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 3.0
 
-$OfficialVersion = "2.0.0"
+if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "ReleaseVersion must be a semantic version such as 2.0.1; got '$ReleaseVersion'"
+}
+$OfficialVersion = $ReleaseVersion
 $SchemaVersion = "1.0"
 $ExpectedCounts = @{ organizations = 13; metrics = 21; facts = 132678 }
-$ExpectedSourceRelativePath = "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx"
+$ExpectedSourceRelativePath = "evaluation/bank_nl2sql/official/$OfficialVersion/bank-nl2sql-ground-truth-v$OfficialVersion.xlsx"
 
 # SAFETY 1: This importer never terminates or stops any process or service.
 # SAFETY 2: This importer never deletes or overwrites any database file or
@@ -68,7 +72,7 @@ $ExpectedSourceRelativePath = "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql
 #           left completely untouched; the user closes the runtime and retries.
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
-$ReleaseDir = Join-Path $RepoRoot "evaluation\bank_nl2sql\db\releases\2.0.0"
+$ReleaseDir = Join-Path $RepoRoot "evaluation\bank_nl2sql\db\releases\$OfficialVersion"
 $ManifestPath = Join-Path $ReleaseDir "database-manifest.json"
 $SqlitePath = Join-Path $ReleaseDir "bank.sqlite"
 $H2ScriptPath = Join-Path $ReleaseDir "bank-h2.sql"

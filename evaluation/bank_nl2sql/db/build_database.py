@@ -92,6 +92,52 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def build_release_manifest(
+    workbook_path: Path,
+    sqlite_output_path: Path,
+    h2_script_output_path: Path,
+    report: dict[str, Any],
+    official_version: str,
+    source_relative_path: str,
+) -> dict[str, Any]:
+    """Return the deterministic manifest for a versioned database release.
+
+    The database artifacts are command-owned outputs.  Keeping their hashes and
+    source provenance here prevents a release from being assembled by manually
+    editing a manifest after the SQLite/H2 files have been generated.
+    """
+    if not official_version or not source_relative_path:
+        raise ValueError("official_version and source_relative_path are required")
+    artifacts = {}
+    for name, path in {
+        "bank.sqlite": Path(sqlite_output_path),
+        "bank-h2.sql": Path(h2_script_output_path),
+    }.items():
+        if not path.is_file():
+            raise FileNotFoundError(f"release artifact missing: {path}")
+        artifacts[name] = {"sha256": _sha256(path), "bytes": path.stat().st_size}
+    return {
+        "schemaVersion": "1.0",
+        "packageName": "bank-nl2sql-official-db-import-package",
+        "officialVersion": official_version,
+        "source": {
+            "officialVersion": official_version,
+            "path": source_relative_path.replace("\\", "/"),
+            "sha256": _sha256(Path(workbook_path)),
+            "dateRange": report["dateRange"],
+        },
+        "artifacts": artifacts,
+        "counts": report["counts"],
+    }
+
+
+def write_release_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    manifest_path = Path(manifest_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
 def _text(value: Any, field: str, row_number: int) -> str:
     if value is None or not str(value).strip():
         raise ValueError(f"{field} is empty at source row {row_number}")
@@ -314,6 +360,9 @@ def main() -> None:
     parser.add_argument("workbook", type=Path)
     parser.add_argument("--sqlite-output", type=Path, required=True)
     parser.add_argument("--h2-script-output", type=Path)
+    parser.add_argument("--database-manifest-output", type=Path)
+    parser.add_argument("--official-version")
+    parser.add_argument("--source-relative-path")
     parser.add_argument("--h2-database-output", type=Path)
     parser.add_argument("--java-path", type=Path)
     parser.add_argument("--h2-jar-path", type=Path)
@@ -323,8 +372,26 @@ def main() -> None:
         parser.error("--h2-database-output requires --h2-script-output")
     if args.h2_database_output and (not args.java_path or not args.h2_jar_path):
         parser.error("--h2-database-output requires --java-path and --h2-jar-path")
+    if args.database_manifest_output and (
+        not args.h2_script_output or not args.official_version or not args.source_relative_path
+    ):
+        parser.error(
+            "--database-manifest-output requires --h2-script-output, --official-version "
+            "and --source-relative-path"
+        )
 
     report = build_database(args.workbook, args.sqlite_output, args.h2_script_output)
+    if args.database_manifest_output:
+        manifest = build_release_manifest(
+            args.workbook,
+            args.sqlite_output,
+            args.h2_script_output,
+            report,
+            args.official_version,
+            args.source_relative_path,
+        )
+        write_release_manifest(args.database_manifest_output, manifest)
+        report["databaseManifest"] = str(args.database_manifest_output)
     if args.h2_database_output:
         report["h2JdbcUrl"] = build_h2_database(
             args.h2_script_output,

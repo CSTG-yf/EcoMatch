@@ -63,12 +63,10 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
                 "v3 answer contracts are not fully ready: "
                 f"{answer_contract_validation['reviewRequiredCount']} REVIEW_REQUIRED"
             )
-        gold_report = {
-            "result": "NOT_SCORED",
-            "reason": "SQL text/AST and legacy stored-row equivalence are not release criteria",
-        }
-    else:
-        gold_report = validate_gold_dataset(dataset_path, database_path)
+    # Result-based scoring still relies on the fact contract; this is a
+    # separate release-integrity gate proving that every generated SQL query
+    # reproduces its structured rows against the packaged database.
+    gold_report = validate_gold_dataset(dataset_path, database_path)
     content_hashes = {filename: _sha256(dataset_path / filename) for filename in RELEASE_FILES}
     release = {
         "version": source_manifest.get("version", "0.1.0"),

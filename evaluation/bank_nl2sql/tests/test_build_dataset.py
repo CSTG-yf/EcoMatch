@@ -818,5 +818,36 @@ class OfficialManifestTest(BuildDatasetTest):
                 build_dataset(workbook_path, intent_root, temp_path / "bank_nl2sql", manifest_path)
 
 
+class OfficialV201RebuildMetadataTest(unittest.TestCase):
+    """The deterministic rebuild must retain the v2.0.1 amendment provenance."""
+
+    def test_incremental_release_projects_answer_amendment_metadata(self) -> None:
+        repository = ROOT.parents[1]
+        official_dir = ROOT / "official" / "2.0.1"
+        workbook = official_dir / "bank-nl2sql-ground-truth-v2.0.1.xlsx"
+        official_manifest = official_dir / "official-manifest.json"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "dataset"
+            report = build_dataset(
+                workbook,
+                repository / "evaluation" / "bank_intent",
+                output,
+                official_manifest,
+            )
+            manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(report["version"], "2.0.1")
+        self.assertEqual(manifest["parentVersion"], "2.0.0")
+        self.assertEqual(manifest["answerAmendment"]["count"], 6)
+        self.assertEqual(
+            manifest["answerAmendment"]["canonicalWorkbook"],
+            "bank-nl2sql-ground-truth-v2.0.1.xlsx",
+        )
+        self.assertEqual(
+            manifest["answerAmendment"]["canonicalWorkbookSha256"],
+            "B19F2DF98CE4CD7A4D7B16B37C220CDB85047D24EB30360D08A37F59105B6706",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

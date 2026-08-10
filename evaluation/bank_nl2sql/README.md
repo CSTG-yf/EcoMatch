@@ -88,7 +88,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py 
   --h2-script-output .local-dev/bank-nl2sql/bank_benchmark_h2.sql
 ```
 
-需要生成本地 H2 文件库时，再传入 `--h2-database-output`、`--java-path` 和 `--h2-jar-path`。生成的数据库文件只放在 `.local-dev`，不提交二进制产物。
+需要生成本地 H2 文件库时，再传入 `--h2-database-output`、`--java-path` 和 `--h2-jar-path`。普通本地生成物只放在 `.local-dev`；唯一例外是经完整发布门禁后、由生成器写入的 `db/releases/<version>/` 官方伴随包。
 
 ## 校验标准库
 
@@ -101,7 +101,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 ## 官方数据库伴随导入包（companion import package）
 
-`db/releases/2.0.0/` 是基于 2.0.0 官方工作簿冻结的**伴随导入包**，**不是运行时
+`db/releases/2.0.1/` 是基于当前 2.0.1 官方工作簿冻结的**伴随导入包**，**不是运行时
 `semantic.mv.db`**：它只包含不可变产物与导入器，运行时数据库由导入器按需生成。
 包内文件：
 
@@ -139,6 +139,19 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-Offici
 
 `db/releases/**` 已在 `.gitattributes` 标记为 `-text`，保证包内产物校验和在
 跨平台检出时保持稳定。
+
+从 v2.0.1 唯一事实源重建该包时，必须由生成器同时写入 SQLite、H2 脚本和
+`database-manifest.json`，不得手工修改其中任一产物：
+
+```powershell
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py `
+  evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx `
+  --sqlite-output evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite `
+  --h2-script-output evaluation/bank_nl2sql/db/releases/2.0.1/bank-h2.sql `
+  --database-manifest-output evaluation/bank_nl2sql/db/releases/2.0.1/database-manifest.json `
+  --official-version 2.0.1 `
+  --source-relative-path evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx
+```
 
 ## 可移植「银行问数」Agent 导入
 
@@ -199,27 +212,29 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
   .local-dev/bank-nl2sql/rebuild-2.0.1
 ```
 
-正式版基于源文件 SHA-256
-`c3b810a4938fefc77a5c834c4c6857bec7f67162c4160abd9f66d9dd6018703c`
-（冻结原始工作簿 `source.xlsx`，只读、永不修改）。199 条官方题的来源
+正式版基于 v2.0.1 唯一事实源 SHA-256
+`b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706`
+（工作簿只读、永不手工修改）。199 条官方题的来源
 与正式评测均为 train/dev/test = 119/40/40，增强样本 12 条。
-`manifest.json` 记录逐题调整；其 `templateOverlap` 仅作为风险披露，
+`manifest.json` 记录 v2.0.1 的答案修正溯源与 `templateOverlap` 风险披露，
 绝不改变题目归属。
 
-## 旧SQL金标诊断
+## 发布完整性校验
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_gold.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
-  evaluation/bank_nl2sql .local-dev/bank-nl2sql/bank_benchmark.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
+
+evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.1/bank.sqlite
 ```
 
-`build_gold.py` / `validate_gold.py` 保留为旧SQL模板与结构化rows一致性诊断，
-不再是2.0.1发布或评分门禁。2.0.1只修正答案文本，保留2.0.0既有SQL和rows；
-当前仓库中的旧SQL重执行存在历史结构漂移，因此不能用该命令覆盖已审查结果。
-正式主判定由下述事实合同v3负责。
+`validate_gold.py` 是发布完整性门禁：199 条生成 SQL 必须全部可执行，且查询结果与
+结构化 rows 一致。它不参与模型得分，也不比较 SQL 文本；模型效果仍以结果事实合同和
+最终答案为准。`freeze_dataset.py` 同时记录事实合同与上述完整性结果。
 
 ## 冻结与盲测
 

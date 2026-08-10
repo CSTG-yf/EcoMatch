@@ -678,6 +678,19 @@ def build_dataset(
         "reassignedForTemplateIsolation": [],
         "templateOverlap": _template_overlap(records_by_split),
     }
+    if (
+        official_manifest is not None
+        and official_manifest_path is not None
+        and official_manifest.get("releaseMode") == "INCREMENTAL_ANSWER_AMENDMENT"
+    ):
+        manifest["parentVersion"] = official_manifest["parent"]["datasetVersion"]
+        manifest["answerAmendment"] = {
+            "count": official_manifest["answerAmendmentCount"],
+            "officialManifestSha256": _sha256(official_manifest_path).upper(),
+            "ledgerSha256": official_manifest["artifactSha256"]["answerAmendmentLedger"].upper(),
+            "canonicalWorkbook": official_manifest["groundTruthWorkbook"],
+            "canonicalWorkbookSha256": official_manifest["artifactSha256"]["groundTruthWorkbook"].upper(),
+        }
 
     output_path.mkdir(parents=True, exist_ok=True)
     for split in EVALUATION_SPLITS:

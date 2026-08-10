@@ -143,13 +143,28 @@ class BuildGoldTest(unittest.TestCase):
 
             # 有 manifest：版本从数据集 manifest 继承
             (root / "manifest.json").write_text(
-                json.dumps({"version": "2.0.0", "sourceSha256": "A" * 64}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                json.dumps(
+                    {
+                        "version": "2.0.1",
+                        "sourceSha256": "A" * 64,
+                        "parentVersion": "2.0.0",
+                        "answerAmendment": {"ledgerSha256": "B" * 64},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
                 encoding="utf-8",
             )
             inherited = build_gold_dataset(root, database_path)
-            self.assertEqual(inherited["version"], "2.0.0")
+            self.assertEqual(inherited["version"], "2.0.1")
+            self.assertEqual(inherited["parentVersion"], "2.0.0")
+            self.assertEqual(inherited["answerAmendmentLedgerSha256"], "B" * 64)
             gold_manifest = json.loads((root / "gold_manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(gold_manifest["version"], "2.0.0")
+            self.assertEqual(gold_manifest["version"], "2.0.1")
+            self.assertEqual(gold_manifest["parentVersion"], "2.0.0")
+            self.assertEqual(gold_manifest["answerAmendmentLedgerSha256"], "B" * 64)
 
 
 if __name__ == "__main__":

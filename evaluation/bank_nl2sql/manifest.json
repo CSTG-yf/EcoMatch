@@ -15,13 +15,13 @@
   "officialCount": 199,
   "parentVersion": "2.0.0",
   "reassignedForTemplateIsolation": [],
-  "sourceSha256": "cddbafd928e8532f360bb8e2014a07287705f43d2ecc316585fc3e9275b5e81e",
+  "sourceSha256": "b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
     "train": 119
   },
-  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.0.xlsx",
+  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
   "templateOverlap": {
     "devTest": [
       "15664243130b4506",

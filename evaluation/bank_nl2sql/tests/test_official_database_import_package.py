@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Contract tests for the immutable official database import package (v2.0.0).
+"""Contract tests for the immutable official database import package (v2.0.1).
 
-The package lives in evaluation/bank_nl2sql/db/releases/2.0.0/ and is a frozen,
-Git-tracked companion for the official Bank NL2SQL v2.0.0 workbook. It is NOT a
+The package lives in evaluation/bank_nl2sql/db/releases/2.0.1/ and is a frozen,
+Git-tracked companion for the official Bank NL2SQL v2.0.1 workbook. It is NOT a
 runtime semantic.mv.db: the runtime database is produced on demand by
 db/Import-OfficialBankData.ps1, which verifies the manifest and artifact hashes
 before touching the target and applies only the packaged bank_* benchmark
@@ -30,18 +30,18 @@ from typing import Any
 BANK_NL2SQL_DIR = Path(__file__).resolve().parents[1]
 DB_DIR = BANK_NL2SQL_DIR / "db"
 REPO_ROOT = Path(__file__).resolve().parents[3]
-RELEASE_DIR = DB_DIR / "releases" / "2.0.0"
+RELEASE_DIR = DB_DIR / "releases" / "2.0.1"
 IMPORTER = DB_DIR / "Import-OfficialBankData.ps1"
 CMD_WRAPPER = DB_DIR / "Import-OfficialBankData.cmd"
 WORKBOOK = (
     REPO_ROOT
-    / "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx"
+    / "evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx"
 )
 
 EXPECTED_SCHEMA_VERSION = "1.0"
-EXPECTED_OFFICIAL_VERSION = "2.0.0"
+EXPECTED_OFFICIAL_VERSION = "2.0.1"
 EXPECTED_SOURCE_RELATIVE_PATH = (
-    "evaluation/bank_nl2sql/official/2.0.0/bank-nl2sql-ground-truth-v2.0.0.xlsx"
+    "evaluation/bank_nl2sql/official/2.0.1/bank-nl2sql-ground-truth-v2.0.1.xlsx"
 )
 EXPECTED_COUNTS = {"organizations": 13, "metrics": 21, "facts": 132678}
 EXPECTED_ARTIFACTS = ("bank.sqlite", "bank-h2.sql")

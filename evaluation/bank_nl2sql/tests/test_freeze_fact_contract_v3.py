@@ -22,7 +22,7 @@ def _write_json(path: Path, payload: object) -> None:
 
 
 class FreezeFactContractV3Test(unittest.TestCase):
-    def test_answer_amendment_release_uses_fact_contract_not_legacy_gold_sql(self) -> None:
+    def test_answer_amendment_release_keeps_fact_contract_and_records_gold_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             record = {
@@ -58,16 +58,22 @@ class FreezeFactContractV3Test(unittest.TestCase):
                 "evaluationSplitCounts": {"train": 1, "dev": 0, "test": 0},
             }
 
+            gold_report = {
+                "result": "PASS",
+                "officialCount": 1,
+                "sqlExecutionCount": 1,
+                "resultMatchCount": 1,
+            }
             with patch("freeze_dataset.validate_dataset", return_value=dataset_report), patch(
-                "freeze_dataset.validate_gold_dataset",
-                side_effect=AssertionError("legacy SQL validator must not run"),
-            ):
+                "freeze_dataset.validate_gold_dataset", return_value=gold_report
+            ) as validate_gold:
                 release = freeze_dataset(root, root / "unused.sqlite")
 
+            validate_gold.assert_called_once_with(root, root / "unused.sqlite")
             self.assertEqual(release["answerContractValidation"]["readyCount"], 1)
             self.assertEqual(release["answerContractValidation"]["reviewRequiredCount"], 0)
             self.assertEqual(release["answerContractValidation"]["excludedCount"], 0)
-            self.assertEqual(release["goldValidation"]["result"], "NOT_SCORED")
+            self.assertEqual(release["goldValidation"], gold_report)
 
 
 if __name__ == "__main__":

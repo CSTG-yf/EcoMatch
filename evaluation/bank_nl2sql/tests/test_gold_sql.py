@@ -134,6 +134,20 @@ class GoldSqlTest(unittest.TestCase):
         self.assertIn("current_value - baseline_value", spec.sql)
         self.assertEqual(spec.features, ["CHANGE", "BASELINE_COMPARISON"])
 
+    def test_explicit_year_end_baseline_is_not_shifted_for_a_later_current_year(self) -> None:
+        """“2024年末”是明确基准日，不能按当前日期退一年推成 2025 年末。"""
+        spec = build_gold_sql(
+            record(
+                "从2024年末到2026-03-31，全省各项存款余额增幅排名前三的是哪几家？增幅各是多少？",
+                "CHANGE",
+                ["ZB001"],
+                ["2024年末", "2026-03-31"],
+                [],
+            )
+        )
+        self.assertIn("'2024-12-31'", spec.sql)
+        self.assertNotIn("'2025-12-31'", spec.sql)
+
     def test_selected_organization_ranking_keeps_the_global_rank(self) -> None:
         spec = build_gold_sql(
             record(

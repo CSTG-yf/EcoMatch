@@ -530,8 +530,20 @@ def _baseline_date(record: dict[str, Any], current_date: str) -> str:
     question = str(record.get("question", ""))
     expressions = [str(value) for value in record.get("normalizedIntent", {}).get("time", {}).get("expressions", [])]
     current = date.fromisoformat(current_date)
+    explicit_year_ends = sorted(
+        {
+            date(int(year), 12, 31).isoformat()
+            for text in [*expressions, question]
+            for year in re.findall(r"(20\d{2})年(?:底|末)", text)
+            if date(int(year), 12, 31) < current
+        }
+    )
+    if explicit_year_ends:
+        # An explicit year-end in the question is an absolute source date.
+        # It must not be replaced by the year preceding the current date.
+        return explicit_year_ends[0]
     for expression in expressions:
-        if "2024年末" in expression or "年初" in expression:
+        if "年初" in expression:
             return date(current.year - 1, 12, 31).isoformat()
         if "去年同期" in expression or "同比" in expression:
             return current.replace(year=current.year - 1).isoformat()
