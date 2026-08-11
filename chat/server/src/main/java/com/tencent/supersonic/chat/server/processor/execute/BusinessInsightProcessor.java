@@ -46,6 +46,12 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext executeContext) {
+        if (DataInterpretProcessor.bankFinalAnswerOwnsSummary(executeContext)) {
+            // A bank agent with the validated final-answer app must not fall back to the generic
+            // business explanation when that answer is rejected; doing so would publish facts
+            // outside the final-answer contract.
+            return false;
+        }
         QueryResult result = executeContext.getResponse();
         return result != null && QueryState.SUCCESS.equals(result.getQueryState())
                 && result.getQueryResults() != null && result.getQueryColumns() != null

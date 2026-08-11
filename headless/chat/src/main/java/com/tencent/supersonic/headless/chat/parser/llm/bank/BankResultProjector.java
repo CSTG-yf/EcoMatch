@@ -852,9 +852,16 @@ public class BankResultProjector {
      */
     private Projection projectMultiMetricProvinceAverage(Contract contract,
             List<Map<String, Object>> sourceRows) {
+        if (sourceRows == null || sourceRows.isEmpty()) {
+            return Projection.notApplied();
+        }
+        boolean hasSqlComputedAverage = sourceRows.stream()
+                .allMatch(sourceRow -> value(sourceRow, "provincial_average").found());
+        if (!hasSqlComputedAverage) {
+            return projectMultiMetricProvinceAverageFromAggregation(contract, sourceRows);
+        }
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
-                : sourceRows) {
+        for (Map<String, Object> sourceRow : sourceRows) {
             String organizationCode = resolveOrganizationCode(contract, sourceRow);
             ValueLookup metricCode = value(sourceRow, "metric_code");
             ValueLookup metricValue = value(sourceRow, "metric_value");
@@ -883,6 +890,84 @@ public class BankResultProjector {
             row.put("gap_value", gapNum);
             row.put("absolute_gap", gapNum == null ? null : gapNum.abs());
             rows.add(row);
+        }
+        rows.sort((left, right) -> String.valueOf(left.get("metric_code"))
+                .compareTo(String.valueOf(right.get("metric_code"))));
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Computes the provincial average from the full-population, per-metric aggregation rows.
+     * This keeps the executable SQL in the established aggregation-summary family while the
+     * result contract remains explicit about the target value, mean and absolute gap.
+     */
+    private Projection projectMultiMetricProvinceAverageFromAggregation(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        Set<String> expectedMetricCodes = metricCodes(contract);
+        if (expectedMetricCodes.isEmpty()) {
+            return Projection.notApplied();
+        }
+        Map<String, Map<String, Object>> valuesByMetricAndOrganization = new LinkedHashMap<>();
+        for (Map<String, Object> sourceRow : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup aggregateValue = value(sourceRow, "aggregate_value");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !aggregateValue.found()
+                    || decimal(aggregateValue.value()) == null) {
+                return Projection.notApplied();
+            }
+            String normalizedMetricCode = StringUtils.upperCase(String.valueOf(metricCode.value()));
+            if (!expectedMetricCodes.contains(normalizedMetricCode)) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> values = valuesByMetricAndOrganization
+                    .computeIfAbsent(normalizedMetricCode, ignored -> new LinkedHashMap<>());
+            if (values.putIfAbsent(organizationCode, aggregateValue.value()) != null) {
+                return Projection.notApplied();
+            }
+        }
+        if (!valuesByMetricAndOrganization.keySet().containsAll(expectedMetricCodes)) {
+            return Projection.notApplied();
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Object>> entry : valuesByMetricAndOrganization.entrySet()) {
+            String metricCode = entry.getKey();
+            Map<String, Object> values = entry.getValue();
+            BigDecimal total = BigDecimal.ZERO;
+            for (Object sourceValue : values.values()) {
+                BigDecimal numericValue = decimal(sourceValue);
+                if (numericValue == null) {
+                    return Projection.notApplied();
+                }
+                total = total.add(numericValue);
+            }
+            if (values.isEmpty()) {
+                return Projection.notApplied();
+            }
+            BigDecimal provincialAverage = total.divide(BigDecimal.valueOf(values.size()), 15,
+                    RoundingMode.HALF_UP);
+            List<String> targetOrganizations = contract.getSelectedOrganizationCodes().isEmpty()
+                    ? new ArrayList<>(values.keySet()) : contract.getSelectedOrganizationCodes();
+            for (String organizationCode : targetOrganizations) {
+                Object metricValue = values.get(organizationCode);
+                BigDecimal metricNumeric = decimal(metricValue);
+                if (metricNumeric == null) {
+                    return Projection.notApplied();
+                }
+                BigDecimal gapValue = metricNumeric.subtract(provincialAverage);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("org_code", organizationCode);
+                row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                        organizationCode));
+                row.put("metric_code", metricCode);
+                row.put("metric_value", metricValue);
+                row.put("provincial_average", provincialAverage);
+                row.put("gap_value", gapValue);
+                row.put("absolute_gap", gapValue.abs());
+                rows.add(row);
+            }
         }
         rows.sort((left, right) -> String.valueOf(left.get("metric_code"))
                 .compareTo(String.valueOf(right.get("metric_code"))));

@@ -6,6 +6,7 @@ import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContract;
 import lombok.Data;
 import org.apache.commons.collections4.CollectionUtils;
 
@@ -34,6 +35,8 @@ public class LLMReq {
     private List<Text2SQLExemplar> dynamicExemplars;
     private BankPlanToolResult bankPlanToolResult;
     private String previousBankQueryPlanJson;
+    /** Model-owned requirements retained across a structured repair within one chat turn. */
+    private BankRequestContract bankRequestContract;
 
     @Data
     public static class ElementValue {

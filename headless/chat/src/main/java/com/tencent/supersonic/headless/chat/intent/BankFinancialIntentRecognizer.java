@@ -237,6 +237,10 @@ public class BankFinancialIntentRecognizer {
         if (containsAny(text, "超过", "高于", "大于", "低于", "小于", "不低于", "不高于", "达标", "满足", "监管要求")) {
             score(scores, BankIntentType.THRESHOLD, 0.99D, "命中阈值或监管条件表达");
         }
+        if (isExplicitProvinceAverageComparison(text, organizationCount)) {
+            score(scores, BankIntentType.THRESHOLD, 0.989D,
+                    "命中单机构与全省均值的显式比较表达");
+        }
         if (containsAny(text, "排名", "第几", "第一", "最后", "最高", "最低", "最多", "最少", "前三", "后三", "后四",
                 "表现较好", "表现较差")) {
             score(scores, BankIntentType.RANKING, 0.98D, "命中排名或极值表达");
@@ -451,6 +455,24 @@ public class BankFinancialIntentRecognizer {
         return !containsAny(text, "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日", "每天", "连续",
                 "全年变化", "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动",
                 "变化");
+    }
+
+    /**
+     * A named institution asking to compare one or more point-in-time metrics with the provincial
+     * average is a threshold-style benchmark query. It is intentionally narrower than the generic
+     * "均值" aggregation rule, and excludes ranking, trend, change and day-count questions.
+     */
+    private boolean isExplicitProvinceAverageComparison(String text, int organizationCount) {
+        if (organizationCount != 1
+                || !containsAny(text, "全省均值", "全省平均", "省均")
+                || !containsAny(text, "对比", "比较", "相比", "对照", "差多少", "高还是低", "比怎么样")) {
+            return false;
+        }
+        if (isDailyProvinceAverageCount(text, organizationCount)) {
+            return false;
+        }
+        return !containsAny(text, "排名", "第几", "前", "后", "趋势", "走势", "逐月", "逐季", "逐日",
+                "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动", "变化");
     }
 
     private boolean isTrendExtremaSummary(String text) {

@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -20,17 +19,15 @@ import java.util.stream.Stream;
 /** Enforces mapper evidence before a BankQueryPlan can reach a compiler or executor. */
 public class BankQueryPlanValidator {
 
-    private static final Set<String> ORGANIZATION_DIMENSIONS = Set.of("bank_organization", "机构");
-    private static final Set<String> TIME_DIMENSIONS =
-            Set.of("bank_data_date", "\u6570\u636e\u65e5\u671f");
+    private static final Set<String> ORGANIZATION_DIMENSIONS = Set.of("bank_organization");
+    private static final Set<String> TIME_DIMENSIONS = Set.of("bank_data_date");
 
     private static final Pattern FORBIDDEN_SQL = Pattern
             .compile("(?i)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|create|merge|"
                     + "truncate|join|union|from|where|with)\\b|[()])");
-    private static final Pattern DERIVED_METRIC_CODE = Pattern
-            .compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern BASE_METRIC_CODE =
-            Pattern.compile("ZB\\d{3}", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DERIVED_METRIC_CODE =
+            Pattern.compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)");
+    private static final Pattern BASE_METRIC_CODE = Pattern.compile("ZB\\d{3}");
     private static final Set<String> FILTER_OPERATORS = BankSemanticRegistry.filterOperators();
     private static final Set<String> LOGICAL_FILTER_FIELDS =
             BankSemanticRegistry.logicalFilterFields();
@@ -46,6 +43,7 @@ public class BankQueryPlanValidator {
             return new ValidationResult(errors);
         }
         validateVersion(plan, errors);
+        validateAction(plan, errors);
         validateForbiddenTokens(plan, errors);
         validateIntent(plan, hints, errors);
         validateMetrics(plan, hints, errors);
@@ -64,6 +62,13 @@ public class BankQueryPlanValidator {
         if (!BankQueryPlan.CURRENT_VERSION.equals(plan.getVersion())) {
             errors.add(error("UNSUPPORTED_PLAN_VERSION",
                     "plan version must be " + BankQueryPlan.CURRENT_VERSION));
+        }
+    }
+
+    private void validateAction(BankQueryPlan plan, List<ValidationError> errors) {
+        if (plan.getAction() != BankQueryPlan.PlanAction.EXECUTE) {
+            errors.add(error("PLAN_ACTION_REQUIRED",
+                    "execution plans must set action to EXECUTE"));
         }
     }
 
@@ -101,122 +106,10 @@ public class BankQueryPlanValidator {
             errors.add(error("INTENT_REQUIRED", "plan intent is required"));
         } else if (hints.getExpectedIntent() != null
                 && hints.getExpectedIntent() != BankIntentType.UNKNOWN
-                && plan.getIntent() != hints.getExpectedIntent()
-                && !isCompatibleIntentRemap(plan, hints)) {
+                && plan.getIntent() != hints.getExpectedIntent()) {
             errors.add(error("INTENT_MISMATCH",
-                    "plan intent conflicts with financial intent evidence"));
+                    "plan intent must equal the model requirements contract"));
         }
-    }
-
-    /**
-     * Accept a small set of intentional remaps between recognizer labels and compiler-owned plan
-     * shapes so deterministic templates are not rejected at compile time.
-     *
-     * <ul>
-     * <li>AVG rankings/extrema: RANKING ↔ AGGREGATION when all metrics use AVG</li>
-     * <li>Structure share / 存贷比: recognizer may say POINT_QUERY while the plan is RATIO</li>
-     * </ul>
-     */
-    private boolean isCompatibleIntentRemap(BankQueryPlan plan, SemanticIntentHints hints) {
-        if (plan.getMetrics() == null || plan.getMetrics().isEmpty()) {
-            return false;
-        }
-        BankIntentType expected = hints.getExpectedIntent();
-        BankIntentType actual = plan.getIntent();
-        if (isRatioPlan(plan)
-                && (expected == BankIntentType.POINT_QUERY || expected == BankIntentType.UNKNOWN
-                        || expected == BankIntentType.RATIO
-                        // M-43 网点平均存款规模 is labeled AGGREGATION / DERIVED by recognizer.
-                        || expected == BankIntentType.AGGREGATION)
-                && actual == BankIntentType.RATIO) {
-            return true;
-        }
-        // Structure share may be labeled RATIO by the recognizer while the plan returns the three
-        // direct balances (对公/个人/合计) for answerExact to format both percentages.
-        if ((expected == BankIntentType.RATIO || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.POINT_QUERY
-                && plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT
-                && plan.getMetrics() != null && plan.getMetrics().size() >= 2) {
-            return true;
-        }
-        // Multi-metric point / four-key compare (S-23, H-04) often arrives as AGGREGATION.
-        if (expected == BankIntentType.AGGREGATION && actual == BankIntentType.POINT_QUERY
-                && plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT
-                && plan.getMetrics() != null && plan.getMetrics().size() >= 2) {
-            return true;
-        }
-        // Quarter/year 日均 (M-36) is POINT_QUERY linguistically but AVG aggregation plan.
-        if (expected == BankIntentType.POINT_QUERY && actual == BankIntentType.AGGREGATION
-                && plan.getMetrics().stream().allMatch(metric -> metric != null
-                        && metric.getAggregation() == BankQueryPlan.Aggregation.AVG)) {
-            return true;
-        }
-        // Org vs province-mean comparisons are often labeled AGGREGATION by the recognizer while
-        // the controlled template is THRESHOLD + PROVINCE_AVERAGE (M-16 / H-04 style).
-        if ((expected == BankIntentType.AGGREGATION || expected == BankIntentType.UNKNOWN
-                || expected == BankIntentType.POINT_QUERY || expected == BankIntentType.COMPARISON)
-                && actual == BankIntentType.THRESHOLD
-                && hasProvinceAverageBenchmark(plan)) {
-            return true;
-        }
-        // Province growth "增幅排名" is RANKING linguistically but compiles as CHANGE.
-        if ((expected == BankIntentType.RANKING || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.CHANGE && plan.getTime() != null
-                && plan.getTime().getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD
-                && plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.CHANGE) {
-            return true;
-        }
-        // Absolute thresholds may arrive as POINT_QUERY from the mapper.
-        if ((expected == BankIntentType.POINT_QUERY || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.THRESHOLD) {
-            return true;
-        }
-        // Multi-org "谁最好/最高" may be labeled COMPARISON while the plan ranks the subset.
-        if (expected == BankIntentType.COMPARISON && actual == BankIntentType.RANKING
-                && plan.getOrganizations() != null && plan.getOrganizations().size() >= 2) {
-            return true;
-        }
-        // S-08 "谁控制得最好" is RANKING linguistically but gold is full named-org COMPARISON.
-        if ((expected == BankIntentType.RANKING || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.COMPARISON
-                && plan.getOrganizations() != null && plan.getOrganizations().size() >= 2) {
-            return true;
-        }
-        // S-21 multi-org breakdown is often AGGREGATION while the plan is POINT_QUERY.
-        if ((expected == BankIntentType.AGGREGATION || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.POINT_QUERY
-                && plan.getOrganizations() != null && plan.getOrganizations().size() >= 2
-                && plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT) {
-            return true;
-        }
-        // Quarter 日均 gold point (M-36) is labeled AGGREGATION/POINT while plan is POINT_QUERY.
-        if ((expected == BankIntentType.AGGREGATION || expected == BankIntentType.UNKNOWN)
-                && actual == BankIntentType.POINT_QUERY
-                && plan.getOrganizations() != null && plan.getOrganizations().size() == 1
-                && plan.getMetrics() != null && plan.getMetrics().size() == 1
-                && plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT) {
-            return true;
-        }
-        boolean allAvg = plan.getMetrics().stream()
-                .allMatch(metric -> metric != null
-                        && metric.getAggregation() == BankQueryPlan.Aggregation.AVG);
-        if (!allAvg) {
-            return false;
-        }
-        return (expected == BankIntentType.RANKING && actual == BankIntentType.AGGREGATION)
-                || (expected == BankIntentType.AGGREGATION && actual == BankIntentType.RANKING);
-    }
-
-    private static boolean hasProvinceAverageBenchmark(BankQueryPlan plan) {
-        return plan.getFilters() != null && plan.getFilters().stream()
-                .anyMatch(filter -> "benchmark".equals(filter.getField())
-                        && "COMPARE".equals(filter.getOperator())
-                        && "PROVINCE_AVERAGE".equals(filter.getValue()));
     }
 
     private static boolean isRatioPlan(BankQueryPlan plan) {
@@ -233,34 +126,27 @@ public class BankQueryPlanValidator {
             errors.add(error("METRIC_REQUIRED", "at least one metric is required"));
         }
         for (String metric : planMetrics) {
-            String canonical = BankQueryPlanAliasNormalizer.canonicalizeMetric(metric);
-            if (!BankSemanticRegistry.metricCodes().contains(canonical)
+            if (!BankSemanticRegistry.metricCodes().contains(metric)
                     || !hints.getAllowedMetrics().isEmpty()
-                            && !metricAllowed(hints.getAllowedMetrics(), metric)) {
+                            && !hints.getAllowedMetrics().contains(metric)) {
                 errors.add(error("UNKNOWN_METRIC",
                         "metric is not available in the semantic schema: " + metric));
             }
         }
-        // Deterministic single-metric plans may intentionally drop sibling mapped metrics (e.g. a
-        // question names 不良贷款率 while the mapper also attaches 贷款余额). Require only that every
-        // plan metric is allowed; when the plan selects exactly one metric and it appears in
-        // required or is the sole recovered primary, do not demand the full required set.
-        // Multi-metric RATIO plans (存贷比 / 结构占比) may also add complementary schema metrics
-        // beyond the mapper's required set when they remain inside allowedMetrics.
-        // Chinese display names vs ZB### codes are treated as the same metric via alias
-        // canonicalization. Ranking TopN / single-primary CHANGE may keep only one metric even when
-        // the mapper attached siblings.
-        boolean requiredOk = requiredMetricsSatisfied(planMetrics, hints.getRequiredMetrics());
-        // Single primary is OK when required is empty, or the selected primary is among required
-        // (alias-aware). Ranking TopN may keep only the question's primary even if mapper attached
-        // siblings — still require the primary to intersect required when required is non-empty.
-        boolean singlePrimaryOk = planMetrics.size() == 1 && (hints.getRequiredMetrics().isEmpty()
-                || requiredMetricsIntersect(planMetrics, hints.getRequiredMetrics()));
-        boolean ratioOk = isRatioPlan(plan)
-                && requiredMetricsSatisfied(planMetrics, hints.getRequiredMetrics());
-        if (!requiredOk && !singlePrimaryOk && !ratioOk) {
+        Set<String> missing = new LinkedHashSet<>(hints.getRequiredMetrics());
+        missing.removeAll(planMetrics);
+        if (!missing.isEmpty()) {
             errors.add(error("MISSING_REQUIRED_METRIC",
-                    "plan omitted a metric recognized from the question"));
+                    "required_metrics_missing: " + String.join(",", missing)));
+        }
+        if (!hints.getRequiredMetrics().isEmpty()) {
+            Set<String> unexpected = new LinkedHashSet<>(planMetrics);
+            unexpected.removeAll(hints.getRequiredMetrics());
+            if (!unexpected.isEmpty()) {
+                errors.add(error("UNEXPECTED_METRIC",
+                        "plan contains metrics outside the model requirements contract: "
+                                + String.join(",", unexpected)));
+            }
         }
     }
 
@@ -294,17 +180,8 @@ public class BankQueryPlanValidator {
         if (haystack == null || needle == null) {
             return false;
         }
-        String needleCanon = BankQueryPlanAliasNormalizer.canonicalizeMetric(needle);
         for (String item : haystack) {
-            if (item == null) {
-                continue;
-            }
-            if (item.equalsIgnoreCase(needle) || item.equalsIgnoreCase(needleCanon)) {
-                return true;
-            }
-            String itemCanon = BankQueryPlanAliasNormalizer.canonicalizeMetric(item);
-            if (itemCanon != null && (itemCanon.equalsIgnoreCase(needle)
-                    || itemCanon.equalsIgnoreCase(needleCanon))) {
+            if (needle.equals(item)) {
                 return true;
             }
         }
@@ -316,10 +193,9 @@ public class BankQueryPlanValidator {
         Set<String> dimensions = safe(plan.getDimensions()).filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         for (String dimension : dimensions) {
-            // Mirror metrics: empty allow-list means "no mapper catalog" — do not fail closed on
-            // known semantic bank dimensions recovered by deterministic plans.
-            if (!hints.getAllowedDimensions().isEmpty()
-                    && !dimensionAllowed(hints.getAllowedDimensions(), dimension)) {
+            if (!BankSemanticRegistry.dimensions().contains(dimension)
+                    || !hints.getAllowedDimensions().isEmpty()
+                            && !dimensionAllowed(hints.getAllowedDimensions(), dimension)) {
                 errors.add(error("UNKNOWN_DIMENSION",
                         "dimension is not available in the semantic schema: " + dimension));
             }
@@ -338,6 +214,12 @@ public class BankQueryPlanValidator {
             errors.add(error("TREND_TIME_DIMENSION_REQUIRED",
                     "trend requires the semantic date dimension"));
         }
+        if (plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.CHANGE
+                && dimensions.stream().anyMatch(TIME_DIMENSIONS::contains)) {
+            errors.add(error("CHANGE_DATE_DIMENSION_FORBIDDEN",
+                    "change comparison dates belong in time and must not group by bank_data_date"));
+        }
     }
 
     private void validateOrganizations(BankQueryPlan plan, SemanticIntentHints hints,
@@ -350,15 +232,15 @@ public class BankQueryPlanValidator {
                     "plan contains an organization outside the official bank registry"));
         }
         if (!planOrganizations.containsAll(hints.getRequiredOrganizationCodes())) {
+            Set<String> missing = new LinkedHashSet<>(hints.getRequiredOrganizationCodes());
+            missing.removeAll(planOrganizations);
             errors.add(error("MISSING_REQUIRED_ORGANIZATION",
-                    "plan omitted an organization recognized from the question"));
+                    "required_organizations_missing: " + String.join(",", missing)));
         }
-        // When the mapper missed organizations, deterministic plan recovery may fill them from
-        // question text. Only reject plan orgs as unknown when the mapper already bound some.
         if (!hints.getRequiredOrganizationCodes().isEmpty()
                 && !hints.getRequiredOrganizationCodes().containsAll(planOrganizations)) {
             errors.add(error("UNKNOWN_ORGANIZATION",
-                    "plan contains an organization outside mapper evidence"));
+                    "plan contains an organization outside the model requirements contract"));
         }
     }
 
@@ -408,63 +290,9 @@ public class BankQueryPlanValidator {
 
     private boolean matchesRecognizedTimeRange(BankQueryPlan.TimeRange time,
             SemanticIntentHints hints) {
-        if (Objects.equals(hints.getRequiredStartDate(), time.getStartDate())
-                && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())) {
-            return true;
-        }
-        // No mapper dates: absolute plan dates from question text (e.g. "2025年全年") are authoritative.
-        if (hints.getRequiredStartDate() == null && hints.getRequiredEndDate() == null) {
-            return true;
-        }
-        // Mapper often binds only the as-of day on one side (e.g. endDate for 「截至D」). Accept a
-        // single-day plan equal to that recognized day.
-        if (time.getStartDate() != null && time.getStartDate().equals(time.getEndDate())) {
-            LocalDate asOf = time.getStartDate();
-            if (Objects.equals(hints.getRequiredEndDate(), asOf)
-                    || Objects.equals(hints.getRequiredStartDate(), asOf)) {
-                return true;
-            }
-        }
-        // Mapper often clamps "YYYY年全年" endDate to "today". Accept a full calendar year plan when
-        // both sides resolve to the same year so annual averages/extrema are not rejected.
-        if (isFullCalendarYear(time) && hints.getRequiredStartDate() != null
-                && hints.getRequiredEndDate() != null
-                && hints.getRequiredStartDate().getYear() == time.getStartDate().getYear()
-                && hints.getRequiredEndDate().getYear() == time.getEndDate().getYear()) {
-            return true;
-        }
-        if (hints.getExpectedIntent() == BankIntentType.CHANGE
-                && hints.getRequiredStartDate() != null && hints.getRequiredEndDate() != null
-                && hints.getRequiredStartDate().isBefore(hints.getRequiredEndDate())
-                && time.getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD
-                && Objects.equals(hints.getRequiredEndDate(), time.getStartDate())
-                && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())
-                && Objects.equals(hints.getRequiredStartDate(), time.getBaselineStartDate())
-                && Objects.equals(hints.getRequiredStartDate(), time.getBaselineEndDate())) {
-            return true;
-        }
-        // Province growth ranking may be labeled RANKING while the plan is CHANGE with an
-        // as-of current day and year-end baseline recovered from question text.
-        if (time.getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD
-                && time.getBaselineStartDate() != null && time.getBaselineEndDate() != null
-                && time.getStartDate() != null && time.getStartDate().equals(time.getEndDate())
-                && time.getBaselineEndDate().isBefore(time.getStartDate())
-                && (hints.getRequiredEndDate() == null
-                        || Objects.equals(hints.getRequiredEndDate(), time.getEndDate()))) {
-            return true;
-        }
-        // Quarter/year 日均: plan expands to a full period while mapper often only binds the
-        // as-of/end day (M-36: 一季度日均 → 01-31..03-31 with endDate-only or single-day hints).
-        if (time.getStartDate() != null && time.getEndDate() != null
-                && time.getStartDate().isBefore(time.getEndDate())
-                && hints.getRequiredEndDate() != null
-                && Objects.equals(hints.getRequiredEndDate(), time.getEndDate())
-                && (hints.getRequiredStartDate() == null
-                        || Objects.equals(hints.getRequiredStartDate(), time.getEndDate())
-                        || !hints.getRequiredStartDate().isAfter(time.getStartDate()))) {
-            return true;
-        }
-        return false;
+        return (hints.getRequiredStartDate() == null && hints.getRequiredEndDate() == null)
+                || Objects.equals(hints.getRequiredStartDate(), time.getStartDate())
+                        && Objects.equals(hints.getRequiredEndDate(), time.getEndDate());
     }
 
     private static boolean isFullCalendarYear(BankQueryPlan.TimeRange time) {
@@ -477,11 +305,17 @@ public class BankQueryPlanValidator {
     private void validateFilters(BankQueryPlan plan, SemanticIntentHints hints,
             List<ValidationError> errors) {
         List<BankQueryPlan.Filter> filters = safe(plan.getFilters()).collect(Collectors.toList());
+        boolean hasProvinceAverageBenchmark = filters.stream()
+                .anyMatch(this::isProvinceAverageBenchmark);
         Set<String> allowedFields = Stream
                 .concat(Stream.concat(hints.getAllowedMetrics().stream(),
                         hints.getAllowedDimensions().stream()), LOGICAL_FILTER_FIELDS.stream())
                 .collect(Collectors.toSet());
         for (BankQueryPlan.Filter filter : filters) {
+            if (filter == null) {
+                errors.add(error("INVALID_FILTER", "filter must be an object"));
+                continue;
+            }
             if (StringUtils.isBlank(filter.getField()) || StringUtils.isBlank(filter.getOperator())
                     || !FILTER_OPERATORS.contains(filter.getOperator())) {
                 errors.add(error("INVALID_FILTER",
@@ -496,22 +330,29 @@ public class BankQueryPlanValidator {
                     && safe(filter.getValues()).findAny().isEmpty()) {
                 errors.add(error("FILTER_VALUE_REQUIRED", "filter value is required"));
             }
+            boolean provinceAverageBenchmark = isProvinceAverageBenchmark(filter);
+            boolean provinceAverageDirection = isProvinceAverageDirection(filter);
+            if (("benchmark".equals(filter.getField()) || "COMPARE".equals(filter.getOperator()))
+                    && !provinceAverageBenchmark) {
+                errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
+                        "province average must use exact benchmark/COMPARE/PROVINCE_AVERAGE"));
+            }
+            if ("PROVINCE_AVERAGE".equals(filter.getValue()) && !provinceAverageBenchmark
+                    && !provinceAverageDirection) {
+                errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
+                        "PROVINCE_AVERAGE may only be a benchmark or metric_value direction"));
+            }
+            if (provinceAverageDirection && !hasProvinceAverageBenchmark) {
+                errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
+                        "province-average direction requires the exact benchmark filter"));
+            }
+            if ((provinceAverageBenchmark || provinceAverageDirection)
+                    && safe(filter.getValues()).findAny().isPresent()) {
+                errors.add(error("PROVINCE_AVERAGE_BENCHMARK_VALUES_FORBIDDEN",
+                        "province-average benchmark values must be empty"));
+            }
         }
         for (SemanticIntentHints.RequiredFilter required : hints.getRequiredFilters()) {
-            // Rank filters belong to point-in-time TopN; province growth CHANGE plans drop them.
-            if (("rank".equals(required.field()) || "rank_from_bottom".equals(required.field()))
-                    && plan.getIntent() == BankIntentType.CHANGE) {
-                continue;
-            }
-            // H-04 multi-metric four-key point drops province-average filters: gold rows are the
-            // org values only (answerText gaps stay GOLD_PARTIAL), and province-average CTEs hit
-            // JDBC_GRAMMAR on the physical path.
-            if (isMultiMetricPointPlan(plan)
-                    && ("benchmark".equals(required.field())
-                            || ("metric_value".equals(required.field())
-                                    && "PROVINCE_AVERAGE".equals(required.value())))) {
-                continue;
-            }
             boolean present = filters.stream()
                     .anyMatch(filter -> Objects.equals(required.field(), filter.getField())
                             && Objects.equals(required.operator(), filter.getOperator())
@@ -521,6 +362,19 @@ public class BankQueryPlanValidator {
                         "plan omitted a filter recognized from the question"));
             }
         }
+    }
+
+    private boolean isProvinceAverageBenchmark(BankQueryPlan.Filter filter) {
+        return filter != null && "benchmark".equals(filter.getField())
+                && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue());
+    }
+
+    private boolean isProvinceAverageDirection(BankQueryPlan.Filter filter) {
+        return filter != null && "metric_value".equals(filter.getField())
+                && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
+                        || "LT".equals(filter.getOperator()) || "LTE".equals(filter.getOperator()))
+                && "PROVINCE_AVERAGE".equals(filter.getValue());
     }
 
     private static boolean isMultiMetricPointPlan(BankQueryPlan plan) {
@@ -576,10 +430,7 @@ public class BankQueryPlanValidator {
             if (metricOrder.size() < 2 || StringUtils.isBlank(calculation.getBaseline())) {
                 errors.add(error("RATIO_DENOMINATOR_REQUIRED",
                         "ratio requires an explicit second selected metric as denominator"));
-            } else if (!metricOrder.get(1).equalsIgnoreCase(calculation.getBaseline())
-                    && !BankQueryPlanAliasNormalizer.canonicalizeMetric(metricOrder.get(1))
-                            .equalsIgnoreCase(BankQueryPlanAliasNormalizer
-                                    .canonicalizeMetric(calculation.getBaseline()))) {
+            } else if (!metricOrder.get(1).equals(calculation.getBaseline())) {
                 errors.add(error("RATIO_DENOMINATOR_MISMATCH",
                         "ratio denominator must be the second selected metric"));
             }
@@ -664,7 +515,7 @@ public class BankQueryPlanValidator {
                     "derived metric requires metricCode, numerator, denominator and name"));
             return;
         }
-        if (!seen.add(code.toUpperCase(Locale.ROOT))) {
+        if (!seen.add(code)) {
             errors.add(error("DERIVED_METRIC_DUPLICATE",
                     "derived metrics must not repeat a metric code: " + code));
         }
@@ -672,13 +523,13 @@ public class BankQueryPlanValidator {
         if (!matcher.matches()) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric code must be DERIVED_<numerator>_DIV_<denominator>: " + code));
-        } else if (!matcher.group(1).equalsIgnoreCase(numerator)
-                || !matcher.group(2).equalsIgnoreCase(denominator)) {
+        } else if (!matcher.group(1).equals(numerator)
+                || !matcher.group(2).equals(denominator)) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric code operands must match the declared numerator and "
                             + "denominator: " + code));
         }
-        if (numerator.equalsIgnoreCase(denominator)) {
+        if (numerator.equals(denominator)) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric numerator and denominator must differ: " + code));
         }
@@ -694,9 +545,9 @@ public class BankQueryPlanValidator {
 
     private boolean matches(SemanticIntentHints.DerivedMetricSpec spec,
             BankQueryPlan.DerivedMetric item) {
-        return spec.code().equalsIgnoreCase(item.getMetricCode())
-                && spec.numerator().equalsIgnoreCase(item.getNumerator())
-                && spec.denominator().equalsIgnoreCase(item.getDenominator())
+        return spec.code().equals(item.getMetricCode())
+                && spec.numerator().equals(item.getNumerator())
+                && spec.denominator().equals(item.getDenominator())
                 && Objects.equals(spec.name(), item.getName());
     }
 
@@ -776,6 +627,8 @@ public class BankQueryPlanValidator {
                 .collect(Collectors.toSet());
         for (BankQueryPlan.OrderBy order : orderBy) {
             if (StringUtils.isBlank(order.getField()) || order.getDirection() == null
+                    || (!BankSemanticRegistry.metricCodes().contains(order.getField())
+                            && !BankSemanticRegistry.dimensions().contains(order.getField()))
                     || (!fields.isEmpty() && !metricAllowed(fields, order.getField())
                             && !dimensionAllowed(fields, order.getField()))) {
                 errors.add(error("INVALID_ORDER_BY",
@@ -897,46 +750,16 @@ public class BankQueryPlanValidator {
         return values.stream().anyMatch(value -> value != null && value.equalsIgnoreCase(target));
     }
 
-    /**
-     * Bank schema catalogs often expose Chinese display names ({@code 机构}/{@code 数据日期}) while
-     * deterministic plans and compilers use semantic bizNames ({@code bank_organization}/
-     * {@code bank_data_date}). Treat either form as the same field for allow-list checks.
-     */
     private boolean dimensionAllowed(Collection<String> allowed, String dimension) {
-        if (containsIgnoreCase(allowed, dimension)) {
-            return true;
-        }
-        if (ORGANIZATION_DIMENSIONS.contains(dimension)
-                && allowed.stream().anyMatch(ORGANIZATION_DIMENSIONS::contains)) {
-            return true;
-        }
-        return TIME_DIMENSIONS.contains(dimension)
-                && allowed.stream().anyMatch(TIME_DIMENSIONS::contains);
+        return allowed != null && allowed.contains(dimension);
     }
 
     private boolean columnAllowed(Collection<String> allowed, String column) {
         return metricAllowed(allowed, column) || dimensionAllowed(allowed, column);
     }
 
-    /**
-     * Schema catalogs often list Chinese display names while deterministic bank plans emit ZB###
-     * indicator codes. Accept legal ZB codes when the allow-list is bank-shaped (has org/time
-     * dimensions or any ZB/Chinese bank metric already present); the compiler still fails closed if
-     * the semantic schema truly lacks the metric.
-     */
     private boolean metricAllowed(Collection<String> allowed, String metric) {
-        if (containsIgnoreCase(allowed, metric)) {
-            return true;
-        }
-        if (metric == null || !BASE_METRIC_CODE.matcher(metric).matches()) {
-            return false;
-        }
-        // Bank domain: allow-list contains org/time dimensions or other ZB codes / 余额|率 names.
-        return allowed.stream().anyMatch(value -> value != null && (ORGANIZATION_DIMENSIONS
-                .contains(value) || TIME_DIMENSIONS.contains(value)
-                || BASE_METRIC_CODE.matcher(value).matches() || value.contains("余额")
-                || value.contains("率") || value.contains("存款") || value.contains("贷款")
-                || value.contains("利润")));
+        return allowed != null && allowed.contains(metric);
     }
 
     private boolean containsAllIgnoreCase(Collection<String> haystack,

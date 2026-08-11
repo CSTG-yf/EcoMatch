@@ -48,6 +48,7 @@ import com.tencent.supersonic.headless.api.pojo.response.SearchResult;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContract;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanTraceEvent;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
@@ -341,6 +342,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         }
         Object previousPlan =
                 failedParse.getProperties().get(BankPlanToolResult.PLAN_PROPERTY_KEY);
+        Object previousRequirements =
+                failedParse.getProperties().get(BankRequestContract.PROPERTY_KEY);
         if (previousPlan == null) {
             return null;
         }
@@ -349,7 +352,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 .queryText(storedQuery.getQueryText()).user(request.getUser()).saveAnswer(false)
                 .internalBankPlanRepair(true)
                 .bankPlanRepairContext(BankPlanRepairContext.of(toolResult.toRepairFeedback(),
-                        JsonUtil.toString(previousPlan)))
+                        JsonUtil.toString(previousPlan), JsonUtil.toString(previousRequirements)))
                 .build();
     }
 

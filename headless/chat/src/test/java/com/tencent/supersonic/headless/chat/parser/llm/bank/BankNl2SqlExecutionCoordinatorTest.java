@@ -149,6 +149,7 @@ class BankNl2SqlExecutionCoordinatorTest {
 
     private BankQueryPlan rankingPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .action(BankQueryPlan.PlanAction.EXECUTE)
                 .intent(BankIntentType.RANKING).metrics(List.of(metric("ZB001")))
                 .dimensions(List.of("bank_organization"))
                 .organizations(List.of(organization("ORG004"))).time(time(null, null))
@@ -165,6 +166,7 @@ class BankNl2SqlExecutionCoordinatorTest {
 
     private BankQueryPlan changePlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .action(BankQueryPlan.PlanAction.EXECUTE)
                 .intent(BankIntentType.CHANGE).metrics(List.of(metric("ZB001")))
                 .dimensions(List.of()).organizations(List.of(organization("ORG004")))
                 .time(time(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,

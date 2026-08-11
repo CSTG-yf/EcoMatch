@@ -80,6 +80,13 @@ class BankSemanticRegistryTest {
         });
     }
 
+    @Test
+    void netProfitUsesTheOfficialGoldUnit() {
+        assertEquals("万元", BankSemanticRegistry.metrics().get("ZB011").unit());
+        assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("ZB011 净利润"));
+        assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("unit=万元"));
+    }
+
     private static <E extends Enum<E>> Set<String> enumNames(Class<E> enumType) {
         return Arrays.stream(enumType.getEnumConstants()).map(Enum::name)
                 .collect(Collectors.toCollection(LinkedHashSet::new));

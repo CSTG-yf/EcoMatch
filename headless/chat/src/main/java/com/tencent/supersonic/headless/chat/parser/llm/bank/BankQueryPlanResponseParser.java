@@ -35,11 +35,9 @@ public class BankQueryPlanResponseParser {
                         BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
                         "model response must contain one JSON object");
             }
-            // Map common model mistakes (time_range, zb_id, extra keys) onto BankQueryPlan before
-            // strict Jackson deserialization + evidence validation.
-            JsonNode canonical = BankQueryPlanJsonCanonicalizer.canonicalize(node);
-            BankQueryPlan plan = OBJECT_MAPPER.treeToValue(canonical, BankQueryPlan.class);
-            plan = BankQueryPlanAliasNormalizer.normalize(plan, hints);
+            // The model owns semantic translation. Reject malformed or non-contract JSON and feed
+            // the precise failure back through the repair loop; never silently rewrite its plan.
+            BankQueryPlan plan = OBJECT_MAPPER.treeToValue(node, BankQueryPlan.class);
             BankQueryPlanValidator.ValidationResult validation = validator.validate(plan, hints);
             if (!validation.isValid()) {
                 throw new BankQueryPlanParseException(
@@ -78,19 +76,9 @@ public class BankQueryPlanResponseParser {
     private String unwrapJson(String modelOutput) {
         String response = StringUtils.trimToEmpty(modelOutput);
         if (response.startsWith("```")) {
-            int lineEnd = response.indexOf('\n');
-            if (lineEnd < 0 || !response.endsWith("```")) {
-                throw new BankQueryPlanParseException(
-                        BankQueryPlanParseException.Reason.MALFORMED_JSON,
-                        "unterminated JSON code fence");
-            }
-            String language = response.substring(3, lineEnd).trim();
-            if (StringUtils.isNotBlank(language) && !"json".equalsIgnoreCase(language)) {
-                throw new BankQueryPlanParseException(
-                        BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
-                        "code fence must declare JSON");
-            }
-            response = response.substring(lineEnd + 1, response.length() - 3).trim();
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
+                    "model response must be one raw JSON object without a code fence");
         }
         if (StringUtils.isBlank(response)) {
             throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MALFORMED_JSON,

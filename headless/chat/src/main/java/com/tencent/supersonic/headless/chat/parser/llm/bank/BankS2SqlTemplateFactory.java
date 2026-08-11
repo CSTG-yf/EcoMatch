@@ -492,12 +492,31 @@ final class BankS2SqlTemplateFactory {
         if (context.metrics().size() == 1) {
             return compileSingleMetricDailyAggregationSummary(context);
         }
+        return compileMultiMetricDailyAggregationSummary(context, false);
+    }
+
+    /**
+     * Runs a multi-metric aggregation over the full institution population. The result projector
+     * then computes the per-metric provincial mean and filters the requested organization(s), so
+     * the semantic SQL never needs a CTE-to-CTE value/gap join.
+     */
+    String compileMultiMetricProvinceAverageAggregation(TemplateContext context) {
+        if (context.metrics().size() < 2) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-metric province-average comparison requires at least two metrics");
+        }
+        return compileMultiMetricDailyAggregationSummary(context, true);
+    }
+
+    private String compileMultiMetricDailyAggregationSummary(TemplateContext context,
+            boolean fullPopulation) {
         if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "province-average aggregation requires at least one metric and no metric filter");
         }
-        Filter organizationFilter = organizationFilter(context);
+        Filter organizationFilter = fullPopulation ? null : organizationFilter(context);
         String where = where(withoutOrganizationFilter(context), context.dateField(),
                 context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
         String outerWhere =

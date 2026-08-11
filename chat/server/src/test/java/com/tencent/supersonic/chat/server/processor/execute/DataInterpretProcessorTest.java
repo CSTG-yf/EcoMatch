@@ -1,8 +1,14 @@
 package com.tencent.supersonic.chat.server.processor.execute;
 
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
+import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContract;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -87,5 +93,29 @@ class DataInterpretProcessorTest {
         assertFalse(DataInterpretProcessor.isInterpretationInputWithinLimits("question",
                 "d".repeat(DataInterpretProcessor.MAX_RESULT_TEXT_CHARACTERS + 1)));
         assertFalse(DataInterpretProcessor.isInterpretationInputWithinLimits("question", null));
+    }
+
+    @Test
+    void doesNotCompeteWithValidatedBankFinalAnswer() {
+        ExecuteContext context = new ExecuteContext(
+                ChatExecuteReq.builder().queryText("银行存款是多少？").build());
+        Agent agent = new Agent();
+        agent.setChatAppConfig(Map.of(
+                DataInterpretProcessor.APP_KEY, ChatApp.builder().enable(true).build(),
+                BankFinalAnswerProcessor.APP_KEY, ChatApp.builder().enable(true).build()));
+        context.setAgent(agent);
+
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getProperties().put(BankPlanToolResult.PLAN_PROPERTY_KEY, Map.of("intent", "POINT_QUERY"));
+        parseInfo.getProperties().put(BankRequestContract.PROPERTY_KEY, Map.of("action", "EXECUTE"));
+        context.setParseInfo(parseInfo);
+
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setTextResult("结果");
+        context.setResponse(result);
+
+        assertTrue(DataInterpretProcessor.bankFinalAnswerOwnsSummary(context));
+        assertFalse(new DataInterpretProcessor().accept(context));
     }
 }
