@@ -78,8 +78,9 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
                     5. 百分比、金额、排名等可以做通常展示性四舍五入，但不得改变方向、口径或数值含义。
                     6. 当问题要求最高或最低、哪个期间或极值结论时，必须在同一句中绑定该结论的日期、数值和单位；
                        不能只在前文的数值列表中出现它们。例如：2026-03 数值最高（42.32亿元）。
-                    7. 当 Request contract.time.granularity 为 MONTH 或 QUARTER 时，期间标签必须使用 YYYY-MM
-                       （例如 2026-03），不得写 YYYY-MM-DD、“2026年3月31日”、“2026年3月末”或“2026年一季度末”。
+                    7. 当 Request contract.time.granularity 为 MONTH 或 QUARTER 时，期间标签必须与
+                       result_facts.context.data_date 表示同一期间；可沿用 YYYY-MM、YYYY-MM-DD 或中文季度末写法，
+                       但不得改成结果中不存在的日期、月份或季度。
                     8. 对“高于/低于全省均值 X”这类表述，X 必须引用 field=absolute_gap 的正数事实；
                        absolute_gap 是绝对差额；gap_value 是“目标值-全省均值”的有符号差额，只有明确表述正负号时才能引用它，绝不可自行取绝对值。
                     9. 当问题要求列出、逐项或全部指标及排名时，必须为 requirements 中每个直接或派生指标
@@ -113,10 +114,6 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
             .configure(DeserializationFeature.FAIL_ON_TRAILING_TOKENS, true);
     private static final Pattern DATE = Pattern.compile("\\d{4}[-年/]\\d{1,2}(?:[-月/]\\d{1,2}日?)?");
-    private static final Pattern DAY_PRECISION_PERIOD_LABEL = Pattern.compile(
-            "(?:\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b|\\d{4}年\\d{1,2}月\\d{1,2}(?:日|号))");
-    private static final Pattern NON_CANONICAL_MONTH_OR_QUARTER_LABEL = Pattern.compile(
-            "\\d{4}年(?:[一二三四1-4]季度末|\\d{1,2}月(?:末)?)");
     private static final Pattern YEAR = Pattern.compile("(?<!\\d)(?:20[2-3]\\d)年?(?!\\d)");
     private static final Pattern CODE = Pattern.compile("(?i)(?:ORG|ZB)\\d{3}");
     private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:\\.\\d+)?");
@@ -256,12 +253,6 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
         if (TECHNICAL_FIELD_MARKERS.stream().anyMatch(answer::contains)) {
             errors.add("ANSWER_TECHNICAL_FIELD");
         }
-        if (requiresMonthPrecisionLabel(requirements)
-                && (DAY_PRECISION_PERIOD_LABEL.matcher(answer).find()
-                || NON_CANONICAL_MONTH_OR_QUARTER_LABEL.matcher(answer).find())) {
-            errors.add("ANSWER_PERIOD_LABEL_MUST_USE_YYYY_MM: 将“YYYY年一季度末”“YYYY年M月末”或“YYYY-MM-DD”改为“YYYY-MM”（例如 2025-03）");
-        }
-
         List<String> requestedIds = response.factIds == null ? List.of() : response.factIds;
         if (requestedIds.isEmpty()) {
             errors.add("ANSWER_FACT_IDS_REQUIRED");
@@ -382,16 +373,6 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
             }
         }
         return values;
-    }
-
-    private boolean requiresMonthPrecisionLabel(BankRequestContract requirements) {
-        if (requirements == null || requirements.getTime() == null
-                || requirements.getTime().getGranularity() == null) {
-            return false;
-        }
-        BankQueryPlan.TimeGranularity granularity = requirements.getTime().getGranularity();
-        return granularity == BankQueryPlan.TimeGranularity.MONTH
-                || granularity == BankQueryPlan.TimeGranularity.QUARTER;
     }
 
     private AnswerResponse parse(String candidate) throws JsonProcessingException {

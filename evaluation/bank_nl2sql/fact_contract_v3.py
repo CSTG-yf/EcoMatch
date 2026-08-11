@@ -28,7 +28,7 @@ from answer_contract import (
 )
 
 
-SCHEMA_VERSION = "3.0-dry-run"
+SCHEMA_VERSION = "3.2-dry-run"
 
 _DATE_TOKEN = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
 _RANK_OUTPUT = re.compile(r"第\s*([1-9]\d*)\s*名")
@@ -400,6 +400,109 @@ def _is_numeric_cell(value: Any) -> bool:
     return isinstance(value, numbers.Real) and not isinstance(value, bool)
 
 
+_PROVINCIAL_AVERAGE_LEGACY_COLUMNS = (
+    "org_code",
+    "org_name",
+    "metric_code",
+    "aggregate_value",
+    "min_value",
+    "max_value",
+    "observation_count",
+)
+_PROVINCIAL_AVERAGE_RESULT_COLUMNS = {
+    "org_code",
+    "org_name",
+    "metric_code",
+    "metric_value",
+    "provincial_average",
+    "gap_value",
+    "absolute_gap",
+}
+
+
+def _standard_provincial_average_projection_binds(
+    expected: dict[str, Any],
+    *,
+    expected_names: list[str],
+    expected_rows: list[Any],
+    columns: list[str],
+    rows: list[list[Any]],
+    require_exact_rows: bool,
+) -> bool | None:
+    """Bind the published provincial-average result contract to legacy aggregate rows.
+
+    This is deliberately narrow: the runtime projection keeps the same organization and metric
+    identity, exposes the current value as ``metric_value``, and additionally exposes the
+    provincial mean/gaps required by the user-visible answer. The legacy snapshot rows encode
+    aggregate/min/max as the same single-date target value and observation count one.
+    """
+
+    if tuple(expected_names) != _PROVINCIAL_AVERAGE_LEGACY_COLUMNS:
+        return None
+    if not _PROVINCIAL_AVERAGE_RESULT_COLUMNS.issubset(columns):
+        return None
+    if any(
+        not isinstance(row, (list, tuple)) or len(row) != len(expected_names)
+        for row in expected_rows
+    ):
+        return False
+
+    indexes = {name: columns.index(name) for name in _PROVINCIAL_AVERAGE_RESULT_COLUMNS}
+    tolerance_raw = expected.get("numericTolerance")
+    tolerance = float(tolerance_raw) if isinstance(tolerance_raw, numbers.Real) else 0.0
+
+    def cells_equal(left: Any, right: Any) -> bool:
+        if _is_numeric_cell(left) and _is_numeric_cell(right):
+            return abs(float(left) - float(right)) <= tolerance
+        return left == right
+
+    projected_rows: list[list[Any]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or any(
+            index >= len(row) for index in indexes.values()
+        ):
+            return False
+        value = row[indexes["metric_value"]]
+        projected_rows.append(
+            [
+                row[indexes["org_code"]],
+                row[indexes["org_name"]],
+                row[indexes["metric_code"]],
+                value,
+                value,
+                value,
+                1,
+            ]
+        )
+
+    def rows_equal(left: list[Any] | tuple[Any, ...], right: list[Any]) -> bool:
+        return len(left) == len(right) and all(
+            cells_equal(expected_value, actual_value)
+            for expected_value, actual_value in zip(left, right)
+        )
+
+    if require_exact_rows and expected.get("orderSensitive", False):
+        return len(expected_rows) == len(projected_rows) and all(
+            rows_equal(expected_row, actual_row)
+            for expected_row, actual_row in zip(expected_rows, projected_rows)
+        )
+
+    unmatched = list(range(len(projected_rows)))
+    for expected_row in expected_rows:
+        matched_index = next(
+            (
+                candidate
+                for candidate in unmatched
+                if rows_equal(expected_row, projected_rows[candidate])
+            ),
+            None,
+        )
+        if matched_index is None:
+            return False
+        unmatched.remove(matched_index)
+    return not unmatched if require_exact_rows else True
+
+
 def _expected_rows_are_bound(
     expected: dict[str, Any],
     *,
@@ -422,6 +525,17 @@ def _expected_rows_are_bound(
     expected_names = [str(column) for column in expected_columns]
     if not expected_names or len(set(columns)) != len(columns):
         return False
+
+    provincial_average_binding = _standard_provincial_average_projection_binds(
+        expected,
+        expected_names=expected_names,
+        expected_rows=expected_rows,
+        columns=columns,
+        rows=rows,
+        require_exact_rows=require_exact_rows,
+    )
+    if provincial_average_binding is not None:
+        return provincial_average_binding
 
     has_identity = any(
         cell is not None and not _is_numeric_cell(cell)
@@ -582,28 +696,68 @@ def _entity_codes_in_text(
 
 
 def _normalized_date_facts(text: str) -> set[str]:
+    """Normalize equivalent period labels without weakening daily-date binding.
+
+    The source answer list mixes ``YYYY-MM`` and quarter-end ``YYYY-MM-DD`` labels
+    for the same quarter-end fact. Treat those two spellings as aliases only for
+    quarter-end months; an arbitrary daily date such as 2025-06-15 remains exact.
+    """
+
     dates: set[str] = set()
+    quarter_day = {3: 31, 6: 30, 9: 30, 12: 31}
+
+    def add_period(year: int, month: int, day: int | None = None) -> None:
+        month_text = f"{year:04d}-{month:02d}"
+        if day is None:
+            dates.add(month_text)
+            if month in quarter_day:
+                dates.add(f"{month_text}-{quarter_day[month]:02d}")
+            return
+        full_text = f"{month_text}-{day:02d}"
+        dates.add(full_text)
+        if month in quarter_day and day == quarter_day[month]:
+            dates.add(month_text)
+
     for token in _ISO_DATE_FACT.findall(text):
         parts = re.split(r"[-/]", token)
-        dates.add("-".join([parts[0], *(part.zfill(2) for part in parts[1:])]))
+        add_period(
+            int(parts[0]),
+            int(parts[1]),
+            int(parts[2]) if len(parts) == 3 else None,
+        )
     quarter_month = {"一": 3, "1": 3, "二": 6, "2": 6, "三": 9, "3": 9, "四": 12, "4": 12}
-    quarter_day = {3: 31, 6: 30, 9: 30, 12: 31}
     for match in _CHINESE_DATE_FACT.finditer(text):
         year = int(match.group("year"))
         if match.group("year_end"):
-            dates.add(f"{year:04d}-12-31")
+            add_period(year, 12, 31)
         elif match.group("quarter"):
             month = quarter_month[match.group("quarter")]
-            dates.add(f"{year:04d}-{month:02d}-{quarter_day[month]:02d}")
+            add_period(year, month, quarter_day[month])
         else:
             month = int(match.group("month"))
             day = match.group("day")
-            dates.add(f"{year:04d}-{month:02d}" + (f"-{int(day):02d}" if day else ""))
+            add_period(year, month, int(day) if day else None)
     return dates
 
 
-def _organization_names(text: str) -> set[str]:
-    return {match.group(0).casefold() for match in _ORGANIZATION_NAME.finditer(text)}
+def _organization_names(
+    text: str,
+    catalog: tuple[tuple[str, str], ...] = (),
+) -> set[str]:
+    """Return only unrecognised explicit bank names.
+
+    The catalog already binds every known organisation to its code. Mask those
+    exact aliases before applying the broad fallback regex so a question prefix
+    such as ``请分析江苏省A市农商行`` is not incorrectly captured as a different
+    organisation named ``请分析江苏省A市农商行``. Any genuinely unknown explicit
+    bank name remains visible and therefore still fails closed.
+    """
+
+    normalized = text.casefold()
+    for alias, _ in catalog:
+        if "农商行" in alias:
+            normalized = normalized.replace(alias, " " * len(alias))
+    return {match.group(0).casefold() for match in _ORGANIZATION_NAME.finditer(normalized)}
 
 
 def _literal_codes(text: str, pattern: re.Pattern[str]) -> set[str]:
@@ -632,7 +786,7 @@ def _text_entities_are_exact(
     extractors = (
         lambda text: _entity_codes_in_text(text, organization_catalog),
         lambda text: _entity_codes_in_text(text, metric_catalog),
-        _organization_names,
+        lambda text: _organization_names(text, organization_catalog),
         _normalized_date_facts,
         lambda text: _literal_codes(text, _ORGANIZATION_CODE),
         lambda text: _literal_codes(text, _METRIC_CODE),

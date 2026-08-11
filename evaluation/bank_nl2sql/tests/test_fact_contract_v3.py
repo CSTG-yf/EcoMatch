@@ -322,6 +322,65 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
+    def test_standard_provincial_average_projection_binds_complete_legacy_identity(self) -> None:
+        record = _record(
+            "PROVINCIAL-AVERAGE-1",
+            question="对江苏省D市农商行的四项指标与全省均值逐一对比。",
+            answer_text=(
+                "存款54.65亿元（低于全省均值18.11亿元）；贷款44.25亿元"
+                "（低于全省均值14.83亿元）；不良率1.55%（高于全省均值0.41%）；"
+                "净利润105.54万元（低于全省均值54.9万元）"
+            ),
+            columns=[
+                "org_code",
+                "org_name",
+                "metric_code",
+                "aggregate_value",
+                "min_value",
+                "max_value",
+                "observation_count",
+            ],
+            rows=[
+                ["ORG004", "江苏省D市农商行", "ZB001", 54.65, 54.65, 54.65, 1],
+                ["ORG004", "江苏省D市农商行", "ZB002", 44.25, 44.25, 44.25, 1],
+                ["ORG004", "江苏省D市农商行", "ZB011", 105.54, 105.54, 105.54, 1],
+                ["ORG004", "江苏省D市农商行", "ZB013", 1.55, 1.55, 1.55, 1],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "PROVINCIAL-AVERAGE-1",
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "metric_value",
+                        "provincial_average",
+                        "gap_value",
+                        "absolute_gap",
+                    ],
+                    "resultRows": [
+                        ["ORG004", "江苏省D市农商行", "ZB001", 54.65, 72.758, -18.108, 18.108],
+                        ["ORG004", "江苏省D市农商行", "ZB002", 44.25, 59.076, -14.826, 14.826],
+                        ["ORG004", "江苏省D市农商行", "ZB011", 105.54, 160.438, -54.898, 54.898],
+                        ["ORG004", "江苏省D市农商行", "ZB013", 1.55, 1.142, 0.408, 0.408],
+                    ],
+                    "textSummary": (
+                        "存款54.65亿元（低于全省均值18.11亿元）；贷款44.25亿元"
+                        "（低于全省均值14.83亿元）；不良率1.55%（高于全省均值0.41%）；"
+                        "净利润105.54万元（低于全省均值54.9万元）"
+                    ),
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["finalFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_complete_gold_rejects_extra_result_row(self) -> None:
         record = _record(
             "EXTRA-ROW-1",
@@ -460,6 +519,56 @@ class ScoreFactContractV3Test(unittest.TestCase):
                 self.assertTrue(scored["items"][0]["resultFactsExact"])
                 self.assertTrue(scored["items"][0]["finalFactsExact"])
                 self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_final_fact_match_accepts_equivalent_quarter_end_month_label(self) -> None:
+        record = _record(
+            "DATE-QUARTER-ALIAS-1",
+            question="请分析江苏省I市农商行不良贷款率从2025年一季度末到2026年一季度末的逐季变化。",
+            answer_text=(
+                "江苏省I市农商行2025-03-31不良贷款率1.48%；"
+                "江苏省I市农商行2025-06-30不良贷款率1.52%"
+            ),
+            columns=["data_date", "metric_value"],
+            rows=[["2025-03-31", 1.48], ["2025-06-30", 1.52]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "DATE-QUARTER-ALIAS-1",
+                    "resultColumns": ["data_date", "metric_value"],
+                    "resultRows": [["2025-03-31", 1.48], ["2025-06-30", 1.52]],
+                    "textSummary": "江苏省I市农商行2025-03不良贷款率1.48%；2025-06不良贷款率1.52%",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["finalFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_final_fact_match_does_not_alias_arbitrary_daily_dates(self) -> None:
+        record = _record(
+            "DATE-DAILY-ALIAS-1",
+            question="2025年6月15日的余额是多少？",
+            answer_text="2025-06-15余额42.02亿元",
+            columns=["data_date", "metric_value"],
+            rows=[["2025-06-15", 42.02]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "DATE-DAILY-ALIAS-1",
+                    "resultColumns": ["data_date", "metric_value"],
+                    "resultRows": [["2025-06-15", 42.02]],
+                    "textSummary": "2025-06余额42.02亿元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertFalse(scored["items"][0]["finalFactsExact"])
 
     def test_question_date_parts_do_not_downgrade_same_numeric_answer_fact(self) -> None:
         record = _record(
@@ -643,6 +752,34 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["resultExact"])
         self.assertTrue(scored["items"][0]["finalFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_known_organization_name_is_not_prefixed_by_question_verbs(self) -> None:
+        record = _record(
+            "ORG-PREFIX-1",
+            question="请分析江苏省A市农商行的余额是多少？",
+            answer_text="余额42.02亿元",
+            columns=["metric_value"],
+            rows=[[42.02]],
+        )
+        record["normalizedIntent"] = {
+            "organizations": [{"code": "ORG001", "name": "江苏省A市农商行"}],
+            "metrics": [],
+        }
+        report = {
+            "items": [
+                {
+                    "id": "ORG-PREFIX-1",
+                    "resultColumns": ["metric_value"],
+                    "resultRows": [[42.02]],
+                    "textSummary": "江苏省A市农商行余额42.02亿元",
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["finalFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
 
     def test_approved_sum_projection_can_ground_final_fact(self) -> None:
         record = _record(

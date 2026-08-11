@@ -129,41 +129,27 @@ class BankFinalAnswerProcessorTest {
     }
 
     @Test
-    void repairsDayPrecisionLabelsForQuarterlyAnswers() {
-        List<String> answers = new ArrayList<>(List.of(
-                "{\"answer\":\"2025年3月31日数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}",
-                "{\"answer\":\"2025-03数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}"));
-        List<String> prompts = new ArrayList<>();
-        BankFinalAnswerProcessor processor = new BankFinalAnswerProcessor((app, prompt) -> {
-            prompts.add(prompt.text());
-            return answers.remove(0);
-        });
+    void acceptsDayPrecisionLabelsWhenTheResultFactHasADay() {
+        BankFinalAnswerProcessor processor = new BankFinalAnswerProcessor((app, prompt) ->
+                "{\"answer\":\"2025年3月31日数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}");
         ExecuteContext context = trendContext();
 
         processor.process(context);
 
-        assertEquals("2025-03数值为41.96亿元，整体呈上升趋势。",
+        assertEquals("2025年3月31日数值为41.96亿元，整体呈上升趋势。",
                 context.getResponse().getTextSummary());
-        assertTrue(prompts.get(1).contains("ANSWER_PERIOD_LABEL_MUST_USE_YYYY_MM"));
     }
 
     @Test
-    void repairsQuarterEndLabelsToCanonicalMonthKeys() {
-        List<String> answers = new ArrayList<>(List.of(
-                "{\"answer\":\"2025年一季度末数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}",
-                "{\"answer\":\"2025-03数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}"));
-        List<String> prompts = new ArrayList<>();
-        BankFinalAnswerProcessor processor = new BankFinalAnswerProcessor((app, prompt) -> {
-            prompts.add(prompt.text());
-            return answers.remove(0);
-        });
+    void acceptsChineseQuarterEndLabelsWhenTheResultFactHasAQuarterEnd() {
+        BankFinalAnswerProcessor processor = new BankFinalAnswerProcessor((app, prompt) ->
+                "{\"answer\":\"2025年一季度末数值为41.96亿元，整体呈上升趋势。\",\"factIds\":[\"F1\",\"F6\"]}");
         ExecuteContext context = trendContext();
 
         processor.process(context);
 
-        assertEquals("2025-03数值为41.96亿元，整体呈上升趋势。",
+        assertEquals("2025年一季度末数值为41.96亿元，整体呈上升趋势。",
                 context.getResponse().getTextSummary());
-        assertTrue(prompts.get(1).contains("ANSWER_PERIOD_LABEL_MUST_USE_YYYY_MM"));
     }
 
     @Test
