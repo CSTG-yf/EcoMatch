@@ -1,0 +1,54 @@
+{
+  "amendmentGenerator": {
+    "name": "amend_official_ground_truth",
+    "version": "1.0.0"
+  },
+  "answerAmendmentCount": 1,
+  "answerAmendmentLedger": "answer-amendment-ledger.json",
+  "artifactSha256": {
+    "answerAmendmentLedger": "BDA569556295C9F463C9550CADCCE01D4C71819DCBC4A0322C7280B6745C698F",
+    "changeLedger": "B8BFBFC792FC7894E427859ECC2B44588B543E8B848311C2B1FCC9A212A1C868",
+    "finalAuditSummary": "394929C7459A0EFC990CE533003F7AB6CDC0D49C973367DAE3150636F0C6D6B8",
+    "groundTruthWorkbook": "74EE679343FBD02B04740AE8AE2E1AF569D5E59002D8E4EB3F07CAA263323763"
+  },
+  "auditStatus": {
+    "auditErrors": 0,
+    "candidateReady": true,
+    "onlyDeclaredAnswerCellsChanged": true,
+    "testSplitChanged": false
+  },
+  "canonicalReady": true,
+  "changeCounts": {
+    "answerChanges": 5,
+    "contractErrors": 0,
+    "questionClarifications": 10,
+    "questionRemovals": 1
+  },
+  "changeLedger": "contract-change-ledger.json",
+  "datasetVersion": "2.0.2",
+  "factRegionSha256": "4E2F31804B1A8E8EC6B876B8B158D46CF08CC9E1E8EACC50C0346D306AC35123",
+  "finalAuditSummary": "answer-amendment-audit-summary.json",
+  "generator": {
+    "name": "clarify_ground_truth_contracts",
+    "version": "2.0.0"
+  },
+  "groundTruthWorkbook": "bank-nl2sql-ground-truth-v2.0.2.xlsx",
+  "officialCount": 199,
+  "parent": {
+    "datasetVersion": "2.0.1",
+    "finalAuditSummarySha256": "C0AC8A868836995801BC7E3194D765F085DEB5E0EF64A2FD8317F19EE6CDB124",
+    "groundTruthWorkbookSha256": "B19F2DF98CE4CD7A4D7B16B37C220CDB85047D24EB30360D08A37F59105B6706",
+    "officialManifestSha256": "919557612BAC04C7FCB00FD1DA0CCBF1383F0909F8FEB3078C15E0E43B3477DD"
+  },
+  "releaseMode": "INCREMENTAL_ANSWER_AMENDMENT",
+  "removedIds": [
+    "TRAIN-M-13"
+  ],
+  "schemaVersion": "2.1",
+  "sourceSha256": "C3B810A4938FEFC77A5C834C4C6857BEC7F67162C4160ABD9F66D9DD6018703C",
+  "sourceSplitCounts": {
+    "dev": 40,
+    "test": 40,
+    "train": 119
+  }
+}

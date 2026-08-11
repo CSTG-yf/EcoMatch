@@ -1,10 +1,10 @@
 {
   "answerAmendment": {
-    "canonicalWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
-    "canonicalWorkbookSha256": "B19F2DF98CE4CD7A4D7B16B37C220CDB85047D24EB30360D08A37F59105B6706",
-    "count": 6,
-    "ledgerSha256": "60D1294BDF3A7F8AC5FF2EE7E5C98836255E0BD05B6196950D462CBB6AF266F4",
-    "officialManifestSha256": "919557612BAC04C7FCB00FD1DA0CCBF1383F0909F8FEB3078C15E0E43B3477DD"
+    "canonicalWorkbook": "bank-nl2sql-ground-truth-v2.0.2.xlsx",
+    "canonicalWorkbookSha256": "74EE679343FBD02B04740AE8AE2E1AF569D5E59002D8E4EB3F07CAA263323763",
+    "count": 1,
+    "ledgerSha256": "BDA569556295C9F463C9550CADCCE01D4C71819DCBC4A0322C7280B6745C698F",
+    "officialManifestSha256": "A20047BC9E95511BAB61CB589DB721174B95FFBAE2029F219A3158670788716A"
   },
   "augmentationCount": 12,
   "evaluationSplitCounts": {
@@ -13,15 +13,15 @@
     "train": 119
   },
   "officialCount": 199,
-  "parentVersion": "2.0.0",
+  "parentVersion": "2.0.1",
   "reassignedForTemplateIsolation": [],
-  "sourceSha256": "b19f2df98ce4cd7a4d7b16b37c220cdb85047d24eb30360d08a37f59105b6706",
+  "sourceSha256": "74ee679343fbd02b04740ae8ae2e1af569d5e59002d8e4eb3f07caa263323763",
   "sourceSplitCounts": {
     "dev": 40,
     "test": 40,
     "train": 119
   },
-  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.1.xlsx",
+  "sourceWorkbook": "bank-nl2sql-ground-truth-v2.0.2.xlsx",
   "templateOverlap": {
     "devTest": [
       "15664243130b4506",
@@ -33,5 +33,5 @@
       "b92432933806f5fa"
     ]
   },
-  "version": "2.0.1"
+  "version": "2.0.2"
 }

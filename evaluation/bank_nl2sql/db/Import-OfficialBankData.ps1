@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Imports the frozen official Bank NL2SQL v2.0.1 benchmark tables/views into a
+    Imports the frozen official Bank NL2SQL v2.0.2 benchmark tables/views into a
     local H2 database (companion import package, NOT a runtime semantic.mv.db).
 
 .DESCRIPTION
@@ -48,14 +48,14 @@ param(
     [string]$TargetDatabase,
     [string]$JavaPath,
     [string]$H2JarPath,
-    [string]$ReleaseVersion = "2.0.1"
+    [string]$ReleaseVersion = "2.0.2"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 3.0
 
 if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+$') {
-    throw "ReleaseVersion must be a semantic version such as 2.0.1; got '$ReleaseVersion'"
+    throw "ReleaseVersion must be a semantic version such as 2.0.2; got '$ReleaseVersion'"
 }
 $OfficialVersion = $ReleaseVersion
 $SchemaVersion = "1.0"

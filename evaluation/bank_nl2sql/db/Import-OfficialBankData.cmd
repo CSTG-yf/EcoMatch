@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================================
-rem  Bank NL2SQL official database import package (v2.0.1) - double-click
+rem  Bank NL2SQL official database import package (v2.0.2) - double-click
 rem  wrapper for Import-OfficialBankData.ps1 (companion import package, NOT a
 rem  runtime semantic.mv.db).
 rem

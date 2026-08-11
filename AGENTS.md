@@ -22,7 +22,7 @@
 
 正式成绩只能使用
 [`evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1`](evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1)，
-它固定 v2.0.1、Fact v3 `caseAccuracy`、串行执行、Agent 启动回执和 smoke → train → dev →
+它固定 v2.0.2、Fact v3 `caseAccuracy`、串行执行、Agent 启动回执和 smoke → train → dev →
 冻结 test 的门禁。不得以其他脚本、历史报告或消融结果替代。
 
 ### 工程复现包（非正式）

@@ -1,0 +1,21 @@
+{
+  "correctionSpecSha256": "EDE271576AC78325DB350EB17FF0238C49A241500D67B2FD2B116797B35657B0",
+  "count": 1,
+  "entries": [
+    {
+      "id": "TRAIN-H-07",
+      "newAnswerSha256": "20016003FD3AE90B304F85F736A947D450B0934ACAADBED8B2A74BB6A10096B2",
+      "oldAnswerSha256": "E0424BC64CC9B440573B947649827FA0EA1DBEBED4DC4917B5EC43DF96F143C3",
+      "reason": "按题干“主要经营指标及排名”及现有 expected.rows 对齐：补齐9个指标的当前值与排名，移除题干和结构化结果均未要求的年初变化、全省均值事实，保留前三/后四结论。",
+      "split": "train"
+    }
+  ],
+  "generator": {
+    "name": "amend_official_ground_truth",
+    "version": "1.0.0"
+  },
+  "parentDatasetVersion": "2.0.1",
+  "parentOfficialManifestSha256": "919557612BAC04C7FCB00FD1DA0CCBF1383F0909F8FEB3078C15E0E43B3477DD",
+  "schemaVersion": "1.0",
+  "targetDatasetVersion": "2.0.2"
+}

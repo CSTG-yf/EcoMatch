@@ -227,7 +227,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         profile, profile_sha256 = load_official_runtime_profile(ROOT)
         release = verify_official_runtime_release(ROOT, profile=profile, split="train")
 
-        self.assertEqual(profile["datasetVersion"], "2.0.1")
+        self.assertEqual(profile["datasetVersion"], "2.0.2")
         self.assertEqual(len(profile_sha256), 64)
         self.assertEqual(release["recordCount"], 119)
         self.assertIn("train.jsonl", release["checkedAssets"])

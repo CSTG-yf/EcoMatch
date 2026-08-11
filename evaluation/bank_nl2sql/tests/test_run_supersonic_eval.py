@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 from pathlib import Path
 
 
@@ -157,6 +158,8 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "/openapi/chat/manage/delete",
             ],
         )
+        chat_name = urllib.parse.parse_qs(urllib.parse.urlsplit(requests[0][0]).query)["chatName"][0]
+        self.assertRegex(chat_name, r"^evaluation-DEV-01-[0-9a-f]{32}$")
         self.assertEqual(
             requests[1][1],
             {

@@ -15,6 +15,7 @@ import json
 import math
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -245,8 +246,12 @@ def _create_conversation(
     sample_id: str,
     agent_id: int,
 ) -> int:
+    # A rerun must never reuse a previous conversation with the same sample ID.
+    # The frontend creates a fresh chat for every evaluation item; include a
+    # process-local nonce so repeated runs preserve that isolation even when the
+    # backend treats chatName as an idempotency key.
     query = urllib.parse.urlencode(
-        {"chatName": f"evaluation-{sample_id}", "agentId": agent_id}
+        {"chatName": f"evaluation-{sample_id}-{uuid.uuid4().hex}", "agentId": agent_id}
     )
     chat_id = _unwrap_api_value(post_json(f"{manage_api_prefix}/save?{query}", {}))
     if not isinstance(chat_id, int) or isinstance(chat_id, bool):
