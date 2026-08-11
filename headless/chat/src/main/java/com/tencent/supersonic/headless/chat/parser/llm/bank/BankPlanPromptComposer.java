@@ -56,6 +56,8 @@ public final class BankPlanPromptComposer {
             COMPARISON_VALUE 仅表示布尔阈值结论（结果中必须存在 meets_condition），不表示普通“比较”这个词。
             “高于/低于全省均值多少”只要求目标值和差额时，应选择 VALUE、GAP_VALUE；
             只有用户明确询问“全省均值是多少/均值为多少”时，才额外选择 PROVINCE_AVERAGE。
+            “主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名，
+            answerFactTypes 必须包含 VALUE、RANK；只有明确只问“排名/第几名/表现较好或较差”时才可只选择 RANK。
             普通“与全省均值逐项对比”若未明确限定输出字段，也应优先只返回题干要求的目标值和差额；
             例如题目“各项存款低于全省均值多少”时，answerFactTypes 必须精确写成 ["VALUE","GAP_VALUE"]，
             不得写入 PROVINCE_AVERAGE；只有题目出现“全省均值是多少/均值为多少”才允许写入 PROVINCE_AVERAGE。

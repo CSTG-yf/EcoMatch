@@ -88,6 +88,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("普通“与全省均值逐项对比”"));
         assertTrue(sys.contains("“高于/低于全省均值多少”只要求目标值和差额时"));
         assertTrue(sys.contains("只有用户明确询问“全省均值是多少/均值为多少”时"));
+        assertTrue(sys.contains("“主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名"));
         assertTrue(sys.contains("VALUE、GAP_VALUE"));
         assertTrue(sys.contains("answerFactTypes 必须精确写成 [\"VALUE\",\"GAP_VALUE\"]"));
         assertTrue(sys.contains("\"answerFactTypes\":[\"VALUE\"]"));
