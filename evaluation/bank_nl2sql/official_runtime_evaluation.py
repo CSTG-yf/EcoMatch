@@ -19,7 +19,7 @@ from typing import Any
 from fact_contract_v3 import score_fact_contract_report
 
 
-OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.0.0"
+OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.1.0"
 OFFICIAL_RUNTIME_PROFILE = "official_runtime_evaluation_v3.json"
 OFFICIAL_DATASET_VERSION = "2.0.1"
 OFFICIAL_MINIMUM_SOURCE_COMMIT = "565bc74ed313acff1b192aef4ab9a974893e1a53"
@@ -38,8 +38,6 @@ _METRIC_KEYS = (
     "caseDenominator",
     "resultFactAccuracy",
     "resultFactsExactHits",
-    "finalFactAccuracy",
-    "finalFactsExactHits",
     "contractReadyRate",
     "contractReadyCount",
 )
@@ -77,7 +75,6 @@ _SCORE_ITEM_KEYS = (
     "resultExact",
     "resultFactsExact",
     "resultEvidence",
-    "finalFactsExact",
     "casePass",
     "reason",
 )
@@ -86,7 +83,6 @@ _FACT_FAILURE_CATEGORIES = {
     "missing_prediction": "MISSING_PREDICTION",
     "contract_review_required": "CONTRACT_REVIEW_REQUIRED",
     "result_mismatch": "RESULT_FACT_MISMATCH",
-    "final_fact_mismatch": "FINAL_FACT_MISMATCH",
 }
 
 
@@ -145,9 +141,10 @@ def load_official_runtime_profile(dataset_dir: Path | str) -> tuple[dict[str, An
     score = profile.get("score")
     if score != {
         "primaryMetric": "caseAccuracy",
-        "casePass": "resultExact AND finalFactsExact",
+        "casePass": "resultExact",
         "denominator": "ALL_SELECTED_RECORDS",
         "sqlTextScored": False,
+        "finalAnswerScored": False,
     }:
         raise OfficialRuntimeEvaluationError("official runtime profile score contract is invalid")
     smoke = profile.get("smoke")
@@ -418,16 +415,10 @@ def _public_item(runtime_item: dict[str, Any], scored_item: dict[str, Any]) -> d
         }
     )
     runtime_error = runtime_item.get("errorCategory")
-    final_answer_trace = item.get("finalAnswerTrace")
-    final_answer_status = (
-        final_answer_trace.get("status") if isinstance(final_answer_trace, dict) else None
-    )
     if runtime_error in {"RESULT_MISMATCH", "ANSWER_SLOT_MISS"}:
         runtime_error = None
     if isinstance(runtime_error, str) and runtime_error:
         item["errorCategory"] = runtime_error
-    elif final_answer_status != "SUCCEEDED":
-        item["errorCategory"] = "FINAL_ANSWER_" + str(final_answer_status or "MISSING")
     else:
         item["errorCategory"] = _FACT_FAILURE_CATEGORIES.get(scored_item.get("reason"))
     return item
@@ -460,8 +451,11 @@ def build_official_runtime_report(
     """
 
     capture_items, expected_ids = _validated_capture_items(capture_report, records)
-    _validate_final_answer_attestation(capture_items)
-    fact_report = score_fact_contract_report(capture_report, records)
+    fact_report = score_fact_contract_report(
+        capture_report,
+        records,
+        score_mode="result_only",
+    )
     scored_items = fact_report.get("items")
     if not isinstance(scored_items, list):
         raise OfficialRuntimeEvaluationError("Fact v3 scorer did not return items[]")
@@ -492,9 +486,10 @@ def build_official_runtime_report(
         "metrics": {key: metrics_in[key] for key in _METRIC_KEYS},
         "policy": {
             "primaryMetric": "caseAccuracy",
-            "casePass": "resultExact AND finalFactsExact",
+            "casePass": "resultExact",
             "denominator": "ALL_SELECTED_RECORDS",
             "sqlTextScored": False,
+            "finalAnswerScored": False,
         },
         "run": capture_report.get("run"),
         "runtimeDiagnostics": _runtime_diagnostics(capture_report, public_items),

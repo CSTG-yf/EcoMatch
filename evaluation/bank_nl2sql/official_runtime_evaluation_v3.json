@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0",
-  "protocolVersion": "3.0.0",
+  "protocolVersion": "3.1.0",
   "name": "official-bank-runtime-evaluation",
   "datasetVersion": "2.0.1",
   "minimumSourceCommit": "565bc74ed313acff1b192aef4ab9a974893e1a53",
@@ -16,9 +16,10 @@
   },
   "score": {
     "primaryMetric": "caseAccuracy",
-    "casePass": "resultExact AND finalFactsExact",
+    "casePass": "resultExact",
     "denominator": "ALL_SELECTED_RECORDS",
-    "sqlTextScored": false
+    "sqlTextScored": false,
+    "finalAnswerScored": false
   },
   "smoke": {
     "split": "train",

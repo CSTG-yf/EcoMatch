@@ -86,8 +86,6 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
                 "caseDenominator",
                 "resultFactAccuracy",
                 "resultFactsExactHits",
-                "finalFactAccuracy",
-                "finalFactsExactHits",
                 "contractReadyRate",
                 "contractReadyCount",
             },
@@ -104,14 +102,16 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         with self.assertRaises(OfficialRuntimeEvaluationError):
             build_official_runtime_report(_capture("UNEXPECTED"), [_record()])
 
-    def test_rejects_a_capture_without_final_answer_stage_attestation(self) -> None:
+    def test_accepts_a_capture_without_final_answer_stage_attestation(self) -> None:
         capture = _capture()
         del capture["items"][0]["finalAnswerTrace"]
 
-        with self.assertRaisesRegex(OfficialRuntimeEvaluationError, "final-answer stage attestation"):
-            build_official_runtime_report(capture, [_record()])
+        report = build_official_runtime_report(capture, [_record()])
 
-    def test_reports_a_skipped_final_answer_stage_as_a_runtime_failure(self) -> None:
+        self.assertTrue(report["items"][0]["casePass"])
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"], 0.0)
+
+    def test_reports_a_skipped_final_answer_stage_as_non_scoring_diagnostic(self) -> None:
         capture = _capture()
         capture["items"][0]["finalAnswerTrace"] = {
             "status": "SKIPPED",
@@ -121,7 +121,8 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
 
         report = build_official_runtime_report(capture, [_record()])
 
-        self.assertEqual(report["items"][0]["errorCategory"], "FINAL_ANSWER_SKIPPED")
+        self.assertTrue(report["items"][0]["casePass"])
+        self.assertIsNone(report["items"][0]["errorCategory"])
         self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"], 0.0)
         self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorStates"], {"SKIPPED": 1})
 

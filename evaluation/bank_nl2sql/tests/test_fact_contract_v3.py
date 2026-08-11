@@ -174,6 +174,36 @@ class FactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
+    def test_result_only_score_does_not_gate_on_final_answer_text(self) -> None:
+        record = _record(
+            "RESULT-ONLY-1",
+            question="余额是多少？",
+            answer_text="42.02亿元",
+            columns=["metric_value"],
+            rows=[[42.02]],
+        )
+
+        scored = score_fact_contract_report(
+            {
+                "items": [
+                    {
+                        "id": "RESULT-ONLY-1",
+                        "resultColumns": record["expected"]["columns"],
+                        "resultRows": record["expected"]["rows"],
+                        "textSummary": "无法回答",
+                    }
+                ]
+            },
+            [record],
+            score_mode="result_only",
+        )
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertNotIn("finalFactsExact", scored["items"][0])
+        self.assertNotIn("finalFactAccuracy", scored["metrics"])
+        self.assertNotIn("finalFactsExactHits", scored["metrics"])
+
     def test_report_keeps_every_record_in_denominator(self) -> None:
         ready = _record(
             "READY-1",

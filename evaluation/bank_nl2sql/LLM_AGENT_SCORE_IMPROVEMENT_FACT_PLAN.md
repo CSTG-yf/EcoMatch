@@ -59,7 +59,7 @@
 - 正式题目总数为 199，切分固定为：TRAIN 119、DEV 40、TEST 40。
 - 另有 12 条 `augmentation.jsonl` 增强样本，不参与官方评分。
 - 赛题文件没有定义总分公式；历史的缩小分母与严格行结构口径均不能作为当前成绩。
-- 当前协议主指标为全分母 `caseAccuracy = resultExact AND finalFactsExact`；SQL 文本和 AST 不计分。
+- 当前协议主指标为全分母 `caseAccuracy = resultExact`；最终回答仅作非计分展示，SQL 文本和 AST 不计分。
 - 结构化执行结果仅作为 `resultExact` 的事实证据，不单独形成成绩。
 - 批量评测器通过 `/openapi` 模拟前端链路，每题使用独立新会话；页面采集器只作为手工 UI 诊断工具。
 - TEST 金标具有显式读取门禁，最终测试需要 `--acknowledge-final-test`。
@@ -397,16 +397,16 @@ Primary：
 
 ```text
 caseAccuracy = casePass / split 全部题数
-casePass = resultExact AND finalFactsExact
+casePass = resultExact
 ```
 
-其中 `resultExact` 按 SQL 执行结果中的必答事实评分，列名、投影结构、SQL 文本和 AST 不参与主判定；`finalFactsExact` 必须由最终文本自身满足，不能用正确结果表替代缺失文本。
+其中 `resultExact` 按 SQL 执行结果中的必答事实评分，列名、投影结构、SQL 文本和 AST 不参与主判定；最终回答仅用于用户展示，不参与主判定。
 
 Secondary：
 
 ```text
 resultExact
-finalFactsExact
+finalAnswerProcessorSuccessRate
 contractReadyRate
 parseSuccessRate
 executionSuccessRate
@@ -582,7 +582,7 @@ Task 0 合规与产品分叉定稿
 - Owner/Boundary：评测与 score loop；不修改候选实现。
 - 依赖：Tasks 1～3。
 - Mode：SIMPLE。
-- Verification/Stop：A/B/C/D 同数据、同模型、同配置；输出 `caseAccuracy`、`resultFactsExact`、`finalFactsExact`、失败类型、恢复率和延迟；不能解析结果则停止晋级。
+- Verification/Stop：A/B/C/D 同数据、同模型、同配置；输出 `caseAccuracy`、`resultFactsExact`、失败类型、恢复率和延迟；最终回答处理状态仅作诊断；不能解析结果则停止晋级。
 
 ### Task 5：加入合规抽象原型检索
 

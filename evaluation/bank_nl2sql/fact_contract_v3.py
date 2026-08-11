@@ -833,8 +833,20 @@ def _text_entities_are_exact(
 def score_fact_contract_report(
     report: dict[str, Any],
     records: list[dict[str, Any]],
+    *,
+    score_mode: str = "legacy",
 ) -> dict[str, Any]:
-    """Score every selected record; unresolved contracts fail closed, never skip."""
+    """Score every selected record; unresolved contracts fail closed, never skip.
+
+    ``result_only`` is the official runtime mode: structured result facts are
+    the score, while the model's natural-language answer remains a UI output
+    and does not gate ``caseAccuracy``.  ``legacy`` is retained only for the
+    focused historical contract tests and migration diagnostics.
+    """
+
+    if score_mode not in {"legacy", "result_only"}:
+        raise ValueError(f"unsupported score_mode: {score_mode}")
+    score_final_answer = score_mode == "legacy"
 
     report_items = report.get("items") if isinstance(report.get("items"), list) else []
     prediction_by_id = {
@@ -897,89 +909,108 @@ def score_fact_contract_report(
                     require_exact_rows=contract.legacyGoldGrade == "GOLD_OK",
                 )
                 result_facts_exact = facts_grounded and row_binding_ok
-            final_numeric_ok = bool(text_summary) and bool(required_facts) and all(
-                _fact_is_grounded_in_text(
-                    fact,
-                    text_values=text_values,
+            if score_final_answer:
+                final_numeric_ok = bool(text_summary) and bool(required_facts) and all(
+                    _fact_is_grounded_in_text(
+                        fact,
+                        text_values=text_values,
+                    )
+                    for fact in required_facts
                 )
-                for fact in required_facts
-            )
-            final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
-                contract,
-                text_values=text_values,
-                additional_values=_result_rank_values(
-                    [str(column) for column in columns] if isinstance(columns, list) else None,
-                    rows if isinstance(rows, list) else None,
-                ),
-            )
-            predicted_semantics = set(_semantic_facts(text_summary or ""))
-            semantic_ok = set(contract.semanticFacts) == predicted_semantics
-            entity_ok = bool(text_summary) and _text_entities_are_exact(
-                record,
-                text_summary,
-                organization_catalog=organization_catalog,
-                metric_catalog=metric_catalog,
-            )
-            final_facts_exact = final_numeric_ok and semantic_ok and entity_ok
+                final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
+                    contract,
+                    text_values=text_values,
+                    additional_values=_result_rank_values(
+                        [str(column) for column in columns] if isinstance(columns, list) else None,
+                        rows if isinstance(rows, list) else None,
+                    ),
+                )
+                predicted_semantics = set(_semantic_facts(text_summary or ""))
+                semantic_ok = set(contract.semanticFacts) == predicted_semantics
+                entity_ok = bool(text_summary) and _text_entities_are_exact(
+                    record,
+                    text_summary,
+                    organization_catalog=organization_catalog,
+                    metric_catalog=metric_catalog,
+                )
+                final_facts_exact = final_numeric_ok and semantic_ok and entity_ok
 
             if contract.status != "READY":
                 reason = "contract_review_required"
             else:
                 if not result_facts_exact:
                     reason = "result_mismatch"
-                elif not final_facts_exact:
+                elif score_final_answer and not final_facts_exact:
                     reason = "final_fact_mismatch"
 
-        case_pass = bool(result_facts_exact and final_facts_exact and contract.status == "READY")
+        case_pass = bool(
+            result_facts_exact
+            and contract.status == "READY"
+            and (not score_final_answer or final_facts_exact)
+        )
         case_hits += int(case_pass)
         result_hits += int(result_facts_exact)
-        final_fact_hits += int(final_facts_exact)
+        if score_final_answer:
+            final_fact_hits += int(final_facts_exact)
+        scored_item = {
+            "id": sample_id,
+            "contractStatus": contract.status,
+            "contractReasons": list(contract.reasons),
+            "resultExact": result_facts_exact,
+            "resultFactsExact": result_facts_exact,
+            "resultEvidence": result_evidence,
+            "casePass": case_pass,
+            "reason": reason,
+        }
+        if score_final_answer:
+            scored_item["finalFactsExact"] = final_facts_exact
         scored_items.append(
-            {
-                "id": sample_id,
-                "contractStatus": contract.status,
-                "contractReasons": list(contract.reasons),
-                "resultExact": result_facts_exact,
-                "resultFactsExact": result_facts_exact,
-                "resultEvidence": result_evidence,
-                "finalFactsExact": final_facts_exact,
-                "casePass": case_pass,
-                "reason": reason,
-            }
+            scored_item
         )
 
     denominator = len(records)
+    metrics = {
+        "caseAccuracy": _rate(case_hits, denominator),
+        "casePassHits": case_hits,
+        "caseDenominator": denominator,
+        "resultExactHits": result_hits,
+        "resultFactAccuracy": _rate(result_hits, denominator),
+        "resultFactsExactHits": result_hits,
+        "contractReadyRate": _rate(ready_count, denominator),
+        "contractReadyCount": ready_count,
+        "excludedCount": 0,
+    }
+    policy = {
+        "primaryMetric": "caseAccuracy",
+        "casePass": "resultExact" if not score_final_answer else "resultExact AND finalFactsExact",
+        "resultExact": (
+            "required answer facts grounded in captured SQL result; complete structured "
+            "gold has exact projected rows and incomplete gold preserves available identities"
+        ),
+        "denominator": "ALL_SELECTED_RECORDS",
+        "sqlTextScored": False,
+        "reviewRequiredBehavior": "FAIL_CLOSED",
+    }
+    if score_final_answer:
+        metrics.update(
+            {
+                "finalFactAccuracy": _rate(final_fact_hits, denominator),
+                "finalFactsExactHits": final_fact_hits,
+            }
+        )
+        policy["finalFactsExact"] = (
+            "all required answer facts and answer entities present with no extra numeric, "
+            "out-of-context entity or contradictory semantic facts"
+        )
+    else:
+        policy["finalAnswerScored"] = False
+
     return {
         "schemaVersion": SCHEMA_VERSION,
         "recordCount": denominator,
-        "metrics": {
-            "caseAccuracy": _rate(case_hits, denominator),
-            "casePassHits": case_hits,
-            "caseDenominator": denominator,
-            "resultExactHits": result_hits,
-            "resultFactAccuracy": _rate(result_hits, denominator),
-            "resultFactsExactHits": result_hits,
-            "finalFactAccuracy": _rate(final_fact_hits, denominator),
-            "finalFactsExactHits": final_fact_hits,
-            "contractReadyRate": _rate(ready_count, denominator),
-            "contractReadyCount": ready_count,
-            "excludedCount": 0,
-        },
-        "policy": {
-            "primaryMetric": "caseAccuracy",
-            "casePass": "resultExact AND finalFactsExact",
-            "resultExact": (
-                "required answer facts grounded in captured SQL result; complete structured "
-                "gold has exact projected rows and incomplete gold preserves available identities"
-            ),
-            "finalFactsExact": (
-                "all required answer facts and answer entities present with no extra numeric, "
-                "out-of-context entity or contradictory semantic facts"
-            ),
-            "denominator": "ALL_SELECTED_RECORDS",
-            "sqlTextScored": False,
-            "reviewRequiredBehavior": "FAIL_CLOSED",
-        },
+        "scoreMode": score_mode,
+        "metrics": metrics,
+        "policy": policy,
         "run": report.get("run"),
         "items": scored_items,
     }

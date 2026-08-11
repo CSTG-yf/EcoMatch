@@ -12,7 +12,7 @@
       "executionSuccessRate",
       "summarySuccessRate",
       "resultFactAccuracy",
-      "finalFactAccuracy",
+      "finalAnswerProcessorSuccessRate",
       "errorCategories",
       "bankRouting"
     ]

@@ -249,7 +249,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Agent: {run['agentId']} · model: `{run['modelLabel']}` · concurrency: {run['concurrency']}",
         f"- caseAccuracy: {metrics['caseAccuracy']:.6f} ({metrics['casePassHits']}/{metrics['caseDenominator']})",
         f"- resultFactAccuracy: {metrics['resultFactAccuracy']:.6f}",
-        f"- finalFactAccuracy: {metrics['finalFactAccuracy']:.6f}",
+        "- final answer text: non-scoring presentation output",
         f"- parse/execution/summary: {diagnostics['parseSuccessRate']:.6f} / {diagnostics['executionSuccessRate']:.6f} / {diagnostics['summarySuccessRate']:.6f}",
         "",
         "## Failed cases",
