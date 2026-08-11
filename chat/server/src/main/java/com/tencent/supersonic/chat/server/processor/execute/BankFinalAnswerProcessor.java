@@ -146,6 +146,10 @@ public class BankFinalAnswerProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext context) {
+        if (context != null && context.getRequest() != null
+                && context.getRequest().isResultOnly()) {
+            return reject(context, "FINAL_ANSWER_RESULT_ONLY");
+        }
         if (context == null || context.getParseInfo() == null
                 || context.getParseInfo().getProperties() == null) {
             return false;

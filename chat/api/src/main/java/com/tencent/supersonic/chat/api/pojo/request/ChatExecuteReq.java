@@ -19,4 +19,6 @@ public class ChatExecuteReq {
     private String queryText;
     private boolean saveAnswer;
     private boolean streamingResult;
+    /** Skip user-facing answer processors when the caller only needs structured facts. */
+    private boolean resultOnly;
 }

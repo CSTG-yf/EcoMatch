@@ -241,8 +241,10 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 
 所有成员只能通过 `Run-OfficialBankEvaluation.ps1` 产出可比较的成绩。它使用
 `official_runtime_evaluation_v3.json` 固定：v2.0.2 数据库包、Fact v3 评分、独立会话、
-串行执行、固定 smoke 和完整分母。它按前端真实顺序调用：新建会话 → 解析 → 执行 →
-轮询最终回答；金标 SQL、结果和答案文本始终只在本地评分，绝不发送给服务端。
+串行执行、结果-only 执行模式、固定 smoke 和完整分母。它仍按前端真实顺序调用：新建会话
+→ 解析 → 执行 → 轮询结果；评测请求显式携带 `resultOnly=true`，服务端保留查询编译、
+结果投影和结构化事实处理，跳过最终回答/通用摘要模型。金标 SQL、结果和答案文本始终只在
+本地评分，绝不发送给服务端。
 
 正式单题判定为：
 

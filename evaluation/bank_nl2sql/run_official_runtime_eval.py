@@ -436,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
                 concurrency=capture["concurrency"],
                 summary_timeout_seconds=float(capture["summaryTimeoutSeconds"]),
                 summary_poll_interval_seconds=float(capture["summaryPollIntervalSeconds"]),
+                result_only=bool(capture["resultOnly"]),
                 cleanup_conversations=False,
                 on_item_complete=checkpoint,
             )
@@ -468,10 +469,7 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
-        if args.mode == "smoke" and (
-            final_report["metrics"]["caseAccuracy"] != profile["smoke"]["requiredCaseAccuracy"]
-            or final_report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"] != 1.0
-        ):
+        if args.mode == "smoke" and final_report["metrics"]["caseAccuracy"] != profile["smoke"]["requiredCaseAccuracy"]:
             return 2
         return 0
     except (OfficialRuntimeEvaluationError, OfficialRuntimeRunError, SuperSonicEvaluationError) as error:

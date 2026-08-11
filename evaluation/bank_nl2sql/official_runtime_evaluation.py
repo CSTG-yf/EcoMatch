@@ -19,7 +19,7 @@ from typing import Any
 from fact_contract_v3 import score_fact_contract_report
 
 
-OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.1.0"
+OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.2.0"
 OFFICIAL_RUNTIME_PROFILE = "official_runtime_evaluation_v3.json"
 OFFICIAL_DATASET_VERSION = "2.0.2"
 OFFICIAL_MINIMUM_SOURCE_COMMIT = "565bc74ed313acff1b192aef4ab9a974893e1a53"
@@ -132,6 +132,7 @@ def load_official_runtime_profile(dataset_dir: Path | str) -> tuple[dict[str, An
         or capture.get("method") != "openapi-frontend-conversation-chain"
         or capture.get("perRecordConversation") != "isolated"
         or capture.get("concurrency") != 1
+        or capture.get("resultOnly") is not True
     ):
         raise OfficialRuntimeEvaluationError("official runtime profile must require serial execution")
     for key in ("timeoutSeconds", "summaryTimeoutSeconds", "networkRetries"):

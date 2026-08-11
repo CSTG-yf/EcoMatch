@@ -315,6 +315,7 @@ def _evaluate_record(
     manage_api_prefix: str,
     summary_timeout_seconds: float,
     summary_poll_interval_seconds: float,
+    result_only: bool,
     cleanup_conversations: bool,
 ) -> dict[str, Any]:
     sample_id = record["id"]
@@ -396,6 +397,8 @@ def _evaluate_record(
         "chatId": chat_id,
         "streamingResult": True,
     }
+    if result_only:
+        execute_payload["resultOnly"] = True
     try:
         started = time.perf_counter()
         execute_response = _unwrap_api_response(
@@ -554,6 +557,7 @@ def run_supersonic_evaluation(
     concurrency: int = 4,
     summary_timeout_seconds: float = 120,
     summary_poll_interval_seconds: float = 0.5,
+    result_only: bool = False,
     cleanup_conversations: bool = True,
     on_item_complete: Callable[[dict[str, Any], int, int], None] | None = None,
 ) -> dict[str, Any]:
@@ -582,6 +586,7 @@ def run_supersonic_evaluation(
                 manage_api_prefix=manage_api_prefix,
                 summary_timeout_seconds=summary_timeout_seconds,
                 summary_poll_interval_seconds=summary_poll_interval_seconds,
+                result_only=result_only,
                 cleanup_conversations=cleanup_conversations,
             ): index
             for index, record in enumerate(record_list)

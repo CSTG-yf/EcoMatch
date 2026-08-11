@@ -118,4 +118,20 @@ class DataInterpretProcessorTest {
         assertTrue(DataInterpretProcessor.bankFinalAnswerOwnsSummary(context));
         assertFalse(new DataInterpretProcessor().accept(context));
     }
+
+    @Test
+    void skipsLegacyInterpretationForResultOnlyExecution() {
+        ExecuteContext context = new ExecuteContext(
+                ChatExecuteReq.builder().queryText("银行存款是多少？").resultOnly(true).build());
+        Agent agent = new Agent();
+        agent.setChatAppConfig(Map.of(DataInterpretProcessor.APP_KEY,
+                ChatApp.builder().enable(true).build()));
+        context.setAgent(agent);
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setTextResult("结果");
+        context.setResponse(result);
+
+        assertFalse(new DataInterpretProcessor().accept(context));
+    }
 }

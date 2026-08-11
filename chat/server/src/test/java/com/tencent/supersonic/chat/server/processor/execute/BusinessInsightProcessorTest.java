@@ -105,6 +105,19 @@ class BusinessInsightProcessorTest {
     }
 
     @Test
+    void skipsGenericExplanationForResultOnlyExecution() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(row("2026-01", 100), row("2026-02", 120)));
+        ExecuteContext context = new ExecuteContext(
+                ChatExecuteReq.builder().resultOnly(true).build());
+        context.setResponse(result);
+
+        assertFalse(new BusinessInsightProcessor().accept(context));
+    }
+
+    @Test
     void warnsInsteadOfClaimingTrendForSmallSamples() {
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);

@@ -46,6 +46,10 @@ public class BusinessInsightProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext executeContext) {
+        if (executeContext != null && executeContext.getRequest() != null
+                && executeContext.getRequest().isResultOnly()) {
+            return false;
+        }
         if (DataInterpretProcessor.bankFinalAnswerOwnsSummary(executeContext)) {
             // A bank agent with the validated final-answer app must not fall back to the generic
             // business explanation when that answer is rejected; doing so would publish facts

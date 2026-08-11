@@ -44,6 +44,22 @@ class BankFinalAnswerProcessorTest {
     }
 
     @Test
+    void skipsModelAnswerGenerationForResultOnlyExecution() {
+        ExecuteContext context = changeContext();
+        context.getRequest().setResultOnly(true);
+
+        BankFinalAnswerProcessor processor = new BankFinalAnswerProcessor((app, prompt) -> {
+            throw new AssertionError("result-only execution must not call the answer model");
+        });
+
+        assertFalse(processor.accept(context));
+        Map<?, ?> trace = (Map<?, ?>) context.getParseInfo().getProperties()
+                .get(BankFinalAnswerProcessor.TRACE_PROPERTY);
+        assertEquals("SKIPPED", trace.get("status"));
+        assertEquals(List.of("FINAL_ANSWER_RESULT_ONLY"), trace.get("errors"));
+    }
+
+    @Test
     void returnsExactJsonContractFeedbackThenLetsTheModelRepairOnce() {
         List<String> answers = new ArrayList<>(List.of("增长6.33%",
                 "{\"answer\":\"增长6.33%。\",\"factIds\":[\"F4\"]}"));

@@ -76,6 +76,10 @@ public class DataInterpretProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext executeContext) {
+        if (executeContext != null && executeContext.getRequest() != null
+                && executeContext.getRequest().isResultOnly()) {
+            return false;
+        }
         if (bankFinalAnswerOwnsSummary(executeContext)) {
             // The bank final-answer processor is the sole owner of the user-visible answer.
             // In particular, do not start the legacy streaming interpreter here: its callback

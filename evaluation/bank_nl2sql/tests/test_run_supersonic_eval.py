@@ -147,7 +147,9 @@ class RunSuperSonicEvalTest(unittest.TestCase):
             }
         ]
 
-        report = run_supersonic_evaluation(records, agent_id=7, post_json=post_json)
+        report = run_supersonic_evaluation(
+            records, agent_id=7, post_json=post_json, result_only=True
+        )
 
         self.assertEqual(
             [path.split("?")[0] for path, _ in requests],
@@ -178,6 +180,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "agentId": 7,
                 "chatId": 501,
                 "streamingResult": True,
+                "resultOnly": True,
             },
         )
         request_text = json.dumps(requests, ensure_ascii=False)
