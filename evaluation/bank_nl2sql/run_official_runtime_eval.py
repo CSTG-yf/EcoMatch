@@ -119,11 +119,19 @@ def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[st
         "timingMs": {
             "averageParseMs": average("parseMs"),
             "averageExecuteMs": average("executeMs"),
+            "averageQueryTimeCostMs": average("queryTimeCostMs"),
+            "averageExecutePostQueryMs": average("executePostQueryMs"),
             "averageSummaryMs": average("summaryMs"),
         },
         "timingDistributionsMs": {
             "parse": _latency_distribution([item.get("parseMs") for item in items]),
             "execute": _latency_distribution([item.get("executeMs") for item in items]),
+            "queryTimeCost": _latency_distribution(
+                [item.get("queryTimeCostMs") for item in items]
+            ),
+            "executePostQuery": _latency_distribution(
+                [item.get("executePostQueryMs") for item in items]
+            ),
             "summary": _latency_distribution([item.get("summaryMs") for item in items]),
             "endToEnd": _latency_distribution([item.get("endToEndMs") for item in items]),
         },

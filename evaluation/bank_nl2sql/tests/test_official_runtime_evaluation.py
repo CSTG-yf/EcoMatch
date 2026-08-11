@@ -48,8 +48,17 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
             "split": "train",
             "agentId": 33,
         },
-        "timingMs": {"averageParseMs": 1.0, "averageExecuteMs": 2.0},
-        "timingDistributionsMs": {"endToEnd": {"count": 1, "p95": 4.0}},
+        "timingMs": {
+            "averageParseMs": 1.0,
+            "averageExecuteMs": 2.0,
+            "averageQueryTimeCostMs": 1.25,
+            "averageExecutePostQueryMs": 0.75,
+        },
+        "timingDistributionsMs": {
+            "queryTimeCost": {"count": 1, "p95": 1.25},
+            "executePostQuery": {"count": 1, "p95": 0.75},
+            "endToEnd": {"count": 1, "p95": 4.0},
+        },
         "items": [
             {
                 "id": sample_id,
@@ -57,6 +66,8 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
                 "sqlFeatures": ["POINT_QUERY"],
                 "parse": True,
                 "execute": True,
+                "queryTimeCostMs": 1.25,
+                "executePostQueryMs": 0.75,
                 "summaryState": "SUCCESS",
                 "textSummary": "2025年末，江苏省A市农商行存款余额42.02亿元。",
                 "finalAnswerTrace": {"status": "SUCCEEDED", "attempts": 1, "errors": []},
@@ -95,6 +106,11 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["errorCategory"], None)
         self.assertEqual(report["runtimeDiagnostics"]["parseSuccessRate"], 1.0)
         self.assertEqual(report["runtimeDiagnostics"]["executionSuccessRate"], 1.0)
+        self.assertEqual(report["items"][0]["queryTimeCostMs"], 1.25)
+        self.assertEqual(report["items"][0]["executePostQueryMs"], 0.75)
+        self.assertEqual(
+            report["runtimeDiagnostics"]["timingMs"]["averageQueryTimeCostMs"], 1.25
+        )
         for legacy_key in ("answerExact", "answerScore", "goldGrade", "match", "tableEX", "tableExact"):
             self.assertNotIn(legacy_key, report["items"][0])
 

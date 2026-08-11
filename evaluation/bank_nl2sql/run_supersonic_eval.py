@@ -327,6 +327,8 @@ def _evaluate_record(
         "execute": False,
         "parseMs": None,
         "executeMs": None,
+        "queryTimeCostMs": None,
+        "executePostQueryMs": None,
         "summaryMs": None,
         "endToEndMs": None,
         "summaryState": None,
@@ -400,6 +402,17 @@ def _evaluate_record(
             post_json(f"{query_api_prefix}/execute", execute_payload)
         )
         item["executeMs"] = round((time.perf_counter() - started) * 1000, 3)
+        query_time_cost = execute_response.get("queryTimeCost")
+        if (
+            isinstance(query_time_cost, (int, float))
+            and not isinstance(query_time_cost, bool)
+            and math.isfinite(float(query_time_cost))
+            and query_time_cost >= 0
+        ):
+            item["queryTimeCostMs"] = round(float(query_time_cost), 3)
+            item["executePostQueryMs"] = round(
+                max(0.0, item["executeMs"] - item["queryTimeCostMs"]), 3
+            )
         backend_error = execute_response.get("errorMsg")
         if isinstance(backend_error, str) and backend_error.strip():
             item["backendError"] = backend_error.strip()
@@ -464,6 +477,14 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     )
     parse_latencies = [item["parseMs"] for item in items if item["parseMs"] is not None]
     execute_latencies = [item["executeMs"] for item in items if item["executeMs"] is not None]
+    query_time_cost_latencies = [
+        item["queryTimeCostMs"] for item in items if item.get("queryTimeCostMs") is not None
+    ]
+    execute_post_query_latencies = [
+        item["executePostQueryMs"]
+        for item in items
+        if item.get("executePostQueryMs") is not None
+    ]
     summary_latencies = [item["summaryMs"] for item in items if item["summaryMs"] is not None]
     end_to_end_latencies = [
         item["endToEndMs"] for item in items if item.get("endToEndMs") is not None
@@ -493,6 +514,16 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
         "timingMs": {
             "averageParseMs": round(sum(parse_latencies) / len(parse_latencies), 3) if parse_latencies else None,
             "averageExecuteMs": round(sum(execute_latencies) / len(execute_latencies), 3) if execute_latencies else None,
+            "averageQueryTimeCostMs": round(
+                sum(query_time_cost_latencies) / len(query_time_cost_latencies), 3
+            )
+            if query_time_cost_latencies
+            else None,
+            "averageExecutePostQueryMs": round(
+                sum(execute_post_query_latencies) / len(execute_post_query_latencies), 3
+            )
+            if execute_post_query_latencies
+            else None,
             "averageSummaryMs": round(sum(summary_latencies) / len(summary_latencies), 3)
             if summary_latencies
             else None,
@@ -500,6 +531,8 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
         "timingDistributionsMs": {
             "parse": _latency_distribution(parse_latencies),
             "execute": _latency_distribution(execute_latencies),
+            "queryTimeCost": _latency_distribution(query_time_cost_latencies),
+            "executePostQuery": _latency_distribution(execute_post_query_latencies),
             "summary": _latency_distribution(summary_latencies),
             "endToEnd": _latency_distribution(end_to_end_latencies),
             "successfulEndToEnd": _latency_distribution(

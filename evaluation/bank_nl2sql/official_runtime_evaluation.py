@@ -50,6 +50,8 @@ _RUNTIME_ITEM_KEYS = (
     "execute",
     "parseMs",
     "executeMs",
+    "queryTimeCostMs",
+    "executePostQueryMs",
     "summaryMs",
     "endToEndMs",
     "summaryState",

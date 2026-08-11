@@ -102,6 +102,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "code": 200,
                     "data": {
                         "queryState": "SUCCESS",
+                        "queryTimeCost": 17,
                         "querySql": "SELECT metric_value FROM bank_metric_daily",
                         "queryColumns": [{"name": "metric_value", "bizName": "metric_value"}],
                         "queryResults": [{"metric_value": 42.02}],
@@ -189,6 +190,10 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(report["policy"], {"transportOnly": True, "score": "NONE"})
         self.assertEqual(report["items"][0]["s2sql"], "SELECT metric_value FROM semantic_dataset")
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
+        self.assertEqual(report["items"][0]["queryTimeCostMs"], 17.0)
+        self.assertGreaterEqual(report["items"][0]["executePostQueryMs"], 0.0)
+        self.assertEqual(report["timingMs"]["averageQueryTimeCostMs"], 17.0)
+        self.assertEqual(report["timingDistributionsMs"]["queryTimeCost"]["count"], 1)
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
         self.assertEqual(
