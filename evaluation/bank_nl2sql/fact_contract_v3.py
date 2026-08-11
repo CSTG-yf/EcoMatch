@@ -629,15 +629,37 @@ def _text_has_only_allowed_facts(
     contract: RecordFactContract,
     *,
     text_values: list[float],
+    additional_values: Iterable[float] = (),
 ) -> bool:
     allowed_facts = list(contract.facts)
+    allowed_values = list(additional_values)
     return all(
         any(
             _close(fact.value, value, kind=fact.kind, tolerance=DEFAULT_ABS_TOL)
             for fact in allowed_facts
+        ) or any(
+            _close(allowed_value, value, kind="RANK", tolerance=DEFAULT_ABS_TOL)
+            for allowed_value in allowed_values
         )
         for value in text_values
     )
+
+
+def _result_rank_values(
+    columns: list[str] | None,
+    rows: list[list[Any]] | None,
+) -> list[float]:
+    if not isinstance(columns, list) or "rank_position" not in columns:
+        return []
+    index = columns.index("rank_position")
+    values: list[float] = []
+    for row in rows or []:
+        if not isinstance(row, (list, tuple)) or index >= len(row):
+            continue
+        value = row[index]
+        if _is_numeric_cell(value):
+            values.append(float(value))
+    return values
 
 
 def _build_entity_alias_catalog(
@@ -757,7 +779,17 @@ def _organization_names(
     for alias, _ in catalog:
         if "农商行" in alias:
             normalized = normalized.replace(alias, " " * len(alias))
-    return {match.group(0).casefold() for match in _ORGANIZATION_NAME.finditer(normalized)}
+    names: set[str] = set()
+    for match in _ORGANIZATION_NAME.finditer(normalized):
+        value = match.group(0)
+        # The broad prefix is intentionally permissive for province names, but
+        # answer prose can place Chinese connective words immediately before
+        # “江苏省X市农商行”. Keep the province suffix and bank name only.
+        province_end = value.rfind("省")
+        if province_end >= 2:
+            value = value[province_end - 2 :]
+        names.add(value.casefold())
+    return names
 
 
 def _literal_codes(text: str, pattern: re.Pattern[str]) -> set[str]:
@@ -875,6 +907,10 @@ def score_fact_contract_report(
             final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
                 contract,
                 text_values=text_values,
+                additional_values=_result_rank_values(
+                    [str(column) for column in columns] if isinstance(columns, list) else None,
+                    rows if isinstance(rows, list) else None,
+                ),
             )
             predicted_semantics = set(_semantic_facts(text_summary or ""))
             semantic_ok = set(contract.semanticFacts) == predicted_semantics

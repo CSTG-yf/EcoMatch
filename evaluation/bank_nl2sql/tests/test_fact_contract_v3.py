@@ -781,6 +781,44 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["finalFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
+    def test_ranking_prose_does_not_prefix_organization_names(self) -> None:
+        record = _record(
+            "ORG-RANKING-PREFIX-1",
+            question="各项存款余额排名前三和后三分别是哪几家？",
+            answer_text=(
+                "前3名：江苏省C市农商行(116.12亿元)、江苏省G市农商行(110.5亿元)。"
+                "后3名：江苏省H市农商行(38.5亿元)。"
+            ),
+            columns=["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+            rows=[
+                ["ORG003", "江苏省C市农商行", "ZB001", 116.12, 1],
+                ["ORG007", "江苏省G市农商行", "ZB001", 110.5, 2],
+                ["ORG008", "江苏省H市农商行", "ZB001", 38.5, 13],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "ORG-RANKING-PREFIX-1",
+                    "resultColumns": ["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+                    "resultRows": [
+                        ["ORG003", "江苏省C市农商行", "ZB001", 116.12, 1],
+                        ["ORG007", "江苏省G市农商行", "ZB001", 110.5, 2],
+                        ["ORG008", "江苏省H市农商行", "ZB001", 38.5, 13],
+                    ],
+                    "textSummary": (
+                        "排名前三的分别是江苏省C市农商行（116.12亿元）、江苏省G市农商行（110.50亿元）；"
+                        "排名后三（第13名）的分别是江苏省H市农商行（38.50亿元）。"
+                    ),
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record])
+
+        self.assertTrue(scored["items"][0]["finalFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_approved_sum_projection_can_ground_final_fact(self) -> None:
         record = _record(
             "SUM-1",
