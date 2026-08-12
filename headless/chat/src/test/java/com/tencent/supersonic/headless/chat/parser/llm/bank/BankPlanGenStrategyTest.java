@@ -105,6 +105,21 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void repeatedClarificationIsRecheckedUntilTheBoundedRequirementAttemptLimit() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(), clarificationJson(),
+                requirementsJson(), validPlanJson());
+
+        LLMReq request = request();
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(List.of("CLARIFICATION_RECHECK", "CLARIFICATION_RECHECK"),
+                request.getBankRequirementsRepairReasons());
+        verify(model, times(4)).generate(anyString());
+    }
+
+    @Test
     void transportFailureDoesNotUseADeterministicFallbackPlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenThrow(new RuntimeException("connection timeout"));

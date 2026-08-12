@@ -68,6 +68,11 @@ public final class BankPlanPromptComposer {
                     并且机构范围可以从题干直接确定（例如“全省”“各家银行”表示 organizationCodes=[]），
                     必须 action=EXECUTE；不要因为“全年”、跨年、相对当前日期、字母城市占位名或“哪家”而 action=CLARIFY。
                     只有指标、机构或时间确实无法从权威目录和题干唯一确定时，才允许 action=CLARIFY。
+                    如果题干显式列出“待评价指标集合”“指标清单”或“包含 A、B、C”等封闭指标集合，
+                    且每一项都能在目录中命中，同时机构和日期已明确，必须把集合中的全部指标写入 metricCodes
+                    并 action=EXECUTE；不要因“主要经营指标”“盈利能力”等宽泛标题再次要求用户拆分。
+                    宽泛标题旁若同时出现了目录未提供的描述性类别（例如未列出具体代码的“收入结构”），
+                    只执行其中明确且可映射的目录指标，不得发明代码，也不得因该描述性类别丢失而 action=CLARIFY。
                     下面两类是可直接执行的通用语义，不需要用户拆分问题：
                     - “期间/全年，<指标> 的单日最高值和单日最低值出现在哪家”表示 intent=AGGREGATION，
                       metricCodes 只填题干明确的指标，organizationCodes=[]，time 填题干期间，
@@ -153,7 +158,13 @@ public final class BankPlanPromptComposer {
                        该计划由编译器按机构逐日汇总后计算全周期单日最大/最小并返回两个机构；output.columns
                        只能声明所选维度和指标，不能填写 aggregate_value、min_value、max_value、rank_position
                        等编译结果列。
-                    7. “从基期到当前期的增幅排名前N”是 CHANGE 变化查询，不是 RANKING。必须使用
+                    7. “全年/期间某机构某指标的日均值是多少？最高日和最低日分别是多少/出现在什么水平”
+                       是完整的日粒度汇总，不是澄清请求。必须使用 intent=AGGREGATION、
+                       dimensions=["bank_organization"]、该指标 aggregation=AVG、目标机构、
+                       time.granularity=DAY、calculation.type=DIRECT、orderBy=[]、limit=null，
+                       output.columns 只写 ["bank_organization","ZB###"]；编译器会返回
+                       aggregate_value、min_value、max_value、observation_count 四类事实。
+                    8. “从基期到当前期的增幅排名前N”是 CHANGE 变化查询，不是 RANKING。必须使用
                        "intent":"CHANGE", "calculation":{"type":"CHANGE","baseline":null},
                        "time.comparison":"PERIOD_OVER_PERIOD"，并在 time 中同时填写当前期和基期日期；
                        dimensions 只能为 [] 或 ["bank_organization"]，不得把 bank_data_date 放入 dimensions。
@@ -161,7 +172,7 @@ public final class BankPlanPromptComposer {
                        current_value、baseline_value、absolute_change、percent_change 事实列；不要把这些结果别名
                        写入 output.columns。题目要求前N时可以保留 requiredLimit 对应的 limit，但不得用 RANKING
                        的 rank/rank_from_bottom 过滤器替代 CHANGE。
-                    8. “排名前三和后三/前N名和后N名”必须同时表达两个切片，而不是返回全量机构：
+                    9. “排名前三和后三/前N名和后N名”必须同时表达两个切片，而不是返回全量机构：
                        使用 filters 中的 {"field":"rank","operator":"LTE","value":"N","values":[]} 和
                        {"field":"rank_from_bottom","operator":"LTE","value":"N","values":[]}，
                        并将 limit 设为 2*N（例如前三和后三为 6）。只问单侧前N或后N时只填写对应一个过滤器，

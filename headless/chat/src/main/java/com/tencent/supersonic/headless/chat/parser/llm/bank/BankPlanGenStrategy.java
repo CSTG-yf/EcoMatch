@@ -186,7 +186,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         String candidate = null;
         BankQueryPlanParseException lastError = null;
         List<String> repairReasons = new ArrayList<>();
-        boolean clarificationRechecked = false;
+        int clarificationRechecks = 0;
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
                     ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText())
@@ -198,8 +198,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 candidate = prefixCache.generate(model, config, user, attempt == 0);
                 BankRequestContract parsed = requestContractParser.parse(candidate, admissionHints);
                 if (parsed.getAction() == BankRequestContract.Action.CLARIFY
-                        && !clarificationRechecked) {
-                    clarificationRechecked = true;
+                        && clarificationRechecks < MAX_REQUIREMENT_ATTEMPTS - 1) {
+                    clarificationRechecks++;
                     lastError = new BankQueryPlanParseException(
                             BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                             CLARIFICATION_RECHECK_MESSAGE);

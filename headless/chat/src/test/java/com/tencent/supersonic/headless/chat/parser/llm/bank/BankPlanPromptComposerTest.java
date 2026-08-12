@@ -117,6 +117,10 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("不要因为出现“排名”就改成 RANKING"));
         assertTrue(sys.contains("封闭清单中的每一项都能映射到权威目录"));
         assertTrue(sys.contains("不得再以“请明确具体指标、机构和时间范围”之类的口径确认替代执行"));
+        assertTrue(sys.contains("待评价指标集合"));
+        assertTrue(sys.contains("只执行其中明确且可映射的目录指标"));
+        assertTrue(sys.contains("日均值是多少？最高日和最低日"));
+        assertTrue(sys.contains("aggregate_value、min_value、max_value、observation_count"));
     }
 
     @Test
