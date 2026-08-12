@@ -75,15 +75,19 @@ public final class BankPlanPromptComposer {
                       将每个季度解析为对应季度末日期，并直接 action=EXECUTE；不得要求用户重新提供起止日期。
                     - “从某个基期到当前期，全省某指标增幅排名前N/后N”已经给出机构范围、指标、两个日期和名次限制。
                       直接 action=EXECUTE，intent=CHANGE，organizationCodes=[]，requiredLimit=N；不得因没有目标机构而澄清。
+                    - 只要 time.comparison 不是 NONE（包括同比、环比、较年初或两个明确时点的变动），
+                      REQUIREMENTS 的 intent 必须为 CHANGE；“评估”“分析”“结构”等业务标题不改变这一执行意图。
                     - “某机构某指标全年/期间日均值，以及最高日和最低日”已经给出单机构、指标和期间。
                       直接 action=EXECUTE，intent=AGGREGATION；不得把“日均值”理解成缺少指标或时间。
-                    - “评估某机构的盈利能力，包含净利润、成本收入比、收入结构和较年初变化”中，
-                      净利润、成本收入比和较年初是明确且可映射的要求；“收入结构”若目录没有具体代码，
-                      只忽略这个无法落到目录的描述性类别，不得因此 action=CLARIFY，也不得发明指标代码。
+                    - “收入结构”是权威目录定义的复合业务语义：必须同时选择中间业务收入（ZB007）和
+                      净利息收入（ZB008）。它不是无代码的描述性类别；用户明确请求收入结构时，不得遗漏
+                      任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
                     如果题干显式列出“待评价指标集合”“指标清单”或“包含 A、B、C”等封闭指标集合，
                     且每一项都能在目录中命中，同时机构和日期已明确，必须把集合中的全部指标写入 metricCodes
                     并 action=EXECUTE；不要因“主要经营指标”“盈利能力”等宽泛标题再次要求用户拆分。
-                    宽泛标题旁若同时出现了目录未提供的描述性类别（例如未列出具体代码的“收入结构”），
+                    “维度与指标映射：维度=A、B；另一维度=C”也是封闭指标集合：metricCodes 只能是映射右侧
+                    所列指标（及其中明确的目录派生指标），即使同一句前面出现“各项指标”也不得扩展到全目录。
+                    宽泛标题旁若同时出现了目录未提供、且无法映射为任何目录指标的描述性类别，
                     只执行其中明确且可映射的目录指标，不得发明代码，也不得因该描述性类别丢失而 action=CLARIFY。
                     下面两类是可直接执行的通用语义，不需要用户拆分问题：
                     - “期间/全年，<指标> 的单日最高值和单日最低值出现在哪家”表示 intent=AGGREGATION，
@@ -211,6 +215,8 @@ public final class BankPlanPromptComposer {
                        不得再以“请明确具体指标、机构和时间范围”之类的口径确认替代执行。
                        “主要经营指标”“相关指标”等泛称在没有封闭清单时不是全量目录；只有此时确实无法从问题确定具体指标集合，
                        才必须 action=CLARIFY，不得用全目录代替理解结果。
+                       如果题干同时给出“维度与指标映射”，映射右侧的指标即为封闭清单；“各项指标”只修饰
+                       该映射中的各项，绝不表示查询 21 个目录指标。
                     3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
                        对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
                        基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
@@ -218,6 +224,11 @@ public final class BankPlanPromptComposer {
                        startDate=endDate=当前点，baselineStartDate=baselineEndDate=较早点。
                        “较年初”必须使用 comparison=START_OF_YEAR：当前期写题目给出的截至日期，
                        baselineStartDate=baselineEndDate=当前期前一年的 12-31；当年 01-01 不是“较年初”基期。
+                       REQUIREMENTS 中 comparison 非 NONE 时 intent 必须为 CHANGE；PLAN 中也必须保留该 intent，
+                       不得因题干含有“评估”“分析”或“结构”等词改成 AGGREGATION、COMPARISON 或 POINT_QUERY。
+                       comparison 只要不是 NONE（YEAR_OVER_YEAR、PERIOD_OVER_PERIOD、START_OF_YEAR 或 MOM_AND_YOY），
+                       calculation.type 必须为 CHANGE；DIRECT 只允许 comparison=NONE。不要把已经声明的
+                       比较基期当作普通当前值查询。
                     4. “全省均值”只能使用目录允许的 benchmark/COMPARE/PROVINCE_AVERAGE 合同，不能写 SQL 或自行估算。
                     5. 收到 <repair> 时，只根据 tool_result、previous_plan、requirements_contract 和目录修正；
                        只改正 error 指出的非法槽位，并保留 previous_plan 中其余已合法、仍满足 requirements_contract
@@ -225,7 +236,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v31-start-of-year-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v33-comparison-calculation-contract";
 
     private BankPlanPromptComposer() {}
 
@@ -314,6 +325,9 @@ public final class BankPlanPromptComposer {
                 通用归一化示例（仅在题干出现对应语义时采用，不要凭空添加指标）：
                 - 从2024年末到2026-03-31表示 baselineStartDate=2024-12-31、baselineEndDate=2024-12-31、startDate=2026-03-31、endDate=2026-03-31。
                 - 全省/各家银行表示查询全部机构，organizationCodes=[]，不要因为没有目标机构而澄清。
+                - 一家唯一目录机构、至少一个目录指标和明确的起止日期已经构成完整请求；季度末
+                  （一/二/三/四季度末）分别是 03-31、06-30、09-30、12-31。不得因为“逐季变化”、
+                  “各季度末数值”或“哪个季度最高”再要求用户补充数据范围或具体指标。
                 - 增幅排名前三表示 intent=CHANGE、comparison=PERIOD_OVER_PERIOD、requiredLimit=3，并包含 CHANGE_RATE 事实类型。
                 - 目录别名：各项存款余额/存款余额 -> ZB001；各项贷款余额/贷款余额 -> ZB002；净利润 -> ZB011。
                 - 某机构全年日均值、最高日、最低日表示该机构和指标的 AGGREGATION 查询，覆盖该年度完整日期范围。

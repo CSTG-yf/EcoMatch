@@ -27,6 +27,9 @@ class BankRequestContractResponseParserTest {
         assertEquals(Set.of("ORG004"), planHints.getRequiredOrganizationCodes());
         assertEquals(LocalDate.of(2025, 7, 31), planHints.getRequiredStartDate());
         assertEquals(LocalDate.of(2025, 7, 31), planHints.getRequiredEndDate());
+        assertEquals(BankQueryPlan.TimeComparison.NONE, planHints.getRequiredTimeComparison());
+        assertEquals(null, planHints.getRequiredBaselineStartDate());
+        assertEquals(null, planHints.getRequiredBaselineEndDate());
     }
 
     @Test
@@ -59,8 +62,9 @@ class BankRequestContractResponseParserTest {
 
     @Test
     void preservesThePublishedMomAndYoyContractWithoutAnExplicitBaselineRange() {
-        String contract = executeContractJson().replace("\"comparison\":\"NONE\"",
-                "\"comparison\":\"MOM_AND_YOY\"");
+        String contract = executeContractJson().replace("\"intent\":\"COMPARISON\"",
+                "\"intent\":\"CHANGE\"").replace("\"comparison\":\"NONE\"",
+                        "\"comparison\":\"MOM_AND_YOY\"");
 
         assertEquals(BankRequestContract.Action.EXECUTE,
                 parser.parse(contract, admissionHints()).getAction());
@@ -82,13 +86,45 @@ class BankRequestContractResponseParserTest {
 
     @Test
     void acceptsPriorYearEndAsTheStartOfYearBaseline() {
-        String contract = executeContractJson().replace(
+        String contract = executeContractJson().replace("\"intent\":\"COMPARISON\"",
+                "\"intent\":\"CHANGE\"").replace(
                 "\"comparison\":\"NONE\",\"baselineStartDate\":null,\"baselineEndDate\":null",
                 "\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\","
                         + "\"baselineEndDate\":\"2024-12-31\"");
 
         assertEquals(BankRequestContract.Action.EXECUTE,
                 parser.parse(contract, admissionHints()).getAction());
+    }
+
+    @Test
+    void carriesTheModelOwnedComparisonAndBaselineIntoPlanHints() {
+        String contractJson = executeContractJson().replace("\"intent\":\"COMPARISON\"",
+                "\"intent\":\"CHANGE\"").replace(
+                "\"comparison\":\"NONE\",\"baselineStartDate\":null,\"baselineEndDate\":null",
+                "\"comparison\":\"START_OF_YEAR\",\"baselineStartDate\":\"2024-12-31\","
+                        + "\"baselineEndDate\":\"2024-12-31\"");
+
+        SemanticIntentHints planHints = parser.parse(contractJson, admissionHints())
+                .toPlanHints(admissionHints());
+
+        assertEquals(BankQueryPlan.TimeComparison.START_OF_YEAR,
+                planHints.getRequiredTimeComparison());
+        assertEquals(LocalDate.of(2024, 12, 31), planHints.getRequiredBaselineStartDate());
+        assertEquals(LocalDate.of(2024, 12, 31), planHints.getRequiredBaselineEndDate());
+    }
+
+    @Test
+    void rejectsAComparisonWhenTheModelKeepsANonChangeIntent() {
+        String contract = executeContractJson().replace(
+                "\"comparison\":\"NONE\",\"baselineStartDate\":null,\"baselineEndDate\":null",
+                "\"comparison\":\"PERIOD_OVER_PERIOD\",\"baselineStartDate\":\"2024-12-31\","
+                        + "\"baselineEndDate\":\"2024-12-31\"");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(contract, admissionHints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.VALIDATION_FAILED, exception.getReason());
+        assertTrue(exception.getMessage().contains("intent=CHANGE"));
     }
 
     @Test

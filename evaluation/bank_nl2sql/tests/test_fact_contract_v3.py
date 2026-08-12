@@ -63,7 +63,7 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(facts[150.0].support, "QUESTION_CONTEXT")
         self.assertEqual(contract.status, "READY")
 
-    def test_sum_fact_is_supported_by_deterministic_projection(self) -> None:
+    def test_sum_fact_without_explicit_result_column_is_not_auto_derived(self) -> None:
         record = _record(
             "TRAIN-M-58",
             question="净利息收入和中间业务收入合计多少？",
@@ -76,8 +76,8 @@ class FactContractV3Test(unittest.TestCase):
 
         total = next(fact for fact in contract.facts if fact.value == 463.61)
         self.assertTrue(total.required)
-        self.assertEqual(total.support, "DERIVED_RESULT")
-        self.assertEqual(total.derivation, "SUM")
+        self.assertEqual(total.support, "MISSING")
+        self.assertIsNone(total.derivation)
         self.assertEqual(contract.status, "READY")
 
     def test_missing_legacy_table_support_is_scorable_from_answer_fact(self) -> None:
@@ -128,7 +128,7 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(contract.status, "READY")
         self.assertIn("SEMANTIC_BINDING_DIAGNOSTIC", contract.warnings)
 
-    def test_equality_gap_can_be_derived_from_two_parts_and_total(self) -> None:
+    def test_equality_gap_without_explicit_result_column_is_not_auto_derived(self) -> None:
         record = _record(
             "TRAIN-S-22",
             question="对公存款加个人存款是不是等于各项存款？差额多少？",
@@ -140,8 +140,8 @@ class FactContractV3Test(unittest.TestCase):
         contract = build_fact_contract(record)
 
         zero = next(fact for fact in contract.facts if fact.value == 0.0)
-        self.assertEqual(zero.support, "DERIVED_RESULT")
-        self.assertEqual(zero.derivation, "SUM_DIFFERENCE")
+        self.assertEqual(zero.support, "MISSING")
+        self.assertIsNone(zero.derivation)
         self.assertEqual(contract.status, "READY")
 
     def test_condition_count_is_derived_from_meets_condition_column(self) -> None:
@@ -174,6 +174,34 @@ class FactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
+    def test_incidental_binary_flag_does_not_satisfy_an_unasked_count(self) -> None:
+        record = _record(
+            "INCIDENTAL-BINARY-FLAG-1",
+            question="请列出满足条件的机构。",
+            answer_text="共有2家机构满足条件。",
+            columns=["org_code", "meets_condition"],
+            rows=[["ORG001", 1], ["ORG002", 1], ["ORG003", 0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "INCIDENTAL-BINARY-FLAG-1",
+                    "resultColumns": ["org_code", "meets_condition"],
+                    "resultRows": [["ORG001", 1], ["ORG002", 1], ["ORG003", 0]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        contract = build_fact_contract(record)
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        count_fact = next(fact for fact in contract.facts if fact.value == 2.0)
+        self.assertEqual(count_fact.support, "MISSING")
+        self.assertIsNone(count_fact.derivation)
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
     def test_result_only_score_does_not_gate_on_final_answer_text(self) -> None:
         record = _record(
             "RESULT-ONLY-1",
@@ -203,6 +231,86 @@ class FactContractV3Test(unittest.TestCase):
         self.assertNotIn("finalFactsExact", scored["items"][0])
         self.assertNotIn("finalFactAccuracy", scored["metrics"])
         self.assertNotIn("finalFactsExactHits", scored["metrics"])
+
+    def test_result_only_rejects_cross_metric_arithmetic_coincidence(self) -> None:
+        record = _record(
+            "CROSS-METRIC-COINCIDENCE-1",
+            question="请评估净利润较年初变化。",
+            answer_text="净利润较年初增长21.25万元。",
+            columns=[
+                "org_code",
+                "metric_code",
+                "current_value",
+                "baseline_value",
+                "absolute_change",
+            ],
+            rows=[["ORG011", "ZB011", 122.43, 105.86, 16.57]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "CROSS-METRIC-COINCIDENCE-1",
+                    "resultColumns": [
+                        "org_code",
+                        "metric_code",
+                        "current_value",
+                        "baseline_value",
+                        "absolute_change",
+                    ],
+                    "resultRows": [
+                        ["ORG011", "ZB007", 172.05, 184.48, -12.43],
+                        ["ORG011", "ZB008", 51.72, 8.71, 43.01],
+                        ["ORG011", "ZB011", 122.43, 105.86, 16.57],
+                        ["ORG011", "ZB012", 34.86, 34.77, 0.09],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_result_only_rejects_unbound_runtime_number_for_missing_gold_fact(self) -> None:
+        record = _record(
+            "UNBOUND-RUNTIME-NUMBER-1",
+            question="请评估净利润较年初变化。",
+            answer_text="净利润较年初增长21.25万元。",
+            columns=[
+                "org_code",
+                "metric_code",
+                "current_value",
+                "baseline_value",
+                "absolute_change",
+            ],
+            rows=[["ORG011", "ZB011", 122.43, 105.86, 16.57]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "UNBOUND-RUNTIME-NUMBER-1",
+                    "resultColumns": [
+                        "org_code",
+                        "metric_code",
+                        "current_value",
+                        "baseline_value",
+                        "absolute_change",
+                    ],
+                    "resultRows": [
+                        ["ORG011", "ZB011", 122.43, 105.86, 16.57],
+                        ["ORG011", "ZB007", 21.25, 0.0, 21.25],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_report_keeps_every_record_in_denominator(self) -> None:
         ready = _record(
@@ -665,7 +773,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["finalFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
-    def test_captured_result_can_supply_approved_derivation_missing_from_legacy_table(self) -> None:
+    def test_captured_result_cannot_supply_untyped_derivation_missing_from_legacy_table(self) -> None:
         record = _record(
             "DERIVE-1",
             question="两项合计多少？",
@@ -687,8 +795,8 @@ class ScoreFactContractV3Test(unittest.TestCase):
         scored = score_fact_contract_report(report, [record])
 
         self.assertEqual(build_fact_contract(record).facts[0].support, "MISSING")
-        self.assertTrue(scored["items"][0]["resultFactsExact"])
-        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
         record = _record(
@@ -755,7 +863,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertEqual(scored["metrics"]["caseAccuracy"], 0.5)
         review_item = next(item for item in scored["items"] if item["id"] == "REVIEW-1")
         self.assertFalse(review_item["casePass"])
-        self.assertTrue(review_item["resultExact"])
+        self.assertFalse(review_item["resultExact"])
         self.assertEqual(review_item["reason"], "contract_review_required")
 
     def test_correct_summary_cannot_hide_wrong_result_table(self) -> None:
@@ -849,7 +957,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["finalFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
-    def test_approved_sum_projection_can_ground_final_fact(self) -> None:
+    def test_sum_projection_without_typed_total_cannot_ground_final_fact(self) -> None:
         record = _record(
             "SUM-1",
             question="两项收入合计多少？",
@@ -870,9 +978,9 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         scored = score_fact_contract_report(report, [record])
 
-        self.assertTrue(scored["items"][0]["resultExact"])
+        self.assertFalse(scored["items"][0]["resultExact"])
         self.assertTrue(scored["items"][0]["finalFactsExact"])
-        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_missing_captured_rows_fails_closed(self) -> None:
         record = _record(

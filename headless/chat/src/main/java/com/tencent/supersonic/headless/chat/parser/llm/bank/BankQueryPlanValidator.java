@@ -270,6 +270,20 @@ public class BankQueryPlanValidator {
             errors.add(
                     error("TIME_RANGE_MISMATCH", "plan must preserve the recognized time range"));
         }
+        if (hints.getRequiredTimeComparison() != null
+                && time.getComparison() != hints.getRequiredTimeComparison()) {
+            errors.add(error("TIME_COMPARISON_MISMATCH",
+                    "plan must preserve the model requirements time comparison"));
+        }
+        if ((hints.getRequiredBaselineStartDate() != null
+                && !Objects.equals(hints.getRequiredBaselineStartDate(),
+                        time.getBaselineStartDate()))
+                || (hints.getRequiredBaselineEndDate() != null
+                        && !Objects.equals(hints.getRequiredBaselineEndDate(),
+                                time.getBaselineEndDate()))) {
+            errors.add(error("COMPARISON_BASELINE_MISMATCH",
+                    "plan must preserve the model requirements baseline range"));
+        }
         if (time.getComparison() != null
                 && time.getComparison() != BankQueryPlan.TimeComparison.NONE
                 && time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY
@@ -400,6 +414,18 @@ public class BankQueryPlanValidator {
         if (calculation == null || calculation.getType() == null) {
             errors.add(error("CALCULATION_REQUIRED", "calculation type is required"));
             return;
+        }
+        BankQueryPlan.TimeComparison comparison = plan.getTime() == null ? null
+                : plan.getTime().getComparison();
+        if (comparison != null && comparison != BankQueryPlan.TimeComparison.NONE
+                && calculation.getType() != BankQueryPlan.CalculationType.CHANGE) {
+            errors.add(error("COMPARISON_CALCULATION_REQUIRED",
+                    "a non-NONE time comparison requires calculation.type=CHANGE"));
+        }
+        if (calculation.getType() == BankQueryPlan.CalculationType.CHANGE
+                && comparison == BankQueryPlan.TimeComparison.NONE) {
+            errors.add(error("CHANGE_COMPARISON_REQUIRED",
+                    "calculation.type=CHANGE requires an explicit non-NONE time comparison"));
         }
         BankQueryPlan.CalculationType expected = switch (hints.getExpectedIntent()) {
             case CHANGE -> BankQueryPlan.CalculationType.CHANGE;

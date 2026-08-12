@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.chat.query.llm.s2sql;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.chat.intent.BankIntentType;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankQueryPlan;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankSemanticRegistry;
 import lombok.Builder;
 import lombok.Value;
@@ -31,6 +32,9 @@ public class SemanticIntentHints {
     List<DerivedMetricSpec> requiredDerivedMetrics;
     LocalDate requiredStartDate;
     LocalDate requiredEndDate;
+    BankQueryPlan.TimeComparison requiredTimeComparison;
+    LocalDate requiredBaselineStartDate;
+    LocalDate requiredBaselineEndDate;
     List<RequiredFilter> requiredFilters;
     Integer requiredLimit;
     int maxLimit;
@@ -40,6 +44,8 @@ public class SemanticIntentHints {
             Set<String> allowedDimensions, Set<String> requiredMetrics,
             Set<String> requiredOrganizationCodes, List<DerivedMetricSpec> requiredDerivedMetrics,
             LocalDate requiredStartDate, LocalDate requiredEndDate,
+            BankQueryPlan.TimeComparison requiredTimeComparison,
+            LocalDate requiredBaselineStartDate, LocalDate requiredBaselineEndDate,
             List<RequiredFilter> requiredFilters, Integer requiredLimit, int maxLimit) {
         this.expectedIntent = expectedIntent;
         this.allowedMetrics = immutableSet(allowedMetrics);
@@ -50,6 +56,9 @@ public class SemanticIntentHints {
                 : List.copyOf(requiredDerivedMetrics);
         this.requiredStartDate = requiredStartDate;
         this.requiredEndDate = requiredEndDate;
+        this.requiredTimeComparison = requiredTimeComparison;
+        this.requiredBaselineStartDate = requiredBaselineStartDate;
+        this.requiredBaselineEndDate = requiredBaselineEndDate;
         this.requiredFilters =
                 requiredFilters == null ? Collections.emptyList() : List.copyOf(requiredFilters);
         this.requiredLimit = requiredLimit;

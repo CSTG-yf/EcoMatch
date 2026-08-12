@@ -175,6 +175,44 @@ class BankQueryPlanValidatorTest {
         assertTrue(validator.validate(plan, provinceWideChangeTopNRequirements()).isValid());
     }
 
+    @Test
+    void rejectsDirectCalculationWhenPlanDeclaresATimeComparison() {
+        BankQueryPlan plan = provinceWideChangeTopNPlan();
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
+        plan.getTime().setBaselineStartDate(LocalDate.of(2025, 12, 31));
+        plan.getTime().setBaselineEndDate(LocalDate.of(2025, 12, 31));
+        plan.getCalculation().setType(BankQueryPlan.CalculationType.DIRECT);
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                provinceWideChangeTopNRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("COMPARISON_CALCULATION_REQUIRED"));
+    }
+
+    @Test
+    void rejectsAPlanThatChangesTheModelOwnedComparisonContract() {
+        BankQueryPlan plan = provinceWideChangeTopNPlan();
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
+        plan.getTime().setBaselineStartDate(LocalDate.of(2025, 12, 31));
+        plan.getTime().setBaselineEndDate(LocalDate.of(2025, 12, 31));
+        SemanticIntentHints requirements = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.CHANGE).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredTimeComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                .requiredBaselineStartDate(LocalDate.of(2024, 12, 31))
+                .requiredBaselineEndDate(LocalDate.of(2024, 12, 31)).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, requirements);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("TIME_COMPARISON_MISMATCH"));
+        assertTrue(result.codes().contains("COMPARISON_BASELINE_MISMATCH"));
+    }
+
     private SemanticIntentHints requirements() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.COMPARISON)
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))

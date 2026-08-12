@@ -89,6 +89,13 @@ public class LLMSqlParser implements SemanticParser {
     static List<String> compilationCorrectionHints(BankPlanCompilationException.Reason reason,
             String previousPlanJson) {
         if (reason == BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION
+                && isDirectTimeComparisonPlan(previousPlanJson)) {
+            return List.of("当前计划已声明 time.comparison 非 NONE，却填写了 "
+                    + "calculation.type=DIRECT：只将 calculation.type 改为 CHANGE；"
+                    + "保留已合法的 intent、指标、机构、日期、基期、dimensions、filters、"
+                    + "output 和 limit 后，重新输出完整 BankQueryPlan。");
+        }
+        if (reason == BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION
                 && isRankingProvinceAveragePlan(previousPlanJson)) {
             return List.of("当前计划是“全省排名”而不是“全省均值”比较：删除 "
                     + "benchmark/COMPARE/PROVINCE_AVERAGE，令 filters=[]；保留 intent=RANKING "
@@ -98,6 +105,22 @@ public class LLMSqlParser implements SemanticParser {
         return List.of("编译器拒绝当前计划组合（" + code
                 + "）。请根据上一份完整计划重新检查 intent、calculation、filters、dimensions、"
                 + "output 的组合后再输出完整 BankQueryPlan。");
+    }
+
+    private static boolean isDirectTimeComparisonPlan(String previousPlanJson) {
+        if (previousPlanJson == null || previousPlanJson.isBlank()) {
+            return false;
+        }
+        try {
+            BankQueryPlan plan = JsonUtil.toObject(previousPlanJson, BankQueryPlan.class);
+            return plan != null && plan.getTime() != null && plan.getCalculation() != null
+                    && plan.getTime().getComparison() != null
+                    && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE
+                    && plan.getCalculation().getType()
+                            == BankQueryPlan.CalculationType.DIRECT;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static boolean isRankingProvinceAveragePlan(String previousPlanJson) {

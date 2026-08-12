@@ -91,6 +91,7 @@ public class BankRequestContractResponseParser {
         validateExactCodes("organizationCodes", contract.getOrganizationCodes(),
                 BankSemanticRegistry.organizationCodes(), Set.of(), false, errors);
         validateTime(contract.getTime(), errors);
+        validateComparisonIntent(contract, errors);
         validateFilters(contract.getFilters(), errors);
         validateAnswerFacts(contract.getAnswerFactTypes(), errors);
         if (contract.getRequiredLimit() != null && (contract.getRequiredLimit() < 1
@@ -155,6 +156,15 @@ public class BankRequestContractResponseParser {
                         + "baselineStartDate and baselineEndDate must both be the prior "
                         + "year's 12-31, not current-year 01-01");
             }
+        }
+    }
+
+    private void validateComparisonIntent(BankRequestContract contract, List<String> errors) {
+        BankQueryPlan.TimeRange time = contract.getTime();
+        if (time != null && time.getComparison() != null
+                && time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                && contract.getIntent() != BankIntentType.CHANGE) {
+            errors.add("a non-NONE time comparison requires intent=CHANGE");
         }
     }
 

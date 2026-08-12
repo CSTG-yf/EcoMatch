@@ -80,6 +80,8 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("baselineEndDate 必须早于 startDate"));
         assertTrue(sys.contains("“较年初”必须使用 comparison=START_OF_YEAR"));
         assertTrue(sys.contains("当前期前一年的 12-31"));
+        assertTrue(sys.contains("comparison 只要不是 NONE"));
+        assertTrue(sys.contains("calculation.type 必须为 CHANGE"));
         assertTrue(sys.contains("CHANGE 的结果排序由编译器负责"));
         assertTrue(sys.contains("orderBy 必须为 []"));
         assertTrue(sys.contains("dimensions 必须为 [\"bank_organization\"]"));
@@ -132,7 +134,12 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("aggregate_value、min_value、max_value、observation_count"));
         assertTrue(sys.contains("逐季变化/各季度末数值"));
         assertTrue(sys.contains("不得因没有目标机构而澄清"));
-        assertTrue(sys.contains("收入结构”若目录没有具体代码"));
+        assertTrue(sys.contains("REQUIREMENTS 的 intent 必须为 CHANGE"));
+        assertTrue(sys.contains("“收入结构”是权威目录定义的复合业务语义"));
+        assertTrue(sys.contains("中间业务收入（ZB007）"));
+        assertTrue(sys.contains("净利息收入（ZB008）"));
+        assertTrue(sys.contains("“维度与指标映射：维度=A、B；另一维度=C”也是封闭指标集合"));
+        assertTrue(sys.contains("不得扩展到全目录"));
     }
 
     @Test
@@ -155,5 +162,7 @@ class BankPlanPromptComposerTest {
         assertTrue(content.contains("ZB002"));
         assertTrue(content.contains("ZB011"));
         assertTrue(content.contains("只能保留 CLARIFY"));
+        assertTrue(content.contains("季度末"));
+        assertTrue(content.contains("哪个季度最高"));
     }
 }

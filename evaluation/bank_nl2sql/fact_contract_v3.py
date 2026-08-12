@@ -12,7 +12,6 @@ must not be silently promoted into the official evaluator.
 
 from __future__ import annotations
 
-import itertools
 import math
 import numbers
 import re
@@ -163,31 +162,6 @@ def _question_values(question: str) -> list[float]:
     return [slot.value for slot in _non_date_slots(question)]
 
 
-def _derive(value: float, candidates: list[float], *, kind: str, tolerance: float) -> str | None:
-    for left, right in itertools.combinations(candidates, 2):
-        operations = (
-            ("SUM", left + right),
-            ("DIFFERENCE", left - right),
-            ("DIFFERENCE", right - left),
-        )
-        if not math.isclose(right, 0.0, abs_tol=1e-12):
-            operations += (("RATIO_PERCENT", left * 100.0 / right),)
-        if not math.isclose(left, 0.0, abs_tol=1e-12):
-            operations += (("RATIO_PERCENT", right * 100.0 / left),)
-        for operation, derived in operations:
-            if _close(value, derived, kind=kind, tolerance=tolerance):
-                return operation
-    for first, second, total in itertools.permutations(candidates, 3):
-        if _close(
-            value,
-            first + second - total,
-            kind=kind,
-            tolerance=tolerance,
-        ):
-            return "SUM_DIFFERENCE"
-    return None
-
-
 def _semantic_facts(answer_text: str) -> list[str]:
     facts: list[str] = []
     checks = (
@@ -246,7 +220,7 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
     )
 
     facts: list[FactDraft] = []
-    seen: set[tuple[float, str]] = set()
+    seen: set[tuple[float, str, str | None]] = set()
     for slot in _non_date_slots(answer_text):
 
         value = float(slot.value)
@@ -263,12 +237,17 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
         if value in province_means and not asks_for_mean:
             required = False
 
-        key = (value, kind)
+        # A binary ``meets_condition`` column proves a count only when the
+        # question explicitly asks for one.  A prose total in an otherwise
+        # list-oriented answer must not invent a count-based scoring path.
+        candidate_derivation = "COUNT_TRUE" if asks_for_count else None
+        key = (value, kind, candidate_derivation)
         if key in seen:
             continue
         seen.add(key)
 
         in_question = any(_close(value, candidate, kind=kind, tolerance=tolerance) for candidate in question_values)
+        derivation = candidate_derivation
         if in_question:
             support = "QUESTION_CONTEXT"
             derivation = None
@@ -277,15 +256,15 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
             support = "DIRECT_RESULT"
             derivation = None
         else:
-            derivation = _derive(value, table_values, kind=kind, tolerance=tolerance)
             if (
-                derivation is None
-                and asks_for_count
+                derivation == "COUNT_TRUE"
                 and condition_true_count is not None
                 and _close(value, condition_true_count, kind=kind, tolerance=tolerance)
             ):
-                derivation = "COUNT_TRUE"
-            support = "DERIVED_RESULT" if derivation else "MISSING"
+                support = "DERIVED_RESULT"
+            else:
+                derivation = None
+                support = "MISSING"
 
         facts.append(
             FactDraft(
@@ -503,6 +482,44 @@ def _standard_provincial_average_projection_binds(
     return not unmatched if require_exact_rows else True
 
 
+def _standard_provincial_average_semantic_values(
+    expected: dict[str, Any],
+    *,
+    columns: list[str],
+    rows: list[list[Any]],
+    require_exact_rows: bool,
+) -> list[float]:
+    """Return only a named comparison gap after the narrow projection is bound.
+
+    The old aggregate snapshot records the target metric value but not the
+    province mean or gap printed in the answer.  The approved runtime projection
+    names its absolute gap explicitly.  Do not expose it unless its organisation
+    and metric identity has first been proven against the legacy rows.
+    """
+
+    expected_columns = expected.get("columns")
+    expected_rows = expected.get("rows")
+    if not isinstance(expected_columns, list) or not isinstance(expected_rows, list):
+        return []
+    if not _standard_provincial_average_projection_binds(
+        expected,
+        expected_names=[str(column) for column in expected_columns],
+        expected_rows=expected_rows,
+        columns=columns,
+        rows=rows,
+        require_exact_rows=require_exact_rows,
+    ):
+        return []
+
+    values: list[float] = []
+    for name in ("absolute_gap",):
+        index = columns.index(name)
+        for row in rows:
+            if isinstance(row, (list, tuple)) and index < len(row) and _is_numeric_cell(row[index]):
+                values.append(float(row[index]))
+    return values
+
+
 def _expected_rows_are_bound(
     expected: dict[str, Any],
     *,
@@ -600,20 +617,36 @@ def _fact_is_grounded_in_result(
     table_values: list[float],
     columns: list[str] | None = None,
     rows: list[list[Any]] | None = None,
+    explicit_semantic_values: Iterable[float] = (),
 ) -> bool:
+    """Accept only evidence already typed by the structured gold contract.
+
+    A captured result table can contain additional metrics or incidental values.
+    It must not turn an answer fact that is absent from ``expected.rows`` into a
+    passing fact merely because the same number appears somewhere else.  The
+    only non-cell derivation retained here is the named ``meets_condition``
+    count, whose column gives the derivation an explicit semantic contract.
+    """
+
     tolerance = DEFAULT_ABS_TOL
-    if any(_close(fact.value, value, kind=fact.kind, tolerance=tolerance) for value in table_values):
-        return True
-    if fact.kind in {"NUMBER", "PERCENT"}:
-        if fact.derivation == "COUNT_TRUE":
-            condition_true_count = _condition_true_count(columns, rows)
-            return condition_true_count is not None and _close(
-                fact.value,
-                condition_true_count,
-                kind=fact.kind,
-                tolerance=DEFAULT_ABS_TOL,
-            )
-        return _derive(fact.value, table_values, kind=fact.kind, tolerance=tolerance) is not None
+    if fact.support == "DIRECT_RESULT":
+        return any(
+            _close(fact.value, value, kind=fact.kind, tolerance=tolerance)
+            for value in table_values
+        )
+    if fact.derivation == "COUNT_TRUE" and fact.support == "DERIVED_RESULT":
+        condition_true_count = _condition_true_count(columns, rows)
+        return condition_true_count is not None and _close(
+            fact.value,
+            condition_true_count,
+            kind=fact.kind,
+            tolerance=DEFAULT_ABS_TOL,
+        )
+    if fact.support == "MISSING":
+        return any(
+            _close(fact.value, value, kind=fact.kind, tolerance=tolerance)
+            for value in explicit_semantic_values
+        )
     return False
 
 
@@ -893,12 +926,20 @@ def score_fact_contract_report(
             )
             required_facts = [fact for fact in contract.facts if fact.required]
             if has_table:
+                require_exact_rows = contract.legacyGoldGrade == "GOLD_OK"
+                explicit_semantic_values = _standard_provincial_average_semantic_values(
+                    expected,
+                    columns=[str(column) for column in columns],
+                    rows=rows,
+                    require_exact_rows=require_exact_rows,
+                )
                 facts_grounded = bool(required_facts) and all(
                     _fact_is_grounded_in_result(
                         fact,
                         table_values=table_values,
                         columns=[str(column) for column in columns],
                         rows=rows,
+                        explicit_semantic_values=explicit_semantic_values,
                     )
                     for fact in required_facts
                 )
@@ -906,7 +947,7 @@ def score_fact_contract_report(
                     expected,
                     columns=[str(column) for column in columns],
                     rows=rows,
-                    require_exact_rows=contract.legacyGoldGrade == "GOLD_OK",
+                    require_exact_rows=require_exact_rows,
                 )
                 result_facts_exact = facts_grounded and row_binding_ok
             if score_final_answer:
@@ -984,8 +1025,8 @@ def score_fact_contract_report(
         "primaryMetric": "caseAccuracy",
         "casePass": "resultExact" if not score_final_answer else "resultExact AND finalFactsExact",
         "resultExact": (
-            "required answer facts grounded in captured SQL result; complete structured "
-            "gold has exact projected rows and incomplete gold preserves available identities"
+            "required answer facts must be directly typed by structured gold, or by an "
+            "identity-bound named projection, and present in captured SQL result"
         ),
         "denominator": "ALL_SELECTED_RECORDS",
         "sqlTextScored": False,
