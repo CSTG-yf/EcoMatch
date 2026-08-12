@@ -292,13 +292,12 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
     typed_facts = expected.get("answerFacts")
     if typed_facts is not None:
         typed_drafts, typed_errors = _typed_answer_facts(typed_facts, expected)
+        legacy_facts = list(facts)
         typed_targets: set[int] = set()
         for typed in typed_drafts:
             target = next(
                 (
-                    index
-                    for index, fact in enumerate(facts)
-                    if index not in typed_targets
+                    index for index, fact in enumerate(legacy_facts)
                     if fact.required
                     and fact.support in {"MISSING", "DIRECT_RESULT"}
                     and fact.kind == typed.kind
@@ -308,6 +307,12 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
             )
             if target is None:
                 typed_errors.append("TYPED_ANSWER_FACT_NOT_BOUND_TO_ANSWER_FACT")
+            elif target in typed_targets:
+                # Legacy extraction intentionally de-duplicates equal numeric
+                # tokens, while typed facts carry distinct metric identities.
+                # Preserve every proven typed fact instead of collapsing tied
+                # ranks or equal values back into a single anonymous number.
+                facts.append(typed)
             else:
                 typed_targets.add(target)
                 facts[target] = typed

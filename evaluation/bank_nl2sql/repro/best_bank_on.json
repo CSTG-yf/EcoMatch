@@ -39,14 +39,14 @@
   },
   "eval": {
     "officialEntry": "evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1",
-    "datasetVersion": "2.0.3",
+    "datasetVersion": "2.0.5",
     "primaryMetric": "caseAccuracy",
     "diagnosticMetrics": ["resultExact", "parseSuccessRate", "executionSuccessRate", "finalAnswerProcessorSuccessRate"],
     "fixedSmokeProfile": "evaluation/bank_nl2sql/official_runtime_evaluation_v3.json"
   },
   "evidencePolicy": {
     "historicalLocalReportsAreNotComparable": true,
-    "requiredForNewClaim": "A fresh official Fact v3 run with bootstrap receipt and v2.0.3 package verification."
+    "requiredForNewClaim": "A fresh official Fact v3 run with bootstrap receipt and v2.0.5 package verification."
   },
   "notRecommended": {
     "s2.parser.bank.plan.deterministic-short-circuit.enable": "true",

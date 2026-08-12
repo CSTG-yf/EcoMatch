@@ -1,0 +1,49 @@
+{
+  "correctionSpecSha256": "581255FBB36E2D4F1756AD27F95D0FBDA03E8656EAFD58E99C9B76B8D5D00A65",
+  "count": 5,
+  "entries": [
+    {
+      "id": "TRAIN-H-08",
+      "newAnswerSha256": "7708E91CF14AB1C7CA1C14FC7048BD539BB5BEED475A8FD8BA6335EA225F3310",
+      "oldAnswerSha256": "5BA2924B86F5AD486A56804F3875B4E0DC7F8502B294612DF5162BE6126DA2E2",
+      "reason": "按题干仅保留9项当前值、全省排名及前三/后四结论，删除题干未要求的年初变化和全省均值。",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-H-09",
+      "newAnswerSha256": "7437ED2A561104ECA8845A16AE8B074423F42A1ECACAAC269AE7DEDDFFD03CDF",
+      "oldAnswerSha256": "FCBA1A48B6771DDA93C8A2885A966D9766A2B47DBF8319C65148306A6CB09ABC",
+      "reason": "按题干仅保留9项当前值、全省排名及前三/后四结论，删除题干未要求的年初变化和全省均值。",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-H-22",
+      "newAnswerSha256": "134F4713F7FD918C3D2A96DBC501EDE0B7379B56FB8DBDE35BEC94A8407F85C0",
+      "oldAnswerSha256": "18B51421D95963AF26B13862B5901AFE351D751FB35914A15FC694516BFD3A9B",
+      "reason": "较年初按当前期前一年12月31日计算，2026-04-30应与2025-12-31比较；删除题干未要求的排名。",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-H-23",
+      "newAnswerSha256": "C1710C325562DAF1698900E035FD37075074BF03DEB0CF613C85FF77B84CEDF9",
+      "oldAnswerSha256": "33148CA57A606BC76FCDBE8AAC41A652D1B62FA84A2D84D4F1E5D4A221DEC635",
+      "reason": "较年初按当前期前一年12月31日计算，2026-04-30应与2025-12-31比较；删除题干未要求的排名。",
+      "split": "train"
+    },
+    {
+      "id": "TRAIN-H-24",
+      "newAnswerSha256": "DFEEC3C42AA3717D5A97ADE164B73B6736B0583C9B1623A0836E7D4ACBB75B12",
+      "oldAnswerSha256": "0DBDB57ADFBEEF53930E280779899E19FD8FC3469737DBE32FBD307809EAFCFE",
+      "reason": "较年初按当前期前一年12月31日计算，2026-04-30应与2025-12-31比较；删除题干未要求的排名。",
+      "split": "train"
+    }
+  ],
+  "generator": {
+    "name": "amend_official_ground_truth",
+    "version": "1.0.0"
+  },
+  "parentDatasetVersion": "2.0.3",
+  "parentOfficialManifestSha256": "3E7E684D43542838EC791EFCB9D029A8CEDADB11110DFCB61286BC9D1E7055E7",
+  "schemaVersion": "1.0",
+  "targetDatasetVersion": "2.0.4"
+}

@@ -259,6 +259,43 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(contract.status, "REVIEW_REQUIRED")
         self.assertIn("ANSWER_FACT_0_INVALID_FORMULA", contract.reasons)
 
+    def test_distinct_typed_facts_can_share_the_same_numeric_rank(self) -> None:
+        record = _record(
+            "TIED-RANKS-TYPED",
+            question="列出两项指标的排名。",
+            answer_text="各项存款余额第11名，各项贷款余额第11名。",
+            columns=["metric_code", "rank_position"],
+            rows=[["ZB001", 11], ["ZB002", 11]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": f"{metric}_rank",
+                "value": 11,
+                "kind": "RANK",
+                "binding": {
+                    "organizationCodes": ["ORG011"],
+                    "metricCodes": [metric],
+                    "dates": ["2025-12-31"],
+                    "comparisonType": "POINT",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [
+                        {"column": "rank_position", "where": {"metric_code": metric}}
+                    ],
+                },
+            }
+            for metric in ("ZB001", "ZB002")
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(
+            [fact.evidence["id"] for fact in contract.facts if fact.kind == "RANK"],
+            ["ZB001_rank", "ZB002_rank"],
+        )
+
     def test_typed_fact_fails_closed_when_declared_value_disagrees_with_formula(self) -> None:
         record = _record(
             "SUM-TYPED-BAD",

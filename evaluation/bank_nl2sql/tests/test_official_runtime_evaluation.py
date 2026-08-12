@@ -226,7 +226,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
             "endpointFingerprint": "a" * 64,
             "protocolProfileSha256": "b" * 64,
             "sourceRevision": "c" * 40,
-            "datasetVersion": "2.0.3",
+            "datasetVersion": "2.0.5",
             "concurrency": 1,
             "maxFailureCount": 5,
         }
@@ -254,7 +254,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
             "endpointFingerprint": "a" * 64,
             "protocolProfileSha256": "b" * 64,
             "sourceRevision": "c" * 40,
-            "datasetVersion": "2.0.3",
+            "datasetVersion": "2.0.5",
             "concurrency": 1,
             "maxFailureCount": 5,
         }
@@ -330,7 +330,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         profile, profile_sha256 = load_official_runtime_profile(ROOT)
         release = verify_official_runtime_release(ROOT, profile=profile, split="train")
 
-        self.assertEqual(profile["datasetVersion"], "2.0.3")
+        self.assertEqual(profile["datasetVersion"], "2.0.5")
         self.assertEqual(len(profile_sha256), 64)
         self.assertEqual(release["recordCount"], 119)
         self.assertIn("train.jsonl", release["checkedAssets"])

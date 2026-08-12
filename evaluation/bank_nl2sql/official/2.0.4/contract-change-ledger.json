@@ -1,0 +1,473 @@
+{
+  "contractErrors": [],
+  "count": 16,
+  "entries": [
+    {
+      "basis": "review 记录 status=CORRECTED 且 fullEvidence=true 且 evidenceValidation.valid=true 且 correctedAnswerText 非空",
+      "category": "DAILY_MEAN",
+      "changeType": "ANSWER_CORRECTION",
+      "difficulty": "普通",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "evidenceValidationValid": true,
+        "fullEvidence": true,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "CORRECTED"
+      },
+      "id": "TRAIN-M-36",
+      "metricCodes": null,
+      "newTextSha256": "8334D3A98A4525ED386E2A6ED8568809D9358834428F427F9FFA14E134C5826E",
+      "oldTextSha256": "DFFCF18600AD28CCF57088C849933633885DCEC4EBAF834F58AD9D1094E8D59E",
+      "split": "train"
+    },
+    {
+      "basis": "review 记录 status=CORRECTED 且 fullEvidence=true 且 evidenceValidation.valid=true 且 correctedAnswerText 非空",
+      "category": "TREND_QUARTER",
+      "changeType": "ANSWER_CORRECTION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "evidenceValidationValid": true,
+        "fullEvidence": true,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "CORRECTED"
+      },
+      "id": "TRAIN-H-03",
+      "metricCodes": null,
+      "newTextSha256": "9E29648D9574FC13CA19E3A556ED83C650F1F9C7B845FB284E9D91E81D1E50BE",
+      "oldTextSha256": "AEF53C72ED8E939E73C85139E767D280C38598F675196C43DCB33A8A0F4BC390",
+      "split": "train"
+    },
+    {
+      "basis": "review 记录 status=CORRECTED 且 fullEvidence=true 且 evidenceValidation.valid=true 且 correctedAnswerText 非空",
+      "category": "DAYS_ABOVE_AVG",
+      "changeType": "ANSWER_CORRECTION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "evidenceValidationValid": true,
+        "fullEvidence": true,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "CORRECTED"
+      },
+      "id": "TRAIN-H-31",
+      "metricCodes": null,
+      "newTextSha256": "851A987A554514940F966A8F5580561795AB412F756D61E7DF614A9D0CD1F8D6",
+      "oldTextSha256": "C86FD21EDE0AAE46C53ADE8CE82ED19F8CA709BB119D2524FD255262EE62D3DF",
+      "split": "train"
+    },
+    {
+      "basis": "review 记录 status=CORRECTED 且 fullEvidence=true 且 evidenceValidation.valid=true 且 correctedAnswerText 非空",
+      "category": "DAYS_ABOVE_AVG",
+      "changeType": "ANSWER_CORRECTION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "evidenceValidationValid": true,
+        "fullEvidence": true,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "CORRECTED"
+      },
+      "id": "TRAIN-H-32",
+      "metricCodes": null,
+      "newTextSha256": "5CFA3A55E46F28E3F2E65060C4D35087ACC85157919FCD147B2393EE78F86058",
+      "oldTextSha256": "23657C4CC39FE57440F0C3EF84FFC738FB87D721CF6B7584AC331DC08E3466CF",
+      "split": "train"
+    },
+    {
+      "basis": "review 记录 status=CORRECTED 且 fullEvidence=true 且 evidenceValidation.valid=true 且 correctedAnswerText 非空",
+      "category": "RANK_TOP_DECLINE",
+      "changeType": "ANSWER_CORRECTION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "evidenceValidationValid": true,
+        "fullEvidence": true,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "CORRECTED"
+      },
+      "id": "TST-H-09",
+      "metricCodes": null,
+      "newTextSha256": "36390D089898D178E3245AA77AA0C492B03AFA9046C65AE8427B87F17E9DC97B",
+      "oldTextSha256": "848D2CF60A8D99D0D395E53D6DF4F4BDE19FE31099EFC6CEBF9086E285D993A7",
+      "split": "test"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-07",
+      "metricCodes": [
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB017",
+        "ZB011",
+        "ZB012",
+        "ZB001",
+        "ZB002"
+      ],
+      "newTextSha256": "E24217531C4F2F1E163E950ABE8246F5A20B27BA699AA174B1E371E11E69B386",
+      "oldTextSha256": "079AD373366BBF18392C87DE5A4D6A617761A0D6D1D78CDC3DA7B0EDABA05205",
+      "split": "train"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-08",
+      "metricCodes": [
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB017",
+        "ZB011",
+        "ZB012",
+        "ZB001",
+        "ZB002"
+      ],
+      "newTextSha256": "C800A5C06F2D4531A56FAC5DB69AC7B3F5C7BAF8244BB7275930EC04607687A0",
+      "oldTextSha256": "77C6E9DF46A083B633345ECF52FCD890D9BD0B592B81BBAD66A640D8848FFF4D",
+      "split": "train"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-09",
+      "metricCodes": [
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB017",
+        "ZB011",
+        "ZB012",
+        "ZB001",
+        "ZB002"
+      ],
+      "newTextSha256": "E7615AFEA3B2EE799778630B0620EBC76CDDBEBC490BDD7C1C08BDF6C6CEC49E",
+      "oldTextSha256": "9404D341149A4395BEA5A4A896150BB36BF16497F422649811991469ACABEC48",
+      "split": "train"
+    },
+    {
+      "basis": "原答案 规模/质量/效益 段明确命名的指标（每维度≥1 且映射唯一；数值不参与提取）",
+      "category": "DIMENSION_3",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": {
+        "盈利能力": [
+          "ZB011"
+        ],
+        "规模": [
+          "ZB001",
+          "ZB002",
+          {
+            "derived": {
+              "denominator": "ZB001",
+              "numerator": "ZB002"
+            },
+            "name": "存贷比"
+          }
+        ],
+        "资产质量": [
+          "ZB013"
+        ]
+      },
+      "evidenceRef": {
+        "category": "DIMENSION_3",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-25",
+      "metricCodes": [
+        "ZB001",
+        "ZB002",
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB011"
+      ],
+      "newTextSha256": "0BA5896963827F79B403485C420387D49A67B6F3F920F4C6C330B931ED3828DC",
+      "oldTextSha256": "B4C36B7C18743241FF84BA29FBAF89379DE82CFE1ACF4760970E5E2614A53838",
+      "split": "train"
+    },
+    {
+      "basis": "原答案 规模/质量/效益 段明确命名的指标（每维度≥1 且映射唯一；数值不参与提取）",
+      "category": "DIMENSION_3",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": {
+        "盈利能力": [
+          "ZB011"
+        ],
+        "规模": [
+          "ZB001",
+          "ZB002",
+          {
+            "derived": {
+              "denominator": "ZB001",
+              "numerator": "ZB002"
+            },
+            "name": "存贷比"
+          }
+        ],
+        "资产质量": [
+          "ZB013"
+        ]
+      },
+      "evidenceRef": {
+        "category": "DIMENSION_3",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-26",
+      "metricCodes": [
+        "ZB001",
+        "ZB002",
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB011"
+      ],
+      "newTextSha256": "8EDCE0797665DF511D6F6C2508A94C3BC657C3FF94A6D769F989E4DAEF321D04",
+      "oldTextSha256": "46FF8264840E7D3B213511934FA9499231654A929D3C2E0A820B84E552B8B70D",
+      "split": "train"
+    },
+    {
+      "basis": "原答案 规模/质量/效益 段明确命名的指标（每维度≥1 且映射唯一；数值不参与提取）",
+      "category": "DIMENSION_3",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": {
+        "盈利能力": [
+          "ZB011"
+        ],
+        "规模": [
+          "ZB001",
+          "ZB002",
+          {
+            "derived": {
+              "denominator": "ZB001",
+              "numerator": "ZB002"
+            },
+            "name": "存贷比"
+          }
+        ],
+        "资产质量": [
+          "ZB013"
+        ]
+      },
+      "evidenceRef": {
+        "category": "DIMENSION_3",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TRAIN-H-27",
+      "metricCodes": [
+        "ZB001",
+        "ZB002",
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB011"
+      ],
+      "newTextSha256": "320CEA5A5CC0A4409EE7FD21B5D7028F07CFEDB75F16986AB0D8DC318D381107",
+      "oldTextSha256": "2CCB607B78B21C4CB767AF1EE74CB0C330D35E3862B27229EB8F3DDC269592A3",
+      "split": "train"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "VAL-H-03",
+      "metricCodes": [
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB011",
+        "ZB012"
+      ],
+      "newTextSha256": "ACBFADF2696B4028FF2D8F0FFEB96FCE3F70ACCA394F7C574BC04B84D995F0C5",
+      "oldTextSha256": "7DEBA72BF0E89B3F45A6D694047005367A50043B17B22D887E8C48AECAF7A6B8",
+      "split": "dev"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "VAL-H-04",
+      "metricCodes": [
+        {
+          "derived": {
+            "denominator": "ZB001",
+            "numerator": "ZB002"
+          },
+          "name": "存贷比"
+        },
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB011",
+        "ZB012"
+      ],
+      "newTextSha256": "08284A4FEE986527C512BC8395697374FC87AD15321394FD440336BFD9CC0B65",
+      "oldTextSha256": "B92ABC0083164B909AEAF11CA3EC221B9FCE3F7A526EDE251B4C3216597C5624",
+      "split": "dev"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TST-H-03",
+      "metricCodes": [
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB011",
+        "ZB012"
+      ],
+      "newTextSha256": "7451FC61D3A1961B481AD11141169C077FD3E1461D3477086E43A0EEBCF6E1DD",
+      "oldTextSha256": "4B86EB629A8FE10932CA26FF33B127D98F4E99B51E26B796D22456A1CBD3BFDB",
+      "split": "test"
+    },
+    {
+      "basis": "原答案明确命名的指标去重集合（数值不参与提取）",
+      "category": "PERFORMANCE",
+      "changeType": "QUESTION_CLARIFICATION",
+      "difficulty": "复杂",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "category": "PERFORMANCE",
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED"
+      },
+      "id": "TST-H-04",
+      "metricCodes": [
+        "ZB013",
+        "ZB015",
+        "ZB016",
+        "ZB011",
+        "ZB012"
+      ],
+      "newTextSha256": "3775C55C130B7CC560FD687CA1D4FF8CB1CBD6F9C513990DAE45BDB11BE3DDE4",
+      "oldTextSha256": "7711815E0FABB0362C2C50044190B5E159EABD4EB22DADC80E59C3069C538824",
+      "split": "test"
+    },
+    {
+      "basis": "用户授权删除：训练集 UNRESOLVED 记录缺少 yoy 基期/当前事实，问题无法复核",
+      "category": "CHANGE_DELTA",
+      "changeType": "QUESTION_REMOVAL",
+      "difficulty": "普通",
+      "dimensionMapping": null,
+      "evidenceRef": {
+        "fullEvidence": false,
+        "reviewFile": ".local-dev\\gt-audit\\codex-hash-baseline\\review.ndjson",
+        "status": "UNRESOLVED",
+        "unresolvedReason": "缺失基期或当前值（yoy）"
+      },
+      "id": "TRAIN-M-13",
+      "metricCodes": null,
+      "newTextSha256": null,
+      "oldTextSha256": "CDB013B7C02A7B332E26D554CC6DEE8BBE353232D0A8EBE11AE877817664F125",
+      "removedAnswerSha256": "3AB0B781CED307A51F1F8C0A9C027601BB8390ADBB16129773289B16ED44ADB2",
+      "split": "train"
+    }
+  ],
+  "generatorName": "clarify_ground_truth_contracts",
+  "generatorVersion": "2.0.0"
+}

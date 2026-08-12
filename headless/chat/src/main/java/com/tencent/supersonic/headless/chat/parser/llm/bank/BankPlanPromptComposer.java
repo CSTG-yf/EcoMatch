@@ -195,6 +195,14 @@ public final class BankPlanPromptComposer {
                        {"field":"rank_from_bottom","operator":"LTE","value":"N","values":[]}，
                        并将 limit 设为 2*N（例如前三和后三为 6）。只问单侧前N或后N时只填写对应一个过滤器，
                        limit 设为 N。排名过滤器只能用于 RANKING，不能用来代替机构或指标过滤。
+                    10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
+                       聚合成一个值再比较。REQUIREMENTS 必须使用 intent=AGGREGATION、单一机构、单一指标、
+                       granularity=DAY、comparison=NONE、answerFactTypes=["COUNT"]，并包含精确的
+                       benchmark/COMPARE/PROVINCE_AVERAGE filter。PLAN 必须保留上述范围，使用
+                       dimensions=["bank_organization"]、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
+                       orderBy=[]、limit=null，output.columns 只写 ["bank_organization","ZB###"]；
+                       编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
+                       不得先对全年求和或平均后只比较一次，也不得用 COMPARISON_VALUE 代替逐日计数。
 
                     ════════════════════════════════
                     严格合同
@@ -236,7 +244,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v33-comparison-calculation-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v34-days-above-province-average";
 
     private BankPlanPromptComposer() {}
 

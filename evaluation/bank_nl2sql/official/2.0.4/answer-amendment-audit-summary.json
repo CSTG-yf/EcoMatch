@@ -1,0 +1,20 @@
+{
+  "answerAmendmentCount": 5,
+  "auditErrors": 0,
+  "candidateWorkbookSha256": "50159F20DE30EF1A4A9CD436AA16965C55725BF226BD0DE4B932D3D94A981EE0",
+  "canonicalReady": true,
+  "datasetVersion": "2.0.4",
+  "factRegionSha256": "4E2F31804B1A8E8EC6B876B8B158D46CF08CC9E1E8EACC50C0346D306AC35123",
+  "onlyDeclaredAnswerCellsChanged": true,
+  "parentDatasetVersion": "2.0.3",
+  "parentWorkbookSha256": "74EE679343FBD02B04740AE8AE2E1AF569D5E59002D8E4EB3F07CAA263323763",
+  "schemaVersion": "1.0",
+  "testSplitChanged": false,
+  "verifiedIds": [
+    "TRAIN-H-08",
+    "TRAIN-H-09",
+    "TRAIN-H-22",
+    "TRAIN-H-23",
+    "TRAIN-H-24"
+  ]
+}

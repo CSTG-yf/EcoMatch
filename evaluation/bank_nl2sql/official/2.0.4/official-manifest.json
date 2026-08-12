@@ -1,0 +1,55 @@
+{
+  "amendmentGenerator": {
+    "name": "amend_official_ground_truth",
+    "version": "1.0.0"
+  },
+  "answerAmendmentCount": 5,
+  "answerAmendmentLedger": "answer-amendment-ledger.json",
+  "artifactSha256": {
+    "answerAmendmentLedger": "67B074D3EE6FF54D1975EFCD5A1FDEC0E83361ED9D030842C4BA19BCB3638D28",
+    "answerFactLedger": "B57C1870552C240A1BA1D8272FD6A568AA139C763EA35FD1B62ACF4276C7B655",
+    "changeLedger": "B8BFBFC792FC7894E427859ECC2B44588B543E8B848311C2B1FCC9A212A1C868",
+    "finalAuditSummary": "8C11DCCC5CBDB76D177F3023674A338669D618BEB7D977EFE1807785355010CF",
+    "groundTruthWorkbook": "50159F20DE30EF1A4A9CD436AA16965C55725BF226BD0DE4B932D3D94A981EE0"
+  },
+  "auditStatus": {
+    "auditErrors": 0,
+    "candidateReady": true,
+    "onlyDeclaredAnswerCellsChanged": true,
+    "testSplitChanged": false
+  },
+  "canonicalReady": true,
+  "changeCounts": {
+    "answerChanges": 5,
+    "contractErrors": 0,
+    "questionClarifications": 10,
+    "questionRemovals": 1
+  },
+  "changeLedger": "contract-change-ledger.json",
+  "datasetVersion": "2.0.4",
+  "factRegionSha256": "4E2F31804B1A8E8EC6B876B8B158D46CF08CC9E1E8EACC50C0346D306AC35123",
+  "finalAuditSummary": "answer-amendment-audit-summary.json",
+  "generator": {
+    "name": "clarify_ground_truth_contracts",
+    "version": "2.0.0"
+  },
+  "groundTruthWorkbook": "bank-nl2sql-ground-truth-v2.0.4.xlsx",
+  "officialCount": 199,
+  "parent": {
+    "datasetVersion": "2.0.3",
+    "finalAuditSummarySha256": "E47AFEF8672A745A6EF1D96DED7879D835CE612306E6730784C1C9EC82860344",
+    "groundTruthWorkbookSha256": "74EE679343FBD02B04740AE8AE2E1AF569D5E59002D8E4EB3F07CAA263323763",
+    "officialManifestSha256": "3E7E684D43542838EC791EFCB9D029A8CEDADB11110DFCB61286BC9D1E7055E7"
+  },
+  "releaseMode": "INCREMENTAL_ANSWER_AMENDMENT",
+  "removedIds": [
+    "TRAIN-M-13"
+  ],
+  "schemaVersion": "2.1",
+  "sourceSha256": "C3B810A4938FEFC77A5C834C4C6857BEC7F67162C4160ABD9F66D9DD6018703C",
+  "sourceSplitCounts": {
+    "dev": 40,
+    "test": 40,
+    "train": 119
+  }
+}

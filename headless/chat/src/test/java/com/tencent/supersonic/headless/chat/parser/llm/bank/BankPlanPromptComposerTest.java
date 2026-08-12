@@ -85,6 +85,10 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("CHANGE 的结果排序由编译器负责"));
         assertTrue(sys.contains("orderBy 必须为 []"));
         assertTrue(sys.contains("dimensions 必须为 [\"bank_organization\"]"));
+        assertTrue(sys.contains("有多少天高于全省均值"));
+        assertTrue(sys.contains("COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"));
+        assertTrue(sys.contains("DAYS_ABOVE_AVERAGE"));
+        assertTrue(sys.contains("不得先对全年求和或平均后只比较一次"));
         assertTrue(sys.contains("只改正 error 指出的非法槽位"));
     }
 
