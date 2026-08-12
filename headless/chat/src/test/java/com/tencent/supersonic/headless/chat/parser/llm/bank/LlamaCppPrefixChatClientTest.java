@@ -23,4 +23,12 @@ class LlamaCppPrefixChatClientTest {
         assertEquals(raw, LlamaCppPrefixChatClient.stripThinking(raw));
         assertEquals("SELECT 2", BankFreeSqlPromptComposer.extractSql(raw));
     }
+
+    @Test
+    void warmupUsesMinimalCompletionWithoutChangingThinkingMode() {
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
+                LlamaCppPrefixChatClient.ChatOptions.warmup(false));
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(true, 1024),
+                LlamaCppPrefixChatClient.ChatOptions.warmup(true));
+    }
 }

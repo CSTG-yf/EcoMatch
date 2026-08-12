@@ -35,6 +35,7 @@ from run_supersonic_eval import (
     _http_post_json,
     _latency_distribution,
     _unwrap_api_value,
+    warm_up_runtime_prefix,
     run_supersonic_evaluation,
 )
 
@@ -104,7 +105,12 @@ def _records_for_mode(
     return split, [by_id[record_id] for record_id in expected_ids]
 
 
-def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
+def _capture_report(
+    items: list[dict[str, Any]],
+    run: dict[str, Any],
+    *,
+    warmup: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     def average(key: str) -> float | None:
         values = [item[key] for item in items if isinstance(item.get(key), (int, float))]
         return round(sum(values) / len(values), 3) if values else None
@@ -115,6 +121,7 @@ def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[st
     )
     return {
         "run": run,
+        "warmup": warmup,
         "items": items,
         "timingMs": {
             "averageParseMs": average("parseMs"),
@@ -402,7 +409,6 @@ def main(argv: list[str] | None = None) -> int:
         resumed_by_id = _load_resumed_items(output_path, expected_run=base_run, records=records) if args.resume else {}
         pending_records = [record for record in records if record["id"] not in resumed_by_id]
         completed_by_id: dict[str, dict[str, Any]] = dict(resumed_by_id)
-        started_at = time.time()
 
         def ordered_items() -> list[dict[str, Any]]:
             return [completed_by_id[str(record["id"])] for record in records if str(record["id"]) in completed_by_id]
@@ -413,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             partial_capture = _capture_report(
                 ordered_items(),
                 _run_metadata(base_run, status="RUNNING", completed_count=len(partial_records), started_at=started_at),
+                warmup=warmup_info,
             )
             partial_report = build_official_runtime_report(partial_capture, partial_records)
             _write_json(output_path, partial_report)
@@ -426,6 +433,18 @@ def main(argv: list[str] | None = None) -> int:
             network_retries=capture["networkRetries"],
             retry_backoff_seconds=float(capture["retryBackoffSeconds"]),
         )
+        # Prefix materialization is deliberately outside the official run clock.  The first
+        # real record must never be charged for loading the fixed bank prompt into the model KV
+        # cache; the separate evidence is retained in the report for auditability.
+        warmup_info = None
+        if pending_records:
+            warmup_info = warm_up_runtime_prefix(
+                post_json=post_json,
+                agent_id=args.agent_id,
+                query_api_prefix=DEFAULT_QUERY_API_PREFIX,
+                manage_api_prefix=DEFAULT_MANAGE_API_PREFIX,
+            )
+        started_at = time.time()
         if pending_records:
             run_supersonic_evaluation(
                 pending_records,
@@ -446,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         final_capture = _capture_report(
             ordered_items(),
             _run_metadata(base_run, status="COMPLETED", completed_count=len(records), started_at=started_at),
+            warmup=warmup_info,
         )
         final_report = build_official_runtime_report(final_capture, records)
         _cleanup_successful_conversations(

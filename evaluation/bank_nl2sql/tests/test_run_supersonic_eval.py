@@ -22,6 +22,7 @@ from run_supersonic_eval import (  # noqa: E402
     _latency_distribution,
     _load_resumable_items,
     run_supersonic_evaluation,
+    warm_up_runtime_prefix,
 )
 
 
@@ -55,6 +56,37 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
 
 
 class RunSuperSonicEvalTest(unittest.TestCase):
+    def test_warmup_uses_disposable_parse_only_chain_and_returns_separate_timing(self) -> None:
+        requests: list[tuple[str, dict]] = []
+
+        def post_json(path: str, payload: dict) -> dict:
+            requests.append((path, payload))
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 900}
+            if path == "/openapi/chat/query/parse":
+                return {"code": 200, "data": {"state": "FAILED", "errorMsg": "placeholder"}}
+            if path == "/openapi/chat/manage/delete?chatId=900":
+                return {"code": 200, "data": True}
+            raise AssertionError(f"Unexpected path: {path}")
+
+        evidence = warm_up_runtime_prefix(post_json=post_json, agent_id=33)
+
+        self.assertEqual(
+            [path.split("?")[0] for path, _ in requests],
+            [
+                "/openapi/chat/manage/save",
+                "/openapi/chat/query/parse",
+                "/openapi/chat/manage/delete",
+            ],
+        )
+        self.assertEqual(requests[1][1]["agentId"], 33)
+        self.assertEqual(requests[1][1]["chatId"], 900)
+        self.assertNotIn("execute", " ".join(path for path, _ in requests))
+        self.assertEqual(evidence["status"], "COMPLETED")
+        self.assertEqual(evidence["parseState"], "FAILED")
+        self.assertTrue(evidence["conversationCleaned"])
+        self.assertGreaterEqual(evidence["durationMs"], 0)
+
     def test_reports_nearest_rank_latency_percentiles(self) -> None:
         self.assertEqual(
             _latency_distribution([1, 2, 3, 4, 100, None]),

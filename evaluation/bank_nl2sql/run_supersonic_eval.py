@@ -31,6 +31,10 @@ from evaluation_policy import EvaluationAccessError, load_evaluation_records, re
 
 DEFAULT_QUERY_API_PREFIX = "/openapi/chat/query"
 DEFAULT_MANAGE_API_PREFIX = "/openapi/chat/manage"
+DEFAULT_WARMUP_QUESTION = (
+    "系统启动预热请求：请仅生成一个最小的银行查询计划占位对象，"
+    "不要执行查询，也不要回答任何业务事实。"
+)
 
 
 class SuperSonicEvaluationError(RuntimeError):
@@ -181,6 +185,9 @@ def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | 
                 "bank.nl2sql.candidateCount",
                 "bank.nl2sql.uniqueCandidateCount",
                 "bank.nl2sql.rejectedCandidateCount",
+                "bank.nl2sql.rejectionReasons",
+                "bank.nl2sql.requirementsAttempts",
+                "bank.nl2sql.requirementsRepairReasons",
                 "bank.nl2sql.planIntent",
             ):
                 if key in properties and properties[key] is not None:
@@ -257,6 +264,73 @@ def _create_conversation(
     if not isinstance(chat_id, int) or isinstance(chat_id, bool):
         raise SuperSonicEvaluationError("Conversation creation did not return an integer chatId")
     return chat_id
+
+
+def warm_up_runtime_prefix(
+    *,
+    post_json: Callable[[str, dict[str, Any]], Any],
+    agent_id: int,
+    query_api_prefix: str = DEFAULT_QUERY_API_PREFIX,
+    manage_api_prefix: str = DEFAULT_MANAGE_API_PREFIX,
+    question: str = DEFAULT_WARMUP_QUESTION,
+) -> dict[str, Any]:
+    """Materialize the bank model prefix before a timed evaluation run.
+
+    The warm-up intentionally uses a fresh disposable conversation and never calls execute.
+    Its duration is returned as separate evidence; callers must start evaluation timing only
+    after this function returns.  A transport/model failure is fatal because silently continuing
+    would charge the first real record with the cold-prefix cost.
+    """
+
+    if not isinstance(question, str) or not question.strip():
+        raise SuperSonicEvaluationError("warm-up question must be non-empty")
+    query_api_prefix = "/" + query_api_prefix.strip("/")
+    manage_api_prefix = "/" + manage_api_prefix.strip("/")
+    started = time.perf_counter()
+    chat_id: int | None = None
+    parse_state: str | None = None
+    cleanup_error: str | None = None
+    try:
+        chat_id = _create_conversation(
+            post_json=post_json,
+            manage_api_prefix=manage_api_prefix,
+            sample_id="__runtime_warmup__",
+            agent_id=agent_id,
+        )
+        parse_response = _unwrap_api_response(
+            post_json(
+                f"{query_api_prefix}/parse",
+                {
+                    "queryText": question.strip(),
+                    "agentId": agent_id,
+                    "chatId": chat_id,
+                },
+            )
+        )
+        raw_state = parse_response.get("state")
+        parse_state = str(raw_state) if raw_state is not None else None
+    except Exception as error:
+        raise SuperSonicEvaluationError("runtime model prefix warm-up failed") from error
+    finally:
+        if chat_id is not None:
+            try:
+                cleaned = _unwrap_api_value(
+                    post_json(f"{manage_api_prefix}/delete?chatId={chat_id}", {})
+                )
+                if cleaned is False:
+                    cleanup_error = "delete returned false"
+            except Exception as error:  # keep the warm-up evidence, but expose cleanup risk
+                cleanup_error = type(error).__name__
+
+    warmup: dict[str, Any] = {
+        "status": "COMPLETED",
+        "durationMs": round((time.perf_counter() - started) * 1000, 3),
+        "parseState": parse_state,
+        "conversationCleaned": cleanup_error is None,
+    }
+    if cleanup_error is not None:
+        warmup["cleanupError"] = cleanup_error
+    return warmup
 
 
 def _poll_execute_summary(

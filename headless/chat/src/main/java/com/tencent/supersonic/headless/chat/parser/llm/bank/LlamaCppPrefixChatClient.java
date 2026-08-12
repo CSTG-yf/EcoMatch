@@ -52,6 +52,14 @@ public class LlamaCppPrefixChatClient {
             return new ChatOptions(false, 0);
         }
 
+        /**
+         * Options for warming a fixed prompt prefix. The warm-up response is discarded, so it
+         * should consume the smallest possible completion while still exercising the chat template.
+         */
+        public static ChatOptions warmup(boolean thinkingEnabled) {
+            return new ChatOptions(thinkingEnabled, thinkingEnabled ? 1024 : 1);
+        }
+
         public static ChatOptions thinking(int maxTokens) {
             return new ChatOptions(true, Math.max(1024, maxTokens));
         }

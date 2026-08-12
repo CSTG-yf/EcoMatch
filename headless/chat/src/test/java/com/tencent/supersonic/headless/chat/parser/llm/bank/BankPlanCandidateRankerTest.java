@@ -24,6 +24,8 @@ class BankPlanCandidateRankerTest {
         assertEquals(2, selection.getUniqueCandidateCount());
         assertEquals(1, selection.getRejectedCandidateCount());
         assertFalse(selection.getRejectionReasons().contains("complete"));
+        assertEquals(List.of("REQUIRED_FILTER_MISSING"),
+                selection.diagnostics().get("bank.nl2sql.rejectionReasons"));
     }
 
     @Test

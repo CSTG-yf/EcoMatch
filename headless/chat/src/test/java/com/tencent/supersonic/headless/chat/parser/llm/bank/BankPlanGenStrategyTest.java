@@ -43,6 +43,10 @@ class BankPlanGenStrategyTest {
         assertEquals(BankIntentType.COMPARISON, response.getBankQueryPlan().getIntent());
         assertEquals("ZB001", response.getBankQueryPlan().getMetrics().get(0).getBizName());
         assertEquals(Set.of("ZB001", "ZB002"), request.getSemanticIntentHints().getRequiredMetrics());
+        assertEquals(1, response.getBankCandidateDiagnostics()
+                .get("bank.nl2sql.requirementsAttempts"));
+        assertEquals(List.of(), response.getBankCandidateDiagnostics()
+                .get("bank.nl2sql.requirementsRepairReasons"));
         verify(model, times(2)).generate(anyString());
         assertEquals("json_object", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getJsonFormatType());

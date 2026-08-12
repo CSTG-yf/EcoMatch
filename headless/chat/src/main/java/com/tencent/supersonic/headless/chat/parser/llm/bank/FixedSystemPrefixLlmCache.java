@@ -101,7 +101,8 @@ public class FixedSystemPrefixLlmCache {
         }
         prefixWarmAttempts.incrementAndGet();
         try {
-            callModel(model, config, warmUserProbe);
+            callModel(model, config, warmUserProbe,
+                    LlamaCppPrefixChatClient.ChatOptions.warmup(enableThinking));
             KEY_PIPELINE.info(
                     "FixedSystemPrefixLlmCache warmed fixed system prefix version={} via={}",
                     prefixVersion, llamaCpp ? "llama.cpp" : "langchain4j");
@@ -184,11 +185,18 @@ public class FixedSystemPrefixLlmCache {
 
     private String callModel(ChatLanguageModel model, ChatModelConfig config,
             String dynamicUserContent) {
+        return callModel(model, config, dynamicUserContent, null);
+    }
+
+    private String callModel(ChatLanguageModel model, ChatModelConfig config,
+            String dynamicUserContent, LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         if (config != null && StringUtils.isNotBlank(config.getBaseUrl())) {
             try {
-                LlamaCppPrefixChatClient.ChatOptions options = enableThinking
-                        ? LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens)
-                        : LlamaCppPrefixChatClient.ChatOptions.defaults();
+                LlamaCppPrefixChatClient.ChatOptions options = requestedOptions != null
+                        ? requestedOptions
+                        : enableThinking
+                                ? LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens)
+                                : LlamaCppPrefixChatClient.ChatOptions.defaults();
                 LlamaCppPrefixChatClient.ChatResult result =
                         llamaCppClient.chat(config, systemPrefix, dynamicUserContent, options);
                 llamaCppCalls.incrementAndGet();

@@ -65,8 +65,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         ChatModelConfig modelConfig = configureModel(chatApp.getChatModelConfig());
         ChatLanguageModel model = getChatLanguageModel(modelConfig);
 
-        BankRequestContract requirements = obtainRequirements(llmReq, model, modelConfig,
+        RequirementsAttempt requirementsAttempt = obtainRequirements(llmReq, model, modelConfig,
                 admissionHints);
+        BankRequestContract requirements = requirementsAttempt.contract();
+        llmReq.setBankRequirementsAttempts(requirementsAttempt.attempts());
+        llmReq.setBankRequirementsRepairReasons(requirementsAttempt.repairReasons());
         if (requirements.getAction() == BankRequestContract.Action.CLARIFY) {
             throw BankNl2SqlError.clarificationRequired(requirements.getClarification());
         }
@@ -123,6 +126,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             Map<String, Object> diagnostics = new LinkedHashMap<>(selection.diagnostics());
             diagnostics.put("bank.nl2sql.planSource", toolRepair ? "MODEL_TOOL_REPAIR" : "MODEL");
             diagnostics.put("bank.nl2sql.requirements", requirementsJson);
+            diagnostics.put("bank.nl2sql.requirementsAttempts",
+                    llmReq.getBankRequirementsAttempts());
+            diagnostics.put("bank.nl2sql.requirementsRepairReasons",
+                    llmReq.getBankRequirementsRepairReasons());
             diagnostics.put("bankPlanPrefixCache", prefixCache.stats());
             KEY_PIPELINE_LOG.info(
                     "BankPlanGenStrategy selected {} unique model plan candidate(s), rejected={}",
@@ -163,13 +170,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return modelConfig;
     }
 
-    private BankRequestContract obtainRequirements(LLMReq llmReq, ChatLanguageModel model,
+    private RequirementsAttempt obtainRequirements(LLMReq llmReq, ChatLanguageModel model,
             ChatModelConfig config, SemanticIntentHints admissionHints) {
         if (llmReq.getBankRequestContract() != null) {
-            return llmReq.getBankRequestContract();
+            return new RequirementsAttempt(llmReq.getBankRequestContract(), 0, List.of());
         }
         String candidate = null;
         BankQueryPlanParseException lastError = null;
+        List<String> repairReasons = new ArrayList<>();
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
                     ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText())
@@ -178,9 +186,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                     : lastError.getMessage());
             try {
                 candidate = prefixCache.generate(model, config, user, attempt == 0);
-                return requestContractParser.parse(candidate, admissionHints);
+                return new RequirementsAttempt(requestContractParser.parse(candidate, admissionHints),
+                        attempt + 1, List.copyOf(repairReasons));
             } catch (BankQueryPlanParseException exception) {
                 lastError = exception;
+                repairReasons.add(exception.getReason().name());
             } catch (RuntimeException exception) {
                 throw BankNl2SqlError.modelFailure(exception);
             }
@@ -252,4 +262,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private record PlanRepairAttempt(List<BankPlanCandidateRanker.Candidate> candidates,
             String lastCandidate, BankQueryPlanParseException lastError,
             RuntimeException modelFailure) {}
+
+    private record RequirementsAttempt(BankRequestContract contract, int attempts,
+            List<String> repairReasons) {}
 }

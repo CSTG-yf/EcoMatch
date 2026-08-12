@@ -399,6 +399,7 @@ def _runtime_diagnostics(
         ),
         "finalAnswerProcessorStates": dict(sorted(final_answer_states.items())),
         "errorCategories": dict(sorted(errors.items())),
+        "warmup": capture_report.get("warmup"),
         "timingMs": capture_report.get("timingMs"),
         "timingDistributionsMs": capture_report.get("timingDistributionsMs"),
     }

@@ -246,6 +246,11 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 结果投影和结构化事实处理，跳过最终回答/通用摘要模型。金标 SQL、结果和答案文本始终只在
 本地评分，绝不发送给服务端。
 
+每次存在待测题目时，runner 会先用一次可丢弃的预热会话触发银行计划模型的固定前缀/KV
+缓存，然后删除该会话；预热耗时单独记录在报告 `runtimeDiagnostics.warmup`，不计入任何
+题目的 `parseMs`、`endToEndMs` 或运行时成绩。预热失败会停止本轮评测，避免把冷启动成本
+隐含计入第一题。
+
 正式单题判定为：
 
 ```text
