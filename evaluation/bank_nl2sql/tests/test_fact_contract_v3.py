@@ -193,6 +193,72 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(contract.status, "READY")
         self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
 
+    def test_typed_fact_can_round_runtime_province_gap_with_financial_rounding(self) -> None:
+        record = _record(
+            "PROVINCE-ROUND-TYPED",
+            question="与全省均值相比差多少？",
+            answer_text="低于全省均值18.11亿元",
+            columns=["org_code", "metric_code", "absolute_gap"],
+            rows=[["ORG004", "ZB001", 18.10846153846154]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit_difference",
+                "value": 18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "PROVINCE_COMPARISON",
+                },
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": 2,
+                    "operands": [
+                        {"column": "absolute_gap", "where": {"metric_code": "ZB001"}}
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
+
+    def test_typed_round_formula_rejects_invalid_scale(self) -> None:
+        record = _record(
+            "PROVINCE-ROUND-INVALID",
+            question="与全省均值相比差多少？",
+            answer_text="低于全省均值18.11亿元",
+            columns=["metric_code", "absolute_gap"],
+            rows=[["ZB001", 18.10846153846154]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit_difference",
+                "value": 18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "PROVINCE_COMPARISON",
+                },
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": "2",
+                    "operands": [{"column": "absolute_gap"}],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("ANSWER_FACT_0_INVALID_FORMULA", contract.reasons)
+
     def test_typed_fact_fails_closed_when_declared_value_disagrees_with_formula(self) -> None:
         record = _record(
             "SUM-TYPED-BAD",

@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 import numbers
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 
@@ -30,6 +31,7 @@ OPERATIONS = {
     "RATIO_PERCENT",
     "MEAN",
     "COUNT",
+    "ROUND",
 }
 
 
@@ -85,6 +87,14 @@ def evaluate_formula(
         return None
     if operation == "DIRECT":
         return operand_values[0][0] if len(operand_values) == 1 and len(operand_values[0]) == 1 else None
+    if operation == "ROUND":
+        if len(operand_values) != 1 or len(operand_values[0]) != 1:
+            return None
+        scale = formula.get("scale")
+        if not isinstance(scale, int) or isinstance(scale, bool) or not 0 <= scale <= 12:
+            return None
+        quantum = Decimal(1).scaleb(-scale)
+        return float(Decimal(str(operand_values[0][0])).quantize(quantum, rounding=ROUND_HALF_UP))
     if operation == "SUM":
         return sum(value for values in operand_values for value in values)
     if operation == "COUNT":
@@ -117,6 +127,17 @@ def _validate_formula(
     operation = formula.get("operation")
     operands = formula.get("operands")
     if operation not in OPERATIONS or not isinstance(operands, list) or not operands:
+        return "INVALID_FORMULA"
+    scale = formula.get("scale")
+    if operation == "ROUND":
+        if (
+            not isinstance(scale, int)
+            or isinstance(scale, bool)
+            or not 0 <= scale <= 12
+            or len(operands) != 1
+        ):
+            return "INVALID_FORMULA"
+    elif "scale" in formula:
         return "INVALID_FORMULA"
     for operand in operands:
         if not isinstance(operand, dict):

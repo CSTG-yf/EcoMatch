@@ -3,7 +3,7 @@
 Runs the only supported Bank NL2SQL evaluation protocol.
 
 .DESCRIPTION
-Uses the fixed v2.0.2 data release, an Agent bootstrap receipt, isolated
+Uses the fixed v2.0.3 data release, an Agent bootstrap receipt, isolated
 frontend-style conversations, and Fact v3 caseAccuracy.  It does not expose
 legacy score switches or a caller-controlled concurrency setting.
 #>

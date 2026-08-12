@@ -19,13 +19,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB001"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "deposit_difference",
           "kind": "NUMBER",
@@ -47,13 +48,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB002"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "loan_difference",
           "kind": "NUMBER",
@@ -75,13 +77,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB013"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "PERCENT",
@@ -103,20 +106,21 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB011"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "profit_difference",
           "kind": "NUMBER",
           "value": 54.9
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-07-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value AS organization_value, p.provincial_average, v.metric_value-p.provincial_average AS signed_difference, ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG004' ORDER BY v.metric_code",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-07-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG004' ORDER BY v.metric_code",
       "id": "TRAIN-H-04",
       "reason": "补齐目标机构四项指标的全省均值差额结果",
       "split": "train",
@@ -144,13 +148,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB001"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "deposit_difference",
           "kind": "NUMBER",
@@ -172,13 +177,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB002"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "loan_difference",
           "kind": "NUMBER",
@@ -200,13 +206,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB013"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "PERCENT",
@@ -228,20 +235,21 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB011"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "profit_difference",
           "kind": "NUMBER",
           "value": 82.78
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-08-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value AS organization_value, p.provincial_average, v.metric_value-p.provincial_average AS signed_difference, ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG008' ORDER BY v.metric_code",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-08-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG008' ORDER BY v.metric_code",
       "id": "TRAIN-H-05",
       "reason": "补齐目标机构四项指标的全省均值差额结果",
       "split": "train",
@@ -269,13 +277,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB001"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "deposit_difference",
           "kind": "NUMBER",
@@ -297,13 +306,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB002"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "loan_difference",
           "kind": "NUMBER",
@@ -325,13 +335,14 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB013"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "PERCENT",
@@ -353,20 +364,21 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference",
+                "column": "absolute_gap",
                 "where": {
                   "metric_code": "ZB011"
                 }
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "profit_difference",
           "kind": "NUMBER",
           "value": 50.73
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-09-30' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value AS organization_value, p.provincial_average, v.metric_value-p.provincial_average AS signed_difference, ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012' ORDER BY v.metric_code",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-09-30' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012' ORDER BY v.metric_code",
       "id": "TRAIN-H-06",
       "reason": "补齐目标机构四项指标的全省均值差额结果",
       "split": "train",
@@ -837,10 +849,11 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "NUMBER",
@@ -872,7 +885,7 @@
           "value": 1.1415384615384616
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-01-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG006'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-01-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG006'",
       "id": "TRAIN-M-16",
       "reason": "补齐目标机构不良率的全省均值与差额",
       "split": "train",
@@ -899,10 +912,11 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "cost_income_difference",
           "kind": "NUMBER",
@@ -934,7 +948,7 @@
           "value": 31.86769230769231
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-02-28' AND metric_code='ZB012'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG010'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-02-28' AND metric_code='ZB012'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG010'",
       "id": "TRAIN-M-17",
       "reason": "补齐目标机构成本收入比的全省均值与差额",
       "split": "train",
@@ -961,10 +975,11 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "provision_difference",
           "kind": "NUMBER",
@@ -996,7 +1011,7 @@
           "value": 178.5176923076923
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB015'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG001'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB015'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG001'",
       "id": "TRAIN-M-18",
       "reason": "补齐目标机构拨备覆盖率的全省均值与差额",
       "split": "train",
@@ -1857,10 +1872,11 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "NUMBER",
@@ -1892,7 +1908,7 @@
           "value": 1.136923076923077
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG011'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG011'",
       "id": "VAL-M-16",
       "reason": "补齐目标机构不良率的全省均值与差额",
       "split": "dev",
@@ -1919,10 +1935,11 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "NUMBER",
@@ -1954,7 +1971,7 @@
           "value": 1.143076923076923
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012'",
       "id": "VAL-M-17",
       "reason": "补齐目标机构不良率的全省均值与差额",
       "split": "dev",
@@ -1981,17 +1998,18 @@
           "formula": {
             "operands": [
               {
-                "column": "rounded_difference"
+                "column": "absolute_gap"
               }
             ],
-            "operation": "DIRECT"
+            "operation": "ROUND",
+            "scale": 2
           },
           "id": "npl_difference",
           "kind": "NUMBER",
           "value": 0.0
         }
       ],
-      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value AS organization_value,p.provincial_average,ROUND(ABS(v.metric_value-p.provincial_average),2) AS rounded_difference FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG013'",
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG013'",
       "id": "VAL-M-18",
       "reason": "补齐目标机构不良率与全省均值的四舍五入差额",
       "split": "dev",
@@ -2047,6 +2065,6 @@
   "parentDatasetVersion": "2.0.2",
   "parentOfficialManifestSha256": "A20047BC9E95511BAB61CB589DB721174B95FFBAE2029F219A3158670788716A",
   "schemaVersion": "1.0",
-  "specSha256": "80CBE07F8F9BB0D77DD8506AAAE1B2DA5318C2B50D4FCBFBB9577E12CB4BA4D3",
+  "specSha256": "99B47C6DCE126CE4F1F0330DA7AFFD71B300F7535F457761E5875AD2496B2905",
   "targetDatasetVersion": "2.0.3"
 }
