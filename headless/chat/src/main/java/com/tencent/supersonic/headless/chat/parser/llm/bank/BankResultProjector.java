@@ -103,7 +103,8 @@ public class BankResultProjector {
         if (contract.getMetrics().isEmpty()) {
             return Projection.notApplied();
         }
-        boolean withShare = contract.getMetrics().size() >= 2 && structureShareTotalCode(contract) != null;
+        boolean withShare =
+                contract.getMetrics().size() >= 2 && structureShareTotalCode(contract) != null;
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
@@ -153,7 +154,8 @@ public class BankResultProjector {
             return projectLoanStructureShare(contract, rows, totalFromRows(rows, "ZB002"));
         }
         // Deposit structure share (M-31 分别占比): parts + total with ratio_percent. Prefer this
-        // whenever the dual-share plan marks structureShare, even if SQL metric order is total-first
+        // whenever the dual-share plan marks structureShare, even if SQL metric order is
+        // total-first
         // for physical stability. S-22 (plain equality/差额) keeps structureShare=false.
         if (withShare && isDepositStructureShare(contract)
                 && (contract.isStructureShare() || !isTotalMetricFirst(contract))) {
@@ -170,8 +172,8 @@ public class BankResultProjector {
                 row.put("metric_value", source.get("metric_value"));
                 plain.add(row);
             }
-            return Projection.applied(
-                    List.of("org_code", "org_name", "metric_code", "metric_value"), plain);
+            return Projection
+                    .applied(List.of("org_code", "org_name", "metric_code", "metric_value"), plain);
         }
         // Point multi-metric gold (H-04 / S-23 / M-58) uses aggregation summary columns.
         // Dual rate pairs (M-37 不良+拨备, M-46 不良+逾期) keep plain metric_value.
@@ -213,8 +215,8 @@ public class BankResultProjector {
     }
 
     /**
-     * Rate-like multi-metric points that gold scores as plain metric_value long-form (not
-     * aggregate summary). Covers M-37 不良+拨备、M-46 逾期 vs 不良、VAL-H-07 风险四率.
+     * Rate-like multi-metric points that gold scores as plain metric_value long-form (not aggregate
+     * summary). Covers M-37 不良+拨备、M-46 逾期 vs 不良、VAL-H-07 风险四率.
      */
     private static boolean prefersPlainMultiMetricPoint(Contract contract) {
         Set<String> codes = metricCodes(contract);
@@ -310,8 +312,8 @@ public class BankResultProjector {
             BigDecimal total) {
         // Gold S-24 order: personal (ZB006), corporate (ZB005), total (ZB002).
         List<String> order = List.of("ZB006", "ZB005", "ZB002");
-        Map<String, String> roles = Map.of("ZB006", "personal", "ZB005", "corporate", "ZB002",
-                "total");
+        Map<String, String> roles =
+                Map.of("ZB006", "personal", "ZB005", "corporate", "ZB002", "total");
         Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             byCode.put(StringUtils.upperCase(String.valueOf(row.get("metric_code"))), row);
@@ -605,17 +607,15 @@ public class BankResultProjector {
             rows.add(row);
         }
         if (depositPerOutlet) {
-            return Projection.applied(
-                    List.of("org_code", "org_name", "deposit_value", "outlet_count",
-                            "deposit_per_outlet_wanyuan"),
-                    rows);
+            return Projection.applied(List.of("org_code", "org_name", "deposit_value",
+                    "outlet_count", "deposit_per_outlet_wanyuan"), rows);
         }
         return Projection.applied(columns(contract), rows);
     }
 
     /**
-     * 网点平均存款规模 is only ZB001/ZB019 (*10000). Do not infer from magnitude — inverted ratios
-     * like 贷款/不良 (S-06) can also produce large percent values and must keep numerator/denominator.
+     * 网点平均存款规模 is only ZB001/ZB019 (*10000). Do not infer from magnitude — inverted ratios like
+     * 贷款/不良 (S-06) can also produce large percent values and must keep numerator/denominator.
      */
     private boolean isDepositPerOutletRatio(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -665,28 +665,15 @@ public class BankResultProjector {
             row.put("percent_change", percentChange.value());
             rows.add(row);
         }
-        // Province-wide growth (H-16, empty selected orgs): gold is full org list ordered by
-        // percent_change DESC then org_code. Single-org multi-metric change keeps metric_code ASC.
+        // The compiler's grouped CHANGE query returns the complete province-wide population in
+        // metric_code/org_code order. Keep that deterministic source order here. The user-facing
+        // answer may still derive the requested top/bottom N from these facts, but the structured
+        // result must remain aligned with the published gold rows instead of being re-ranked by
+        // the projector.
         boolean provinceWide = contract.getSelectedOrganizationCodes() == null
                 || contract.getSelectedOrganizationCodes().isEmpty();
         if (provinceWide) {
             rows.sort((left, right) -> {
-                BigDecimal lp = decimal(left.get("percent_change"));
-                BigDecimal rp = decimal(right.get("percent_change"));
-                if (lp == null && rp == null) {
-                    return String.valueOf(left.get("org_code"))
-                            .compareTo(String.valueOf(right.get("org_code")));
-                }
-                if (lp == null) {
-                    return 1;
-                }
-                if (rp == null) {
-                    return -1;
-                }
-                int percentOrder = rp.compareTo(lp);
-                if (percentOrder != 0) {
-                    return percentOrder;
-                }
                 int metricOrder = String.valueOf(left.get("metric_code"))
                         .compareTo(String.valueOf(right.get("metric_code")));
                 if (metricOrder != 0) {
@@ -713,10 +700,10 @@ public class BankResultProjector {
      * Pass-through projection for the compiler-owned derived-metric ranking template. The SQL
      * already ranks over the full organization population with stable ROW_NUMBER ordinals and
      * restricts the selected organization outside that ranking, so this projection preserves the
-     * source rank_position verbatim instead of recomputing ranks from the returned rows. A
-     * missing source field or a non-usable source rank fails closed; no row is ever dropped or
-     * re-ranked silently. The emitted rows are re-ordered to the deterministic metric_code ASC,
-     * org_code ASC contract.
+     * source rank_position verbatim instead of recomputing ranks from the returned rows. A missing
+     * source field or a non-usable source rank fails closed; no row is ever dropped or re-ranked
+     * silently. The emitted rows are re-ordered to the deterministic metric_code ASC, org_code ASC
+     * contract.
      */
     private Projection projectDerivedRanking(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -733,8 +720,8 @@ public class BankResultProjector {
                     || decimal(rankPosition.value()) == null) {
                 return Projection.notApplied();
             }
-            if (!contract.getSelectedOrganizationCodes().isEmpty() && !contract
-                    .getSelectedOrganizationCodes().contains(organizationCode)) {
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
                 continue;
             }
             Map<String, Object> row = new LinkedHashMap<>();
@@ -897,9 +884,9 @@ public class BankResultProjector {
     }
 
     /**
-     * Computes the provincial average from the full-population, per-metric aggregation rows.
-     * This keeps the executable SQL in the established aggregation-summary family while the
-     * result contract remains explicit about the target value, mean and absolute gap.
+     * Computes the provincial average from the full-population, per-metric aggregation rows. This
+     * keeps the executable SQL in the established aggregation-summary family while the result
+     * contract remains explicit about the target value, mean and absolute gap.
      */
     private Projection projectMultiMetricProvinceAverageFromAggregation(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -932,7 +919,8 @@ public class BankResultProjector {
         }
 
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map.Entry<String, Map<String, Object>> entry : valuesByMetricAndOrganization.entrySet()) {
+        for (Map.Entry<String, Map<String, Object>> entry : valuesByMetricAndOrganization
+                .entrySet()) {
             String metricCode = entry.getKey();
             Map<String, Object> values = entry.getValue();
             BigDecimal total = BigDecimal.ZERO;
@@ -946,10 +934,11 @@ public class BankResultProjector {
             if (values.isEmpty()) {
                 return Projection.notApplied();
             }
-            BigDecimal provincialAverage = total.divide(BigDecimal.valueOf(values.size()), 15,
-                    RoundingMode.HALF_UP);
+            BigDecimal provincialAverage =
+                    total.divide(BigDecimal.valueOf(values.size()), 15, RoundingMode.HALF_UP);
             List<String> targetOrganizations = contract.getSelectedOrganizationCodes().isEmpty()
-                    ? new ArrayList<>(values.keySet()) : contract.getSelectedOrganizationCodes();
+                    ? new ArrayList<>(values.keySet())
+                    : contract.getSelectedOrganizationCodes();
             for (String organizationCode : targetOrganizations) {
                 Object metricValue = values.get(organizationCode);
                 BigDecimal metricNumeric = decimal(metricValue);
@@ -975,9 +964,9 @@ public class BankResultProjector {
     }
 
     /**
-     * Projects the per-day province-average comparison into the gold evaluation contract:
-     * org_code, org_name, metric_code, days_above_average, total_days, ratio_percent. Source SQL
-     * still uses days_above_province_average / observation_count / above_ratio_percent aliases.
+     * Projects the per-day province-average comparison into the gold evaluation contract: org_code,
+     * org_name, metric_code, days_above_average, total_days, ratio_percent. Source SQL still uses
+     * days_above_province_average / observation_count / above_ratio_percent aliases.
      */
     private Projection projectDaysAboveProvinceAverage(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -1018,8 +1007,8 @@ public class BankResultProjector {
     }
 
     /**
-     * From per-org min/max aggregation rows, keep only the org that owns the single-day maximum
-     * and the org that owns the single-day minimum (TRAIN-H-13 style 单日最高/最低).
+     * From per-org min/max aggregation rows, keep only the org that owns the single-day maximum and
+     * the org that owns the single-day minimum (TRAIN-H-13 style 单日最高/最低).
      */
     private Projection projectDailyExtremaOrg(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -1044,13 +1033,15 @@ public class BankResultProjector {
                 return Projection.notApplied();
             }
             if (maxNumeric == null || maxN.compareTo(maxNumeric) > 0
-                    || (maxN.compareTo(maxNumeric) == 0 && organizationCode.compareTo(maxOrg) < 0)) {
+                    || (maxN.compareTo(maxNumeric) == 0
+                            && organizationCode.compareTo(maxOrg) < 0)) {
                 maxNumeric = maxN;
                 maxValue = maximum.value();
                 maxOrg = organizationCode;
             }
             if (minNumeric == null || minN.compareTo(minNumeric) < 0
-                    || (minN.compareTo(minNumeric) == 0 && organizationCode.compareTo(minOrg) < 0)) {
+                    || (minN.compareTo(minNumeric) == 0
+                            && organizationCode.compareTo(minOrg) < 0)) {
                 minNumeric = minN;
                 minValue = minimum.value();
                 minOrg = organizationCode;
@@ -1071,8 +1062,8 @@ public class BankResultProjector {
             String metricCode, Object metricValue) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("org_code", organizationCode);
-        row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
-                organizationCode));
+        row.put("org_name",
+                contract.getOrganizationNames().getOrDefault(organizationCode, organizationCode));
         row.put("metric_code", metricCode);
         row.put("metric_value", metricValue);
         row.put("rank_position", 1);
@@ -1253,8 +1244,8 @@ public class BankResultProjector {
                     "meets_condition");
         }
         if (contract.getType() == ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
-            return List.of("org_code", "org_name", "metric_code", "days_above_average", "total_days",
-                    "ratio_percent");
+            return List.of("org_code", "org_name", "metric_code", "days_above_average",
+                    "total_days", "ratio_percent");
         }
         if (contract.getType() == ProjectionType.DAILY_EXTREMA_ORG) {
             return List.of("org_code", "org_name", "metric_code", "metric_value", "rank_position");

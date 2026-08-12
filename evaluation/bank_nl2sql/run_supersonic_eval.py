@@ -40,6 +40,56 @@ DEFAULT_WARMUP_QUESTION = (
 class SuperSonicEvaluationError(RuntimeError):
     """The runtime response did not satisfy the evaluator's API contract."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str | None = None,
+        error_stage: str | None = None,
+        endpoint: str | None = None,
+        http_status: int | None = None,
+        retry_count: int | None = None,
+        transport: bool = False,
+        api_code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_stage = error_stage
+        self.endpoint = endpoint
+        self.http_status = http_status
+        self.retry_count = retry_count
+        self.transport = transport
+        self.api_code = api_code
+
+
+def _record_error(
+    item: dict[str, Any],
+    error: BaseException,
+    *,
+    default_stage: str,
+) -> None:
+    """Record bounded, stable diagnostics without replacing the raw backend field."""
+
+    item["errorType"] = type(error).__name__
+    item["errorStage"] = (
+        error.error_stage
+        if isinstance(error, SuperSonicEvaluationError) and error.error_stage
+        else default_stage
+    )
+    if isinstance(error, SuperSonicEvaluationError):
+        item["errorCode"] = error.error_code
+        item["errorEndpoint"] = error.endpoint
+        item["errorHttpStatus"] = error.http_status
+        item["errorRetries"] = error.retry_count
+        item["errorTransport"] = error.transport
+        item["errorApiCode"] = error.api_code
+
+
+def _error_category(error: BaseException, default: str) -> str:
+    if isinstance(error, SuperSonicEvaluationError) and error.transport:
+        return "ENVIRONMENT_TRANSPORT"
+    return default
+
 
 def _unwrap_api_value(response: Any) -> Any:
     """Accept the controller's standard ``{code, data}`` envelope or raw data."""
@@ -48,8 +98,14 @@ def _unwrap_api_value(response: Any) -> Any:
         return response
     if "code" not in response:
         return response
-    if str(response.get("code")) != "200":
-        raise SuperSonicEvaluationError("SuperSonic API did not report success")
+    api_code = str(response.get("code"))
+    if api_code != "200":
+        raise SuperSonicEvaluationError(
+            "SuperSonic API did not report success",
+            error_code="API_STATUS_ERROR",
+            error_stage="API_RESPONSE",
+            api_code=api_code,
+        )
     return response.get("data")
 
 
@@ -410,6 +466,14 @@ def _evaluate_record(
         "textSummary": None,
         "finalAnswerTrace": None,
         "errorCategory": None,
+        "errorType": None,
+        "errorCode": None,
+        "errorStage": None,
+        "errorEndpoint": None,
+        "errorHttpStatus": None,
+        "errorRetries": None,
+        "errorTransport": False,
+        "errorApiCode": None,
         "s2sql": None,
         "physicalSql": None,
         "bankRouting": None,
@@ -429,8 +493,8 @@ def _evaluate_record(
         )
         item["chatId"] = chat_id
     except Exception as error:
-        item["errorCategory"] = "CONVERSATION_ERROR"
-        item["errorType"] = type(error).__name__
+        item["errorCategory"] = _error_category(error, "CONVERSATION_ERROR")
+        _record_error(item, error, default_stage="CONVERSATION")
         return item
 
     query_started = time.perf_counter()
@@ -450,6 +514,14 @@ def _evaluate_record(
             post_json(f"{query_api_prefix}/parse", parse_payload)
         )
         item["parseMs"] = round((time.perf_counter() - started) * 1000, 3)
+        parse_error = parse_response.get("errorMsg")
+        if isinstance(parse_error, str) and parse_error.strip():
+            item["backendError"] = parse_error.strip()
+            raise SuperSonicEvaluationError(
+                "SuperSonic parse returned an error message",
+                error_code="PARSE_BACKEND_ERROR",
+                error_stage="PARSE_RESPONSE",
+            )
         parse_id, s2sql = _selected_parse(parse_response)
         query_id = parse_response.get("queryId")
         if not isinstance(query_id, int):
@@ -459,8 +531,8 @@ def _evaluate_record(
         item["queryId"] = query_id
         item["bankRouting"] = _bank_routing_telemetry(parse_response)
     except Exception as error:
-        item["errorCategory"] = "PARSE_ERROR"
-        item["errorType"] = type(error).__name__
+        item["errorCategory"] = _error_category(error, "PARSE_ERROR")
+        _record_error(item, error, default_stage="PARSE")
         return finish_query_timing()
 
     execute_payload = {
@@ -509,8 +581,8 @@ def _evaluate_record(
         item["resultRows"] = rows
         item["errorCategory"] = None
     except Exception as error:
-        item["errorCategory"] = "EXECUTION_ERROR"
-        item["errorType"] = type(error).__name__
+        item["errorCategory"] = _error_category(error, "EXECUTION_ERROR")
+        _record_error(item, error, default_stage="EXECUTE")
         return finish_query_timing()
 
     try:
@@ -532,7 +604,8 @@ def _evaluate_record(
     except Exception as error:
         item["summaryState"] = "ERROR"
         item["summaryErrorType"] = type(error).__name__
-        item["errorCategory"] = "SUMMARY_ERROR"
+        item["errorCategory"] = _error_category(error, "SUMMARY_ERROR")
+        _record_error(item, error, default_stage="SUMMARY")
 
     finish_query_timing()
     # The standard scorer makes the final case-level cleanup decision.  The
@@ -545,6 +618,7 @@ def _evaluate_record(
             item["conversationCleaned"] = cleaned is not False
         except Exception as error:
             item["cleanupErrorType"] = type(error).__name__
+            _record_error(item, error, default_stage="CLEANUP")
     return item
 
 
@@ -707,13 +781,41 @@ def _http_post_json(
                 retriable = error.code == 429 or error.code >= 500
                 if not retriable or attempt >= network_retries:
                     raise SuperSonicEvaluationError(
-                        f"SuperSonic HTTP request failed with status {error.code}"
+                        f"SuperSonic HTTP request failed with status {error.code}",
+                        error_code=f"HTTP_STATUS_{error.code}",
+                        error_stage="HTTP",
+                        endpoint=path,
+                        http_status=error.code,
+                        retry_count=attempt + 1,
                     ) from error
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, BrokenPipeError) as error:
                 if attempt >= network_retries:
-                    raise SuperSonicEvaluationError("SuperSonic HTTP request failed") from error
+                    raise SuperSonicEvaluationError(
+                        "SuperSonic HTTP request failed",
+                        error_code="HTTP_TRANSPORT_ERROR",
+                        error_stage="TRANSPORT",
+                        endpoint=path,
+                        retry_count=attempt + 1,
+                        transport=True,
+                    ) from error
+            except json.JSONDecodeError as error:
+                if attempt >= network_retries:
+                    raise SuperSonicEvaluationError(
+                        "SuperSonic HTTP response was not valid JSON",
+                        error_code="INVALID_JSON",
+                        error_stage="RESPONSE_DECODE",
+                        endpoint=path,
+                        retry_count=attempt + 1,
+                    ) from error
             time.sleep(retry_backoff_seconds * (2**attempt))
-        raise SuperSonicEvaluationError("SuperSonic HTTP request failed")
+        raise SuperSonicEvaluationError(
+            "SuperSonic HTTP request failed",
+            error_code="HTTP_TRANSPORT_ERROR",
+            error_stage="TRANSPORT",
+            endpoint=path,
+            retry_count=network_retries + 1,
+            transport=True,
+        )
 
     return post_json
 

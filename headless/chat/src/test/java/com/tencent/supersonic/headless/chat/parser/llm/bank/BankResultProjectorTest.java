@@ -57,6 +57,31 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldKeepProvinceWideChangeRowsInPublishedMetricOrganizationOrder() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "A", "ORG002", "B"))
+                .selectedOrganizationCodes(List.of())
+                .metrics(List.of(BankResultProjector.MetricBinding.builder().semanticColumn("zb001")
+                        .metricCode("ZB001").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG002", "metric_code", "ZB001", "current_value",
+                        new BigDecimal("52"), "baseline_value", new BigDecimal("50"),
+                        "absolute_change", new BigDecimal("2"), "percent_change",
+                        new BigDecimal("4")),
+                        row("bank_organization", "ORG001", "metric_code", "ZB001", "current_value",
+                                new BigDecimal("42"), "baseline_value", new BigDecimal("41"),
+                                "absolute_change", new BigDecimal("1"), "percent_change",
+                                new BigDecimal("2"))));
+
+        assertEquals(List.of("ORG001", "ORG002"),
+                projection.getRows().stream().map(row -> row.get("org_code")).toList());
+    }
+
+    @Test
     void shouldAddStableRankPositionsAfterProjectingOrganizationRows() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.RANKED_LONG_FORM)
@@ -273,14 +298,15 @@ class BankResultProjectorTest {
     @Test
     void shouldProjectProvinceAverageThresholdRowsToTheStableBankContract() {
         // Gold M-16 is point aggregation summary for the selected org only.
-        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
-                .type(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG003", "C", "ORG004", "D"))
-                .selectedOrganizationCodes(List.of("ORG003"))
-                .metrics(List.of(BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("metric_value").metricCode("ZB013").build()))
-                .build();
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG003", "C", "ORG004", "D"))
+                        .selectedOrganizationCodes(List.of("ORG003"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("metric_value").metricCode("ZB013").build()))
+                        .build();
 
         BankResultProjector.Projection projection = projector.project(contract,
                 List.of(row("bank_organization", "ORG003", "metric_value", new BigDecimal("116.02"),
@@ -292,32 +318,30 @@ class BankResultProjectorTest {
 
         assertEquals(List.of("org_code", "org_name", "metric_code", "aggregate_value", "min_value",
                 "max_value", "observation_count"), projection.getColumns());
-        assertEquals(
-                List.of(row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB013",
-                        "aggregate_value", new BigDecimal("116.02"), "min_value",
-                        new BigDecimal("116.02"), "max_value", new BigDecimal("116.02"),
-                        "observation_count", 1)),
+        assertEquals(List.of(row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB013",
+                "aggregate_value", new BigDecimal("116.02"), "min_value", new BigDecimal("116.02"),
+                "max_value", new BigDecimal("116.02"), "observation_count", 1)),
                 projection.getRows());
     }
 
     @Test
     void shouldProjectProvinceWideThresholdWithAverageAndMeetsCondition() {
         // Gold S-19/M-40: multi-org province-wide threshold keeps provincial_average.
-        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
-                .type(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG001", "A", "ORG002", "B"))
-                .selectedOrganizationCodes(List.of())
-                .metrics(List.of(BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("metric_value").metricCode("ZB002").build()))
-                .build();
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG001", "A", "ORG002", "B"))
+                        .selectedOrganizationCodes(List.of())
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("metric_value").metricCode("ZB002").build()))
+                        .build();
 
-        BankResultProjector.Projection projection = projector.project(contract,
-                List.of(row("bank_organization", "ORG001", "metric_value", new BigDecimal("33.95"),
+        BankResultProjector.Projection projection = projector.project(contract, List.of(
+                row("bank_organization", "ORG001", "metric_value", new BigDecimal("33.95"),
                         "provincial_average", new BigDecimal("59.2"), "meets_condition", 0),
-                        row("bank_organization", "ORG002", "metric_value", new BigDecimal("70.0"),
-                                "provincial_average", new BigDecimal("59.2"), "meets_condition",
-                                1)));
+                row("bank_organization", "ORG002", "metric_value", new BigDecimal("70.0"),
+                        "provincial_average", new BigDecimal("59.2"), "meets_condition", 1)));
 
         assertEquals(List.of("org_code", "org_name", "metric_value", "provincial_average",
                 "meets_condition"), projection.getColumns());
@@ -343,32 +367,32 @@ class BankResultProjectorTest {
                                 .metricCode("ZB013").build()))
                 .build();
 
-        BankResultProjector.Projection projection = projector.project(contract, List.of(
-                row("bank_organization", "ORG001", "metric_code", "ZB001", "aggregate_value",
-                        new BigDecimal("20")),
-                row("bank_organization", "ORG002", "metric_code", "ZB001", "aggregate_value",
-                        new BigDecimal("10")),
-                row("bank_organization", "ORG003", "metric_code", "ZB001", "aggregate_value",
-                        new BigDecimal("30")),
-                row("bank_organization", "ORG001", "metric_code", "ZB013", "aggregate_value",
-                        new BigDecimal("1.0")),
-                row("bank_organization", "ORG002", "metric_code", "ZB013", "aggregate_value",
-                        new BigDecimal("1.5")),
-                row("bank_organization", "ORG003", "metric_code", "ZB013", "aggregate_value",
-                        new BigDecimal("2.0"))));
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "metric_code", "ZB001",
+                        "aggregate_value", new BigDecimal("20")),
+                        row("bank_organization", "ORG002", "metric_code", "ZB001",
+                                "aggregate_value", new BigDecimal("10")),
+                        row("bank_organization", "ORG003", "metric_code", "ZB001",
+                                "aggregate_value", new BigDecimal("30")),
+                        row("bank_organization", "ORG001", "metric_code", "ZB013",
+                                "aggregate_value", new BigDecimal("1.0")),
+                        row("bank_organization", "ORG002", "metric_code", "ZB013",
+                                "aggregate_value", new BigDecimal("1.5")),
+                        row("bank_organization", "ORG003", "metric_code", "ZB013",
+                                "aggregate_value", new BigDecimal("2.0"))));
 
         assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value",
                 "provincial_average", "gap_value", "absolute_gap"), projection.getColumns());
         assertEquals(List.of(
-                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB001",
-                        "metric_value", new BigDecimal("10"), "provincial_average",
+                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB001", "metric_value",
+                        new BigDecimal("10"), "provincial_average",
                         new BigDecimal("20.000000000000000"), "gap_value",
                         new BigDecimal("-10.000000000000000"), "absolute_gap",
                         new BigDecimal("10.000000000000000")),
-                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB013",
-                        "metric_value", new BigDecimal("1.5"), "provincial_average",
-                        new BigDecimal("1.500000000000000"), "gap_value",
-                        new BigDecimal("0E-15"), "absolute_gap", new BigDecimal("0E-15"))),
+                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB013", "metric_value",
+                        new BigDecimal("1.5"), "provincial_average",
+                        new BigDecimal("1.500000000000000"), "gap_value", new BigDecimal("0E-15"),
+                        "absolute_gap", new BigDecimal("0E-15"))),
                 projection.getRows());
     }
 
@@ -376,10 +400,8 @@ class BankResultProjectorTest {
     void shouldProjectDepositStructureShareWithRatioPercent() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.LONG_FORM)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG002", "B"))
-                .selectedOrganizationCodes(List.of("ORG002"))
-                .structureShare(true)
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG002", "B"))
+                .selectedOrganizationCodes(List.of("ORG002")).structureShare(true)
                 .metrics(List.of(
                         BankResultProjector.MetricBinding.builder().semanticColumn("zb001")
                                 .metricCode("ZB001").build(),
@@ -389,11 +411,12 @@ class BankResultProjectorTest {
                                 .metricCode("ZB004").build()))
                 .build();
 
-        BankResultProjector.Projection projection = projector.project(contract,
-                List.of(row("zb001", new BigDecimal("52.11"), "zb003", new BigDecimal("18.51"),
-                        "zb004", new BigDecimal("33.6"))));
+        BankResultProjector.Projection projection =
+                projector.project(contract, List.of(row("zb001", new BigDecimal("52.11"), "zb003",
+                        new BigDecimal("18.51"), "zb004", new BigDecimal("33.6"))));
 
-        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value", "ratio_percent"),
+        assertEquals(
+                List.of("org_code", "org_name", "metric_code", "metric_value", "ratio_percent"),
                 projection.getColumns());
         assertEquals("ZB003", projection.getRows().get(0).get("metric_code"));
         assertEquals("ZB004", projection.getRows().get(1).get("metric_code"));
@@ -404,13 +427,14 @@ class BankResultProjectorTest {
 
     @Test
     void shouldKeepAggregationExtremaWhenMinAndMaxDiffer() {
-        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
-                .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG010", "J"))
-                .metrics(List.of(BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("aggregate_value").metricCode("ZB001").build()))
-                .build();
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG010", "J"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("aggregate_value").metricCode("ZB001").build()))
+                        .build();
 
         BankResultProjector.Projection projection = projector.project(contract,
                 List.of(row("bank_organization", "ORG010", "aggregate_value",
@@ -427,8 +451,7 @@ class BankResultProjectorTest {
     void shouldProjectDualRatePairAsPlainMetricValue() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.LONG_FORM)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG004", "D"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG004", "D"))
                 .selectedOrganizationCodes(List.of("ORG004"))
                 .metrics(List.of(
                         BankResultProjector.MetricBinding.builder().semanticColumn("zb013")
@@ -450,8 +473,7 @@ class BankResultProjectorTest {
     void shouldNotTreatLargeRatioAsDepositPerOutletWithoutOutletMetric() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.RATIO)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG011", "K"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG011", "K"))
                 .selectedOrganizationCodes(List.of("ORG011"))
                 .metrics(List.of(
                         BankResultProjector.MetricBinding.builder().semanticColumn("zb014")
@@ -521,8 +543,7 @@ class BankResultProjectorTest {
     void shouldProjectMultipleMetricAggregationSummaryFromValidatedSourceMetricCodes() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG004", "D"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG004", "D"))
                 .selectedOrganizationCodes(List.of("ORG004"))
                 .metrics(List.of(
                         BankResultProjector.MetricBinding.builder().semanticColumn("metric_code")
@@ -544,14 +565,16 @@ class BankResultProjectorTest {
                 "aggregate_value", new BigDecimal("54.79"), "min_value", new BigDecimal("50.00"),
                 "max_value", new BigDecimal("60.00"), "observation_count", 3),
                 row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB002",
-                        "aggregate_value", new BigDecimal("42.25"), "min_value", new BigDecimal("40.00"),
-                        "max_value", new BigDecimal("45.00"), "observation_count", 3)),
+                        "aggregate_value", new BigDecimal("42.25"), "min_value",
+                        new BigDecimal("40.00"), "max_value", new BigDecimal("45.00"),
+                        "observation_count", 3)),
                 projection.getRows());
 
-        assertFalse(projector.project(contract, List.of(
-                row("bank_organization", "ORG004", "metric_code", "ZB999", "aggregate_value",
-                        new BigDecimal("1"), "min_value", new BigDecimal("1"), "max_value",
-                        new BigDecimal("1"), "observation_count", 1))).isApplied());
+        assertFalse(projector.project(contract,
+                List.of(row("bank_organization", "ORG004", "metric_code", "ZB999",
+                        "aggregate_value", new BigDecimal("1"), "min_value", new BigDecimal("1"),
+                        "max_value", new BigDecimal("1"), "observation_count", 1)))
+                .isApplied());
     }
 
     @Test
@@ -605,63 +628,64 @@ class BankResultProjectorTest {
     void shouldProjectDaysAboveProvinceAverageToTheStableAuditableColumns() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG004", "D"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG004", "D"))
                 .selectedOrganizationCodes(List.of("ORG004"))
                 .metrics(List.of(BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("days_above_province_average").metricCode("ZB001")
-                        .build()))
+                        .semanticColumn("days_above_province_average").metricCode("ZB001").build()))
                 .build();
 
         BankResultProjector.Projection projection = projector.project(contract,
                 List.of(row("bank_organization", "ORG004", "days_above_province_average", 132,
-                        "observation_count", 250,
-                        "above_ratio_percent", new BigDecimal("52.8"))));
+                        "observation_count", 250, "above_ratio_percent", new BigDecimal("52.8"))));
 
         assertEquals(List.of("org_code", "org_name", "metric_code", "days_above_average",
                 "total_days", "ratio_percent"), projection.getColumns());
-        assertEquals(
-                List.of(row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB001",
-                        "days_above_average", 132, "total_days", 250, "ratio_percent",
-                        new BigDecimal("52.8"))),
-                projection.getRows());
+        assertEquals(List.of(row("org_code", "ORG004", "org_name", "D", "metric_code", "ZB001",
+                "days_above_average", 132, "total_days", 250, "ratio_percent",
+                new BigDecimal("52.8"))), projection.getRows());
         // 数值缺失或非数值必须 fail closed,而不是静默丢弃。
-        assertFalse(projector.project(contract,
-                List.of(row("bank_organization", "ORG004", "days_above_province_average", "many",
-                        "observation_count", 250, "above_ratio_percent", 1))).isApplied());
-        assertFalse(projector.project(contract,
-                List.of(row("bank_organization", "ORG004", "days_above_province_average", 1,
-                        "above_ratio_percent", 1))).isApplied());
+        assertFalse(projector
+                .project(contract,
+                        List.of(row("bank_organization", "ORG004", "days_above_province_average",
+                                "many", "observation_count", 250, "above_ratio_percent", 1)))
+                .isApplied());
+        assertFalse(
+                projector
+                        .project(contract, List.of(row("bank_organization", "ORG004",
+                                "days_above_province_average", 1, "above_ratio_percent", 1)))
+                        .isApplied());
     }
 
     @Test
     void shouldProjectDailyExtremaOrgToMaxAndMinHolders() {
-        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
-                .type(BankResultProjector.ProjectionType.DAILY_EXTREMA_ORG)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG003", "C", "ORG008", "H", "ORG001", "A"))
-                .metrics(List.of(BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("aggregate_value").metricCode("ZB002").build()))
-                .build();
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.DAILY_EXTREMA_ORG)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG003", "C", "ORG008", "H", "ORG001", "A"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("aggregate_value").metricCode("ZB002").build()))
+                        .build();
 
-        BankResultProjector.Projection projection = projector.project(contract, List.of(
-                row("bank_organization", "ORG001", "aggregate_value", new BigDecimal("34"),
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "aggregate_value", new BigDecimal("34"),
                         "min_value", new BigDecimal("32"), "max_value", new BigDecimal("35"),
                         "observation_count", 365),
-                row("bank_organization", "ORG003", "aggregate_value", new BigDecimal("90"),
-                        "min_value", new BigDecimal("88"), "max_value", new BigDecimal("95.06"),
-                        "observation_count", 365),
-                row("bank_organization", "ORG008", "aggregate_value", new BigDecimal("31"),
-                        "min_value", new BigDecimal("30.52"), "max_value", new BigDecimal("32"),
-                        "observation_count", 365)));
+                        row("bank_organization", "ORG003", "aggregate_value", new BigDecimal("90"),
+                                "min_value", new BigDecimal("88"), "max_value",
+                                new BigDecimal("95.06"), "observation_count", 365),
+                        row("bank_organization", "ORG008", "aggregate_value", new BigDecimal("31"),
+                                "min_value", new BigDecimal("30.52"), "max_value",
+                                new BigDecimal("32"), "observation_count", 365)));
 
-        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value", "rank_position"),
+        assertEquals(
+                List.of("org_code", "org_name", "metric_code", "metric_value", "rank_position"),
                 projection.getColumns());
-        assertEquals(List.of(
-                row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB002", "metric_value",
-                        new BigDecimal("95.06"), "rank_position", 1),
-                row("org_code", "ORG008", "org_name", "H", "metric_code", "ZB002", "metric_value",
-                        new BigDecimal("30.52"), "rank_position", 1)),
+        assertEquals(
+                List.of(row("org_code", "ORG003", "org_name", "C", "metric_code", "ZB002",
+                        "metric_value", new BigDecimal("95.06"), "rank_position", 1),
+                        row("org_code", "ORG008", "org_name", "H", "metric_code", "ZB002",
+                                "metric_value", new BigDecimal("30.52"), "rank_position", 1)),
                 projection.getRows());
     }
 
@@ -673,15 +697,16 @@ class BankResultProjectorTest {
                 .organizationNames(Map.of("ORG004", "江苏省D市农商行"))
                 .selectedOrganizationCodes(List.of("ORG004")).build();
 
-        BankResultProjector.Projection projection = projector.project(contract, List.of(
-                row("metric_code", "ZB001", "bank_organization", "ORG004", "metric_value",
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("metric_code", "ZB001", "bank_organization", "ORG004", "metric_value",
                         new BigDecimal("48.50"), "rank_position", 3),
-                row("metric_code", "DERIVED_ZB002_DIV_ZB001", "bank_organization", "ORG004",
-                        "metric_value", new BigDecimal("87.30"), "rank_position", 7)));
+                        row("metric_code", "DERIVED_ZB002_DIV_ZB001", "bank_organization", "ORG004",
+                                "metric_value", new BigDecimal("87.30"), "rank_position", 7)));
 
         assertTrue(projection.isApplied());
-        assertEquals(List.of("metric_code", "org_code", "org_name", "metric_value",
-                "rank_position"), projection.getColumns());
+        assertEquals(
+                List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position"),
+                projection.getColumns());
         // 直接沿用 SQL 的 ROW_NUMBER 序位,不重新计算;输出按 metric_code ASC、org_code ASC 确定排序。
         assertEquals(List.of(
                 row("metric_code", "DERIVED_ZB002_DIV_ZB001", "org_code", "ORG004", "org_name",
@@ -695,16 +720,15 @@ class BankResultProjectorTest {
     void shouldFailClosedWhenDerivedRankingSourceRankIsMissingOrNotUsable() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG004", "D"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG004", "D"))
                 .selectedOrganizationCodes(List.of("ORG004")).build();
 
-        assertFalse(projector.project(contract,
-                List.of(row("metric_code", "ZB001", "bank_organization", "ORG004",
-                        "metric_value", new BigDecimal("1")))).isApplied());
-        assertFalse(projector.project(contract,
-                List.of(row("metric_code", "ZB001", "bank_organization", "ORG004",
-                        "metric_value", new BigDecimal("1"), "rank_position", "first")))
+        assertFalse(projector.project(contract, List.of(row("metric_code", "ZB001",
+                "bank_organization", "ORG004", "metric_value", new BigDecimal("1")))).isApplied());
+        assertFalse(projector
+                .project(contract,
+                        List.of(row("metric_code", "ZB001", "bank_organization", "ORG004",
+                                "metric_value", new BigDecimal("1"), "rank_position", "first")))
                 .isApplied());
     }
 
@@ -712,15 +736,17 @@ class BankResultProjectorTest {
     void shouldFailClosedWhenADerivedRankingRowHasNoUsableRatioValue() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
-                .organizationColumn("bank_organization")
-                .organizationNames(Map.of("ORG004", "D"))
+                .organizationColumn("bank_organization").organizationNames(Map.of("ORG004", "D"))
                 .selectedOrganizationCodes(List.of("ORG004")).build();
 
         // 零分母在 SQL 中产生 NULL 比值并在排名前被排除;若任何行仍缺 metric_value,
         // 投影必须整体 fail closed,绝不臆造一个排名的比值。
-        assertFalse(projector.project(contract,
-                List.of(row("metric_code", "DERIVED_ZB002_DIV_ZB001", "bank_organization",
-                        "ORG004", "rank_position", 5))).isApplied());
+        assertFalse(
+                projector
+                        .project(contract,
+                                List.of(row("metric_code", "DERIVED_ZB002_DIV_ZB001",
+                                        "bank_organization", "ORG004", "rank_position", 5)))
+                        .isApplied());
     }
 
     private static Map<String, Object> row(Object... values) {

@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from unittest import mock
 from pathlib import Path
 
 
@@ -19,8 +20,10 @@ sys.path.insert(0, str(ROOT))
 from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run  # noqa: E402
 from run_supersonic_eval import (  # noqa: E402
     SuperSonicEvaluationError,
+    _http_post_json,
     _latency_distribution,
     _load_resumable_items,
+    _unwrap_api_value,
     run_supersonic_evaluation,
     warm_up_runtime_prefix,
 )
@@ -56,6 +59,97 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
 
 
 class RunSuperSonicEvalTest(unittest.TestCase):
+    def test_http_transport_failure_preserves_endpoint_and_retry_diagnostics(self) -> None:
+        post_json = _http_post_json(
+            base_url="http://127.0.0.1:9080",
+            authorization_token=None,
+            cookie=None,
+            timeout_seconds=1,
+            network_retries=2,
+            retry_backoff_seconds=0,
+        )
+
+        with mock.patch(
+            "run_supersonic_eval.urllib.request.urlopen",
+            side_effect=ConnectionResetError("connection reset by peer"),
+        ) as urlopen:
+            with self.assertRaises(SuperSonicEvaluationError) as raised:
+                post_json("/openapi/chat/query/parse", {"queryText": "smoke"})
+
+        self.assertEqual(urlopen.call_count, 3)
+        error = raised.exception
+        self.assertEqual(error.error_code, "HTTP_TRANSPORT_ERROR")
+        self.assertEqual(error.error_stage, "TRANSPORT")
+        self.assertEqual(error.endpoint, "/openapi/chat/query/parse")
+        self.assertEqual(error.retry_count, 3)
+        self.assertTrue(error.transport)
+
+    def test_api_status_error_preserves_api_code(self) -> None:
+        with self.assertRaises(SuperSonicEvaluationError) as raised:
+            _unwrap_api_value({"code": 503, "data": None})
+
+        error = raised.exception
+        self.assertEqual(error.error_code, "API_STATUS_ERROR")
+        self.assertEqual(error.error_stage, "API_RESPONSE")
+        self.assertEqual(error.api_code, "503")
+
+    def test_report_classifies_transport_parse_failure_with_structured_fields(self) -> None:
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 505}
+            if path.endswith("/parse"):
+                raise SuperSonicEvaluationError(
+                    "SuperSonic HTTP request failed",
+                    error_code="HTTP_TRANSPORT_ERROR",
+                    error_stage="TRANSPORT",
+                    endpoint="/openapi/chat/query/parse",
+                    retry_count=3,
+                    transport=True,
+                )
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [{"id": "DEV-TRANSPORT", "question": "offline", "expected": {}}],
+            agent_id=7,
+            post_json=post_json,
+        )
+
+        item = report["items"][0]
+        self.assertEqual(item["errorCategory"], "ENVIRONMENT_TRANSPORT")
+        self.assertEqual(item["errorType"], "SuperSonicEvaluationError")
+        self.assertEqual(item["errorCode"], "HTTP_TRANSPORT_ERROR")
+        self.assertEqual(item["errorStage"], "TRANSPORT")
+        self.assertEqual(item["errorEndpoint"], "/openapi/chat/query/parse")
+        self.assertEqual(item["errorRetries"], 3)
+        self.assertTrue(item["errorTransport"])
+
+    def test_parse_backend_error_is_retained_without_treating_it_as_transport(self) -> None:
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 506}
+            if path.endswith("/parse"):
+                return {
+                    "code": 200,
+                    "data": {
+                        "state": "FAILED",
+                        "errorMsg": "[BANK_CONSTRAINED_PLAN]plan output order mismatch",
+                    },
+                }
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [{"id": "DEV-PARSE-BACKEND", "question": "invalid", "expected": {}}],
+            agent_id=7,
+            post_json=post_json,
+        )
+
+        item = report["items"][0]
+        self.assertEqual(item["errorCategory"], "PARSE_ERROR")
+        self.assertEqual(item["errorCode"], "PARSE_BACKEND_ERROR")
+        self.assertEqual(item["errorStage"], "PARSE_RESPONSE")
+        self.assertFalse(item["errorTransport"])
+        self.assertEqual(item["backendError"], "[BANK_CONSTRAINED_PLAN]plan output order mismatch")
+
     def test_warmup_uses_disposable_parse_only_chain_and_returns_separate_timing(self) -> None:
         requests: list[tuple[str, dict]] = []
 

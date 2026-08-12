@@ -35,8 +35,8 @@ class BankPlanPromptComposerTest {
         BankPlanToolResult failure = BankPlanToolResult.failed(2, "trace-2", "fingerprint-1",
                 BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION",
                 Map.of("intent", List.of("POINT_QUERY", "CHANGE")), List.of("重新选择查询组合"));
-        String repair = BankPlanPromptComposer.buildToolRepairUserContent("存款是多少？",
-                requirements, "{\"intent\":\"POINT_QUERY\"}", failure);
+        String repair = BankPlanPromptComposer.buildToolRepairUserContent("存款是多少？", requirements,
+                "{\"intent\":\"POINT_QUERY\"}", failure);
 
         assertTrue(plan.contains("<stage>PLAN</stage>"));
         assertTrue(plan.contains("<requirements_contract>"));
@@ -71,6 +71,12 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("aggregation\":\"AVG\""));
         assertTrue(sys.contains("rank_from_bottom"));
         assertTrue(sys.contains("limit 设为 2*N"));
+        assertTrue(sys.contains("单日最高值和单日最低值出现在哪家"));
+        assertTrue(sys.contains("AGGREGATION"));
+        assertTrue(sys.contains("不要把它误判成普通 RANKING"));
+        assertTrue(sys.contains("从基期到当前期的增幅排名前N"));
+        assertTrue(sys.contains("这些结果别名"));
+        assertTrue(sys.contains("写入 output.columns"));
     }
 
     @Test
@@ -104,6 +110,11 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("全省排名不等于全省均值比较"));
         assertTrue(sys.contains("\"intent\":\"RANKING\""));
         assertTrue(sys.contains("\"filters\":[]"));
+        assertTrue(sys.contains("明确给出目录中的具体指标、合法日期或日期范围"));
+        assertTrue(sys.contains("必须 action=EXECUTE"));
+        assertTrue(sys.contains("只有指标、机构或时间确实无法从权威目录和题干唯一确定时"));
+        assertTrue(sys.contains("同一查询的两个结果事实"));
+        assertTrue(sys.contains("不要因为出现“排名”就改成 RANKING"));
     }
 
     @Test
