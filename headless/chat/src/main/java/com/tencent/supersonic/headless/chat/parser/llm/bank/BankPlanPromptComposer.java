@@ -214,7 +214,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v27-closed-metric-list-execution";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v28-clarification-guidance";
 
     private BankPlanPromptComposer() {}
 
