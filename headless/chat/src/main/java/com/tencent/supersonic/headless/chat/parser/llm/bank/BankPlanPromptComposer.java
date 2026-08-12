@@ -279,17 +279,36 @@ public final class BankPlanPromptComposer {
             error = "contract validation failed; output one complete JSON object for the current stage";
         }
         String repairTag = errorTag == null ? "error" : errorTag;
+        String clarificationRecheck = buildClarificationRecheck(stage, error);
         String content = "%s\n\n<stage>%s</stage>%s\n<repair>\n<%s>%s</%s>\n"
-                + "<previous_candidate>\n%s\n</previous_candidate>\n"
+                + "<previous_candidate>\n%s\n</previous_candidate>\n" + "%s"
                 + "<instruction>只输出修正后的完整当前阶段 JSON；不输出解释、补丁或 SQL。</instruction>\n</repair>";
         String requirements = requirementsJson == null ? ""
                 : "\n<requirements_contract>\n" + requirementsJson.strip()
                         + "\n</requirements_contract>";
         String result = content.formatted(buildDynamicUserContent(queryText), stage, requirements,
                 repairTag, error, repairTag,
-                previousCandidate == null ? "" : previousCandidate.strip());
+                previousCandidate == null ? "" : previousCandidate.strip(), clarificationRecheck);
         assertQuestionOnlyUserContent(result, stage + " repair user");
         return result;
+    }
+
+    private static String buildClarificationRecheck(String stage, String error) {
+        if (!"REQUIREMENTS".equals(stage) || !error.contains("model selected CLARIFY")) {
+            return "";
+        }
+        return """
+                <clarification_recheck>
+                这不是新的用户回合，而是合同纠错：题干已有明确目录命中时必须重新理解并执行，不要再次返回泛化澄清。
+                通用归一化示例（仅在题干出现对应语义时采用，不要凭空添加指标）：
+                - 从2024年末到2026-03-31表示 baselineStartDate=2024-12-31、baselineEndDate=2024-12-31、startDate=2026-03-31、endDate=2026-03-31。
+                - 全省/各家银行表示查询全部机构，organizationCodes=[]，不要因为没有目标机构而澄清。
+                - 增幅排名前三表示 intent=CHANGE、comparison=PERIOD_OVER_PERIOD、requiredLimit=3，并包含 CHANGE_RATE 事实类型。
+                - 目录别名：各项存款余额/存款余额 -> ZB001；各项贷款余额/贷款余额 -> ZB002；净利润 -> ZB011。
+                - 某机构全年日均值、最高日、最低日表示该机构和指标的 AGGREGATION 查询，覆盖该年度完整日期范围。
+                若指标、机构或时间确实无法从题干和权威目录唯一确定，只能保留 CLARIFY；否则输出 action=EXECUTE 的完整 JSON。
+                </clarification_recheck>
+                """;
     }
 
     private static void requireContract(String requirementsJson) {

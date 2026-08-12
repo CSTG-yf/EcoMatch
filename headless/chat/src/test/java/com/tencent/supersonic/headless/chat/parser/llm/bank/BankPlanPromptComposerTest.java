@@ -132,4 +132,19 @@ class BankPlanPromptComposerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> BankPlanPromptComposer.buildDynamicUserContent(catalog));
     }
+
+    @Test
+    void clarificationRepairIncludesGenericSlotNormalizationGuidance() {
+        String content = BankPlanPromptComposer.buildRequirementsRepairUserContent(
+                "从2024年末到2026-03-31，全省各项存款余额增幅排名前三的是哪几家？增幅各是多少？", "{\"action\":\"CLARIFY\"}",
+                "model selected CLARIFY");
+
+        assertTrue(content.contains("<clarification_recheck>"));
+        assertTrue(content.contains("baselineStartDate=2024-12-31"));
+        assertTrue(content.contains("organizationCodes=[]"));
+        assertTrue(content.contains("ZB001"));
+        assertTrue(content.contains("ZB002"));
+        assertTrue(content.contains("ZB011"));
+        assertTrue(content.contains("只能保留 CLARIFY"));
+    }
 }
