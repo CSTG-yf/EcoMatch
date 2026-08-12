@@ -1144,6 +1144,73 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
+    def test_days_above_projection_binds_reviewed_legacy_column_aliases(self) -> None:
+        record = _record(
+            "DAYS-ABOVE-ALIASES-1",
+            question="2025年全年，该机构的不良贷款率有多少天高于全省均值？",
+            answer_text="高于全省均值的天数：0天；总天数：365天；占比：0%",
+            columns=[
+                "org_code",
+                "org_name",
+                "days_above_province_average",
+                "observation_count",
+                "above_ratio_percent",
+            ],
+            rows=[["ORG002", "江苏省B市农商行", 0, 365, 0.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "days_above_average",
+                        "total_days",
+                        "ratio_percent",
+                    ],
+                    "resultRows": [
+                        ["ORG002", "江苏省B市农商行", "ZB013", 0, 365, 0.0]
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_days_above_projection_rejects_unreviewed_column_aliases(self) -> None:
+        record = _record(
+            "DAYS-ABOVE-ALIASES-2",
+            question="有多少天高于全省均值？",
+            answer_text="高于全省均值0天；总天数365天；占比0%",
+            columns=[
+                "days_above_province_average",
+                "observation_count",
+                "above_ratio_percent",
+            ],
+            rows=[[0, 365, 0.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["days", "count", "percent"],
+                    "resultRows": [[0, 365, 0.0]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
     def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
         record = _record(
             "DERIVE-IDENTITY-1",

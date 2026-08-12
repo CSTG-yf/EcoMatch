@@ -51,6 +51,17 @@ _ORGANIZATION_NAME = re.compile(r"(?:[\u4e00-\u9fff]{2,8}省)?[A-Za-z]市农商�
 _ORGANIZATION_CODE = re.compile(r"\bORG\d{3}\b", re.IGNORECASE)
 _METRIC_CODE = re.compile(r"\bZB\d{3}\b", re.IGNORECASE)
 
+# The constrained bank compiler exposes stable projector names that are more
+# concise than a few legacy workbook aliases.  Keep this mapping deliberately
+# small and directional: it may reconcile a reviewed gold column with its
+# canonical runtime projection, but it must never match arbitrary columns by
+# position or by coincidentally equal numeric values.
+_RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "days_above_province_average": ("days_above_average",),
+    "observation_count": ("total_days",),
+    "above_ratio_percent": ("ratio_percent",),
+}
+
 
 @dataclass(frozen=True)
 class FactDraft:
@@ -608,10 +619,21 @@ def _expected_rows_are_bound(
     )
     if not has_identity and not require_exact_rows:
         return True
-    if any(name not in columns for name in expected_names):
+    resolved_names = [
+        next(
+            (
+                candidate
+                for candidate in (name, *_RESULT_COLUMN_ALIASES.get(name, ()))
+                if candidate in columns
+            ),
+            None,
+        )
+        for name in expected_names
+    ]
+    if any(name is None for name in resolved_names):
         return False
 
-    indexes = [columns.index(name) for name in expected_names]
+    indexes = [columns.index(name) for name in resolved_names if name is not None]
     projected_rows: list[list[Any]] = []
     for row in rows:
         if not isinstance(row, (list, tuple)) or any(index >= len(row) for index in indexes):
