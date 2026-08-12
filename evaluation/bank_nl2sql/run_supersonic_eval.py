@@ -708,11 +708,14 @@ def run_supersonic_evaluation(
     result_only: bool = False,
     cleanup_conversations: bool = True,
     on_item_complete: Callable[[dict[str, Any], int, int], None] | None = None,
+    stop_predicate: Callable[[dict[str, Any], int, int], bool] | None = None,
 ) -> dict[str, Any]:
     """Run the frontend conversation API chain and return transport evidence."""
 
     if concurrency < 1:
         raise SuperSonicEvaluationError("concurrency must be at least 1")
+    if stop_predicate is not None and concurrency != 1:
+        raise SuperSonicEvaluationError("stop_predicate requires serial concurrency=1")
     query_api_prefix = "/" + query_api_prefix.strip("/")
     manage_api_prefix = "/" + manage_api_prefix.strip("/")
     record_list = list(records)
@@ -721,6 +724,29 @@ def run_supersonic_evaluation(
         question = record.get("question")
         if not isinstance(sample_id, str) or not isinstance(question, str) or not question.strip():
             raise SuperSonicEvaluationError("Every evaluation record needs non-empty id and question")
+
+    if stop_predicate is not None:
+        items: list[dict[str, Any]] = []
+        for completed, record in enumerate(record_list, start=1):
+            item = _evaluate_record(
+                record,
+                agent_id=agent_id,
+                post_json=post_json,
+                query_api_prefix=query_api_prefix,
+                manage_api_prefix=manage_api_prefix,
+                summary_timeout_seconds=summary_timeout_seconds,
+                summary_poll_interval_seconds=summary_poll_interval_seconds,
+                result_only=result_only,
+                cleanup_conversations=cleanup_conversations,
+            )
+            items.append(item)
+            if on_item_complete is not None:
+                on_item_complete(item, completed, len(record_list))
+            if stop_predicate(item, completed, len(record_list)):
+                report = _build_report(items)
+                report["stoppedEarly"] = True
+                return report
+        return _build_report(items)
 
     items_by_index: dict[int, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=min(concurrency, max(1, len(record_list)))) as executor:

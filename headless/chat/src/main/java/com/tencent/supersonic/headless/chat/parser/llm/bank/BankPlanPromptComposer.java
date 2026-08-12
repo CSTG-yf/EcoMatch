@@ -53,6 +53,8 @@ public final class BankPlanPromptComposer {
                     “请分析……逐季变化”表示需要逐期 VALUE；如果问题同时要求整体方向/趋势，也可填写 TREND_DIRECTION。
                     “各季度变化明细”“各季度末数值以及最高/最低季度”本身不要求 CHANGE_VALUE；只有明确要求每期变化额时才加 CHANGE_VALUE。
                     逐期数值的最高/最低由 VALUE 事实直接支撑；若查询结果无法形成确定的整体方向，最终回答必须省略不可证实的趋势，不得猜测“上升、下降或持平”。
+                    “最高/最低、最高日/最低日”不是 answerFactTypes 枚举；它们只能填写 VALUE，
+                    由查询结果中的 min_value、max_value 事实支持。禁止填写 MINIMUM_VALUE、MAXIMUM_VALUE。
                     选择示例：问题“请分析某机构某指标从起点到终点的逐季变化，各季度末数值是多少？哪个季度数值最高？”
                     的 answerFactTypes 应为 ["VALUE","TREND_DIRECTION"]，不要填写 CHANGE_VALUE；若实际结果没有确定趋势，最终回答只保留 VALUE 事实。
                     COMPARISON_VALUE 仅表示布尔阈值结论（结果中必须存在 meets_condition），不表示普通“比较”这个词。
@@ -180,7 +182,9 @@ public final class BankPlanPromptComposer {
                        dimensions 只能为 [] 或 ["bank_organization"]，不得把 bank_data_date 放入 dimensions。
                        这类计划的 output.columns 仍只填写所选维度和指标（例如 ["ZB001"]），编译器会产生
                        current_value、baseline_value、absolute_change、percent_change 事实列；不要把这些结果别名
-                       写入 output.columns。题目要求前N时可以保留 requiredLimit 对应的 limit，但不得用 RANKING
+                       写入 output.columns 或 orderBy。CHANGE 的结果排序由编译器负责，因此 orderBy 必须为 []；
+                       题目要求前N时可以保留 requiredLimit 对应的 limit。题目询问全省/全部机构前N或后N时，
+                       dimensions 必须为 ["bank_organization"]，以便返回每家机构的变化事实；不得用 RANKING
                        的 rank/rank_from_bottom 过滤器替代 CHANGE。
                     9. “排名前三和后三/前N名和后N名”必须同时表达两个切片，而不是返回全量机构：
                        使用 filters 中的 {"field":"rank","operator":"LTE","value":"N","values":[]} 和
@@ -208,13 +212,20 @@ public final class BankPlanPromptComposer {
                        “主要经营指标”“相关指标”等泛称在没有封闭清单时不是全量目录；只有此时确实无法从问题确定具体指标集合，
                        才必须 action=CLARIFY，不得用全目录代替理解结果。
                     3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
+                       对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
+                       基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
+                       绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期；点对点比较时，
+                       startDate=endDate=当前点，baselineStartDate=baselineEndDate=较早点。
+                       “较年初”必须使用 comparison=START_OF_YEAR：当前期写题目给出的截至日期，
+                       baselineStartDate=baselineEndDate=当前期前一年的 12-31；当年 01-01 不是“较年初”基期。
                     4. “全省均值”只能使用目录允许的 benchmark/COMPARE/PROVINCE_AVERAGE 合同，不能写 SQL 或自行估算。
                     5. 收到 <repair> 时，只根据 tool_result、previous_plan、requirements_contract 和目录修正；
-                       仍只输出当前阶段要求的一份完整 JSON，不输出补丁或解释。
+                       只改正 error 指出的非法槽位，并保留 previous_plan 中其余已合法、仍满足 requirements_contract
+                       的槽位。仍只输出当前阶段要求的一份完整 JSON，不输出补丁或解释。
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v28-clarification-guidance";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v31-start-of-year-contract";
 
     private BankPlanPromptComposer() {}
 

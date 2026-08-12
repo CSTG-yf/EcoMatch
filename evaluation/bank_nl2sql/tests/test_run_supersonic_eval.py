@@ -482,6 +482,54 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(requests[602], ["save", "parse", "execute", "summary", "delete"])
         self.assertEqual([item["id"] for item in report["items"]], ["DEV-A", "DEV-B"])
 
+    def test_serial_stop_predicate_stops_before_the_next_record(self) -> None:
+        parsed_ids: list[int] = []
+
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 701 if "DEV-A" in path else 702}
+            if path.endswith("/parse"):
+                parsed_ids.append(payload["chatId"])
+                return {
+                    "code": 200,
+                    "data": {"queryId": payload["chatId"] + 1000, "selectedParses": [{"id": 1}]},
+                }
+            if path.endswith("/execute"):
+                return {
+                    "code": 200,
+                    "data": {"queryState": "SUCCESS", "queryColumns": [], "queryResults": []},
+                }
+            if path.endswith("/getExecuteSummary"):
+                return {"code": 200, "data": {"queryMode": "METRIC", "textSummary": "done"}}
+            if path.startswith("/openapi/chat/manage/delete?"):
+                return {"code": 200, "data": True}
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [
+                {"id": "DEV-A", "question": "first", "expected": {"columns": [], "rows": []}},
+                {"id": "DEV-B", "question": "second", "expected": {"columns": [], "rows": []}},
+            ],
+            agent_id=7,
+            post_json=post_json,
+            concurrency=1,
+            stop_predicate=lambda _item, completed, _total: completed == 1,
+        )
+
+        self.assertTrue(report["stoppedEarly"])
+        self.assertEqual(parsed_ids, [701])
+        self.assertEqual([item["id"] for item in report["items"]], ["DEV-A"])
+
+    def test_stop_predicate_rejects_parallel_execution(self) -> None:
+        with self.assertRaises(SuperSonicEvaluationError):
+            run_supersonic_evaluation(
+                [{"id": "DEV-A", "question": "first", "expected": {}}],
+                agent_id=7,
+                post_json=lambda _path, _payload: {"code": 200, "data": 1},
+                concurrency=2,
+                stop_predicate=lambda _item, _completed, _total: False,
+            )
+
     def test_resume_checkpoint_requires_the_same_split_agent_and_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             checkpoint = Path(temp_dir) / "checkpoint.json"

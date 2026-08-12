@@ -134,6 +134,47 @@ class BankQueryPlanValidatorTest {
         assertTrue(result.codes().contains("CHANGE_DATE_DIMENSION_FORBIDDEN"));
     }
 
+    @Test
+    void rejectsCompilerOwnedOrderingAndMissingOrganizationDimensionForProvinceChangeTopN() {
+        BankQueryPlan plan = provinceWideChangeTopNPlan();
+        plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("percent_change")
+                .direction(BankQueryPlan.SortDirection.DESC).build()));
+
+        BankQueryPlanValidator.ValidationResult ordered = validator.validate(plan,
+                provinceWideChangeTopNRequirements());
+
+        assertFalse(ordered.isValid());
+        assertTrue(ordered.codes().contains("CHANGE_RESULT_ORDER_FORBIDDEN"));
+        assertTrue(ordered.codes().contains("CHANGE_TOPN_ORGANIZATION_DIMENSION_REQUIRED"));
+
+        plan.setOrderBy(List.of());
+        plan.setDimensions(List.of("bank_organization"));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001"));
+
+        assertTrue(validator.validate(plan, provinceWideChangeTopNRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsCurrentYearFirstDayAsTheStartOfYearPlanBaseline() {
+        BankQueryPlan plan = provinceWideChangeTopNPlan();
+        plan.setDimensions(List.of("bank_organization"));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001"));
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);
+        plan.getTime().setBaselineStartDate(LocalDate.of(2026, 1, 1));
+        plan.getTime().setBaselineEndDate(LocalDate.of(2026, 1, 1));
+
+        BankQueryPlanValidator.ValidationResult invalid = validator.validate(plan,
+                provinceWideChangeTopNRequirements());
+
+        assertFalse(invalid.isValid());
+        assertTrue(invalid.codes().contains("START_OF_YEAR_BASELINE_INVALID"));
+
+        plan.getTime().setBaselineStartDate(LocalDate.of(2025, 12, 31));
+        plan.getTime().setBaselineEndDate(LocalDate.of(2025, 12, 31));
+
+        assertTrue(validator.validate(plan, provinceWideChangeTopNRequirements()).isValid());
+    }
+
     private SemanticIntentHints requirements() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.COMPARISON)
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))
@@ -144,6 +185,36 @@ class BankQueryPlanValidatorTest {
                 .requiredEndDate(LocalDate.of(2025, 7, 31))
                 .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
                         "COMPARE", "PROVINCE_AVERAGE")))
+                .build();
+    }
+
+    private SemanticIntentHints provinceWideChangeTopNRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.CHANGE)
+                .allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).build();
+    }
+
+    private BankQueryPlan provinceWideChangeTopNPlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.CHANGE)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>()).dimensions(new ArrayList<>())
+                .organizations(new ArrayList<>())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 3, 31))
+                        .endDate(LocalDate.of(2026, 3, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                        .baselineStartDate(LocalDate.of(2024, 12, 31))
+                        .baselineEndDate(LocalDate.of(2024, 12, 31)).build())
+                .filters(new ArrayList<>()).calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.CHANGE).build())
+                .orderBy(new ArrayList<>()).limit(3)
+                .output(BankQueryPlan.Output.builder().columns(new ArrayList<>(List.of("ZB001")))
+                        .orderSensitive(false).build())
                 .build();
     }
 

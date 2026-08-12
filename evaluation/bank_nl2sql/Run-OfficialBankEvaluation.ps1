@@ -33,6 +33,8 @@ param(
 
     [string]$RunRegistry,
 
+    [Nullable[int]]$MaxFailures,
+
     [switch]$AcknowledgeFinalTest,
 
     [switch]$NoResume
@@ -61,6 +63,12 @@ if ($Mode -eq "test" -and (-not $AcknowledgeFinalTest -or [string]::IsNullOrWhit
 if ($Mode -ne "test" -and $AcknowledgeFinalTest) {
     throw "-AcknowledgeFinalTest is valid only for test mode."
 }
+if ($null -ne $MaxFailures -and $MaxFailures -lt 0) {
+    throw "-MaxFailures must be zero or greater."
+}
+if ($null -ne $MaxFailures -and $Mode -notin @("train", "dev")) {
+    throw "-MaxFailures is valid only for train or dev mode."
+}
 
 $RunnerArgs = @(
     $Runner,
@@ -77,6 +85,9 @@ if (-not [string]::IsNullOrWhiteSpace($EvidenceRoot)) {
 }
 if ($Mode -eq "test") {
     $RunnerArgs += @("--acknowledge-final-test", "--run-registry", $RunRegistry)
+}
+if ($null -ne $MaxFailures) {
+    $RunnerArgs += @("--max-failures", "$MaxFailures")
 }
 if ($NoResume) {
     $RunnerArgs += "--no-resume"

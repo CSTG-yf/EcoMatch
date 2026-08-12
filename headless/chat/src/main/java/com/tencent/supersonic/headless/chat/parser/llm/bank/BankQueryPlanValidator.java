@@ -286,6 +286,16 @@ public class BankQueryPlanValidator {
             errors.add(error("COMPARISON_BASELINE_INVALID",
                     "comparison baseline must be a complete range earlier than the query range"));
         }
+        if (time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && time.getBaselineStartDate() != null && time.getBaselineEndDate() != null) {
+            LocalDate priorYearEnd = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+            if (!priorYearEnd.equals(time.getBaselineStartDate())
+                    || !priorYearEnd.equals(time.getBaselineEndDate())) {
+                errors.add(error("START_OF_YEAR_BASELINE_INVALID",
+                        "START_OF_YEAR baseline must be the prior calendar year's 12-31, "
+                                + "not current-year 01-01"));
+            }
+        }
     }
 
     private boolean matchesRecognizedTimeRange(BankQueryPlan.TimeRange time,
@@ -622,17 +632,24 @@ public class BankQueryPlanValidator {
         if (plan.getIntent() == BankIntentType.RANKING && orderBy.isEmpty()) {
             errors.add(error("RANKING_ORDER_REQUIRED", "ranking requires explicit sort direction"));
         }
+        if (plan.getIntent() == BankIntentType.CHANGE && !orderBy.isEmpty()) {
+            errors.add(error("CHANGE_RESULT_ORDER_FORBIDDEN",
+                    "CHANGE result ordering is compiler-owned; set orderBy to [] and do not use "
+                            + "percent_change, current_value, baseline_value, or absolute_change"));
+        }
         Set<String> fields = Stream
                 .concat(hints.getAllowedMetrics().stream(), hints.getAllowedDimensions().stream())
                 .collect(Collectors.toSet());
-        for (BankQueryPlan.OrderBy order : orderBy) {
-            if (StringUtils.isBlank(order.getField()) || order.getDirection() == null
-                    || (!BankSemanticRegistry.metricCodes().contains(order.getField())
-                            && !BankSemanticRegistry.dimensions().contains(order.getField()))
-                    || (!fields.isEmpty() && !metricAllowed(fields, order.getField())
-                            && !dimensionAllowed(fields, order.getField()))) {
-                errors.add(error("INVALID_ORDER_BY",
-                        "order field and direction must be semantic identifiers"));
+        if (plan.getIntent() != BankIntentType.CHANGE) {
+            for (BankQueryPlan.OrderBy order : orderBy) {
+                if (StringUtils.isBlank(order.getField()) || order.getDirection() == null
+                        || (!BankSemanticRegistry.metricCodes().contains(order.getField())
+                                && !BankSemanticRegistry.dimensions().contains(order.getField()))
+                        || (!fields.isEmpty() && !metricAllowed(fields, order.getField())
+                                && !dimensionAllowed(fields, order.getField()))) {
+                    errors.add(error("INVALID_ORDER_BY",
+                            "order field and direction must be semantic identifiers"));
+                }
             }
         }
         if (plan.getLimit() != null
@@ -641,6 +658,14 @@ public class BankQueryPlanValidator {
         }
         boolean ranksSelectedOrganization = safe(plan.getOrganizations())
                 .map(BankQueryPlan.Organization::getCode).anyMatch(StringUtils::isNotBlank);
+        boolean provinceWideChangeTopN = plan.getIntent() == BankIntentType.CHANGE
+                && hints.getRequiredLimit() != null && !ranksSelectedOrganization
+                && safe(plan.getDimensions()).noneMatch(ORGANIZATION_DIMENSIONS::contains);
+        if (provinceWideChangeTopN) {
+            errors.add(error("CHANGE_TOPN_ORGANIZATION_DIMENSION_REQUIRED",
+                    "province-wide CHANGE TopN requires the bank_organization dimension so the "
+                            + "compiler can return per-organization facts"));
+        }
         if (plan.getIntent() == BankIntentType.RANKING && plan.getLimit() == null
                 && !ranksSelectedOrganization) {
             errors.add(error("RANKING_LIMIT_REQUIRED", "ranking requires a TopN limit"));

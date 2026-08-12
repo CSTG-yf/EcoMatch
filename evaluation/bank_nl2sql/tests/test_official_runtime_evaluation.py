@@ -22,6 +22,12 @@ from official_runtime_evaluation import (  # noqa: E402
     verify_bootstrap_receipt,
     verify_official_runtime_release,
 )
+from run_official_runtime_eval import (  # noqa: E402
+    OfficialRuntimeRunError,
+    _assert_completed_gate,
+    _early_stop_state,
+    _load_resumed_items,
+)
 
 
 def _record(sample_id: str = "TRAIN-S-01") -> dict:
@@ -191,6 +197,87 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertIn("run_official_runtime_eval.py", launcher)
         self.assertNotIn("run_supersonic_eval.py", launcher)
         self.assertNotIn("--concurrency", launcher)
+        self.assertIn("MaxFailures", launcher)
+        self.assertIn("--max-failures", launcher)
+
+    def test_early_stop_requires_more_than_the_failure_budget(self) -> None:
+        scored_items = [
+            {"id": "TRAIN-S-01", "casePass": False},
+            {"id": "TRAIN-M-01", "casePass": False},
+            {"id": "TRAIN-H-01", "casePass": False},
+        ]
+
+        self.assertIsNone(_early_stop_state(max_failures=3, scored_items=scored_items))
+        stop = _early_stop_state(max_failures=2, scored_items=scored_items)
+
+        self.assertEqual(stop["reason"], "MAX_FAILURES_EXCEEDED")
+        self.assertEqual(stop["maxFailures"], 2)
+        self.assertEqual(stop["observedFailures"], 3)
+        self.assertEqual(stop["triggeredAfterId"], "TRAIN-H-01")
+        self.assertFalse(stop["promotable"])
+
+    def test_resume_rejects_a_diagnostic_stopped_early_report(self) -> None:
+        expected_run = {
+            "runId": "train-stop",
+            "mode": "train",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.2",
+            "concurrency": 1,
+            "maxFailureCount": 5,
+        }
+        report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
+            "run": {**expected_run, "status": "STOPPED_EARLY"},
+            "items": [
+                {"id": "TRAIN-S-01"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "train.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+
+            with self.assertRaisesRegex(OfficialRuntimeRunError, "stopped early and is diagnostic-only"):
+                _load_resumed_items(report_path, expected_run=expected_run, records=[_record()])
+
+    def test_completed_smoke_gate_ignores_a_later_train_stop_budget(self) -> None:
+        expected_train = {
+            "runId": "train-stop",
+            "mode": "train",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.2",
+            "concurrency": 1,
+            "maxFailureCount": 5,
+        }
+        smoke_report = {
+            "run": {
+                **{key: value for key, value in expected_train.items() if key != "maxFailureCount"},
+                "mode": "smoke",
+                "split": "train",
+                "status": "COMPLETED",
+                "requestedCount": 1,
+            },
+            "metrics": {"caseDenominator": 1, "caseAccuracy": 1.0},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "smoke.json"
+            report_path.write_text(json.dumps(smoke_report), encoding="utf-8")
+
+            _assert_completed_gate(
+                report_path,
+                expected=expected_train,
+                required_mode="smoke",
+                require_green=True,
+            )
 
     def test_all_public_scoring_commands_converge_or_fail_closed(self) -> None:
         official = subprocess.run(

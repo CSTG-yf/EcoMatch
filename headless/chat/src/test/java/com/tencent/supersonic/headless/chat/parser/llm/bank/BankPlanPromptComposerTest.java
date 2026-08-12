@@ -77,6 +77,13 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("从基期到当前期的增幅排名前N"));
         assertTrue(sys.contains("这些结果别名"));
         assertTrue(sys.contains("写入 output.columns"));
+        assertTrue(sys.contains("baselineEndDate 必须早于 startDate"));
+        assertTrue(sys.contains("“较年初”必须使用 comparison=START_OF_YEAR"));
+        assertTrue(sys.contains("当前期前一年的 12-31"));
+        assertTrue(sys.contains("CHANGE 的结果排序由编译器负责"));
+        assertTrue(sys.contains("orderBy 必须为 []"));
+        assertTrue(sys.contains("dimensions 必须为 [\"bank_organization\"]"));
+        assertTrue(sys.contains("只改正 error 指出的非法槽位"));
     }
 
     @Test
@@ -100,6 +107,8 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("\"answerFactTypes\":[\"VALUE\"]"));
         assertTrue(sys.contains("只有用户明确询问整体/总体趋势"));
         assertTrue(sys.contains("逐期数值的最高/最低由 VALUE 事实直接支撑"));
+        assertTrue(sys.contains("最高日/最低日”不是 answerFactTypes 枚举"));
+        assertTrue(sys.contains("禁止填写 MINIMUM_VALUE、MAXIMUM_VALUE"));
         assertTrue(sys.contains("若查询结果无法形成确定的整体方向"));
         assertTrue(sys.contains("的 answerFactTypes 应为 [\"VALUE\",\"TREND_DIRECTION\"]"));
         assertTrue(sys.contains("派生指标（代码、公式、单位与方向）"));
