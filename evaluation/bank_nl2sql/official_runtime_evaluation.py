@@ -19,9 +19,9 @@ from typing import Any
 from fact_contract_v3 import score_fact_contract_report
 
 
-OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.0.0"
+OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.2.0"
 OFFICIAL_RUNTIME_PROFILE = "official_runtime_evaluation_v3.json"
-OFFICIAL_DATASET_VERSION = "2.0.1"
+OFFICIAL_DATASET_VERSION = "2.0.2"
 OFFICIAL_MINIMUM_SOURCE_COMMIT = "565bc74ed313acff1b192aef4ab9a974893e1a53"
 OFFICIAL_SMOKE_IDS = (
     "TRAIN-S-01",
@@ -38,8 +38,6 @@ _METRIC_KEYS = (
     "caseDenominator",
     "resultFactAccuracy",
     "resultFactsExactHits",
-    "finalFactAccuracy",
-    "finalFactsExactHits",
     "contractReadyRate",
     "contractReadyCount",
 )
@@ -52,10 +50,13 @@ _RUNTIME_ITEM_KEYS = (
     "execute",
     "parseMs",
     "executeMs",
+    "queryTimeCostMs",
+    "executePostQueryMs",
     "summaryMs",
     "endToEndMs",
     "summaryState",
     "textSummary",
+    "finalAnswerTrace",
     "errorType",
     "backendError",
     "summaryErrorType",
@@ -76,7 +77,6 @@ _SCORE_ITEM_KEYS = (
     "resultExact",
     "resultFactsExact",
     "resultEvidence",
-    "finalFactsExact",
     "casePass",
     "reason",
 )
@@ -85,7 +85,6 @@ _FACT_FAILURE_CATEGORIES = {
     "missing_prediction": "MISSING_PREDICTION",
     "contract_review_required": "CONTRACT_REVIEW_REQUIRED",
     "result_mismatch": "RESULT_FACT_MISMATCH",
-    "final_fact_mismatch": "FINAL_FACT_MISMATCH",
 }
 
 
@@ -133,6 +132,7 @@ def load_official_runtime_profile(dataset_dir: Path | str) -> tuple[dict[str, An
         or capture.get("method") != "openapi-frontend-conversation-chain"
         or capture.get("perRecordConversation") != "isolated"
         or capture.get("concurrency") != 1
+        or capture.get("resultOnly") is not True
     ):
         raise OfficialRuntimeEvaluationError("official runtime profile must require serial execution")
     for key in ("timeoutSeconds", "summaryTimeoutSeconds", "networkRetries"):
@@ -144,9 +144,10 @@ def load_official_runtime_profile(dataset_dir: Path | str) -> tuple[dict[str, An
     score = profile.get("score")
     if score != {
         "primaryMetric": "caseAccuracy",
-        "casePass": "resultExact AND finalFactsExact",
+        "casePass": "resultExact",
         "denominator": "ALL_SELECTED_RECORDS",
         "sqlTextScored": False,
+        "finalAnswerScored": False,
     }:
         raise OfficialRuntimeEvaluationError("official runtime profile score contract is invalid")
     smoke = profile.get("smoke")
@@ -378,12 +379,25 @@ def _runtime_diagnostics(
         str(item.get("errorCategory") or "NONE")
         for item in items
     )
+    final_answer_states = Counter(
+        str((item.get("finalAnswerTrace") or {}).get("status") or "MISSING")
+        for item in items
+    )
     return {
         "parseSuccessRate": _rate(sum(bool(item.get("parse")) for item in items), count),
         "executionSuccessRate": _rate(sum(bool(item.get("execute")) for item in items), count),
         "summarySuccessRate": _rate(
             sum(item.get("summaryState") == "SUCCESS" for item in items), count
         ),
+        "finalAnswerProcessorSuccessRate": _rate(
+            sum(
+                isinstance(item.get("finalAnswerTrace"), dict)
+                and item["finalAnswerTrace"].get("status") == "SUCCEEDED"
+                for item in items
+            ),
+            count,
+        ),
+        "finalAnswerProcessorStates": dict(sorted(final_answer_states.items())),
         "errorCategories": dict(sorted(errors.items())),
         "timingMs": capture_report.get("timingMs"),
         "timingDistributionsMs": capture_report.get("timingDistributionsMs"),
@@ -413,6 +427,23 @@ def _public_item(runtime_item: dict[str, Any], scored_item: dict[str, Any]) -> d
     return item
 
 
+def _validate_final_answer_attestation(capture_items: list[dict[str, Any]]) -> None:
+    for item in capture_items:
+        trace = item.get("finalAnswerTrace")
+        if not isinstance(trace, dict):
+            raise OfficialRuntimeEvaluationError(
+                "runtime capture lacks final-answer stage attestation; deploy the current backend "
+                "and bootstrap the Agent before evaluation"
+            )
+        if (
+            not isinstance(trace.get("status"), str)
+            or not isinstance(trace.get("attempts"), int)
+            or not isinstance(trace.get("errors"), list)
+            or not all(isinstance(error, str) for error in trace["errors"])
+        ):
+            raise OfficialRuntimeEvaluationError("runtime capture final-answer stage attestation is invalid")
+
+
 def build_official_runtime_report(
     capture_report: dict[str, Any], records: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -423,7 +454,11 @@ def build_official_runtime_report(
     """
 
     capture_items, expected_ids = _validated_capture_items(capture_report, records)
-    fact_report = score_fact_contract_report(capture_report, records)
+    fact_report = score_fact_contract_report(
+        capture_report,
+        records,
+        score_mode="result_only",
+    )
     scored_items = fact_report.get("items")
     if not isinstance(scored_items, list):
         raise OfficialRuntimeEvaluationError("Fact v3 scorer did not return items[]")
@@ -454,9 +489,10 @@ def build_official_runtime_report(
         "metrics": {key: metrics_in[key] for key in _METRIC_KEYS},
         "policy": {
             "primaryMetric": "caseAccuracy",
-            "casePass": "resultExact AND finalFactsExact",
+            "casePass": "resultExact",
             "denominator": "ALL_SELECTED_RECORDS",
             "sqlTextScored": False,
+            "finalAnswerScored": False,
         },
         "run": capture_report.get("run"),
         "runtimeDiagnostics": _runtime_diagnostics(capture_report, public_items),

@@ -7,6 +7,8 @@ import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContract;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContractResponseParser;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
@@ -140,6 +142,12 @@ public class LLMRequestService {
         llmRequest.setBankPlanToolResult(toolResult);
         llmRequest.setPreviousBankQueryPlanJson(
                 queryRequest.getBankPlanRepairContext().getPreviousPlanJson());
+        String requirementsJson =
+                queryRequest.getBankPlanRepairContext().getPreviousRequirementsJson();
+        if (requirementsJson != null && !requirementsJson.isBlank()) {
+            llmRequest.setBankRequestContract(new BankRequestContractResponseParser().parse(
+                    requirementsJson, llmRequest.getSemanticIntentHints()));
+        }
     }
 
     static LLMReq.SqlGenType selectSqlGenType(LLMReq.SqlGenType configuredSqlGenType,

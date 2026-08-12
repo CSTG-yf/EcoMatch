@@ -20,34 +20,37 @@ beforeEach(() => {
 });
 
 describe('bank query presentation', () => {
-  it('renders the normalized intent and query context', () => {
+  it('renders the model-owned requirements contract instead of a rule preflight intent', () => {
     render(
       <BankQueryOverview
-        intent={
-          {
-            originalText: '看看本月贷款余额',
-            normalizedText: '查询本月贷款余额',
-            intent: 'POINT_QUERY',
-            scene: 'OPERATION_ANALYSIS',
-            confidence: 0.96,
-            metrics: [{ name: '贷款余额' }],
-            organizations: [{ name: '南京分行' }],
-            time: { expression: '本月' },
-          } as any
-        }
         parseInfo={
           {
-            dimensions: [{ name: '机构' }],
-            dataSet: { name: '信贷经营主题' },
+            properties: {
+              'bank.nl2sql.requirements': JSON.stringify({
+                action: 'EXECUTE',
+                intent: 'COMPARISON',
+                metricCodes: ['ZB001', 'ZB002'],
+                organizationCodes: ['ORG004'],
+                time: {
+                  startDate: '2025-07-31',
+                  endDate: '2025-07-31',
+                  comparison: 'NONE',
+                },
+                answerFactTypes: ['VALUE', 'PROVINCE_AVERAGE', 'GAP_VALUE'],
+              }),
+            },
           } as any
         }
       />
     );
 
-    expect(screen.getByRole('region', { name: '标准化问数意图' })).toHaveTextContent('指标查询');
-    expect(screen.getByText('查询本月贷款余额')).toBeInTheDocument();
-    expect(screen.getByText('南京分行')).toBeInTheDocument();
-    expect(screen.getByText('信贷经营主题')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '模型理解的查询需求' })).toHaveTextContent(
+      '对比分析'
+    );
+    expect(screen.getByText('ZB001、ZB002')).toBeInTheDocument();
+    expect(screen.getByText('ORG004')).toBeInTheDocument();
+    expect(screen.getByText('2025-07-31')).toBeInTheDocument();
+    expect(screen.getByText('VALUE、PROVINCE_AVERAGE、GAP_VALUE')).toBeInTheDocument();
   });
 
   it('renders status, chart recommendation, explanation evidence and warnings', () => {

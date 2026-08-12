@@ -11,6 +11,8 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -20,6 +22,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class LLMSqlParserTest {
+
+    @Test
+    void compilationRepairExplainsRankingAndProvinceAverageConflictWithoutRawExceptionText() {
+        List<String> hints = LLMSqlParser.compilationCorrectionHints(
+                BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION, """
+                        {"intent":"RANKING","filters":[{"field":"benchmark",
+                        "operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]}]}
+                        """);
+
+        assertEquals(List.of("当前计划是“全省排名”而不是“全省均值”比较：删除 "
+                + "benchmark/COMPARE/PROVINCE_AVERAGE，令 filters=[]；保留 intent=RANKING "
+                + "和 bank_organization 维度后，重新输出完整 BankQueryPlan。"), hints);
+    }
 
     @Test
     void shouldRetryCompilationOnceWithSanitizedToolFeedbackThenStopOnRepeatedFailure() {

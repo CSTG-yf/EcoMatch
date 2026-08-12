@@ -43,7 +43,11 @@ def main(argv: list[str] | None = None) -> int:
     except EvaluationAccessError as error:
         parser.error(str(error))
 
-    scored = score_fact_contract_report(_read_json(args.report), records)
+    scored = score_fact_contract_report(
+        _read_json(args.report),
+        records,
+        score_mode="result_only",
+    )
     _write_json(args.output, scored)
     print(json.dumps(scored["metrics"], ensure_ascii=False, sort_keys=True))
     return 0

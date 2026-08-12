@@ -22,8 +22,9 @@
 
 正式成绩只能使用
 [`evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1`](evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1)，
-它固定 v2.0.1、Fact v3 `caseAccuracy`、串行执行、Agent 启动回执和 smoke → train → dev →
-冻结 test 的门禁。不得以其他脚本、历史报告或消融结果替代。
+它固定 v2.0.2、Fact v3 `caseAccuracy`、串行执行、Agent 启动回执和 smoke → train → dev →
+冻结 test 的门禁。正式评测的 execute 请求带 `resultOnly=true`，只保留查询和结构化
+结果事实处理；最终回答只作非计分诊断。不得以其他脚本、历史报告或消融结果替代。
 
 ### 工程复现包（非正式）
 
@@ -97,7 +98,7 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 1. **结果事实**：数值、机构、指标和日期身份必须由 compiler + projector **稳定产出**，并可被 `resultExact` 证明。
    - 例：H-04 族应落入已有 **multi-metric aggregation summary** 模板，而不是自由 UNION gap SQL。
-2. **最终回答**：`finalFactsExact` 必须在最终文本中完整、直接地回答题目，且不得为文案破坏可执行查询或凭空补充日期/数字。
+2. **最终回答**：只作为用户可见的非计分展示；不得为文案破坏可执行查询或凭空补充日期/数字。
 3. 问句措辞（如「与全省均值对比」）与中间投影形态冲突时：
    - **第一刀**：保证可执行且结果事实、实体绑定正确。
    - **第二刀**：再生成简洁、可校验的最终回答。
@@ -129,7 +130,7 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 - 报告记录 `planSource`（DETERMINISTIC / MODEL / MODEL_COLD_REPLAN / SOFT_FALLBACK）。  
 - 对比用同一 `ids-file`、同一 agent、同一数据集冻结版本。  
 - 脚本与产物可放 `.local-dev/bank-nl2sql/ablation/`（不提交大日志亦可）。  
-- 主指标：Fact v3 `caseAccuracy`（全分母）；`resultExact` 与 `finalFactsExact` 为可解释组成项；不把 SQL 文本或表形态当分数。
+- 主指标：Fact v3 `caseAccuracy`（全分母，等于 `resultExact`）；最终回答不参与计分；不把 SQL 文本或表形态当分数。
 
 ---
 

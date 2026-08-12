@@ -15,6 +15,7 @@ import json
 import math
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -245,8 +246,12 @@ def _create_conversation(
     sample_id: str,
     agent_id: int,
 ) -> int:
+    # A rerun must never reuse a previous conversation with the same sample ID.
+    # The frontend creates a fresh chat for every evaluation item; include a
+    # process-local nonce so repeated runs preserve that isolation even when the
+    # backend treats chatName as an idempotency key.
     query = urllib.parse.urlencode(
-        {"chatName": f"evaluation-{sample_id}", "agentId": agent_id}
+        {"chatName": f"evaluation-{sample_id}-{uuid.uuid4().hex}", "agentId": agent_id}
     )
     chat_id = _unwrap_api_value(post_json(f"{manage_api_prefix}/save?{query}", {}))
     if not isinstance(chat_id, int) or isinstance(chat_id, bool):
@@ -261,7 +266,7 @@ def _poll_execute_summary(
     query_id: int,
     timeout_seconds: float,
     poll_interval_seconds: float,
-) -> tuple[str, str | None, float]:
+) -> tuple[str, str | None, float, dict[str, Any] | None]:
     started = time.perf_counter()
     deadline = started + timeout_seconds
     while True:
@@ -272,10 +277,33 @@ def _poll_execute_summary(
                 "SUCCESS",
                 str(summary) if isinstance(summary, str) else None,
                 round((time.perf_counter() - started) * 1000, 3),
+                _final_answer_trace(response),
             )
         if time.perf_counter() >= deadline:
-            return "TIMEOUT", None, round((time.perf_counter() - started) * 1000, 3)
+            return "TIMEOUT", None, round((time.perf_counter() - started) * 1000, 3), None
         time.sleep(poll_interval_seconds)
+
+
+def _final_answer_trace(summary_response: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract the safe final-answer stage attestation from a persisted result."""
+
+    context = summary_response.get("chatContext")
+    if not isinstance(context, dict):
+        return None
+    properties = context.get("properties")
+    if not isinstance(properties, dict):
+        return None
+    raw = properties.get("bank.nl2sql.finalAnswerTrace")
+    if not isinstance(raw, dict):
+        return None
+    status = raw.get("status")
+    attempts = raw.get("attempts")
+    errors = raw.get("errors")
+    if not isinstance(status, str) or not isinstance(attempts, int):
+        return None
+    if not isinstance(errors, list) or not all(isinstance(error, str) for error in errors):
+        return None
+    return {"status": status, "attempts": attempts, "errors": list(errors)}
 
 
 def _evaluate_record(
@@ -287,6 +315,7 @@ def _evaluate_record(
     manage_api_prefix: str,
     summary_timeout_seconds: float,
     summary_poll_interval_seconds: float,
+    result_only: bool,
     cleanup_conversations: bool,
 ) -> dict[str, Any]:
     sample_id = record["id"]
@@ -299,10 +328,13 @@ def _evaluate_record(
         "execute": False,
         "parseMs": None,
         "executeMs": None,
+        "queryTimeCostMs": None,
+        "executePostQueryMs": None,
         "summaryMs": None,
         "endToEndMs": None,
         "summaryState": None,
         "textSummary": None,
+        "finalAnswerTrace": None,
         "errorCategory": None,
         "s2sql": None,
         "physicalSql": None,
@@ -365,12 +397,25 @@ def _evaluate_record(
         "chatId": chat_id,
         "streamingResult": True,
     }
+    if result_only:
+        execute_payload["resultOnly"] = True
     try:
         started = time.perf_counter()
         execute_response = _unwrap_api_response(
             post_json(f"{query_api_prefix}/execute", execute_payload)
         )
         item["executeMs"] = round((time.perf_counter() - started) * 1000, 3)
+        query_time_cost = execute_response.get("queryTimeCost")
+        if (
+            isinstance(query_time_cost, (int, float))
+            and not isinstance(query_time_cost, bool)
+            and math.isfinite(float(query_time_cost))
+            and query_time_cost >= 0
+        ):
+            item["queryTimeCostMs"] = round(float(query_time_cost), 3)
+            item["executePostQueryMs"] = round(
+                max(0.0, item["executeMs"] - item["queryTimeCostMs"]), 3
+            )
         backend_error = execute_response.get("errorMsg")
         if isinstance(backend_error, str) and backend_error.strip():
             item["backendError"] = backend_error.strip()
@@ -395,7 +440,7 @@ def _evaluate_record(
         return finish_query_timing()
 
     try:
-        summary_state, text_summary, summary_ms = _poll_execute_summary(
+        summary_state, text_summary, summary_ms, final_answer_trace = _poll_execute_summary(
             post_json=post_json,
             summary_endpoint=f"{query_api_prefix}/getExecuteSummary",
             query_id=query_id,
@@ -405,6 +450,7 @@ def _evaluate_record(
         item["summaryState"] = summary_state
         item["textSummary"] = text_summary
         item["summaryMs"] = summary_ms
+        item["finalAnswerTrace"] = final_answer_trace
         if summary_state != "SUCCESS":
             item["errorCategory"] = (
                 "SUMMARY_TIMEOUT" if summary_state == "TIMEOUT" else "SUMMARY_ERROR"
@@ -434,6 +480,14 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     )
     parse_latencies = [item["parseMs"] for item in items if item["parseMs"] is not None]
     execute_latencies = [item["executeMs"] for item in items if item["executeMs"] is not None]
+    query_time_cost_latencies = [
+        item["queryTimeCostMs"] for item in items if item.get("queryTimeCostMs") is not None
+    ]
+    execute_post_query_latencies = [
+        item["executePostQueryMs"]
+        for item in items
+        if item.get("executePostQueryMs") is not None
+    ]
     summary_latencies = [item["summaryMs"] for item in items if item["summaryMs"] is not None]
     end_to_end_latencies = [
         item["endToEndMs"] for item in items if item.get("endToEndMs") is not None
@@ -463,6 +517,16 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
         "timingMs": {
             "averageParseMs": round(sum(parse_latencies) / len(parse_latencies), 3) if parse_latencies else None,
             "averageExecuteMs": round(sum(execute_latencies) / len(execute_latencies), 3) if execute_latencies else None,
+            "averageQueryTimeCostMs": round(
+                sum(query_time_cost_latencies) / len(query_time_cost_latencies), 3
+            )
+            if query_time_cost_latencies
+            else None,
+            "averageExecutePostQueryMs": round(
+                sum(execute_post_query_latencies) / len(execute_post_query_latencies), 3
+            )
+            if execute_post_query_latencies
+            else None,
             "averageSummaryMs": round(sum(summary_latencies) / len(summary_latencies), 3)
             if summary_latencies
             else None,
@@ -470,6 +534,8 @@ def _build_report(items: list[dict[str, Any]]) -> dict[str, Any]:
         "timingDistributionsMs": {
             "parse": _latency_distribution(parse_latencies),
             "execute": _latency_distribution(execute_latencies),
+            "queryTimeCost": _latency_distribution(query_time_cost_latencies),
+            "executePostQuery": _latency_distribution(execute_post_query_latencies),
             "summary": _latency_distribution(summary_latencies),
             "endToEnd": _latency_distribution(end_to_end_latencies),
             "successfulEndToEnd": _latency_distribution(
@@ -491,6 +557,7 @@ def run_supersonic_evaluation(
     concurrency: int = 4,
     summary_timeout_seconds: float = 120,
     summary_poll_interval_seconds: float = 0.5,
+    result_only: bool = False,
     cleanup_conversations: bool = True,
     on_item_complete: Callable[[dict[str, Any], int, int], None] | None = None,
 ) -> dict[str, Any]:
@@ -519,6 +586,7 @@ def run_supersonic_evaluation(
                 manage_api_prefix=manage_api_prefix,
                 summary_timeout_seconds=summary_timeout_seconds,
                 summary_poll_interval_seconds=summary_poll_interval_seconds,
+                result_only=result_only,
                 cleanup_conversations=cleanup_conversations,
             ): index
             for index, record in enumerate(record_list)

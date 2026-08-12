@@ -5,7 +5,9 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
+import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -84,6 +86,35 @@ class BusinessInsightProcessorTest {
 
         assertEquals("余额增长50%。", result.getTextSummary());
         assertTrue(result.getBusinessExplanation().getSummary().contains("查询返回3条记录"));
+    }
+
+    @Test
+    void doesNotPublishGenericExplanationWhenBankFinalAnswerIsConfigured() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(row("2026-01", 100), row("2026-02", 120)));
+        ExecuteContext context = new ExecuteContext(new ChatExecuteReq());
+        Agent agent = new Agent();
+        agent.setChatAppConfig(Map.of(BankFinalAnswerProcessor.APP_KEY,
+                ChatApp.builder().enable(true).build()));
+        context.setAgent(agent);
+        context.setResponse(result);
+
+        assertFalse(new BusinessInsightProcessor().accept(context));
+    }
+
+    @Test
+    void skipsGenericExplanationForResultOnlyExecution() {
+        QueryResult result = new QueryResult();
+        result.setQueryState(QueryState.SUCCESS);
+        result.setQueryColumns(List.of(column("month", "DATE"), column("balance", "NUMBER")));
+        result.setQueryResults(List.of(row("2026-01", 100), row("2026-02", 120)));
+        ExecuteContext context = new ExecuteContext(
+                ChatExecuteReq.builder().resultOnly(true).build());
+        context.setResponse(result);
+
+        assertFalse(new BusinessInsightProcessor().accept(context));
     }
 
     @Test

@@ -15,25 +15,42 @@ class BankQueryPlanResponseParserTest {
     private final BankQueryPlanResponseParser parser = new BankQueryPlanResponseParser();
 
     @Test
-    void shouldParseCodeFencedJsonPlanAndValidateItAgainstSemanticHints() {
-        BankQueryPlan plan = parser.parse("```json\n" + validPlanJson() + "\n```", hints());
+    void shouldRejectCodeFencedJsonPlanInsteadOfSilentlyAcceptingMarkdown() {
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse("```json\n" + validPlanJson() + "\n```", hints()));
 
-        assertEquals(BankIntentType.RANKING, plan.getIntent());
-        assertEquals("ZB001", plan.getMetrics().get(0).getBizName());
-        assertEquals(3, plan.getLimit());
+        assertEquals(BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, exception.getReason());
     }
 
     @Test
-    void shouldStripSqlLikeHelperFieldsAndStillValidateThePlan() {
-        // Models often invent helper keys (sql, additional_analysis). Canonicalization drops them
-        // so a near-correct plan is not rejected solely for unknown properties.
+    void shouldRejectSqlLikeHelperFieldsInsteadOfSilentlyDroppingThem() {
         String output = validPlanJson().replace("\n}",
                 ",\n  \"sql\": \"SELECT * FROM bank_daily_metrics\"\n}");
 
-        BankQueryPlan plan = parser.parse(output, hints());
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, hints()));
 
-        assertEquals(BankIntentType.RANKING, plan.getIntent());
-        assertEquals("ZB001", plan.getMetrics().get(0).getBizName());
+        assertEquals(BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, exception.getReason());
+    }
+
+    @Test
+    void shouldRejectMetricCodeThatIsNotAnExactCatalogIdentifier() {
+        String output = validPlanJson().replace("\"ZB001\"", "\"zb001\"");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, hints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.VALIDATION_FAILED, exception.getReason());
+    }
+
+    @Test
+    void shouldRejectChineseDisplayNamesInsteadOfNormalizingThemIntoSemanticIdentifiers() {
+        String output = validPlanJson().replace("bank_organization", "机构");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, hints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.VALIDATION_FAILED, exception.getReason());
     }
 
     @Test
@@ -72,7 +89,8 @@ class BankQueryPlanResponseParserTest {
 
     private SemanticIntentHints hints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
-                .allowedMetrics(Set.of("ZB001")).allowedDimensions(Set.of("机构", "数据日期"))
+                .allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
@@ -82,9 +100,10 @@ class BankQueryPlanResponseParserTest {
         return """
                 {
                   "version": "1.0",
+                  "action": "EXECUTE",
                   "intent": "RANKING",
                   "metrics": [{"bizName": "ZB001", "aggregation": "DEFAULT"}],
-                  "dimensions": ["机构"],
+                  "dimensions": ["bank_organization"],
                   "organizations": [{"code": "ORG004"}],
                   "time": {
                     "startDate": "2026-03-31",
@@ -96,7 +115,7 @@ class BankQueryPlanResponseParserTest {
                   "calculation": {"type": "DIRECT"},
                   "orderBy": [{"field": "ZB001", "direction": "DESC"}],
                   "limit": 3,
-                  "output": {"columns": ["机构", "ZB001"], "orderSensitive": true}
+                  "output": {"columns": ["bank_organization", "ZB001"], "orderSensitive": true}
                 }
                 """;
     }

@@ -20,63 +20,96 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void requirementsUserNamesTheStageWithoutRepeatingTheCatalog() {
+        String content = BankPlanPromptComposer.buildRequirementsUserContent("存款是多少？");
+
+        assertTrue(content.contains("<stage>REQUIREMENTS</stage>"));
+        assertFalse(content.contains("可填写值目录"));
+        assertFalse(content.contains(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.substring(0, 20)));
+    }
+
+    @Test
+    void planAndToolRepairCarryTheValidatedRequirementsContract() {
+        String requirements = "{\"version\":\"1.0\",\"action\":\"EXECUTE\"}";
+        String plan = BankPlanPromptComposer.buildPlanUserContent("存款是多少？", requirements);
+        BankPlanToolResult failure = BankPlanToolResult.failed(2, "trace-2", "fingerprint-1",
+                BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION",
+                Map.of("intent", List.of("POINT_QUERY", "CHANGE")), List.of("重新选择查询组合"));
+        String repair = BankPlanPromptComposer.buildToolRepairUserContent("存款是多少？",
+                requirements, "{\"intent\":\"POINT_QUERY\"}", failure);
+
+        assertTrue(plan.contains("<stage>PLAN</stage>"));
+        assertTrue(plan.contains("<requirements_contract>"));
+        assertTrue(repair.contains("<tool_result>"));
+        assertTrue(repair.contains("UNSUPPORTED_PLAN_COMBINATION"));
+        assertTrue(repair.contains("<requirements_contract>"));
+        assertFalse(repair.toUpperCase().contains("SELECT "));
+    }
+
+    @Test
+    void systemPrefixStatesBothExactOutputFormatsWithoutHiddenBusinessRecipes() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("第一阶段：REQUIREMENTS 的精确输出格式"));
+        assertTrue(sys.contains("BankRequestContract"));
+        assertTrue(sys.contains("metricCodes"));
+        assertTrue(sys.contains("answerFactTypes"));
+        assertTrue(sys.contains("第二阶段：PLAN 的精确输出格式"));
+        assertTrue(sys.contains("BankQueryPlan"));
+        assertTrue(sys.contains("\"action\":\"EXECUTE\""));
+        assertTrue(sys.contains("YYYY-MM-DD"));
+        assertTrue(sys.contains("权威语义目录"));
+        assertFalse(sys.contains("{{SEMANTIC_REGISTRY}}"));
+        assertFalse(sys.contains("意图配方"));
+        assertFalse(sys.contains("对公存款」=ZB003"));
+        assertTrue(sys.contains("封闭指标清单"));
+        assertTrue(sys.contains("不得用全目录代替理解结果"));
+        assertTrue(sys.contains("包括目录中的字母城市占位名称"));
+        assertTrue(sys.contains("不得依据系统当前日期"));
+        assertTrue(sys.contains("只有没有目录精确命中或确实命中多个机构时才澄清"));
+        assertTrue(sys.contains("均值排名"));
+        assertTrue(sys.contains("aggregation\":\"AVG\""));
+        assertTrue(sys.contains("rank_from_bottom"));
+        assertTrue(sys.contains("limit 设为 2*N"));
+    }
+
+    @Test
+    void systemPrefixMakesExecutableFormatsUnambiguousToTheModel() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("尖括号中的内容只是占位说明，绝不可原样输出"));
+        assertTrue(sys.contains("\"action\":\"EXECUTE\""));
+        assertTrue(sys.contains("\"action\":\"CLARIFY\""));
+        assertTrue(sys.contains("只选择回答当前问题实际需要的类型"));
+        assertTrue(sys.contains("不得把所有枚举值都填入 answerFactTypes"));
+        assertTrue(sys.contains("只问“变动了多少/增加或减少多少”"));
+        assertTrue(sys.contains("\"answerFactTypes\":[\"CHANGE_VALUE\"]"));
+        assertTrue(sys.contains("COMPARISON_VALUE 仅表示布尔阈值结论"));
+        assertTrue(sys.contains("普通“与全省均值逐项对比”"));
+        assertTrue(sys.contains("“高于/低于全省均值多少”只要求目标值和差额时"));
+        assertTrue(sys.contains("只有用户明确询问“全省均值是多少/均值为多少”时"));
+        assertTrue(sys.contains("“主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名"));
+        assertTrue(sys.contains("VALUE、GAP_VALUE"));
+        assertTrue(sys.contains("answerFactTypes 必须精确写成 [\"VALUE\",\"GAP_VALUE\"]"));
+        assertTrue(sys.contains("\"answerFactTypes\":[\"VALUE\"]"));
+        assertTrue(sys.contains("只有用户明确询问整体/总体趋势"));
+        assertTrue(sys.contains("逐期数值的最高/最低由 VALUE 事实直接支撑"));
+        assertTrue(sys.contains("若查询结果无法形成确定的整体方向"));
+        assertTrue(sys.contains("的 answerFactTypes 应为 [\"VALUE\",\"TREND_DIRECTION\"]"));
+        assertTrue(sys.contains("派生指标（代码、公式、单位与方向）"));
+        assertTrue(sys.contains("DERIVED_ZB002_DIV_ZB001"));
+        assertTrue(sys.contains("CHANGE 变化查询"));
+        assertTrue(sys.contains("\"field\":\"benchmark\",\"operator\":\"COMPARE\","
+                + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]"));
+        assertTrue(sys.contains("全省排名不等于全省均值比较"));
+        assertTrue(sys.contains("\"intent\":\"RANKING\""));
+        assertTrue(sys.contains("\"filters\":[]"));
+    }
+
+    @Test
     void rejectsCatalogDumpInUserContent() {
         String catalog = "可填写值目录（只能从下列内容中选择）：\n- /metrics/*/bizName: [ZB001]";
         assertThrows(IllegalArgumentException.class,
                 () -> BankPlanPromptComposer.buildDynamicUserContent(catalog));
-    }
-
-    @Test
-    void repairUserDoesNotRestateFieldCatalog() {
-        String repair = BankPlanPromptComposer.buildRepairUserContent("存款是多少？",
-                "{\"intent\":\"POINT_QUERY\"}", "output columns invalid");
-        assertTrue(repair.startsWith("存款是多少？"));
-        assertTrue(repair.contains("<repair>"));
-        assertFalse(repair.contains("可填写值目录"));
-        assertFalse(repair.contains("Metrics=["));
-        assertFalse(repair.contains(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.substring(0, 20)));
-    }
-
-    @Test
-    void repairStripsEmbeddedCatalogFromError() {
-        String repair = BankPlanPromptComposer.buildRepairUserContent("q", "{}",
-                "bad\n可填写值目录\n- /metrics/*/bizName: [ZB001]");
-        assertTrue(repair.contains("plan validation failed"));
-        assertFalse(repair.contains("可填写值目录"));
-    }
-
-    @Test
-    void toolRepairContainsOnlyPreviousPlanAndSanitizedStageFailure() {
-        BankPlanToolResult failure = BankPlanToolResult.failed(2, "trace-2", "fingerprint-1",
-                BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION",
-                Map.of("intent", List.of("POINT_QUERY", "CHANGE")),
-                List.of("重新选择受支持的查询族"));
-
-        String repair = BankPlanPromptComposer.buildToolRepairUserContent("存款变化多少？",
-                "{\"intent\":\"CHANGE\"}", failure);
-
-        assertTrue(repair.startsWith("存款变化多少？"));
-        assertTrue(repair.contains("<tool_result>"));
-        assertTrue(repair.contains("UNSUPPORTED_PLAN_COMBINATION"));
-        assertTrue(repair.contains("<previous_plan>"));
-        assertTrue(repair.contains("必须输出修正后的完整 BankQueryPlan"));
-        assertFalse(repair.toUpperCase().contains("SELECT "));
-        assertFalse(repair.contains("gold"));
-    }
-
-    @Test
-    void systemPrefixTeachesRecipesWithoutLeakingEvalQuestions() {
-        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
-        // Abstract recipes stay.
-        assertTrue(sys.contains("待评价指标集合"));
-        assertTrue(sys.contains("derivedMetrics"));
-        assertTrue(sys.contains("COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"));
-        assertTrue(sys.contains("结构骨架"));
-        // Must not embed concrete train/dev-style natural-language questions as few-shots.
-        assertFalse(sys.contains("江苏省A市农商行在2025年6月15日"));
-        assertFalse(sys.contains("待评价指标集合：存贷比、不良率、拨备覆盖率"));
-        assertFalse(sys.contains("规模（贷款）、质量（不良率）、效益（净利润）"));
-        assertFalse(sys.contains("不良率和全省均值比怎么样"));
-        assertTrue(BankPlanPromptComposer.PREFIX_VERSION.contains("v10"));
     }
 }

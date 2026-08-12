@@ -162,6 +162,7 @@ public final class BankSemanticRegistry {
         values.put("action", PLAN_ACTIONS);
         values.put("intent", INTENTS);
         values.put("metrics.bizName", metricCodes());
+        values.put("derivedMetrics.metricCode", derivedMetricCodes());
         values.put("dimensions", DIMENSIONS);
         values.put("organizations.code", organizationCodes());
         values.put("metrics.aggregation", AGGREGATIONS);
@@ -176,7 +177,7 @@ public final class BankSemanticRegistry {
 
     public static String jsonSchema() {
         return """
-                {"type":"object","additionalProperties":false,"required":["version","intent",
+                {"type":"object","additionalProperties":false,"required":["version","action","intent",
                 "metrics","dimensions","organizations","time","filters","calculation","orderBy",
                 "limit","output"],"properties":{"version":{"const":"1.0"},
                 "action":{"enum":%s},"intent":{"enum":%s},"metrics":{"type":"array",
@@ -204,7 +205,7 @@ public final class BankSemanticRegistry {
                 "columns":{"type":"array","items":{"type":"string"}},"orderSensitive":{
                 "type":"boolean"}}},"derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
-                "properties":{"metricCode":{"type":"string"},"numerator":{"enum":%s},
+                "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},
                 "denominator":{"enum":%s},"name":{"type":"string"}}}}}}
                 """
                 .formatted(jsonArray(PLAN_ACTIONS), jsonArray(INTENTS), jsonArray(metricCodes()),
@@ -212,7 +213,8 @@ public final class BankSemanticRegistry {
                         jsonArray(organizationCodes()), jsonArray(TIME_GRANULARITIES),
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(CALCULATION_TYPES),
-                        jsonArray(SORT_DIRECTIONS), jsonArray(metricCodes()),
+                        jsonArray(SORT_DIRECTIONS), jsonArray(derivedMetricCodes()),
+                        jsonArray(metricCodes()),
                         jsonArray(metricCodes()))
                 .strip();
     }
@@ -230,6 +232,11 @@ public final class BankSemanticRegistry {
                 .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s）"
                         .formatted(metric.code(), metric.name(), metric.aliases(), metric.unit(),
                                 metric.defaultAggregation(), metric.direction()))
+                .collect(Collectors.joining("\n"));
+        String derivedMetricLines = DERIVED_METRICS.values().stream()
+                .map(metric -> "%s %s（formula=%s, unit=%s, direction=%s）"
+                        .formatted(metric.code(), metric.name(), metric.formula(), metric.unit(),
+                                metric.direction()))
                 .collect(Collectors.joining("\n"));
         String organizationLines = ORGANIZATIONS.values().stream()
                 .map(org -> "%s %s（aliases=%s, scope=%s）".formatted(org.code(), org.name(),
@@ -263,6 +270,9 @@ public final class BankSemanticRegistry {
                 指标代码、单位与方向：
                 %s
 
+                派生指标（代码、公式、单位与方向）：
+                %s
+
                 机构代码与范围（organizations=[] 表示全省/各家范围）：
                 %s
 
@@ -270,14 +280,14 @@ public final class BankSemanticRegistry {
                 %s
                 """.formatted(VERSION, planFieldLines, PLAN_ACTIONS, INTENTS, AGGREGATIONS,
                 DIMENSIONS, TIME_GRANULARITIES, TIME_COMPARISONS, CALCULATION_TYPES,
-                SORT_DIRECTIONS, filterFields(), FILTER_OPERATORS, metricLines, organizationLines,
-                factLines).strip();
+                SORT_DIRECTIONS, filterFields(), FILTER_OPERATORS, metricLines, derivedMetricLines,
+                organizationLines, factLines).strip();
     }
 
     private static Map<String, PlanFieldDefinition> buildPlanFields() {
         LinkedHashMap<String, PlanFieldDefinition> fields = new LinkedHashMap<>();
         fields.put("version", field("string", true, "1.0", Set.of("1.0"), "\"1.0\""));
-        fields.put("action", field("enum", false, "EXECUTE", PLAN_ACTIONS, "\"EXECUTE\""));
+        fields.put("action", field("enum", true, "EXECUTE", PLAN_ACTIONS, "\"EXECUTE\""));
         fields.put("intent", field("enum", true, null, INTENTS, "\"POINT_QUERY\""));
         fields.put("metrics", field("array", true, "[]", metricCodes(),
                 "[{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\"}]"));
@@ -312,6 +322,7 @@ public final class BankSemanticRegistry {
             };
             String unit = switch (code) {
                 case "ZB012", "ZB013", "ZB015", "ZB016", "ZB017" -> "%";
+                case "ZB011" -> "万元";
                 case "ZB018" -> "人";
                 case "ZB019" -> "个";
                 case "ZB020", "ZB021" -> "户";

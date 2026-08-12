@@ -13,6 +13,7 @@ import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionCoordinator;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanCompilationException;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankQueryPlan;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMResp;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlResp;
@@ -79,6 +80,41 @@ public class LLMSqlParser implements SemanticParser {
         }
         parseResp.setState(ParseResp.ParseState.FAILED);
         parseResp.setErrorMsg(error.toParserErrorMessage());
+    }
+
+    /**
+     * Returns only deterministic, plan-shape feedback. Raw exception messages can contain opaque
+     * provider or implementation detail and must never enter the model repair context.
+     */
+    static List<String> compilationCorrectionHints(BankPlanCompilationException.Reason reason,
+            String previousPlanJson) {
+        if (reason == BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION
+                && isRankingProvinceAveragePlan(previousPlanJson)) {
+            return List.of("当前计划是“全省排名”而不是“全省均值”比较：删除 "
+                    + "benchmark/COMPARE/PROVINCE_AVERAGE，令 filters=[]；保留 intent=RANKING "
+                    + "和 bank_organization 维度后，重新输出完整 BankQueryPlan。");
+        }
+        String code = reason == null ? "COMPILATION_FAILED" : reason.name();
+        return List.of("编译器拒绝当前计划组合（" + code
+                + "）。请根据上一份完整计划重新检查 intent、calculation、filters、dimensions、"
+                + "output 的组合后再输出完整 BankQueryPlan。");
+    }
+
+    private static boolean isRankingProvinceAveragePlan(String previousPlanJson) {
+        if (previousPlanJson == null || previousPlanJson.isBlank()) {
+            return false;
+        }
+        try {
+            BankQueryPlan plan = JsonUtil.toObject(previousPlanJson, BankQueryPlan.class);
+            return plan != null
+                    && plan.getIntent() == com.tencent.supersonic.headless.chat.intent.BankIntentType.RANKING
+                    && plan.getFilters() != null && plan.getFilters().stream().anyMatch(filter ->
+                            filter != null && "benchmark".equals(filter.getField())
+                                    && "COMPARE".equals(filter.getOperator())
+                                    && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private void tryParse(ChatQueryContext queryCtx, Long dataSetId) {
@@ -173,7 +209,8 @@ public class LLMSqlParser implements SemanticParser {
                             && !signature.equals(lastToolFailureSignature)) {
                         llmReq.setBankPlanToolResult(BankPlanToolResult.failed(currentRetry,
                                 bankTraceId, null, BankPlanToolResult.Stage.COMPILE, errorCode,
-                                Map.of(), List.of("根据编译错误码重新生成完整 BankQueryPlan")));
+                                Map.of(), compilationCorrectionHints(compilationException.getReason(),
+                                        previousBankPlanJson)));
                         llmReq.setPreviousBankQueryPlanJson(previousBankPlanJson);
                         lastToolFailureSignature = signature;
                     } else {

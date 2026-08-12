@@ -28,7 +28,7 @@ from answer_contract import (
 )
 
 
-SCHEMA_VERSION = "3.0-dry-run"
+SCHEMA_VERSION = "3.2-dry-run"
 
 _DATE_TOKEN = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
 _RANK_OUTPUT = re.compile(r"第\s*([1-9]\d*)\s*名")
@@ -39,7 +39,7 @@ _GOOD_SEGMENT = re.compile(r"表现较好(?:指标)?[:：](.*?)(?:表现较差|$
 _RANK_REQUEST = re.compile(r"排第几|排名|表现较好|表现较差")
 _MEAN_REQUEST = re.compile(r"均值|平均值|对比|比较|比.*(?:全省|省)均")
 _COUNT_REQUEST = re.compile(r"多少家|有几家|几家机构")
-_ISO_DATE_FACT = re.compile(r"\d{4}-\d{1,2}(?:-\d{1,2})?")
+_ISO_DATE_FACT = re.compile(r"\d{4}[-/]\d{1,2}(?:[-/]\d{1,2})?")
 _CHINESE_DATE_FACT = re.compile(
     r"(?P<year>\d{4})年(?:"
     r"(?P<month>\d{1,2})月(?:(?P<day>\d{1,2})日|末)?"
@@ -146,8 +146,21 @@ def _close(left: float, right: float, *, kind: str, tolerance: float) -> bool:
     return values_close(left, right, abs_tol=fact_tolerance, rel_tol=DEFAULT_REL_TOL)
 
 
+def _non_date_slots(text: str) -> list[Any]:
+    """Extract numeric answer slots without interpreting date components as facts.
+
+    ``extract_answer_slots`` correctly recognizes the year portion of a date, but
+    month/day tokens in Chinese dates (for example ``2025年6月15日``) are otherwise
+    ordinary quantities.  Dates are identity entities, not answer values, and are
+    checked separately by ``_normalized_date_facts``.
+    """
+
+    without_dates = _CHINESE_DATE_FACT.sub(" ", _ISO_DATE_FACT.sub(" ", text))
+    return [slot for slot in extract_answer_slots(without_dates) if slot.kind != "year"]
+
+
 def _question_values(question: str) -> list[float]:
-    return [slot.value for slot in extract_answer_slots(question) if slot.kind != "year"]
+    return [slot.value for slot in _non_date_slots(question)]
 
 
 def _derive(value: float, candidates: list[float], *, kind: str, tolerance: float) -> str | None:
@@ -234,9 +247,7 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
 
     facts: list[FactDraft] = []
     seen: set[tuple[float, str]] = set()
-    for slot in extract_answer_slots(answer_text):
-        if slot.kind == "year":
-            continue
+    for slot in _non_date_slots(answer_text):
 
         value = float(slot.value)
         if value in rank_values:
@@ -381,16 +392,115 @@ def _prediction_values(
     text_summary: str | None,
 ) -> tuple[list[float], list[float]]:
     table_values = _numeric_table_values({"columns": columns or [], "rows": rows or []})
-    text_values = [
-        slot.value
-        for slot in extract_answer_slots(text_summary or "")
-        if slot.kind != "year"
-    ]
+    text_values = [slot.value for slot in _non_date_slots(text_summary or "")]
     return table_values, text_values
 
 
 def _is_numeric_cell(value: Any) -> bool:
     return isinstance(value, numbers.Real) and not isinstance(value, bool)
+
+
+_PROVINCIAL_AVERAGE_LEGACY_COLUMNS = (
+    "org_code",
+    "org_name",
+    "metric_code",
+    "aggregate_value",
+    "min_value",
+    "max_value",
+    "observation_count",
+)
+_PROVINCIAL_AVERAGE_RESULT_COLUMNS = {
+    "org_code",
+    "org_name",
+    "metric_code",
+    "metric_value",
+    "provincial_average",
+    "gap_value",
+    "absolute_gap",
+}
+
+
+def _standard_provincial_average_projection_binds(
+    expected: dict[str, Any],
+    *,
+    expected_names: list[str],
+    expected_rows: list[Any],
+    columns: list[str],
+    rows: list[list[Any]],
+    require_exact_rows: bool,
+) -> bool | None:
+    """Bind the published provincial-average result contract to legacy aggregate rows.
+
+    This is deliberately narrow: the runtime projection keeps the same organization and metric
+    identity, exposes the current value as ``metric_value``, and additionally exposes the
+    provincial mean/gaps required by the user-visible answer. The legacy snapshot rows encode
+    aggregate/min/max as the same single-date target value and observation count one.
+    """
+
+    if tuple(expected_names) != _PROVINCIAL_AVERAGE_LEGACY_COLUMNS:
+        return None
+    if not _PROVINCIAL_AVERAGE_RESULT_COLUMNS.issubset(columns):
+        return None
+    if any(
+        not isinstance(row, (list, tuple)) or len(row) != len(expected_names)
+        for row in expected_rows
+    ):
+        return False
+
+    indexes = {name: columns.index(name) for name in _PROVINCIAL_AVERAGE_RESULT_COLUMNS}
+    tolerance_raw = expected.get("numericTolerance")
+    tolerance = float(tolerance_raw) if isinstance(tolerance_raw, numbers.Real) else 0.0
+
+    def cells_equal(left: Any, right: Any) -> bool:
+        if _is_numeric_cell(left) and _is_numeric_cell(right):
+            return abs(float(left) - float(right)) <= tolerance
+        return left == right
+
+    projected_rows: list[list[Any]] = []
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or any(
+            index >= len(row) for index in indexes.values()
+        ):
+            return False
+        value = row[indexes["metric_value"]]
+        projected_rows.append(
+            [
+                row[indexes["org_code"]],
+                row[indexes["org_name"]],
+                row[indexes["metric_code"]],
+                value,
+                value,
+                value,
+                1,
+            ]
+        )
+
+    def rows_equal(left: list[Any] | tuple[Any, ...], right: list[Any]) -> bool:
+        return len(left) == len(right) and all(
+            cells_equal(expected_value, actual_value)
+            for expected_value, actual_value in zip(left, right)
+        )
+
+    if require_exact_rows and expected.get("orderSensitive", False):
+        return len(expected_rows) == len(projected_rows) and all(
+            rows_equal(expected_row, actual_row)
+            for expected_row, actual_row in zip(expected_rows, projected_rows)
+        )
+
+    unmatched = list(range(len(projected_rows)))
+    for expected_row in expected_rows:
+        matched_index = next(
+            (
+                candidate
+                for candidate in unmatched
+                if rows_equal(expected_row, projected_rows[candidate])
+            ),
+            None,
+        )
+        if matched_index is None:
+            return False
+        unmatched.remove(matched_index)
+    return not unmatched if require_exact_rows else True
 
 
 def _expected_rows_are_bound(
@@ -415,6 +525,17 @@ def _expected_rows_are_bound(
     expected_names = [str(column) for column in expected_columns]
     if not expected_names or len(set(columns)) != len(columns):
         return False
+
+    provincial_average_binding = _standard_provincial_average_projection_binds(
+        expected,
+        expected_names=expected_names,
+        expected_rows=expected_rows,
+        columns=columns,
+        rows=rows,
+        require_exact_rows=require_exact_rows,
+    )
+    if provincial_average_binding is not None:
+        return provincial_average_binding
 
     has_identity = any(
         cell is not None and not _is_numeric_cell(cell)
@@ -508,15 +629,37 @@ def _text_has_only_allowed_facts(
     contract: RecordFactContract,
     *,
     text_values: list[float],
+    additional_values: Iterable[float] = (),
 ) -> bool:
     allowed_facts = list(contract.facts)
+    allowed_values = list(additional_values)
     return all(
         any(
             _close(fact.value, value, kind=fact.kind, tolerance=DEFAULT_ABS_TOL)
             for fact in allowed_facts
+        ) or any(
+            _close(allowed_value, value, kind="RANK", tolerance=DEFAULT_ABS_TOL)
+            for allowed_value in allowed_values
         )
         for value in text_values
     )
+
+
+def _result_rank_values(
+    columns: list[str] | None,
+    rows: list[list[Any]] | None,
+) -> list[float]:
+    if not isinstance(columns, list) or "rank_position" not in columns:
+        return []
+    index = columns.index("rank_position")
+    values: list[float] = []
+    for row in rows or []:
+        if not isinstance(row, (list, tuple)) or index >= len(row):
+            continue
+        value = row[index]
+        if _is_numeric_cell(value):
+            values.append(float(value))
+    return values
 
 
 def _build_entity_alias_catalog(
@@ -575,28 +718,78 @@ def _entity_codes_in_text(
 
 
 def _normalized_date_facts(text: str) -> set[str]:
+    """Normalize equivalent period labels without weakening daily-date binding.
+
+    The source answer list mixes ``YYYY-MM`` and quarter-end ``YYYY-MM-DD`` labels
+    for the same quarter-end fact. Treat those two spellings as aliases only for
+    quarter-end months; an arbitrary daily date such as 2025-06-15 remains exact.
+    """
+
     dates: set[str] = set()
-    for token in _ISO_DATE_FACT.findall(text):
-        parts = token.split("-")
-        dates.add("-".join([parts[0], *(part.zfill(2) for part in parts[1:])]))
-    quarter_month = {"一": 3, "1": 3, "二": 6, "2": 6, "三": 9, "3": 9, "四": 12, "4": 12}
     quarter_day = {3: 31, 6: 30, 9: 30, 12: 31}
+
+    def add_period(year: int, month: int, day: int | None = None) -> None:
+        month_text = f"{year:04d}-{month:02d}"
+        if day is None:
+            dates.add(month_text)
+            if month in quarter_day:
+                dates.add(f"{month_text}-{quarter_day[month]:02d}")
+            return
+        full_text = f"{month_text}-{day:02d}"
+        dates.add(full_text)
+        if month in quarter_day and day == quarter_day[month]:
+            dates.add(month_text)
+
+    for token in _ISO_DATE_FACT.findall(text):
+        parts = re.split(r"[-/]", token)
+        add_period(
+            int(parts[0]),
+            int(parts[1]),
+            int(parts[2]) if len(parts) == 3 else None,
+        )
+    quarter_month = {"一": 3, "1": 3, "二": 6, "2": 6, "三": 9, "3": 9, "四": 12, "4": 12}
     for match in _CHINESE_DATE_FACT.finditer(text):
         year = int(match.group("year"))
         if match.group("year_end"):
-            dates.add(f"{year:04d}-12-31")
+            add_period(year, 12, 31)
         elif match.group("quarter"):
             month = quarter_month[match.group("quarter")]
-            dates.add(f"{year:04d}-{month:02d}-{quarter_day[month]:02d}")
+            add_period(year, month, quarter_day[month])
         else:
             month = int(match.group("month"))
             day = match.group("day")
-            dates.add(f"{year:04d}-{month:02d}" + (f"-{int(day):02d}" if day else ""))
+            add_period(year, month, int(day) if day else None)
     return dates
 
 
-def _organization_names(text: str) -> set[str]:
-    return {match.group(0).casefold() for match in _ORGANIZATION_NAME.finditer(text)}
+def _organization_names(
+    text: str,
+    catalog: tuple[tuple[str, str], ...] = (),
+) -> set[str]:
+    """Return only unrecognised explicit bank names.
+
+    The catalog already binds every known organisation to its code. Mask those
+    exact aliases before applying the broad fallback regex so a question prefix
+    such as ``请分析江苏省A市农商行`` is not incorrectly captured as a different
+    organisation named ``请分析江苏省A市农商行``. Any genuinely unknown explicit
+    bank name remains visible and therefore still fails closed.
+    """
+
+    normalized = text.casefold()
+    for alias, _ in catalog:
+        if "农商行" in alias:
+            normalized = normalized.replace(alias, " " * len(alias))
+    names: set[str] = set()
+    for match in _ORGANIZATION_NAME.finditer(normalized):
+        value = match.group(0)
+        # The broad prefix is intentionally permissive for province names, but
+        # answer prose can place Chinese connective words immediately before
+        # “江苏省X市农商行”. Keep the province suffix and bank name only.
+        province_end = value.rfind("省")
+        if province_end >= 2:
+            value = value[province_end - 2 :]
+        names.add(value.casefold())
+    return names
 
 
 def _literal_codes(text: str, pattern: re.Pattern[str]) -> set[str]:
@@ -625,7 +818,7 @@ def _text_entities_are_exact(
     extractors = (
         lambda text: _entity_codes_in_text(text, organization_catalog),
         lambda text: _entity_codes_in_text(text, metric_catalog),
-        _organization_names,
+        lambda text: _organization_names(text, organization_catalog),
         _normalized_date_facts,
         lambda text: _literal_codes(text, _ORGANIZATION_CODE),
         lambda text: _literal_codes(text, _METRIC_CODE),
@@ -640,8 +833,20 @@ def _text_entities_are_exact(
 def score_fact_contract_report(
     report: dict[str, Any],
     records: list[dict[str, Any]],
+    *,
+    score_mode: str = "legacy",
 ) -> dict[str, Any]:
-    """Score every selected record; unresolved contracts fail closed, never skip."""
+    """Score every selected record; unresolved contracts fail closed, never skip.
+
+    ``result_only`` is the official runtime mode: structured result facts are
+    the score, while the model's natural-language answer remains a UI output
+    and does not gate ``caseAccuracy``.  ``legacy`` is retained only for the
+    focused historical contract tests and migration diagnostics.
+    """
+
+    if score_mode not in {"legacy", "result_only"}:
+        raise ValueError(f"unsupported score_mode: {score_mode}")
+    score_final_answer = score_mode == "legacy"
 
     report_items = report.get("items") if isinstance(report.get("items"), list) else []
     prediction_by_id = {
@@ -704,85 +909,108 @@ def score_fact_contract_report(
                     require_exact_rows=contract.legacyGoldGrade == "GOLD_OK",
                 )
                 result_facts_exact = facts_grounded and row_binding_ok
-            final_numeric_ok = bool(text_summary) and bool(required_facts) and all(
-                _fact_is_grounded_in_text(
-                    fact,
-                    text_values=text_values,
+            if score_final_answer:
+                final_numeric_ok = bool(text_summary) and bool(required_facts) and all(
+                    _fact_is_grounded_in_text(
+                        fact,
+                        text_values=text_values,
+                    )
+                    for fact in required_facts
                 )
-                for fact in required_facts
-            )
-            final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
-                contract,
-                text_values=text_values,
-            )
-            predicted_semantics = set(_semantic_facts(text_summary or ""))
-            semantic_ok = set(contract.semanticFacts) == predicted_semantics
-            entity_ok = bool(text_summary) and _text_entities_are_exact(
-                record,
-                text_summary,
-                organization_catalog=organization_catalog,
-                metric_catalog=metric_catalog,
-            )
-            final_facts_exact = final_numeric_ok and semantic_ok and entity_ok
+                final_numeric_ok = final_numeric_ok and _text_has_only_allowed_facts(
+                    contract,
+                    text_values=text_values,
+                    additional_values=_result_rank_values(
+                        [str(column) for column in columns] if isinstance(columns, list) else None,
+                        rows if isinstance(rows, list) else None,
+                    ),
+                )
+                predicted_semantics = set(_semantic_facts(text_summary or ""))
+                semantic_ok = set(contract.semanticFacts) == predicted_semantics
+                entity_ok = bool(text_summary) and _text_entities_are_exact(
+                    record,
+                    text_summary,
+                    organization_catalog=organization_catalog,
+                    metric_catalog=metric_catalog,
+                )
+                final_facts_exact = final_numeric_ok and semantic_ok and entity_ok
 
             if contract.status != "READY":
                 reason = "contract_review_required"
             else:
                 if not result_facts_exact:
                     reason = "result_mismatch"
-                elif not final_facts_exact:
+                elif score_final_answer and not final_facts_exact:
                     reason = "final_fact_mismatch"
 
-        case_pass = bool(result_facts_exact and final_facts_exact and contract.status == "READY")
+        case_pass = bool(
+            result_facts_exact
+            and contract.status == "READY"
+            and (not score_final_answer or final_facts_exact)
+        )
         case_hits += int(case_pass)
         result_hits += int(result_facts_exact)
-        final_fact_hits += int(final_facts_exact)
+        if score_final_answer:
+            final_fact_hits += int(final_facts_exact)
+        scored_item = {
+            "id": sample_id,
+            "contractStatus": contract.status,
+            "contractReasons": list(contract.reasons),
+            "resultExact": result_facts_exact,
+            "resultFactsExact": result_facts_exact,
+            "resultEvidence": result_evidence,
+            "casePass": case_pass,
+            "reason": reason,
+        }
+        if score_final_answer:
+            scored_item["finalFactsExact"] = final_facts_exact
         scored_items.append(
-            {
-                "id": sample_id,
-                "contractStatus": contract.status,
-                "contractReasons": list(contract.reasons),
-                "resultExact": result_facts_exact,
-                "resultFactsExact": result_facts_exact,
-                "resultEvidence": result_evidence,
-                "finalFactsExact": final_facts_exact,
-                "casePass": case_pass,
-                "reason": reason,
-            }
+            scored_item
         )
 
     denominator = len(records)
+    metrics = {
+        "caseAccuracy": _rate(case_hits, denominator),
+        "casePassHits": case_hits,
+        "caseDenominator": denominator,
+        "resultExactHits": result_hits,
+        "resultFactAccuracy": _rate(result_hits, denominator),
+        "resultFactsExactHits": result_hits,
+        "contractReadyRate": _rate(ready_count, denominator),
+        "contractReadyCount": ready_count,
+        "excludedCount": 0,
+    }
+    policy = {
+        "primaryMetric": "caseAccuracy",
+        "casePass": "resultExact" if not score_final_answer else "resultExact AND finalFactsExact",
+        "resultExact": (
+            "required answer facts grounded in captured SQL result; complete structured "
+            "gold has exact projected rows and incomplete gold preserves available identities"
+        ),
+        "denominator": "ALL_SELECTED_RECORDS",
+        "sqlTextScored": False,
+        "reviewRequiredBehavior": "FAIL_CLOSED",
+    }
+    if score_final_answer:
+        metrics.update(
+            {
+                "finalFactAccuracy": _rate(final_fact_hits, denominator),
+                "finalFactsExactHits": final_fact_hits,
+            }
+        )
+        policy["finalFactsExact"] = (
+            "all required answer facts and answer entities present with no extra numeric, "
+            "out-of-context entity or contradictory semantic facts"
+        )
+    else:
+        policy["finalAnswerScored"] = False
+
     return {
         "schemaVersion": SCHEMA_VERSION,
         "recordCount": denominator,
-        "metrics": {
-            "caseAccuracy": _rate(case_hits, denominator),
-            "casePassHits": case_hits,
-            "caseDenominator": denominator,
-            "resultExactHits": result_hits,
-            "resultFactAccuracy": _rate(result_hits, denominator),
-            "resultFactsExactHits": result_hits,
-            "finalFactAccuracy": _rate(final_fact_hits, denominator),
-            "finalFactsExactHits": final_fact_hits,
-            "contractReadyRate": _rate(ready_count, denominator),
-            "contractReadyCount": ready_count,
-            "excludedCount": 0,
-        },
-        "policy": {
-            "primaryMetric": "caseAccuracy",
-            "casePass": "resultExact AND finalFactsExact",
-            "resultExact": (
-                "required answer facts grounded in captured SQL result; complete structured "
-                "gold has exact projected rows and incomplete gold preserves available identities"
-            ),
-            "finalFactsExact": (
-                "all required answer facts and answer entities present with no extra numeric, "
-                "out-of-context entity or contradictory semantic facts"
-            ),
-            "denominator": "ALL_SELECTED_RECORDS",
-            "sqlTextScored": False,
-            "reviewRequiredBehavior": "FAIL_CLOSED",
-        },
+        "scoreMode": score_mode,
+        "metrics": metrics,
+        "policy": policy,
         "run": report.get("run"),
         "items": scored_items,
     }

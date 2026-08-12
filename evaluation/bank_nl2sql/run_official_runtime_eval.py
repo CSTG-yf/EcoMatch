@@ -119,11 +119,19 @@ def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[st
         "timingMs": {
             "averageParseMs": average("parseMs"),
             "averageExecuteMs": average("executeMs"),
+            "averageQueryTimeCostMs": average("queryTimeCostMs"),
+            "averageExecutePostQueryMs": average("executePostQueryMs"),
             "averageSummaryMs": average("summaryMs"),
         },
         "timingDistributionsMs": {
             "parse": _latency_distribution([item.get("parseMs") for item in items]),
             "execute": _latency_distribution([item.get("executeMs") for item in items]),
+            "queryTimeCost": _latency_distribution(
+                [item.get("queryTimeCostMs") for item in items]
+            ),
+            "executePostQuery": _latency_distribution(
+                [item.get("executePostQueryMs") for item in items]
+            ),
             "summary": _latency_distribution([item.get("summaryMs") for item in items]),
             "endToEnd": _latency_distribution([item.get("endToEndMs") for item in items]),
         },
@@ -249,7 +257,7 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         f"- Agent: {run['agentId']} · model: `{run['modelLabel']}` · concurrency: {run['concurrency']}",
         f"- caseAccuracy: {metrics['caseAccuracy']:.6f} ({metrics['casePassHits']}/{metrics['caseDenominator']})",
         f"- resultFactAccuracy: {metrics['resultFactAccuracy']:.6f}",
-        f"- finalFactAccuracy: {metrics['finalFactAccuracy']:.6f}",
+        "- final answer text: non-scoring presentation output",
         f"- parse/execution/summary: {diagnostics['parseSuccessRate']:.6f} / {diagnostics['executionSuccessRate']:.6f} / {diagnostics['summarySuccessRate']:.6f}",
         "",
         "## Failed cases",
@@ -428,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
                 concurrency=capture["concurrency"],
                 summary_timeout_seconds=float(capture["summaryTimeoutSeconds"]),
                 summary_poll_interval_seconds=float(capture["summaryPollIntervalSeconds"]),
+                result_only=bool(capture["resultOnly"]),
                 cleanup_conversations=False,
                 on_item_complete=checkpoint,
             )

@@ -1,9 +1,9 @@
 package com.tencent.supersonic.headless.chat.query.llm.s2sql;
 
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
-import com.tencent.supersonic.headless.chat.intent.BankFinancialIntentRecognizer;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.chat.intent.BankIntentType;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankSemanticRegistry;
 import lombok.Builder;
 import lombok.Value;
 
@@ -68,10 +68,8 @@ public class SemanticIntentHints {
         BankIntentResult.TimeSlot time = intent == null ? null : intent.getTime();
         return builder()
                 .expectedIntent(intent == null ? BankIntentType.UNKNOWN : intent.getIntent())
-                .allowedMetrics(schemaElementNames(schema == null ? null : schema.getMetrics()))
-                .allowedDimensions(
-                        schemaElementNames(schema == null ? null : schema.getDimensions(),
-                                schema == null ? null : schema.getPartitionTime()))
+                .allowedMetrics(bankMetricCapabilities(schema))
+                .allowedDimensions(bankDimensionCapabilities(schema))
                 .requiredMetrics(requiredMetrics).requiredOrganizationCodes(requiredOrganizations)
                 .requiredDerivedMetrics(requiredDerivedMetrics(intent, schema))
                 .requiredStartDate(time == null ? null : time.getStartDate())
@@ -107,16 +105,13 @@ public class SemanticIntentHints {
     }
 
     /**
-     * Build evidence for the LLM phase even when a selected rule parse has already populated the
-     * mapper result. In that path the normal mapper stage is intentionally skipped, so the bank
-     * recognizer must be invoked here to preserve immutable metric, organization, and time hints.
+     * Builds the admission context for a model-owned bank plan. The context deliberately exposes
+     * only live schema capabilities; it must not infer metrics, organizations, dates, filters, or
+     * intent from the natural-language question and then force those rule guesses onto the model.
      */
     public static SemanticIntentHints fromQuery(String queryText, BankIntentResult mappedIntent,
             LLMReq.LLMSchema schema, LocalDate referenceDate) {
-        BankIntentResult intent = mappedIntent == null
-                ? new BankFinancialIntentRecognizer().recognize(queryText, referenceDate)
-                : mappedIntent;
-        return from(intent, schema);
+        return from(null, schema);
     }
 
     private static Set<String> schemaElementNames(Collection<SchemaElement> elements) {
@@ -131,6 +126,48 @@ public class SemanticIntentHints {
         }
         return immutableSet(source.filter(Objects::nonNull)
                 .flatMap(element -> Stream.of(element.getBizName(), element.getName())));
+    }
+
+    /**
+     * Admission is derived from the live schema, but it exposes the compiler-facing ZB### codes
+     * to the model. Display names remain schema metadata, never valid model plan identifiers.
+     */
+    private static Set<String> bankMetricCapabilities(LLMReq.LLMSchema schema) {
+        Set<String> available = new LinkedHashSet<>(
+                schemaElementNames(schema == null ? null : schema.getMetrics()));
+        BankSemanticRegistry.metrics().values().forEach(metric -> {
+            boolean present = containsSchemaIdentifier(available, metric.code())
+                    || containsSchemaIdentifier(available, metric.name())
+                    || metric.aliases().stream()
+                            .anyMatch(alias -> containsSchemaIdentifier(available, alias));
+            if (present) {
+                available.add(metric.code());
+            }
+        });
+        return immutableSet(available);
+    }
+
+    /** Same schema-to-identifier bridge for the only two supported semantic dimensions. */
+    private static Set<String> bankDimensionCapabilities(LLMReq.LLMSchema schema) {
+        Set<String> available = new LinkedHashSet<>(schemaElementNames(
+                schema == null ? null : schema.getDimensions(),
+                schema == null ? null : schema.getPartitionTime()));
+        addDimensionIdentifier(available, "bank_organization", "机构");
+        addDimensionIdentifier(available, "bank_data_date", "数据日期");
+        return immutableSet(available);
+    }
+
+    private static void addDimensionIdentifier(Set<String> available, String identifier,
+            String displayName) {
+        if (containsSchemaIdentifier(available, identifier)
+                || containsSchemaIdentifier(available, displayName)) {
+            available.add(identifier);
+        }
+    }
+
+    private static boolean containsSchemaIdentifier(Collection<String> values, String expected) {
+        return values != null && expected != null && values.stream()
+                .anyMatch(value -> value != null && value.equalsIgnoreCase(expected));
     }
 
     private static Set<String> immutableSet(Stream<String> values) {

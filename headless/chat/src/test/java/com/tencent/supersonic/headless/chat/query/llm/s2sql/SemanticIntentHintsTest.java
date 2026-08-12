@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SemanticIntentHintsTest {
 
     @Test
-    void shouldRecognizeBankEvidenceWhenTheSelectedRuleParseSkippedMapping() {
+    void shouldExposeOnlySchemaAdmissionContextForBankPlanGeneration() {
         LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
         schema.setMetrics(List.of(element("营业支出", "zb010", SchemaElementType.METRIC)));
         schema.setDimensions(List.of(element("数据日期", "数据日期", SchemaElementType.DIMENSION)));
@@ -24,12 +25,11 @@ class SemanticIntentHintsTest {
         SemanticIntentHints hints = SemanticIntentHints.fromQuery("2026年1月10日江苏省A市农商行的营业支出是多少",
                 null, schema, LocalDate.of(2026, 7, 23));
 
-        assertEquals(BankIntentType.POINT_QUERY, hints.getExpectedIntent());
-        assertEquals(List.of("zb010"), hints.getRequiredMetrics().stream().sorted().toList());
-        assertEquals(List.of("ORG001"),
-                hints.getRequiredOrganizationCodes().stream().sorted().toList());
-        assertEquals(LocalDate.of(2026, 1, 10), hints.getRequiredStartDate());
-        assertEquals(LocalDate.of(2026, 1, 10), hints.getRequiredEndDate());
+        assertEquals(BankIntentType.UNKNOWN, hints.getExpectedIntent());
+        assertTrue(hints.getRequiredMetrics().isEmpty());
+        assertTrue(hints.getRequiredOrganizationCodes().isEmpty());
+        assertEquals(null, hints.getRequiredStartDate());
+        assertEquals(null, hints.getRequiredEndDate());
         assertTrue(hints.getAllowedMetrics().contains("zb010"));
     }
 
@@ -59,6 +59,33 @@ class SemanticIntentHintsTest {
                 () -> hints.getRequiredDerivedMetrics().add(
                         new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB002_DIV_ZB001",
                                 "ZB002", "ZB001", "存贷比")));
+    }
+
+    @Test
+    void shouldNotInjectProvinceAverageEvidenceFromQuestionRules() {
+        BankIntentResult mapped = new BankIntentResult();
+        mapped.setIntent(BankIntentType.AGGREGATION);
+        mapped.setMetrics(List.of());
+        mapped.setOrganizations(List.of());
+        mapped.setDerivedMetrics(List.of());
+        mapped.setFilters(List.of());
+
+        LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
+        schema.setMetrics(List.of(
+                element("各项存款余额", "ZB001", SchemaElementType.METRIC),
+                element("各项贷款余额", "ZB002", SchemaElementType.METRIC)));
+        schema.setDimensions(List.of(element("机构", "bank_organization",
+                SchemaElementType.DIMENSION)));
+        schema.setPartitionTime(element("数据日期", "bank_data_date",
+                SchemaElementType.DIMENSION));
+
+        SemanticIntentHints hints = SemanticIntentHints.fromQuery(
+                "江苏省A市农商行在2026-01-31的各项存款余额和各项贷款余额与全省均值逐一对比。",
+                mapped, schema, LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.UNKNOWN, hints.getExpectedIntent());
+        assertTrue(hints.getRequiredMetrics().isEmpty());
+        assertTrue(hints.getRequiredFilters().isEmpty());
     }
 
     @Test

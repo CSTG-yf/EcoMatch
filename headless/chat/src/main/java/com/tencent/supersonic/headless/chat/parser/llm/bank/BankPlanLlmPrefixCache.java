@@ -18,12 +18,9 @@ public class BankPlanLlmPrefixCache {
     public static final String THINKING_PROPERTY = "s2.parser.bank.plan.thinking.enable";
     private static final int DEFAULT_MEMO_CAPACITY = 256;
     private static final int DEFAULT_THINKING_MAX_TOKENS = 8192;
-    private static final String PLAN_WARM_PROBE = "前缀预热：忽略本条业务内容，只输出 "
-            + "{\"version\":\"1.0\",\"intent\":\"UNKNOWN\",\"metrics\":[],"
-            + "\"dimensions\":[],\"organizations\":[],\"time\":{\"startDate\":\"1970-01-01\","
-            + "\"endDate\":\"1970-01-01\",\"granularity\":\"DAY\",\"comparison\":\"NONE\"},"
-            + "\"filters\":[],\"calculation\":{\"type\":\"DIRECT\"},\"orderBy\":[],\"limit\":null,"
-            + "\"output\":{\"columns\":[],\"orderSensitive\":false}}";
+    private static final String PLAN_WARM_PROBE = "前缀预热：忽略本条业务内容。\n"
+            + "<stage>REQUIREMENTS</stage>\n"
+            + "只输出一个短 JSON 占位对象，不执行任何业务理解。";
 
     private final FixedSystemPrefixLlmCache delegate;
     private final boolean enableThinking;

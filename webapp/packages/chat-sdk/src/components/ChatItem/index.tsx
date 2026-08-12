@@ -1,6 +1,5 @@
 import {
   ChatContextType,
-  BankIntentResultType,
   DateInfoType,
   DashboardQuerySource,
   EntityInfoType,
@@ -20,7 +19,6 @@ import {
   deleteQuery,
   switchEntity,
   getExecuteSummary,
-  recognizeBankIntent,
 } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
 import { Button, message, Spin } from 'antd';
@@ -40,9 +38,7 @@ import { exportCsvFile } from '../../utils/utils';
 import { useMethodRegister } from '../../hooks';
 import BankQueryOverview from './BankQueryOverview';
 import QueryStageStatus from './QueryStageStatus';
-import BankClarificationPanel from './BankClarificationPanel';
 import MultiTurnContextBar from './MultiTurnContextBar';
-import { shouldAwaitClarification } from './contextModel';
 import TrustExplanationPanel from './TrustExplanationPanel';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
 import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
@@ -131,7 +127,6 @@ const ChatItem: React.FC<Props> = ({
     {}
   );
   const [isParserError, setIsParseError] = useState<boolean>(false);
-  const [bankIntent, setBankIntent] = useState<BankIntentResultType>();
   const [multiTurnContext, setMultiTurnContext] = useState<MultiTurnContextType>();
   const [workflowStage, setWorkflowStage] = useState<QueryWorkflowStage>('idle');
   const summaryPollToken = useRef(0);
@@ -154,7 +149,6 @@ const ChatItem: React.FC<Props> = ({
     setEntityInfo({} as EntityInfoType);
     setDataCache({});
     setIsParseError(false);
-    setBankIntent(undefined);
     setMultiTurnContext(undefined);
     setWorkflowStage('idle');
   };
@@ -192,20 +186,6 @@ const ChatItem: React.FC<Props> = ({
     }
     setExecuteTip(tip || SEARCH_EXCEPTION_TIP);
     return false;
-  };
-
-  const loadBankIntent = async (queryText: string) => {
-    try {
-      const response: any = await recognizeBankIntent(queryText);
-      const intent = response?.data || response;
-      if (intent && typeof intent === 'object') {
-        setBankIntent(intent);
-        return intent as BankIntentResultType;
-      }
-    } catch {
-      setBankIntent(undefined);
-    }
-    return undefined;
   };
 
   const pollExecuteSummary = async (
@@ -316,12 +296,6 @@ const ChatItem: React.FC<Props> = ({
     setIsParseError(false);
     setParseLoading(true);
     try {
-      const intent = await loadBankIntent(msg);
-      if (shouldAwaitClarification(intent)) {
-        setWorkflowStage('clarifying');
-        onUpdateMessageScroll?.();
-        return;
-      }
       const parseData: any = await chatParse({
         queryText: msg,
         chatId: conversationId,
@@ -386,7 +360,6 @@ const ChatItem: React.FC<Props> = ({
 
   const initChatItem = (msg, msgData) => {
     if (msgData) {
-      void loadBankIntent(msg);
       const parseInfoOptionsValue =
         parseInfos && parseInfos.length > 0
           ? parseInfos.map(item => ({ ...item, queryId: msgData.queryId }))
@@ -611,8 +584,7 @@ const ChatItem: React.FC<Props> = ({
           </div>
           <div className={contentClass}>
             <QueryStageStatus stage={workflowStage} />
-            <BankQueryOverview intent={bankIntent} parseInfo={parseInfo} />
-            <BankClarificationPanel intent={bankIntent} question={msg} onApply={onSendMsg} />
+            <BankQueryOverview parseInfo={parseInfo} />
             <MultiTurnContextBar context={multiTurnContext} question={msg} onSendMsg={onSendMsg} />
             <TrustExplanationPanel
               question={msg}

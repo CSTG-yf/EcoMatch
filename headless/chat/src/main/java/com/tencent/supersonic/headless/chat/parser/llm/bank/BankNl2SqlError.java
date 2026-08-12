@@ -33,6 +33,14 @@ public class BankNl2SqlError extends RuntimeException {
                 "bank query plan model generation failed", cause);
     }
 
+    /** The model could not resolve an essential ambiguity from the catalog and user turn. */
+    public static BankNl2SqlError clarificationRequired(String clarification) {
+        String message = clarification == null || clarification.isBlank()
+                ? "请补充机构、指标或时间范围。" : clarification.strip();
+        return new BankNl2SqlError(Stage.PLAN, Category.CLARIFICATION_REQUIRED, false, message,
+                null);
+    }
+
     public static BankNl2SqlError compilationFailure(Throwable cause) {
         String detail = cause == null || cause.getMessage() == null ? "bank query plan compilation failed"
                 : "bank query plan compilation failed: " + cause.getMessage();
@@ -79,6 +87,7 @@ public class BankNl2SqlError extends RuntimeException {
     private String toUserMessage() {
         return switch (category) {
             case MALFORMED_JSON, SCHEMA_VIOLATION, VALIDATION_FAILED -> "未能可靠识别该银行指标查询，请明确机构、指标和时间范围后重试。";
+            case CLARIFICATION_REQUIRED -> getMessage();
             case MODEL_FAILURE, COMPILATION_FAILURE -> "银行指标查询服务暂时不可用，请稍后重试。";
         };
     }
@@ -97,6 +106,7 @@ public class BankNl2SqlError extends RuntimeException {
     }
 
     public enum Category {
-        MALFORMED_JSON, SCHEMA_VIOLATION, VALIDATION_FAILED, MODEL_FAILURE, COMPILATION_FAILURE
+        MALFORMED_JSON, SCHEMA_VIOLATION, VALIDATION_FAILED, MODEL_FAILURE, COMPILATION_FAILURE,
+        CLARIFICATION_REQUIRED
     }
 }

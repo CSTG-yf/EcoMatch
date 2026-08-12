@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 from pathlib import Path
 
 
@@ -101,6 +102,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "code": 200,
                     "data": {
                         "queryState": "SUCCESS",
+                        "queryTimeCost": 17,
                         "querySql": "SELECT metric_value FROM bank_metric_daily",
                         "queryColumns": [{"name": "metric_value", "bizName": "metric_value"}],
                         "queryResults": [{"metric_value": 42.02}],
@@ -112,6 +114,15 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "data": {
                         "queryMode": "METRIC",
                         "textSummary": "A bank deposit balance is 42.02",
+                        "chatContext": {
+                            "properties": {
+                                "bank.nl2sql.finalAnswerTrace": {
+                                    "status": "SUCCEEDED",
+                                    "attempts": 1,
+                                    "errors": [],
+                                }
+                            }
+                        },
                     },
                 }
             if path == "/openapi/chat/manage/delete?chatId=501":
@@ -136,7 +147,9 @@ class RunSuperSonicEvalTest(unittest.TestCase):
             }
         ]
 
-        report = run_supersonic_evaluation(records, agent_id=7, post_json=post_json)
+        report = run_supersonic_evaluation(
+            records, agent_id=7, post_json=post_json, result_only=True
+        )
 
         self.assertEqual(
             [path.split("?")[0] for path, _ in requests],
@@ -148,6 +161,8 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "/openapi/chat/manage/delete",
             ],
         )
+        chat_name = urllib.parse.parse_qs(urllib.parse.urlsplit(requests[0][0]).query)["chatName"][0]
+        self.assertRegex(chat_name, r"^evaluation-DEV-01-[0-9a-f]{32}$")
         self.assertEqual(
             requests[1][1],
             {
@@ -165,6 +180,7 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "agentId": 7,
                 "chatId": 501,
                 "streamingResult": True,
+                "resultOnly": True,
             },
         )
         request_text = json.dumps(requests, ensure_ascii=False)
@@ -177,8 +193,16 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(report["policy"], {"transportOnly": True, "score": "NONE"})
         self.assertEqual(report["items"][0]["s2sql"], "SELECT metric_value FROM semantic_dataset")
         self.assertEqual(report["items"][0]["physicalSql"], "SELECT metric_value FROM bank_metric_daily")
+        self.assertEqual(report["items"][0]["queryTimeCostMs"], 17.0)
+        self.assertGreaterEqual(report["items"][0]["executePostQueryMs"], 0.0)
+        self.assertEqual(report["timingMs"]["averageQueryTimeCostMs"], 17.0)
+        self.assertEqual(report["timingDistributionsMs"]["queryTimeCost"]["count"], 1)
         self.assertEqual(report["items"][0]["summaryState"], "SUCCESS")
         self.assertEqual(report["items"][0]["textSummary"], "A bank deposit balance is 42.02")
+        self.assertEqual(
+            report["items"][0]["finalAnswerTrace"],
+            {"status": "SUCCEEDED", "attempts": 1, "errors": []},
+        )
         self.assertEqual(report["items"][0]["resultColumns"], ["metric_value"])
         self.assertEqual(report["items"][0]["resultRows"], [[42.02]])
         for score_field in ("match", "answerExact", "tableEX", "answerScore", "goldGrade"):

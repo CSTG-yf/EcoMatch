@@ -69,7 +69,7 @@ class FreezeFactContractV3Test(unittest.TestCase):
             ) as validate_gold:
                 release = freeze_dataset(root, root / "unused.sqlite")
 
-            validate_gold.assert_called_once_with(root, root / "unused.sqlite")
+            validate_gold.assert_called_once_with(root.resolve(), (root / "unused.sqlite").resolve())
             self.assertEqual(release["answerContractValidation"]["readyCount"], 1)
             self.assertEqual(release["answerContractValidation"]["reviewRequiredCount"], 0)
             self.assertEqual(release["answerContractValidation"]["excludedCount"], 0)

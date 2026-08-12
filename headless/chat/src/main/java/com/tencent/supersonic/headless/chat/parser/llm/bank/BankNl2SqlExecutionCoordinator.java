@@ -62,6 +62,7 @@ public class BankNl2SqlExecutionCoordinator {
         private final Map<String, Object> bankTelemetry;
         private final BankPlanToolResult toolResult;
         private final BankQueryPlan plan;
+        private final BankRequestContract requirements;
 
         private ExecutionCandidate(BankQueryPlanCompiler.CompiledQuery compiled, String s2sql,
                 BankQueryPlan plan, LLMReq request) {
@@ -72,6 +73,7 @@ public class BankNl2SqlExecutionCoordinator {
             this.fingerprint = compiled.getFingerprint();
             this.bankTelemetry = bankTelemetry(plan, route);
             this.plan = plan;
+            this.requirements = request.getBankRequestContract();
             BankPlanToolResult previous = request.getBankPlanToolResult();
             int attempt = previous == null ? 1 : previous.getAttempt() + 1;
             String traceId = previous == null ? UUID.randomUUID().toString()
@@ -89,6 +91,10 @@ public class BankNl2SqlExecutionCoordinator {
             diagnostics.put("bankTelemetry", bankTelemetry);
             diagnostics.put(BankPlanToolResult.PROPERTY_KEY, toolResult);
             diagnostics.put(BankPlanToolResult.PLAN_PROPERTY_KEY, plan);
+            if (requirements != null) {
+                diagnostics.put(BankRequestContract.PROPERTY_KEY,
+                        requirements);
+            }
             if (resultContract != null) {
                 diagnostics.put(BankResultProjector.CONTRACT_PROPERTY, resultContract);
             }

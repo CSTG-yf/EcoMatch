@@ -330,6 +330,49 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldDeriveMultiMetricProvinceAverageFromFullPopulationAggregationRows() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "A", "ORG002", "B", "ORG003", "C"))
+                .selectedOrganizationCodes(List.of("ORG002"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("metric_value")
+                                .metricCode("ZB001").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("metric_value")
+                                .metricCode("ZB013").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract, List.of(
+                row("bank_organization", "ORG001", "metric_code", "ZB001", "aggregate_value",
+                        new BigDecimal("20")),
+                row("bank_organization", "ORG002", "metric_code", "ZB001", "aggregate_value",
+                        new BigDecimal("10")),
+                row("bank_organization", "ORG003", "metric_code", "ZB001", "aggregate_value",
+                        new BigDecimal("30")),
+                row("bank_organization", "ORG001", "metric_code", "ZB013", "aggregate_value",
+                        new BigDecimal("1.0")),
+                row("bank_organization", "ORG002", "metric_code", "ZB013", "aggregate_value",
+                        new BigDecimal("1.5")),
+                row("bank_organization", "ORG003", "metric_code", "ZB013", "aggregate_value",
+                        new BigDecimal("2.0"))));
+
+        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value",
+                "provincial_average", "gap_value", "absolute_gap"), projection.getColumns());
+        assertEquals(List.of(
+                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB001",
+                        "metric_value", new BigDecimal("10"), "provincial_average",
+                        new BigDecimal("20.000000000000000"), "gap_value",
+                        new BigDecimal("-10.000000000000000"), "absolute_gap",
+                        new BigDecimal("10.000000000000000")),
+                row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB013",
+                        "metric_value", new BigDecimal("1.5"), "provincial_average",
+                        new BigDecimal("1.500000000000000"), "gap_value",
+                        new BigDecimal("0E-15"), "absolute_gap", new BigDecimal("0E-15"))),
+                projection.getRows());
+    }
+
+    @Test
     void shouldProjectDepositStructureShareWithRatioPercent() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.LONG_FORM)

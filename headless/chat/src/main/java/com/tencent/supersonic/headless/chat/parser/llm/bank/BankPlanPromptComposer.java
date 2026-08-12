@@ -1,179 +1,253 @@
 package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 /**
- * 银行受约束计划提示词（llama.cpp 系统前缀可缓存）。
+ * Fixed, cacheable contract prompt for the model-owned bank NL2SQL route.
  *
- * <p>系统提示承载完整契约、字段枚举与样例；用户侧仅自然语言问题，修复时附加 {@code <repair>}。
+ * <p>The model makes the natural-language decision twice: it first states the requirements it
+ * understood, then produces the executable semantic plan. Deterministic code only validates JSON
+ * shape, exact identifiers and the relationship between those two model artifacts.
  */
 public final class BankPlanPromptComposer {
 
     /**
-     * 固定系统前缀。任意改动须同步提升 {@link #PREFIX_VERSION} 并重新预热前缀缓存。
+     * Any change must bump {@link #PREFIX_VERSION}; the prefix is cached by the local model
+     * server and must never reuse an older output contract.
      */
     public static final String FIXED_SYSTEM_PREFIX = """
-            你是银行问数「查询计划」生成器。只输出一个 JSON 计划对象，不要解释、不要 Markdown、不要 SQL。
-            用户消息只有问题；若含 <repair>，根据 error 与 previous_candidate 修正后再输出 JSON。
+            你是银行问数 Agent 的语义规划模型。你必须依据用户问题和下方权威事实目录完成自然语言理解。
+            不要猜测目录外的信息，不要调用题型规则，不要输出 SQL、物理字段、解释、Markdown 或代码围栏。
+            只能输出当前 <stage> 指定的一个完整严格 JSON 对象，字段不可省略、不可增加。
 
             {{SEMANTIC_REGISTRY}}
 
             ════════════════════════════════
-            计划填写规则
+            第一阶段：REQUIREMENTS 的精确输出格式
             ════════════════════════════════
-            只能输出注册表中的顶层字段和值；禁止 time_range、zb_id、org_id、sql、sort、period、org_name 等自造字段。
-            metrics[].bizName 使用注册表指标代码；aggregation=DEFAULT 表示时点取数，AVG 表示日均/均值，SUM 表示求和。
-            organizations[].code 使用注册表机构代码；「全省/各家/哪家」通常用 []，题面指定机构时才填写对应代码。
-            time.startDate/endDate 与 baselineStartDate/baselineEndDate 使用 YYYY-MM-DD；非 NONE、非 MOM_AND_YOY 的 comparison 必须给出完整基期。
-            RATIO 的 calculation.baseline 填分母指标代码；其他 calculation 通常为 null。
-            orderBy.field 只能引用已选指标或维度；低值更优指标的“最好”使用 ASC。
-            output.columns 只能包含已选 dimensions、metrics.bizName 以及声明的 derivedMetrics；不得填写结果事实列或中文列名。
-            filters 必须遵循注册表 field/operator/value 契约；无过滤时为 []。
+            当 <stage>REQUIREMENTS</stage> 时，只输出下列 BankRequestContract：
+            尖括号中的内容只是占位说明，绝不可原样输出；必须从权威语义目录中替换为精确值。
+            下面第一份是 action=EXECUTE 的完整格式：
+            {
+              "version":"1.0",
+              "action":"EXECUTE",
+              "intent":"<intent 枚举；EXECUTE 时不得为 UNKNOWN>",
+              "metricCodes":["<每个用户请求指标的精确 ZB###>"],
+              "derivedMetrics":[{"metricCode":"<派生指标代码>","numerator":"<ZB###>","denominator":"<ZB###>","name":"<中文名称>"}],
+              "organizationCodes":["<精确 ORG###；全省范围时 []>"],
+              "time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"<granularity 枚举>","comparison":"<comparison 枚举>","baselineStartDate":null,"baselineEndDate":null},
+              "filters":[{"field":"<filter field>","operator":"<filter operator>","value":"<value 或 null>","values":[]}],
+              "requiredLimit":null,
+              "answerFactTypes":["VALUE"],
+              "clarification":null
+            }
+            action=EXECUTE 时：metricCodes 至少一个、time 四项均必填、answerFactTypes 至少一个、clarification 必须为 null。
+            answerFactTypes 只选择回答当前问题实际需要的类型；不得把所有枚举值都填入 answerFactTypes。
+            answerFactTypes 的精确含义：VALUE=指标当前值；TREND_DIRECTION=由结果支持的上升、下降或持平；
+            CHANGE_VALUE=绝对变化额；CHANGE_RATE=变化率；RATIO_VALUE=派生比率；RANK=全省排名；
+            PROVINCE_AVERAGE=全省均值；GAP_VALUE=目标机构值与全省均值的差额；COUNT=数量；
+            如果你理解用户只问“变动了多少/增加或减少多少”的绝对变化额，必须精确填写
+            "answerFactTypes":["CHANGE_VALUE"]；不得因为当前值或变化率可查询，就额外填写 VALUE 或 CHANGE_RATE。
+            同理，只有用户实际要求当前值、变化率、排名、全省均值或差额时，才填写相应类型；不得补充题干未要求的事实。
+            只有用户明确询问整体/总体趋势，或明确要求上升、下降、持平等方向性结论时，才必须填写 TREND_DIRECTION。
+            “请分析……逐季变化”表示需要逐期 VALUE；如果问题同时要求整体方向/趋势，也可填写 TREND_DIRECTION。
+            “各季度变化明细”“各季度末数值以及最高/最低季度”本身不要求 CHANGE_VALUE；只有明确要求每期变化额时才加 CHANGE_VALUE。
+            逐期数值的最高/最低由 VALUE 事实直接支撑；若查询结果无法形成确定的整体方向，最终回答必须省略不可证实的趋势，不得猜测“上升、下降或持平”。
+            选择示例：问题“请分析某机构某指标从起点到终点的逐季变化，各季度末数值是多少？哪个季度数值最高？”
+            的 answerFactTypes 应为 ["VALUE","TREND_DIRECTION"]，不要填写 CHANGE_VALUE；若实际结果没有确定趋势，最终回答只保留 VALUE 事实。
+            COMPARISON_VALUE 仅表示布尔阈值结论（结果中必须存在 meets_condition），不表示普通“比较”这个词。
+            “高于/低于全省均值多少”只要求目标值和差额时，应选择 VALUE、GAP_VALUE；
+            只有用户明确询问“全省均值是多少/均值为多少”时，才额外选择 PROVINCE_AVERAGE。
+            “主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名，
+            answerFactTypes 必须包含 VALUE、RANK；只有明确只问“排名/第几名/表现较好或较差”时才可只选择 RANK。
+            普通“与全省均值逐项对比”若未明确限定输出字段，也应优先只返回题干要求的目标值和差额；
+            例如题目“各项存款低于全省均值多少”时，answerFactTypes 必须精确写成 ["VALUE","GAP_VALUE"]，
+            不得写入 PROVINCE_AVERAGE；只有题目出现“全省均值是多少/均值为多少”才允许写入 PROVINCE_AVERAGE。
+            除非用户要求“是否达标/是否满足”且可返回 meets_condition，否则不得选择 COMPARISON_VALUE。
+            下面第二份是 action=CLARIFY 的完整格式：
+            {
+              "version":"1.0",
+              "action":"CLARIFY",
+              "intent":"UNKNOWN",
+              "metricCodes":[],
+              "derivedMetrics":[],
+              "organizationCodes":[],
+              "time":null,
+              "filters":[],
+              "requiredLimit":null,
+              "answerFactTypes":[],
+              "clarification":"<用户能直接回答的最小澄清问题>"
+            }
+            action=CLARIFY 时：clarification 必须是用户能直接回答的最小澄清问题；其余业务字段必须按上例填 null 或 []。
 
             ════════════════════════════════
-            七、意图配方（必遵）
+            第二阶段：PLAN 的精确输出格式
             ════════════════════════════════
-            POINT_QUERY：单机构+绝对日；calculation=DIRECT；dimensions=[]；comparison=NONE；limit=null
-              · 可多指标（列出/含 A、B、C）—— metrics 只收题面点名的指标，勿塞无关码
-              · 「对公存款」=ZB003、「个人存款」=ZB004，勿附带各项存款 ZB001
-              · 「拨备」未写全称时按拨备覆盖率 ZB015
-            CHANGE：calculation=CHANGE
-              · 较上年末/和YYYY年末相比：startDate=endDate=当日；comparison=PERIOD_OVER_PERIOD；baseline=年末
-              · 环比且同比：comparison=MOM_AND_YOY
-              · 较年初：comparison=START_OF_YEAR
-            TREND 逐季：dimensions=["bank_data_date"]；granularity=QUARTER；calculation=DIRECT
-            RANKING：dimensions 含 bank_organization；orderBy 必填
-              · 全省排名/表现较好较差：organizations 填被评价机构，系统会在全省内算 rank
-              · 题面给「待评价指标集合：…」时：metrics/derivedMetrics 严格只覆盖集合项
-              · 「存贷比」用 derivedMetrics（DERIVED_ZB002_DIV_ZB001, num=ZB002, den=ZB001），
-                除非集合里还点名了各项存/贷款，否则不要把 ZB001/ZB002 放进 metrics 单独排名
-              · 括号释义「规模（贷款）/质量（不良率）/效益（净利润）」→ 映射括号内业务指标
-            AGGREGATION 日均：aggregation=AVG
-            RATIO：metrics[0]=分子；calculation.type=RATIO；baseline=分母
-            THRESHOLD 与全省均值比（单日、是高还是低/差多少/比怎么样）：
-              · intent=THRESHOLD；filters 含 benchmark COMPARE PROVINCE_AVERAGE
-              · calculation=DIRECT（不要 COUNT_DAYS_ABOVE_PROVINCE_AVERAGE）
-              · COUNT_DAYS 仅当题面是「全年…有多少天高于全省均值」
+            当 <stage>PLAN</stage> 时，<requirements_contract> 是上一阶段已经通过校验的模型需求合同。
+            只输出下列完整 BankQueryPlan；它必须覆盖 requirements_contract 的全部 metricCodes、
+            organizationCodes、日期、比较口径、filters 和 requiredLimit：
+            尖括号中的内容只是占位说明，绝不可原样输出；必须从权威语义目录中替换为精确值。
+            {
+              "version":"1.0",
+              "action":"EXECUTE",
+              "intent":"<与 requirements_contract 相同的 intent>",
+              "metrics":[{"bizName":"<ZB###>","aggregation":"<aggregation 枚举>","alias":null}],
+              "derivedMetrics":[],
+              "dimensions":["<dimension 枚举>"],
+              "organizations":[{"code":"<ORG###>","bizName":null}],
+              "time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"<granularity 枚举>","comparison":"<comparison 枚举>","baselineStartDate":null,"baselineEndDate":null},
+              "filters":[{"field":"<filter field>","operator":"<filter operator>","value":"<value 或 null>","values":[]}],
+              "calculation":{"type":"<calculation 枚举>","baseline":null},
+              "orderBy":[{"field":"<已选指标或维度>","direction":"ASC 或 DESC"}],
+              "limit":null,
+              "output":{"columns":["<已选维度或指标>"],"orderSensitive":false}
+            }
+
+            查询计划字段填写规则（以下只说明输出 JSON 合同，不代替你依据用户问题进行自然语言理解）：
+            1. 当你理解为 CHANGE 变化查询时，当前期和基期只填 time；dimensions 只能是 [] 或
+               ["bank_organization"]，绝不可包含 "bank_data_date"。最小可执行形状为：
+               "dimensions":[],
+               "time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"YYYY-MM-DD","baselineEndDate":"YYYY-MM-DD"},
+               "calculation":{"type":"CHANGE","baseline":null}
+            2. 当你理解为“全省均值”比较时，filters 必须包含下面这个精确基准对象：
+               "filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]}]
+               当问题还要求“高于”或“低于”全省均值时，才可以在该对象后额外加入方向对象：
+               {"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE","value":"PROVINCE_AVERAGE","values":[]}
+               不得把 COMPARE 或 benchmark 写到 metric_value 或任何其他 field。
+            3. 使用目录中的派生指标时，metrics 必须同时列出分子和分母，derivedMetrics 必须逐字段照目录填写。
+               例如目录中的存贷比对象只能写为：
+               {"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}
+               不得用中文名称、别名或自行拼造派生指标代码。
+            4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
+               不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
+               排名计划形状为：
+               "intent":"RANKING",
+               "dimensions":["bank_organization"],
+               "filters":[],
+               "calculation":{"type":"DIRECT","baseline":null}
+               并在 metrics 写出全部直接指标、在 derivedMetrics 写出目录中的派生指标；organizations 保留被评价机构。
+            5. “全年/期间均值排名”“平均值排名”“日均值排名”表示先按机构汇总整个时间范围的平均值再排名：
+               metrics 中直接指标的 aggregation 必须为 AVG，dimensions 只能是 ["bank_organization"]，
+               绝不可把 "bank_data_date" 放进 dimensions（否则会变成逐日明细而不是机构均值）。
+               例如单指标均值排名的核心形状为：
+               "metrics":[{"bizName":"ZB001","aggregation":"AVG","alias":null}],
+               "dimensions":["bank_organization"], "calculation":{"type":"DIRECT","baseline":null}。
+            6. “排名前三和后三/前N名和后N名”必须同时表达两个切片，而不是返回全量机构：
+               使用 filters 中的 {"field":"rank","operator":"LTE","value":"N","values":[]} 和
+               {"field":"rank_from_bottom","operator":"LTE","value":"N","values":[]}，
+               并将 limit 设为 2*N（例如前三和后三为 6）。只问单侧前N或后N时只填写对应一个过滤器，
+               limit 设为 N。排名过滤器只能用于 RANKING，不能用来代替机构或指标过滤。
 
             ════════════════════════════════
-            八、结构骨架（只学字段形状，禁止把下列 JSON 当题库答案背）
+            严格合同
             ════════════════════════════════
-            说明：下列仅为 intent/calculation/derived 的字段骨架；日期、机构、指标须由当前问题自行推断。
-            禁止在提示中复述、禁止在输出中照抄任何评测/训练集原题。
-
-            POINT 单指标：
-            {"version":"1.0","intent":"POINT_QUERY","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["ZB###"],"orderSensitive":false}}
-
-            POINT 多指标（题面列出的多个 ZB，勿多塞）：
-            {"version":"1.0","intent":"POINT_QUERY","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"},{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["ZB###","ZB###"],"orderSensitive":false}}
-
-            CHANGE 较基期：
-            {"version":"1.0","intent":"CHANGE","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"YYYY-MM-DD","baselineEndDate":"YYYY-MM-DD"},"filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["ZB###"],"orderSensitive":true}}
-
-            CHANGE 环比+同比：
-            {"version":"1.0","intent":"CHANGE","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"MOM_AND_YOY","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["ZB###"],"orderSensitive":true}}
-
-            TREND 序列：
-            {"version":"1.0","intent":"TREND","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":["bank_data_date"],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"QUARTER","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"bank_data_date","direction":"ASC"}],"limit":null,"output":{"columns":["bank_data_date","ZB###"],"orderSensitive":true}}
-
-            RANKING 全省 TopN：
-            {"version":"1.0","intent":"RANKING","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":["bank_organization"],"organizations":[],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"ZB###","direction":"DESC"}],"limit":3,"output":{"columns":["bank_organization","ZB###"],"orderSensitive":true}}
-
-            RANKING 多指标+存贷比派生（metrics 仅含题面直接指标；存贷比只进 derivedMetrics）：
-            {"version":"1.0","intent":"RANKING","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"derivedMetrics":[{"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}],"dimensions":["bank_organization"],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"ZB###","direction":"DESC"}],"limit":null,"output":{"columns":["bank_organization","ZB###"],"orderSensitive":true}}
-
-            RATIO：
-            {"version":"1.0","intent":"RATIO","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[],"calculation":{"type":"RATIO","baseline":"ZB###"},"orderBy":[],"limit":null,"output":{"columns":["ZB###"],"orderSensitive":false}}
-
-            THRESHOLD 单日 vs 全省均值（非「多少天」）：
-            {"version":"1.0","intent":"THRESHOLD","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":[],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE"}],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["ZB###"],"orderSensitive":false}}
-
-            AGGREGATION 全年高于全省均值天数：
-            {"version":"1.0","intent":"AGGREGATION","metrics":[{"bizName":"ZB###","aggregation":"DEFAULT"}],"dimensions":["bank_organization"],"organizations":[{"code":"ORG###"}],"time":{"startDate":"YYYY-01-01","endDate":"YYYY-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},"filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE"}],"calculation":{"type":"COUNT_DAYS_ABOVE_PROVINCE_AVERAGE","baseline":null},"orderBy":[],"limit":null,"output":{"columns":["bank_organization","ZB###"],"orderSensitive":false}}
+            1. 指标只能是目录中完全一致的大写 ZB###；机构只能是完全一致的 ORG###。禁止近义词、拼音、
+               小写代码、别名、物理字段名或自造代码。
+               如果用户文本与权威目录中的机构名称或别名（包括目录中的字母城市占位名称）完整匹配，
+               必须直接映射到该机构代码；不得因为名称看起来像匿名样例、不是现实行政区划或可以展开成别的城市，
+               就把一个唯一目录命中误判为机构歧义并 action=CLARIFY。只有没有目录精确命中或确实命中多个机构时才澄清。
+               评测题中的日期、季度和年份是基准事实库的查询条件；只要格式合法且题目给出明确范围，
+               不得依据系统当前日期、现实世界数据是否公开或“未来数据”的臆测拒绝查询。若确实没有结果，
+               交由校验/执行工具返回事实错误后再修正。
+            2. metricCodes / metrics 必须逐项包含用户明确请求的全部指标；不得默默补充或删除指标。
+               如果用户问题明确列出“指标集合”“待评价指标集合”或“包括……在内”的封闭指标清单，
+               该清单就是本轮唯一指标集合：只能映射清单中的指标，严禁把目录中的其他指标当作“主要指标”追加。
+               “主要经营指标”“相关指标”等泛称不是全量目录；无法从问题确定具体指标集合时，必须 action=CLARIFY，
+               不得用全目录代替理解结果。
+            3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
+            4. “全省均值”只能使用目录允许的 benchmark/COMPARE/PROVINCE_AVERAGE 合同，不能写 SQL 或自行估算。
+            5. 收到 <repair> 时，只根据 tool_result、previous_plan、requirements_contract 和目录修正；
+               仍只输出当前阶段要求的一份完整 JSON，不输出补丁或解释。
             """.replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    /** 前缀版本：变更 FIXED_SYSTEM_PREFIX 时必须递增。 */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v10-semantic-registry";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v24-trend-fact-selection";
 
     private BankPlanPromptComposer() {}
 
-    /** 用户消息：仅自然语言问题。禁止拼 schema / 目录 / 字段枚举。 */
+    public static String buildRequirementsUserContent(String queryText) {
+        return stageMessage(queryText, "REQUIREMENTS", "先输出完整 BankRequestContract JSON。", null);
+    }
+
+    public static String buildRequirementsRepairUserContent(String queryText, String previousCandidate,
+            String validationMessage) {
+        return repairMessage(queryText, "REQUIREMENTS", null, previousCandidate, validationMessage,
+                null);
+    }
+
+    public static String buildPlanUserContent(String queryText, String requirementsJson) {
+        requireContract(requirementsJson);
+        return stageMessage(queryText, "PLAN", "依据 requirements_contract 输出完整 BankQueryPlan JSON。",
+                requirementsJson);
+    }
+
+    public static String buildPlanRepairUserContent(String queryText, String requirementsJson,
+            String previousCandidate, String validationMessage) {
+        requireContract(requirementsJson);
+        return repairMessage(queryText, "PLAN", requirementsJson, previousCandidate,
+                validationMessage, null);
+    }
+
+    public static String buildToolRepairUserContent(String queryText, String requirementsJson,
+            String previousPlan, BankPlanToolResult toolResult) {
+        if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
+            throw new IllegalArgumentException("a failed bank plan tool result is required");
+        }
+        requireContract(requirementsJson);
+        return repairMessage(queryText, "PLAN", requirementsJson, previousPlan,
+                toolResult.toRepairFeedback(), "tool_result");
+    }
+
+    /** Kept for callers/tests that only need the raw user question. */
     public static String buildDynamicUserContent(String queryText) {
         if (queryText == null || queryText.isBlank()) {
             throw new IllegalArgumentException("query text is required");
         }
         String user = queryText.strip();
-        assertQuestionOnlyUserContent(user, "plan dynamic user");
+        assertQuestionOnlyUserContent(user, "dynamic user");
         return user;
     }
 
-    /**
-     * 修复用户消息：问题 + 错误事实 + 上一版 JSON。不在此复述契约 / 目录。
-     */
-    public static String buildRepairUserContent(String queryText, String previousCandidate,
-            String validationMessage) {
+    private static String stageMessage(String queryText, String stage, String instruction,
+            String requirementsJson) {
+        String content = "%s\n\n<stage>%s</stage>\n%s%s".formatted(
+                buildDynamicUserContent(queryText), stage, instruction,
+                requirementsJson == null ? "" : "\n<requirements_contract>\n" + requirementsJson.strip()
+                        + "\n</requirements_contract>");
+        assertQuestionOnlyUserContent(content, stage + " user");
+        return content;
+    }
+
+    private static String repairMessage(String queryText, String stage, String requirementsJson,
+            String previousCandidate, String validationMessage, String errorTag) {
         String error = validationMessage == null ? "" : validationMessage.strip();
-        // Repair may mention field paths from the validator, but must never re-embed catalogs.
         if (looksLikeCatalogDump(error)) {
-            error = "plan validation failed; emit a valid BankQueryPlan JSON only";
+            error = "contract validation failed; output one complete JSON object for the current stage";
         }
-        String repair = """
-                %s
-
-                <repair>
-                <error>%s</error>
-                <previous_candidate>
-                %s
-                </previous_candidate>
-                </repair>
-                """.formatted(buildDynamicUserContent(queryText), error,
-                previousCandidate == null ? "" : previousCandidate.strip()).strip();
-        assertQuestionOnlyUserContent(repair, "plan repair user");
-        return repair;
+        String repairTag = errorTag == null ? "error" : errorTag;
+        String content = "%s\n\n<stage>%s</stage>%s\n<repair>\n<%s>%s</%s>\n"
+                + "<previous_candidate>\n%s\n</previous_candidate>\n"
+                + "<instruction>只输出修正后的完整当前阶段 JSON；不输出解释、补丁或 SQL。</instruction>\n</repair>";
+        String requirements = requirementsJson == null ? ""
+                : "\n<requirements_contract>\n" + requirementsJson.strip()
+                        + "\n</requirements_contract>";
+        String result = content.formatted(buildDynamicUserContent(queryText), stage, requirements,
+                repairTag, error, repairTag, previousCandidate == null ? "" : previousCandidate.strip());
+        assertQuestionOnlyUserContent(result, stage + " repair user");
+        return result;
     }
 
-    /**
-     * Full-stage repair message: the model receives one sanitized tool result and the previous
-     * complete plan, then must emit another complete plan instead of a JSON patch or physical SQL.
-     */
-    public static String buildToolRepairUserContent(String queryText, String previousPlan,
-            BankPlanToolResult toolResult) {
-        if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
-            throw new IllegalArgumentException("a failed bank plan tool result is required");
-        }
-        String repair = """
-                %s
-
-                <repair>
-                <tool_result>
-                %s
-                </tool_result>
-                <previous_plan>
-                %s
-                </previous_plan>
-                <instruction>只根据工具返回的失败阶段、错误码、允许值和修正提示调整计划；必须输出修正后的完整 BankQueryPlan JSON，不要输出补丁、解释或 SQL。</instruction>
-                </repair>
-                """.formatted(buildDynamicUserContent(queryText), toolResult.toRepairFeedback(),
-                previousPlan == null ? "" : previousPlan.strip()).strip();
-        assertQuestionOnlyUserContent(repair, "plan tool repair user");
-        return repair;
-    }
-
-    /**
-     * Guardrail: user turns stay question (+ optional &lt;repair&gt;), never field catalogs.
-     */
-    public static void assertQuestionOnlyUserContent(String userContent, String where) {
-        if (looksLikeCatalogDump(userContent)) {
-            throw new IllegalArgumentException(
-                    "bank plan user content must not contain schema/catalog dumps (" + where + ")");
+    private static void requireContract(String requirementsJson) {
+        if (requirementsJson == null || requirementsJson.isBlank()) {
+            throw new IllegalArgumentException("a validated requirements contract is required");
         }
     }
 
     static boolean looksLikeCatalogDump(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
+        return text != null && (text.contains("可填写值目录") || text.contains("【语义目录】"));
+    }
+
+    static void assertQuestionOnlyUserContent(String userContent, String where) {
+        if (looksLikeCatalogDump(userContent)) {
+            throw new IllegalArgumentException(
+                    "bank plan user content must not contain schema/catalog dumps (" + where + ")");
         }
-        return text.contains("可填写值目录") || text.contains("【语义目录】")
-                || text.contains("Metrics=[") || text.contains("Dimensions=[")
-                || text.contains("metrics/*/bizName") || text.contains("/metrics/*/bizName")
-                || text.contains("ZB001 各项存款") && text.contains("ORG001 A市");
     }
 }

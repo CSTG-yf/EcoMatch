@@ -48,8 +48,17 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
             "split": "train",
             "agentId": 33,
         },
-        "timingMs": {"averageParseMs": 1.0, "averageExecuteMs": 2.0},
-        "timingDistributionsMs": {"endToEnd": {"count": 1, "p95": 4.0}},
+        "timingMs": {
+            "averageParseMs": 1.0,
+            "averageExecuteMs": 2.0,
+            "averageQueryTimeCostMs": 1.25,
+            "averageExecutePostQueryMs": 0.75,
+        },
+        "timingDistributionsMs": {
+            "queryTimeCost": {"count": 1, "p95": 1.25},
+            "executePostQuery": {"count": 1, "p95": 0.75},
+            "endToEnd": {"count": 1, "p95": 4.0},
+        },
         "items": [
             {
                 "id": sample_id,
@@ -57,8 +66,11 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
                 "sqlFeatures": ["POINT_QUERY"],
                 "parse": True,
                 "execute": True,
+                "queryTimeCostMs": 1.25,
+                "executePostQueryMs": 0.75,
                 "summaryState": "SUCCESS",
                 "textSummary": "2025年末，江苏省A市农商行存款余额42.02亿元。",
+                "finalAnswerTrace": {"status": "SUCCEEDED", "attempts": 1, "errors": []},
                 "resultColumns": ["metric_value"],
                 "resultRows": [[42.02]],
                 "chatId": 501,
@@ -85,8 +97,6 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
                 "caseDenominator",
                 "resultFactAccuracy",
                 "resultFactsExactHits",
-                "finalFactAccuracy",
-                "finalFactsExactHits",
                 "contractReadyRate",
                 "contractReadyCount",
             },
@@ -96,12 +106,41 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertEqual(report["items"][0]["errorCategory"], None)
         self.assertEqual(report["runtimeDiagnostics"]["parseSuccessRate"], 1.0)
         self.assertEqual(report["runtimeDiagnostics"]["executionSuccessRate"], 1.0)
+        self.assertEqual(report["items"][0]["queryTimeCostMs"], 1.25)
+        self.assertEqual(report["items"][0]["executePostQueryMs"], 0.75)
+        self.assertEqual(
+            report["runtimeDiagnostics"]["timingMs"]["averageQueryTimeCostMs"], 1.25
+        )
         for legacy_key in ("answerExact", "answerScore", "goldGrade", "match", "tableEX", "tableExact"):
             self.assertNotIn(legacy_key, report["items"][0])
 
     def test_rejects_a_capture_that_omits_or_adds_records(self) -> None:
         with self.assertRaises(OfficialRuntimeEvaluationError):
             build_official_runtime_report(_capture("UNEXPECTED"), [_record()])
+
+    def test_accepts_a_capture_without_final_answer_stage_attestation(self) -> None:
+        capture = _capture()
+        del capture["items"][0]["finalAnswerTrace"]
+
+        report = build_official_runtime_report(capture, [_record()])
+
+        self.assertTrue(report["items"][0]["casePass"])
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"], 0.0)
+
+    def test_reports_a_skipped_final_answer_stage_as_non_scoring_diagnostic(self) -> None:
+        capture = _capture()
+        capture["items"][0]["finalAnswerTrace"] = {
+            "status": "SKIPPED",
+            "attempts": 0,
+            "errors": ["FINAL_ANSWER_APP_DISABLED_OR_UNCONFIGURED"],
+        }
+
+        report = build_official_runtime_report(capture, [_record()])
+
+        self.assertTrue(report["items"][0]["casePass"])
+        self.assertIsNone(report["items"][0]["errorCategory"])
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorSuccessRate"], 0.0)
+        self.assertEqual(report["runtimeDiagnostics"]["finalAnswerProcessorStates"], {"SKIPPED": 1})
 
     def test_bootstrap_receipt_binds_the_agent_to_the_official_dataset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -204,7 +243,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         profile, profile_sha256 = load_official_runtime_profile(ROOT)
         release = verify_official_runtime_release(ROOT, profile=profile, split="train")
 
-        self.assertEqual(profile["datasetVersion"], "2.0.1")
+        self.assertEqual(profile["datasetVersion"], "2.0.2")
         self.assertEqual(len(profile_sha256), 64)
         self.assertEqual(release["recordCount"], 119)
         self.assertIn("train.jsonl", release["checkedAssets"])

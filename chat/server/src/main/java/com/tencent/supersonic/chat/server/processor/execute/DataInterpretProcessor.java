@@ -76,11 +76,34 @@ public class DataInterpretProcessor implements ExecuteResultProcessor {
 
     @Override
     public boolean accept(ExecuteContext executeContext) {
+        if (executeContext != null && executeContext.getRequest() != null
+                && executeContext.getRequest().isResultOnly()) {
+            return false;
+        }
+        if (bankFinalAnswerOwnsSummary(executeContext)) {
+            // The bank final-answer processor is the sole owner of the user-visible answer.
+            // In particular, do not start the legacy streaming interpreter here: its callback
+            // persists a generic summary after the validated answer and can overwrite it.
+            return false;
+        }
         Agent agent = executeContext.getAgent();
         ChatApp chatApp = agent.getChatAppConfig().get(APP_KEY);
         return Objects.nonNull(chatApp) && chatApp.isEnable()
                 && StringUtils.isNotBlank(executeContext.getResponse().getTextResult()) // 如果都没结果，则无法处理
                 && StringUtils.isBlank(executeContext.getResponse().getTextSummary()); // 如果已经有汇总的结果了，无法再次处理
+    }
+
+    static boolean bankFinalAnswerOwnsSummary(ExecuteContext executeContext) {
+        if (executeContext == null || executeContext.getAgent() == null
+                || executeContext.getAgent().getChatAppConfig() == null) {
+            return false;
+        }
+        ChatApp finalAnswerApp = executeContext.getAgent().getChatAppConfig()
+                .get(BankFinalAnswerProcessor.APP_KEY);
+        // The final-answer app is a mutually exclusive answer owner for this agent. Checking
+        // only the current parse properties is racy during plan-repair/streaming execution and
+        // allowed the legacy interpreter to start before those properties were attached.
+        return finalAnswerApp != null && finalAnswerApp.isEnable();
     }
 
     @Override

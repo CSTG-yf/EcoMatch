@@ -34,6 +34,8 @@ class BootstrapBankAgentTest(unittest.TestCase):
         self.assertTrue(final_answer["enable"])
         self.assertEqual(final_answer["chatModelId"], 5)
         self.assertIn("validation_feedback", final_answer["prompt"])
+        self.assertIn("metric_catalog", final_answer["prompt"])
+        self.assertIn("整体上升、下降或持平", final_answer["prompt"])
         self.assertIn("禁止输出记录数", final_answer["prompt"])
         self.assertEqual(payload["chatAppConfig"]["S2SQL_PARSER"]["chatModelId"], 5)
         self.assertEqual(payload["chatAppConfig"]["EXECUTION_SQL_CORRECTOR"]["chatModelId"], 5)

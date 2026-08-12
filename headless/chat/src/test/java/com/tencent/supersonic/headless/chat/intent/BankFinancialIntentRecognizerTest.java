@@ -226,6 +226,34 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldTreatExplicitProvinceAverageComparisonAsThreshold() {
+        BankIntentResult result = recognizer.recognize(
+                "江苏省A市农商行在2026-01-31的各项存款余额和各项贷款余额与全省均值逐一对比。",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.THRESHOLD, result.getIntent());
+        assertTrue(result.getFilters().stream().anyMatch(filter -> "benchmark".equals(
+                filter.getField()) && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldRecognizeFourKeyProvinceAverageComparisonWithCompleteEvidence() {
+        BankIntentResult result = recognizer.recognize(
+                "对江苏省D市农商行在2025-07-31的存款、贷款、不良率、净利润四项关键指标与全省均值逐一对比。",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.THRESHOLD, result.getIntent());
+        assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB013"), metricCodes(result));
+        assertEquals("ORG004", result.getOrganizations().get(0).getCode());
+        assertEquals(LocalDate.of(2025, 7, 31), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 7, 31), result.getTime().getEndDate());
+        assertTrue(result.getFilters().stream().anyMatch(filter -> "benchmark".equals(
+                filter.getField()) && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue())));
+    }
+
+    @Test
     void shouldKeepRankingStrongerThanDaysAboveProvinceAverageAggregation() {
         BankIntentResult result = recognizer.recognize(
                 "2025年全年各项存款余额有多少天在省均值以上，排名前3的农商行？", LocalDate.of(2026, 7, 22));
