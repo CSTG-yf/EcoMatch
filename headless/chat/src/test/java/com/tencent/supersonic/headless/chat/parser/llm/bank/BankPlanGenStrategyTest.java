@@ -37,14 +37,14 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
         assertEquals("MODEL", response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
-        assertEquals(Set.of("ZB001", "ZB002"),
-                response.getBankRequestContract().getMetricCodes().stream().collect(
-                        java.util.stream.Collectors.toSet()));
+        assertEquals(Set.of("ZB001", "ZB002"), response.getBankRequestContract().getMetricCodes()
+                .stream().collect(java.util.stream.Collectors.toSet()));
         assertEquals(BankIntentType.COMPARISON, response.getBankQueryPlan().getIntent());
         assertEquals("ZB001", response.getBankQueryPlan().getMetrics().get(0).getBizName());
-        assertEquals(Set.of("ZB001", "ZB002"), request.getSemanticIntentHints().getRequiredMetrics());
-        assertEquals(1, response.getBankCandidateDiagnostics()
-                .get("bank.nl2sql.requirementsAttempts"));
+        assertEquals(Set.of("ZB001", "ZB002"),
+                request.getSemanticIntentHints().getRequiredMetrics());
+        assertEquals(1,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
         assertEquals(List.of(), response.getBankCandidateDiagnostics()
                 .get("bank.nl2sql.requirementsRepairReasons"));
         verify(model, times(2)).generate(anyString());
@@ -58,7 +58,8 @@ class BankPlanGenStrategyTest {
     void missingMetricIsReturnedToTheModelAsARepairableRequirementsError() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(requirementsJson(),
-                validPlanJson().replace("{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\",\"alias\":null},", ""),
+                validPlanJson().replace(
+                        "{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\",\"alias\":null},", ""),
                 validPlanJson());
         LLMReq request = request();
 
@@ -88,6 +89,22 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void oneClarificationIsRecheckedByTheModelBeforeBeingReturnedToTheUser() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(), requirementsJson(),
+                validPlanJson());
+
+        LLMReq request = request();
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(List.of("CLARIFICATION_RECHECK"), request.getBankRequirementsRepairReasons());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("model selected CLARIFY"));
+    }
+
+    @Test
     void transportFailureDoesNotUseADeterministicFallbackPlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenThrow(new RuntimeException("connection timeout"));
@@ -103,8 +120,8 @@ class BankPlanGenStrategyTest {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(validPlanJson());
         LLMReq request = request();
-        request.setBankRequestContract(new BankRequestContractResponseParser().parse(requirementsJson(),
-                request.getSemanticIntentHints()));
+        request.setBankRequestContract(new BankRequestContractResponseParser()
+                .parse(requirementsJson(), request.getSemanticIntentHints()));
         request.setPreviousBankQueryPlanJson(validPlanJson());
         request.setBankPlanToolResult(BankPlanToolResult.failed(1, "trace-1", "fingerprint-1",
                 BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION", Map.of(),
@@ -114,8 +131,9 @@ class BankPlanGenStrategyTest {
 
         assertEquals("MODEL_TOOL_REPAIR",
                 response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
-        verify(model).generate(org.mockito.ArgumentMatchers.<String>argThat(prompt ->
-                prompt.contains("<tool_result>") && prompt.contains("<requirements_contract>")
+        verify(model).generate(org.mockito.ArgumentMatchers
+                .<String>argThat(prompt -> prompt.contains("<tool_result>")
+                        && prompt.contains("<requirements_contract>")
                         && prompt.contains("UNSUPPORTED_PLAN_COMBINATION")));
     }
 
@@ -132,8 +150,8 @@ class BankPlanGenStrategyTest {
                 () -> new TestBankPlanGenStrategy(model).generate(request()));
 
         assertEquals(BankNl2SqlError.Category.CLARIFICATION_REQUIRED, error.getCategory());
-        assertEquals("请明确要查询的具体指标。", error.toParserErrorMessage()
-                .replace("[BANK_CONSTRAINED_PLAN]", ""));
+        assertEquals("请明确要查询的具体指标。",
+                error.toParserErrorMessage().replace("[BANK_CONSTRAINED_PLAN]", ""));
     }
 
     private LLMReq request() {
@@ -155,6 +173,14 @@ class BankPlanGenStrategyTest {
                 "time":{"startDate":"2025-07-31","endDate":"2025-07-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]}],
                 "requiredLimit":null,"answerFactTypes":["VALUE","PROVINCE_AVERAGE","GAP_VALUE"],"clarification":null}
+                """;
+    }
+
+    private String clarificationJson() {
+        return """
+                {"version":"1.0","action":"CLARIFY","intent":"UNKNOWN","metricCodes":[],
+                "derivedMetrics":[],"organizationCodes":[],"time":null,"filters":[],
+                "requiredLimit":null,"answerFactTypes":[],"clarification":"请明确具体指标、机构和时间范围。"}
                 """;
     }
 

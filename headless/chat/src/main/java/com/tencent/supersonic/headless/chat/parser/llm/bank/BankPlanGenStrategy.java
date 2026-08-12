@@ -24,8 +24,9 @@ import java.util.Map;
 /**
  * Model-owned constrained bank planning.
  *
- * <p>The first model response is a requirement contract, the second is an executable semantic
- * plan. This class intentionally contains no question keyword recognizer, business-code mapper,
+ * <p>
+ * The first model response is a requirement contract, the second is an executable semantic plan.
+ * This class intentionally contains no question keyword recognizer, business-code mapper,
  * deterministic plan template, or post-generation plan rewrite.
  */
 @Service
@@ -35,6 +36,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
     private static final int MAX_REQUIREMENT_ATTEMPTS = 3;
+    private static final String CLARIFICATION_RECHECK_MESSAGE =
+            "model selected CLARIFY; re-read the original question and use CLARIFY only when "
+                    + "a metric, organization, or time slot is genuinely missing or ambiguous. "
+                    + "If the question already supplies those values, return action=EXECUTE. "
+                    + "Do not replace a complete request with a generic request for more details.";
 
     private final BankRequestContractResponseParser requestContractParser =
             new BankRequestContractResponseParser();
@@ -44,8 +50,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     public BankPlanGenStrategy() {
         ChatAppManager.register(APP_KEY,
-                ChatApp.builder().name("银行受约束查询计划")
-                        .description("由大模型生成经过事实目录校验的银行查询计划")
+                ChatApp.builder().name("银行受约束查询计划").description("由大模型生成经过事实目录校验的银行查询计划")
                         .enable(false).appModule(AppModule.CHAT).build());
     }
 
@@ -65,8 +70,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         ChatModelConfig modelConfig = configureModel(chatApp.getChatModelConfig());
         ChatLanguageModel model = getChatLanguageModel(modelConfig);
 
-        RequirementsAttempt requirementsAttempt = obtainRequirements(llmReq, model, modelConfig,
-                admissionHints);
+        RequirementsAttempt requirementsAttempt =
+                obtainRequirements(llmReq, model, modelConfig, admissionHints);
         BankRequestContract requirements = requirementsAttempt.contract();
         llmReq.setBankRequirementsAttempts(requirementsAttempt.attempts());
         llmReq.setBankRequirementsRepairReasons(requirementsAttempt.repairReasons());
@@ -86,7 +91,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         llmReq.getBankPlanToolResult())
                 : BankPlanPromptComposer.buildPlanUserContent(llmReq.getQueryText(),
                         requirementsJson);
-        int candidateLimit = toolRepair ? 1 : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
+        int candidateLimit =
+                toolRepair ? 1 : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
 
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
         BankQueryPlanParseException lastPlanError = null;
@@ -95,14 +101,15 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         for (int candidateIndex = 0; candidateIndex < candidateLimit; candidateIndex++) {
             String candidate = null;
             try {
-                candidate = prefixCache.generate(model, modelConfig, dynamicUser, candidateLimit == 1);
+                candidate =
+                        prefixCache.generate(model, modelConfig, dynamicUser, candidateLimit == 1);
                 lastCandidate = candidate;
                 candidates.add(candidateRanker.evaluate(responseParser.parse(candidate, planHints),
                         planHints));
             } catch (BankQueryPlanParseException exception) {
                 lastPlanError = exception;
-                candidates.add(BankPlanCandidateRanker.Candidate.rejected(
-                        "rejected-plan-" + candidateIndex, exception.getReason().name()));
+                candidates.add(BankPlanCandidateRanker.Candidate
+                        .rejected("rejected-plan-" + candidateIndex, exception.getReason().name()));
                 PlanRepairAttempt repaired = repairPlan(llmReq, requirementsJson, candidate,
                         exception, model, modelConfig, planHints, candidateIndex);
                 candidates.addAll(repaired.candidates());
@@ -134,7 +141,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             KEY_PIPELINE_LOG.info(
                     "BankPlanGenStrategy selected {} unique model plan candidate(s), rejected={}",
                     selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount());
-            return planResponse(llmReq, requirements, selection.getSelected().getPlan(), diagnostics);
+            return planResponse(llmReq, requirements, selection.getSelected().getPlan(),
+                    diagnostics);
         } catch (IllegalArgumentException noCandidate) {
             throw BankNl2SqlError.afterSingleRepair(lastPlanError == null
                     ? new BankQueryPlanParseException(
@@ -178,16 +186,27 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         String candidate = null;
         BankQueryPlanParseException lastError = null;
         List<String> repairReasons = new ArrayList<>();
+        boolean clarificationRechecked = false;
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
                     ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText())
-                    : BankPlanPromptComposer.buildRequirementsRepairUserContent(llmReq.getQueryText(),
-                            candidate, lastError == null ? "requirements JSON is invalid"
+                    : BankPlanPromptComposer.buildRequirementsRepairUserContent(
+                            llmReq.getQueryText(), candidate,
+                            lastError == null ? "requirements JSON is invalid"
                                     : lastError.getMessage());
             try {
                 candidate = prefixCache.generate(model, config, user, attempt == 0);
-                return new RequirementsAttempt(requestContractParser.parse(candidate, admissionHints),
-                        attempt + 1, List.copyOf(repairReasons));
+                BankRequestContract parsed = requestContractParser.parse(candidate, admissionHints);
+                if (parsed.getAction() == BankRequestContract.Action.CLARIFY
+                        && !clarificationRechecked) {
+                    clarificationRechecked = true;
+                    lastError = new BankQueryPlanParseException(
+                            BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                            CLARIFICATION_RECHECK_MESSAGE);
+                    repairReasons.add("CLARIFICATION_RECHECK");
+                    continue;
+                }
+                return new RequirementsAttempt(parsed, attempt + 1, List.copyOf(repairReasons));
             } catch (BankQueryPlanParseException exception) {
                 lastError = exception;
                 repairReasons.add(exception.getReason().name());
@@ -195,10 +214,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 throw BankNl2SqlError.modelFailure(exception);
             }
         }
-        throw BankNl2SqlError.afterSingleRepair(lastError == null
-                ? new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
-                        "model did not return an executable requirements contract")
-                : lastError);
+        throw BankNl2SqlError
+                .afterSingleRepair(lastError == null
+                        ? new BankQueryPlanParseException(
+                                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                                "model did not return an executable requirements contract")
+                        : lastError);
     }
 
     private PlanRepairAttempt repairPlan(LLMReq llmReq, String requirementsJson,
@@ -211,7 +232,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             try {
                 String repaired = prefixCache.generate(model, config,
                         BankPlanPromptComposer.buildPlanRepairUserContent(llmReq.getQueryText(),
-                                requirementsJson, previous, lastError.getMessage()), false);
+                                requirementsJson, previous, lastError.getMessage()),
+                        false);
                 previous = repaired;
                 candidates.add(candidateRanker.evaluate(responseParser.parse(repaired, planHints),
                         planHints));
