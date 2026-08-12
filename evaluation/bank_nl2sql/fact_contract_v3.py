@@ -25,6 +25,7 @@ from answer_contract import (
     extract_answer_slots,
     values_close,
 )
+from answer_facts import evaluate_formula, validate_answer_facts
 
 
 SCHEMA_VERSION = "3.2-dry-run"
@@ -59,6 +60,7 @@ class FactDraft:
     required: bool
     support: str
     derivation: str | None = None
+    evidence: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -197,6 +199,15 @@ def _source_risks(question: str, answer_text: str) -> list[str]:
     return risks
 
 
+def _typed_answer_facts(
+    raw_facts: Any, expected: dict[str, Any]
+) -> tuple[list[FactDraft], list[str]]:
+    validated, errors = validate_answer_facts(
+        raw_facts, expected, default_tolerance=DEFAULT_ABS_TOL
+    )
+    return [FactDraft(**fact) for fact in validated], errors
+
+
 def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
     sample_id = str(record.get("id") or "")
     question = str(record.get("question") or "")
@@ -277,9 +288,36 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
             )
         )
 
+    typed_errors: list[str] = []
+    typed_facts = expected.get("answerFacts")
+    if typed_facts is not None:
+        typed_drafts, typed_errors = _typed_answer_facts(typed_facts, expected)
+        typed_targets: set[int] = set()
+        for typed in typed_drafts:
+            target = next(
+                (
+                    index
+                    for index, fact in enumerate(facts)
+                    if index not in typed_targets
+                    if fact.required
+                    and fact.support in {"MISSING", "DIRECT_RESULT"}
+                    and fact.kind == typed.kind
+                    and _close(fact.value, typed.value, kind=fact.kind, tolerance=tolerance)
+                ),
+                None,
+            )
+            if target is None:
+                typed_errors.append("TYPED_ANSWER_FACT_NOT_BOUND_TO_ANSWER_FACT")
+            else:
+                typed_targets.add(target)
+                facts[target] = typed
+
     risks = _source_risks(question, answer_text)
     warnings: list[str] = []
-    if any(fact.required and fact.support == "MISSING" for fact in facts):
+    missing_required_support = any(
+        fact.required and fact.support == "MISSING" for fact in facts
+    )
+    if missing_required_support:
         warnings.append("LEGACY_TABLE_MISSING_ANSWER_FACT")
     if asks_for_mean or re.search(r"哪些表现较好|哪些表现较差", question):
         warnings.append("SEMANTIC_BINDING_DIAGNOSTIC")
@@ -287,6 +325,9 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
     reasons: list[str] = []
     if risks:
         reasons.append("SOURCE_SEMANTIC_RISK")
+    if missing_required_support:
+        reasons.append("MISSING_RESULT_SUPPORT")
+    reasons.extend(typed_errors)
     if not any(fact.required for fact in facts):
         reasons.append("NO_REQUIRED_FACTS")
 
@@ -298,7 +339,7 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
         semanticFacts=_semantic_facts(answer_text),
         sourceRisks=risks,
         warnings=warnings,
-        reasons=reasons,
+        reasons=list(dict.fromkeys(reasons)),
     )
 
 
@@ -633,6 +674,19 @@ def _fact_is_grounded_in_result(
         return any(
             _close(fact.value, value, kind=fact.kind, tolerance=tolerance)
             for value in table_values
+        )
+    if fact.support == "TYPED_RESULT" and isinstance(fact.evidence, dict):
+        formula = fact.evidence.get("formula")
+        calculated = (
+            evaluate_formula(formula, columns or [], rows or [])
+            if isinstance(formula, dict)
+            else None
+        )
+        return calculated is not None and _close(
+            fact.value,
+            calculated,
+            kind=fact.kind,
+            tolerance=tolerance,
         )
     if fact.derivation == "COUNT_TRUE" and fact.support == "DERIVED_RESULT":
         condition_true_count = _condition_true_count(columns, rows)

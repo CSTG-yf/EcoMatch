@@ -22,7 +22,7 @@ def _write_json(path: Path, payload: object) -> None:
 
 
 class FreezeFactContractV3Test(unittest.TestCase):
-    def test_answer_amendment_release_keeps_fact_contract_and_records_gold_integrity(self) -> None:
+    def test_answer_fact_release_keeps_fact_contract_and_records_gold_integrity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             record = {
@@ -47,7 +47,7 @@ class FreezeFactContractV3Test(unittest.TestCase):
                 {
                     "version": "2.0.1",
                     "sourceSha256": "A" * 64,
-                    "answerAmendment": {"count": 1},
+                    "answerFactContract": {"count": 1},
                 },
             )
             _write_json(root / "gold_manifest.json", {"version": "2.0.1"})

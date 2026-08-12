@@ -32,6 +32,8 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
+from answer_facts import validate_answer_facts
+
 
 METRIC_CODE_PATTERN = re.compile(r"^ZB\d{3}$")
 
@@ -73,6 +75,9 @@ SCHEMA: dict[str, Any] = {
         "expected": {
             "type": "object",
             "required": ["answerText", "columns", "rows", "unit", "numericTolerance", "orderSensitive"],
+            "properties": {
+                "answerFacts": {"type": "array", "minItems": 1},
+            },
         },
     },
 }
@@ -148,6 +153,8 @@ def _load_official_manifest(path: Path) -> dict[str, Any]:
         raise DatasetBuildError("官方 manifest artifactSha256.changeLedger 非法")
     if manifest.get("releaseMode") == "INCREMENTAL_ANSWER_AMENDMENT":
         _validate_incremental_answer_amendment(manifest, path.parent)
+    elif manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT":
+        _load_answer_fact_contracts(manifest, path.parent)
     return manifest
 
 
@@ -247,7 +254,107 @@ def _validate_incremental_answer_amendment(
             raise DatasetBuildError(f"answerAmendmentLedger reason 非法: {sample_id}")
 
 
-def _load_change_ledger(manifest: dict[str, Any], manifest_dir: Path) -> dict[str, dict[str, Any]]:
+def _load_answer_fact_contracts(
+    manifest: dict[str, Any], manifest_dir: Path
+) -> dict[str, dict[str, Any]]:
+    """Validate and load a versioned answer-fact ledger without mutating the source ledger."""
+
+    parent = manifest.get("parent")
+    if (
+        not isinstance(parent, dict)
+        or not isinstance(parent.get("datasetVersion"), str)
+        or not parent["datasetVersion"]
+        or not isinstance(parent.get("officialManifestSha256"), str)
+        or len(parent["officialManifestSha256"]) != 64
+    ):
+        raise DatasetBuildError("答案事实官方 manifest parent 非法")
+    ledger_name = manifest.get("answerFactLedger")
+    ledger_rel = Path(ledger_name) if isinstance(ledger_name, str) and ledger_name else None
+    if ledger_rel is None or ledger_rel.is_absolute() or ".." in ledger_rel.parts:
+        raise DatasetBuildError("答案事实官方 manifest answerFactLedger 非法")
+    fact_count = manifest.get("answerFactCount")
+    if not isinstance(fact_count, int) or fact_count <= 0:
+        raise DatasetBuildError("答案事实官方 manifest answerFactCount 非法")
+    generator = manifest.get("answerFactGenerator")
+    if (
+        not isinstance(generator, dict)
+        or not isinstance(generator.get("name"), str)
+        or not generator["name"]
+        or not isinstance(generator.get("version"), str)
+        or not generator["version"]
+    ):
+        raise DatasetBuildError("答案事实官方 manifest answerFactGenerator 非法")
+    expected_sha = (manifest.get("artifactSha256") or {}).get("answerFactLedger")
+    if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+        raise DatasetBuildError("答案事实官方 manifest artifactSha256.answerFactLedger 非法")
+    ledger_path = (manifest_dir / ledger_rel).resolve()
+    if not ledger_path.is_file():
+        raise DatasetBuildError(f"answerFactLedger 不存在: {ledger_path}")
+    actual_sha = _sha256(ledger_path).upper()
+    if actual_sha != expected_sha.upper():
+        raise DatasetBuildError(
+            f"answerFactLedger SHA-256 不匹配 ({actual_sha} != {expected_sha.upper()})"
+        )
+    try:
+        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetBuildError(f"answerFactLedger 无法解析: {exc}") from exc
+    if not isinstance(ledger, dict):
+        raise DatasetBuildError("answerFactLedger 必须为对象")
+    if ledger.get("targetDatasetVersion") != manifest.get("datasetVersion"):
+        raise DatasetBuildError("answerFactLedger targetDatasetVersion 不匹配")
+    if ledger.get("parentDatasetVersion") != parent["datasetVersion"]:
+        raise DatasetBuildError("answerFactLedger parentDatasetVersion 不匹配")
+    if ledger.get("parentOfficialManifestSha256") != parent["officialManifestSha256"]:
+        raise DatasetBuildError("answerFactLedger parentOfficialManifestSha256 不匹配")
+    if ledger.get("generator") != generator:
+        raise DatasetBuildError("answerFactLedger generator 不匹配")
+    entries = ledger.get("entries")
+    if not isinstance(entries, list) or ledger.get("count") != len(entries) or len(entries) != fact_count:
+        raise DatasetBuildError("answerFactLedger count/entries 非法")
+    contracts: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise DatasetBuildError("answerFactLedger entry 必须为对象")
+        sample_id = entry.get("id")
+        if not isinstance(sample_id, str) or not sample_id or sample_id in contracts:
+            raise DatasetBuildError("answerFactLedger ID 非法或重复")
+        if entry.get("split") not in {"train", "dev"}:
+            raise DatasetBuildError(f"answerFactLedger 禁止非 train/dev: {sample_id}")
+        answer_facts = entry.get("answerFacts")
+        _, errors = validate_answer_facts(
+            answer_facts,
+            {"columns": [], "rows": [], "numericTolerance": 1e-6},
+            default_tolerance=1e-6,
+            require_result_match=False,
+        )
+        if errors:
+            raise DatasetBuildError(f"{sample_id}: answerFactLedger answerFacts 非法: {errors}")
+        if not isinstance(entry.get("reason"), str) or not entry["reason"].strip():
+            raise DatasetBuildError(f"answerFactLedger reason 非法: {sample_id}")
+        projected: dict[str, Any] = {"answerFacts": answer_facts}
+        gold_sql = entry.get("goldSql")
+        if gold_sql is not None:
+            features = entry.get("sqlFeatures")
+            if (
+                not isinstance(gold_sql, str)
+                or not gold_sql.strip()
+                or not gold_sql.lstrip().upper().startswith(("SELECT ", "WITH "))
+                or ";" in gold_sql
+                or not isinstance(features, list)
+                or not features
+                or not all(isinstance(feature, str) and feature.strip() for feature in features)
+            ):
+                raise DatasetBuildError(f"answerFactLedger goldSql/sqlFeatures 非法: {sample_id}")
+            projected["goldSql"] = gold_sql
+            projected["sqlFeatures"] = features
+        contracts[sample_id] = projected
+    return contracts
+
+
+def _load_change_ledger(
+    manifest: dict[str, Any], manifest_dir: Path
+) -> dict[str, dict[str, Any]]:
     """Read and validate the manifest-referenced change ledger (fail closed).
 
     Returns the ledger's ``QUESTION_CLARIFICATION`` entries keyed by question
@@ -623,6 +730,7 @@ def build_dataset(
     question_ids = {question["id"] for question in questions}
     removed_ids: set[str] = set()
     clarification_contracts: dict[str, dict[str, Any]] = {}
+    answer_fact_contracts: dict[str, dict[str, Any]] = {}
     if official_manifest is not None:
         removed_ids = set(official_manifest["removedIds"])
         if official_manifest["officialCount"] != len(questions):
@@ -640,11 +748,22 @@ def build_dataset(
         missing_removed_intents = removed_ids - set(official_intents)
         if missing_removed_intents:
             raise DatasetBuildError(f"Ledger-removed IDs absent from intents: {sorted(missing_removed_intents)}")
-        clarification_contracts = _load_change_ledger(official_manifest, official_manifest_path.parent)
+        clarification_contracts = _load_change_ledger(
+            official_manifest, official_manifest_path.parent
+        )
+        if official_manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT":
+            answer_fact_contracts = _load_answer_fact_contracts(
+                official_manifest, official_manifest_path.parent
+            )
         missing_clarifications = set(clarification_contracts) - question_ids
         if missing_clarifications:
             raise DatasetBuildError(
                 f"Ledger clarification IDs absent from workbook: {sorted(missing_clarifications)}"
+            )
+        missing_answer_facts = set(answer_fact_contracts) - question_ids
+        if missing_answer_facts:
+            raise DatasetBuildError(
+                f"Ledger answer-fact IDs absent from workbook: {sorted(missing_answer_facts)}"
             )
     unknown_intents = sorted(set(official_intents) - question_ids - removed_ids)
     missing_intents = sorted(question_ids - set(official_intents))
@@ -659,6 +778,12 @@ def build_dataset(
         contract = clarification_contracts.get(question["id"])
         if contract is not None:
             _apply_clarification_contract(record, contract)
+        answer_fact_contract = answer_fact_contracts.get(question["id"])
+        if answer_fact_contract is not None:
+            record["expected"]["answerFacts"] = answer_fact_contract["answerFacts"]
+            if "goldSql" in answer_fact_contract:
+                record["goldSqlOverride"] = answer_fact_contract["goldSql"]
+                record["goldSqlFeatures"] = answer_fact_contract["sqlFeatures"]
         records_by_split[record["split"]].append(record)
     for records in records_by_split.values():
         records.sort(key=lambda item: item["id"])
@@ -688,6 +813,19 @@ def build_dataset(
             "count": official_manifest["answerAmendmentCount"],
             "officialManifestSha256": _sha256(official_manifest_path).upper(),
             "ledgerSha256": official_manifest["artifactSha256"]["answerAmendmentLedger"].upper(),
+            "canonicalWorkbook": official_manifest["groundTruthWorkbook"],
+            "canonicalWorkbookSha256": official_manifest["artifactSha256"]["groundTruthWorkbook"].upper(),
+        }
+    elif (
+        official_manifest is not None
+        and official_manifest_path is not None
+        and official_manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT"
+    ):
+        manifest["parentVersion"] = official_manifest["parent"]["datasetVersion"]
+        manifest["answerFactContract"] = {
+            "count": official_manifest["answerFactCount"],
+            "officialManifestSha256": _sha256(official_manifest_path).upper(),
+            "ledgerSha256": official_manifest["artifactSha256"]["answerFactLedger"].upper(),
             "canonicalWorkbook": official_manifest["groundTruthWorkbook"],
             "canonicalWorkbookSha256": official_manifest["artifactSha256"]["groundTruthWorkbook"].upper(),
         }

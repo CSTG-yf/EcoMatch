@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from gold_sql import build_gold_sql
+from gold_sql import GoldSqlSpec, build_gold_sql
 
 
 SPLITS = ("train", "dev", "test")
@@ -86,11 +86,19 @@ def build_gold_dataset(
         raise ValueError("Partial materialisation must not overwrite gold_manifest.json")
     records_by_split = {split: _read_jsonl(dataset_path / f"{split}.jsonl") for split in selected_splits}
 
-    connection = sqlite3.connect(database_path)
+    connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
+    connection.execute("PRAGMA query_only = ON")
     try:
         for records in records_by_split.values():
             for record in records:
-                spec = build_gold_sql(record)
+                override = record.get("goldSqlOverride")
+                if isinstance(override, str) and override.strip():
+                    features = record.get("goldSqlFeatures")
+                    if not isinstance(features, list) or not features:
+                        raise ValueError(f"Gold SQL override lacks features for {record.get('id')}")
+                    spec = GoldSqlSpec(sql=override, s2sql=override, features=features)
+                else:
+                    spec = build_gold_sql(record)
                 cursor = connection.execute(spec.sql)
                 columns = [column[0] for column in cursor.description]
                 rows = [[_json_value(value) for value in row] for row in cursor.fetchall()]
@@ -99,6 +107,8 @@ def build_gold_dataset(
                 record["s2sql"] = spec.s2sql
                 record["sql"] = spec.sql
                 record["sqlFeatures"] = spec.features
+                record.pop("goldSqlOverride", None)
+                record.pop("goldSqlFeatures", None)
                 expected = record.setdefault("expected", {})
                 expected["columns"] = columns
                 expected["rows"] = rows
@@ -125,6 +135,11 @@ def build_gold_dataset(
         ledger_sha = amendment.get("ledgerSha256")
         if isinstance(ledger_sha, str) and len(ledger_sha) == 64:
             report["answerAmendmentLedgerSha256"] = ledger_sha.upper()
+    answer_fact_contract = source_manifest.get("answerFactContract")
+    if isinstance(answer_fact_contract, dict):
+        ledger_sha = answer_fact_contract.get("ledgerSha256")
+        if isinstance(ledger_sha, str) and len(ledger_sha) == 64:
+            report["answerFactLedgerSha256"] = ledger_sha.upper()
     if write_gold_manifest:
         (dataset_path / "gold_manifest.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"

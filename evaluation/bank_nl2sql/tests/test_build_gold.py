@@ -18,6 +18,86 @@ from build_gold import build_gold_dataset  # noqa: E402
 
 
 class BuildGoldTest(unittest.TestCase):
+    def test_materialises_versioned_gold_sql_override(self) -> None:
+        record = {
+            "id": "CASE-OVERRIDE-01",
+            "question": "和全省均值相比如何？",
+            "normalizedIntent": {"intent": "AGGREGATION", "metrics": [], "time": {}, "organizations": []},
+            "expected": {"answerText": "低1", "columns": [], "rows": [], "unit": None, "numericTolerance": None, "orderSensitive": False},
+            "goldSqlOverride": "SELECT 41.0 AS organization_value, 42.0 AS provincial_average, 1.0 AS absolute_difference",
+            "goldSqlFeatures": ["PROVINCIAL_AVERAGE", "ANSWER_FACT_CONTRACT"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "train.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            (root / "dev.jsonl").write_text("", encoding="utf-8")
+            (root / "test.jsonl").write_text("", encoding="utf-8")
+            database_path = root / "benchmark.sqlite"
+            sqlite3.connect(database_path).close()
+
+            build_gold_dataset(root, database_path)
+            populated = json.loads((root / "train.jsonl").read_text(encoding="utf-8"))
+
+            self.assertEqual(populated["sql"], record["goldSqlOverride"])
+            self.assertEqual(populated["sqlFeatures"], record["goldSqlFeatures"])
+            self.assertNotIn("goldSqlOverride", populated)
+            self.assertNotIn("goldSqlFeatures", populated)
+            self.assertEqual(
+                populated["expected"]["rows"], [[41.0, 42.0, 1.0]]
+            )
+
+    def test_rejects_write_statement_disguised_as_cte_override(self) -> None:
+        record = {
+            "id": "CASE-OVERRIDE-WRITE",
+            "question": "恶意覆盖不得修改评估库",
+            "normalizedIntent": {
+                "intent": "POINT_QUERY",
+                "metrics": [],
+                "time": {},
+                "organizations": [],
+            },
+            "expected": {
+                "answerText": "1",
+                "columns": [],
+                "rows": [],
+                "unit": None,
+                "numericTolerance": None,
+                "orderSensitive": False,
+            },
+            "goldSqlOverride": (
+                "WITH marker AS (SELECT 1) "
+                "DELETE FROM guarded_fact RETURNING value"
+            ),
+            "goldSqlFeatures": ["ANSWER_FACT_CONTRACT"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "train.jsonl").write_text(
+                json.dumps(record) + "\n", encoding="utf-8"
+            )
+            (root / "dev.jsonl").write_text("", encoding="utf-8")
+            (root / "test.jsonl").write_text("", encoding="utf-8")
+            database_path = root / "benchmark.sqlite"
+            connection = sqlite3.connect(database_path)
+            connection.executescript(
+                "CREATE TABLE guarded_fact (value INTEGER);"
+                "INSERT INTO guarded_fact VALUES (1);"
+            )
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(sqlite3.OperationalError):
+                build_gold_dataset(root, database_path)
+
+            connection = sqlite3.connect(database_path)
+            try:
+                self.assertEqual(
+                    connection.execute("SELECT value FROM guarded_fact").fetchall(),
+                    [(1,)],
+                )
+            finally:
+                connection.close()
+
     def test_populates_sql_and_structured_result_from_sqlite(self) -> None:
         record = {
             "id": "CASE-01",
@@ -165,6 +245,16 @@ class BuildGoldTest(unittest.TestCase):
             self.assertEqual(gold_manifest["version"], "2.0.1")
             self.assertEqual(gold_manifest["parentVersion"], "2.0.0")
             self.assertEqual(gold_manifest["answerAmendmentLedgerSha256"], "B" * 64)
+
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            manifest.pop("answerAmendment")
+            manifest["answerFactContract"] = {"ledgerSha256": "C" * 64}
+            (root / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            answer_facts = build_gold_dataset(root, database_path)
+            self.assertEqual(answer_facts["answerFactLedgerSha256"], "C" * 64)
 
 
 if __name__ == "__main__":

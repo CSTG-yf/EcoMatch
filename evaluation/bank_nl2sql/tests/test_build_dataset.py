@@ -337,6 +337,107 @@ class OfficialManifestTest(BuildDatasetTest):
         }
         return ledger_path
 
+    def write_answer_fact_ledger(
+        self, directory: Path, manifest: dict, entries: list[dict]
+    ) -> Path:
+        parent_manifest_sha = "B" * 64
+        generator = {"name": "amend_official_answer_facts", "version": "1.0.0"}
+        ledger = {
+            "schemaVersion": "1.0",
+            "generator": generator,
+            "parentDatasetVersion": "2.0.0",
+            "parentOfficialManifestSha256": parent_manifest_sha,
+            "targetDatasetVersion": "2.0.1",
+            "count": len(entries),
+            "entries": entries,
+        }
+        ledger_path = directory / "answer-fact-ledger.json"
+        ledger_path.write_text(
+            json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        manifest.update(
+            {
+                "releaseMode": "INCREMENTAL_ANSWER_FACT_CONTRACT",
+                "datasetVersion": "2.0.1",
+                "parent": {
+                    "datasetVersion": "2.0.0",
+                    "officialManifestSha256": parent_manifest_sha,
+                },
+                "answerFactLedger": ledger_path.name,
+                "answerFactCount": len(entries),
+                "answerFactGenerator": generator,
+            }
+        )
+        manifest["artifactSha256"]["answerFactLedger"] = hashlib.sha256(
+            ledger_path.read_bytes()
+        ).hexdigest().upper()
+        return ledger_path
+
+    def test_manifest_projects_typed_answer_fact_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            answer_facts = [
+                {
+                    "id": "deposit_value",
+                    "value": 41.76,
+                    "kind": "NUMBER",
+                    "binding": {
+                        "organizationCodes": ["ORG001"],
+                        "metricCodes": ["ZB001"],
+                        "dates": ["2025-12-31"],
+                        "comparisonType": "POINT",
+                    },
+                    "formula": {
+                        "operation": "DIRECT",
+                        "operands": [
+                            {"column": "metric_value", "where": {"metric_code": "ZB001"}}
+                        ],
+                    },
+                }
+            ]
+            self.write_ledger(
+                temp_path,
+                manifest,
+                removed_ids=["TRAIN-S-02"],
+            )
+            self.write_answer_fact_ledger(
+                temp_path,
+                manifest,
+                [
+                    {
+                        "id": "TRAIN-S-01",
+                        "split": "train",
+                        "reason": "derived answer fact",
+                        "answerFacts": answer_facts,
+                        "goldSql": "SELECT 41.76 AS metric_value",
+                        "sqlFeatures": ["ANSWER_FACT_CONTRACT"],
+                    }
+                ],
+            )
+            self.write_manifest(manifest_path, manifest)
+            output_path = temp_path / "output"
+
+            build_dataset(
+                workbook_path,
+                intent_root,
+                output_path,
+                official_manifest_path=manifest_path,
+            )
+
+            record = json.loads((output_path / "train.jsonl").read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(record["expected"]["answerFacts"], answer_facts)
+            self.assertEqual(record["goldSqlOverride"], "SELECT 41.76 AS metric_value")
+            self.assertEqual(record["goldSqlFeatures"], ["ANSWER_FACT_CONTRACT"])
+            schema = json.loads((output_path / "schema.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                schema["properties"]["expected"]["properties"]["answerFacts"]["type"],
+                "array",
+            )
+
     def create_clarification_fixture(self, temp_path: Path) -> tuple[Path, Path]:
         """Workbook + intents with one clarify-style RANKING question.
 

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Imports the frozen official Bank NL2SQL v2.0.2 benchmark tables/views into a
+    Imports the frozen official Bank NL2SQL v2.0.3 benchmark tables/views into a
     local H2 database (companion import package, NOT a runtime semantic.mv.db).
 
 .DESCRIPTION
@@ -48,19 +48,19 @@ param(
     [string]$TargetDatabase,
     [string]$JavaPath,
     [string]$H2JarPath,
-    [string]$ReleaseVersion = "2.0.2"
+    [string]$ReleaseVersion = "2.0.3"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 3.0
 
 if ($ReleaseVersion -notmatch '^\d+\.\d+\.\d+$') {
-    throw "ReleaseVersion must be a semantic version such as 2.0.2; got '$ReleaseVersion'"
+    throw "ReleaseVersion must be a semantic version such as 2.0.3; got '$ReleaseVersion'"
 }
 $OfficialVersion = $ReleaseVersion
 $SchemaVersion = "1.0"
 $ExpectedCounts = @{ organizations = 13; metrics = 21; facts = 132678 }
-$ExpectedSourceRelativePath = "evaluation/bank_nl2sql/official/$OfficialVersion/bank-nl2sql-ground-truth-v$OfficialVersion.xlsx"
+$ExpectedSourceDirectory = "evaluation/bank_nl2sql/official/$OfficialVersion/"
 
 # SAFETY 1: This importer never terminates or stops any process or service.
 # SAFETY 2: This importer never deletes or overwrites any database file or
@@ -76,7 +76,6 @@ $ReleaseDir = Join-Path $RepoRoot "evaluation\bank_nl2sql\db\releases\$OfficialV
 $ManifestPath = Join-Path $ReleaseDir "database-manifest.json"
 $SqlitePath = Join-Path $ReleaseDir "bank.sqlite"
 $H2ScriptPath = Join-Path $ReleaseDir "bank-h2.sql"
-$SourceWorkbookPath = Join-Path $RepoRoot $ExpectedSourceRelativePath
 
 if (-not $TargetDatabase) {
     $TargetDatabase = Join-Path $RepoRoot ".local-dev\state\semantic"
@@ -115,9 +114,12 @@ function Assert-ManifestAndArtifacts {
     if ($manifest.source.officialVersion -ne $OfficialVersion) {
         throw "Unexpected source officialVersion '$($manifest.source.officialVersion)'; expected '$OfficialVersion'"
     }
-    if ($manifest.source.path -ne $ExpectedSourceRelativePath) {
-        throw "Unexpected source path '$($manifest.source.path)'; expected '$ExpectedSourceRelativePath'"
+    $sourceRelativePath = [string]$manifest.source.path
+    $normalizedSourcePath = $sourceRelativePath.Replace("\", "/")
+    if (-not $normalizedSourcePath.StartsWith($ExpectedSourceDirectory) -or $normalizedSourcePath.Contains("..")) {
+        throw "Unexpected source path '$sourceRelativePath'; expected an artifact under '$ExpectedSourceDirectory'"
     }
+    $SourceWorkbookPath = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $sourceRelativePath))
     if (-not (Test-Path -LiteralPath $SourceWorkbookPath)) {
         throw "Official source workbook not found: $SourceWorkbookPath"
     }
