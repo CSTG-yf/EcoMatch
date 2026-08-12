@@ -37,10 +37,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
     private static final int MAX_REQUIREMENT_ATTEMPTS = 3;
     private static final String CLARIFICATION_RECHECK_MESSAGE =
-            "model selected CLARIFY; re-read the original question and use CLARIFY only when "
-                    + "a metric, organization, or time slot is genuinely missing or ambiguous. "
-                    + "If the question already supplies those values, return action=EXECUTE. "
-                    + "Do not replace a complete request with a generic request for more details.";
+            "model selected CLARIFY, but this is a validation failure rather than a user turn. "
+                    + "Re-read the original question and the complete semantic registry now. "
+                    + "Use CLARIFY only when a metric, organization, or time slot is genuinely "
+                    + "missing or ambiguous. If the question already supplies those values, "
+                    + "return action=EXECUTE with every directly stated metric, organization, "
+                    + "and date/range. Do not repeat a generic request for details, and do not "
+                    + "treat a broad label beside explicit catalog metrics as missing information.";
 
     private final BankRequestContractResponseParser requestContractParser =
             new BankRequestContractResponseParser();

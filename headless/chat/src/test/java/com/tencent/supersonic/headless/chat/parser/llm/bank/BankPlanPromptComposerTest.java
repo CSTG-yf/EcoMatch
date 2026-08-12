@@ -121,6 +121,9 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("只执行其中明确且可映射的目录指标"));
         assertTrue(sys.contains("日均值是多少？最高日和最低日"));
         assertTrue(sys.contains("aggregate_value、min_value、max_value、observation_count"));
+        assertTrue(sys.contains("逐季变化/各季度末数值"));
+        assertTrue(sys.contains("不得因没有目标机构而澄清"));
+        assertTrue(sys.contains("收入结构”若目录没有具体代码"));
     }
 
     @Test
