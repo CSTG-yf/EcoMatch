@@ -115,6 +115,8 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("只有指标、机构或时间确实无法从权威目录和题干唯一确定时"));
         assertTrue(sys.contains("同一查询的两个结果事实"));
         assertTrue(sys.contains("不要因为出现“排名”就改成 RANKING"));
+        assertTrue(sys.contains("封闭清单中的每一项都能映射到权威目录"));
+        assertTrue(sys.contains("不得再以“请明确具体指标、机构和时间范围”之类的口径确认替代执行"));
     }
 
     @Test

@@ -181,8 +181,11 @@ public final class BankPlanPromptComposer {
                     2. metricCodes / metrics 必须逐项包含用户明确请求的全部指标；不得默默补充或删除指标。
                        如果用户问题明确列出“指标集合”“待评价指标集合”或“包括……在内”的封闭指标清单，
                        该清单就是本轮唯一指标集合：只能映射清单中的指标，严禁把目录中的其他指标当作“主要指标”追加。
-                       “主要经营指标”“相关指标”等泛称不是全量目录；无法从问题确定具体指标集合时，必须 action=CLARIFY，
-                       不得用全目录代替理解结果。
+                       当封闭清单中的每一项都能映射到权威目录，且机构和日期也已明确时，即使同句出现“主要经营指标”、
+                       “风险指标”等宽泛词，仍必须 action=EXECUTE；这同样适用于 RANKING、表现较好/较差和包含派生指标的组合，
+                       不得再以“请明确具体指标、机构和时间范围”之类的口径确认替代执行。
+                       “主要经营指标”“相关指标”等泛称在没有封闭清单时不是全量目录；只有此时确实无法从问题确定具体指标集合，
+                       才必须 action=CLARIFY，不得用全目录代替理解结果。
                     3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
                     4. “全省均值”只能使用目录允许的 benchmark/COMPARE/PROVINCE_AVERAGE 合同，不能写 SQL 或自行估算。
                     5. 收到 <repair> 时，只根据 tool_result、previous_plan、requirements_contract 和目录修正；
@@ -190,7 +193,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v26-requirement-execution-boundary";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v27-closed-metric-list-execution";
 
     private BankPlanPromptComposer() {}
 
