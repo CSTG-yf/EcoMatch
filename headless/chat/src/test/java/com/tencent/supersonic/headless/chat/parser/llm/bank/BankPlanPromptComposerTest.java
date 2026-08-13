@@ -170,6 +170,17 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void systemPrefixKeepsQuarterlySeriesOutOfPointToPointChangePlans() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("逐季变化”必须使用 intent=TREND"));
+        assertTrue(sys.contains("time.comparison=NONE"));
+        assertTrue(sys.contains("dimensions 必须包含 \"bank_data_date\""));
+        assertTrue(sys.contains("calculation.type=DIRECT"));
+        assertTrue(sys.contains("不得压缩为起点与终点的 CHANGE"));
+    }
+
+    @Test
     void rejectsCatalogDumpInUserContent() {
         String catalog = "可填写值目录（只能从下列内容中选择）：\n- /metrics/*/bizName: [ZB001]";
         assertThrows(IllegalArgumentException.class,

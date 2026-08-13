@@ -51,6 +51,8 @@ public final class BankPlanPromptComposer {
                     同理，只有用户实际要求当前值、变化率、排名、全省均值或差额时，才填写相应类型；不得补充题干未要求的事实。
                     只有用户明确询问整体/总体趋势，或明确要求上升、下降、持平等方向性结论时，才必须填写 TREND_DIRECTION。
                     “请分析……逐季变化”表示需要逐期 VALUE；如果问题同时要求整体方向/趋势，也可填写 TREND_DIRECTION。
+                    “从某季度末到另一季度末的逐季变化”必须使用 intent=TREND，保留完整起止日期，
+                    time.comparison=NONE；不得把区间压缩为起点与终点的 CHANGE、同比或环比比较。
                     “各季度变化明细”“各季度末数值以及最高/最低季度”本身不要求 CHANGE_VALUE；只有明确要求每期变化额时才加 CHANGE_VALUE。
                     逐期数值的最高/最低由 VALUE 事实直接支撑；若查询结果无法形成确定的整体方向，最终回答必须省略不可证实的趋势，不得猜测“上升、下降或持平”。
                     “最高/最低、最高日/最低日”不是 answerFactTypes 枚举；它们只能填写 VALUE，
@@ -83,7 +85,9 @@ public final class BankPlanPromptComposer {
                     以完整日期范围计算 AVG；不要使用 MONTH 产生 yyyy-MM 字符串日期条件。
                     下面是需求阶段的语义判定优先规则；它们要求你完成自然语言理解，不是让后端替你猜测：
                     - “从某年某季度末到另一季度末的逐季变化/各季度末数值”已经给出起止范围。
-                      将每个季度解析为对应季度末日期，并直接 action=EXECUTE；不得要求用户重新提供起止日期。
+                      将每个季度解析为对应季度末日期，并直接 action=EXECUTE、intent=TREND；
+                      time.comparison=NONE，不填写 baselineStartDate/baselineEndDate；不得要求用户重新提供起止日期，
+                      也不得压缩为起点与终点的 CHANGE、同比或环比比较。
                     - “从某个基期到当前期，全省某指标增幅排名前N/后N”已经给出机构范围、指标、两个日期和名次限制。
                       直接 action=EXECUTE，intent=CHANGE，organizationCodes=[]，requiredLimit=N；不得因没有目标机构而澄清。
                     - 只要 time.comparison 不是 NONE（包括同比、环比、较年初或两个明确时点的变动），
@@ -164,12 +168,17 @@ public final class BankPlanPromptComposer {
                     }
 
                     查询计划字段填写规则（以下只说明输出 JSON 合同，不代替你依据用户问题进行自然语言理解）：
-                    1. 当你理解为 CHANGE 变化查询时，当前期和基期只填 time；dimensions 只能是 [] 或
+                    1. “从某季度末到另一季度末的逐季变化/各季度末数值”必须使用 intent=TREND，
+                       time.startDate/endDate 保留完整区间，time.granularity=DAY、time.comparison=NONE，
+                       baselineStartDate/baselineEndDate=null，dimensions 必须包含 "bank_data_date"，
+                       calculation.type=DIRECT，orderBy 按 bank_data_date ASC，output.columns 必须包含
+                       bank_data_date 和目标指标。不得压缩为起点与终点的 CHANGE、同比或环比比较。
+                    2. 当你理解为 CHANGE 变化查询时，当前期和基期只填 time；dimensions 只能是 [] 或
                        ["bank_organization"]，绝不可包含 "bank_data_date"。最小可执行形状为：
                        "dimensions":[],
                        "time":{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"YYYY-MM-DD","baselineEndDate":"YYYY-MM-DD"},
                        "calculation":{"type":"CHANGE","baseline":null}
-                    2. 当你理解为“全省均值”比较时，filters 必须包含下面这个精确基准对象：
+                    3. 当你理解为“全省均值”比较时，filters 必须包含下面这个精确基准对象：
                        "filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]}]
                        当问题还要求“高于”或“低于”全省均值时，才可以在该对象后额外加入方向对象：
                        {"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE","value":"PROVINCE_AVERAGE","values":[]}
@@ -290,7 +299,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v41-ratio-organization-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v42-quarterly-trend-contract";
 
     private BankPlanPromptComposer() {}
 
