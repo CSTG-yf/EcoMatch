@@ -219,9 +219,17 @@ def _assert_same_run(
         "modelLabel",
         "endpointFingerprint",
         "protocolProfileSha256",
+        "protocolSchemaVersion",
         "sourceRevision",
+        "requiredBaseRevision",
         "datasetVersion",
+        "databaseArtifacts",
+        "setupReceipt",
+        "captureMethod",
+        "authentication",
         "concurrency",
+        "selectedRecordIds",
+        "requestedCount",
     ):
         if run.get(key) != expected.get(key):
             raise OfficialRuntimeRunError(f"existing report is not compatible with this run: {key}")
@@ -298,10 +306,27 @@ def _load_resumed_items(path: Path, *, expected_run: dict[str, Any], records: li
     return resumed
 
 
-def _assert_completed_gate(path: Path, *, expected: dict[str, Any], required_mode: str, require_green: bool) -> None:
+def _assert_completed_gate(
+    path: Path,
+    *,
+    expected: dict[str, Any],
+    required_mode: str,
+    require_green: bool,
+    expected_record_ids: list[str] | None = None,
+) -> None:
     if not path.is_file():
         raise OfficialRuntimeRunError(f"required {required_mode} report does not exist: {path}")
     report = _read_json(path)
+    if report.get("schemaVersion") != OFFICIAL_RUNTIME_SCHEMA_VERSION:
+        raise OfficialRuntimeRunError(f"required {required_mode} report schemaVersion is invalid")
+    record_ids = expected_record_ids if expected_record_ids is not None else expected.get("selectedRecordIds")
+    if (
+        not isinstance(record_ids, list)
+        or not record_ids
+        or any(not isinstance(record_id, str) or not record_id for record_id in record_ids)
+        or len(set(record_ids)) != len(record_ids)
+    ):
+        raise OfficialRuntimeRunError(f"required {required_mode} expected selectedRecordIds are invalid")
     run = report.get("run")
     if not isinstance(run, dict):
         raise OfficialRuntimeRunError(f"required {required_mode} report has no run metadata")
@@ -309,6 +334,8 @@ def _assert_completed_gate(path: Path, *, expected: dict[str, Any], required_mod
         **expected,
         "mode": required_mode,
         "split": "train" if required_mode == "smoke" else required_mode,
+        "selectedRecordIds": record_ids,
+        "requestedCount": len(record_ids),
     }
     # maxFailureCount is a diagnostic stop budget for a selected train/dev
     # capture, not part of the common source/runtime identity required by an
@@ -317,10 +344,32 @@ def _assert_completed_gate(path: Path, *, expected: dict[str, Any], required_mod
     _assert_same_run(run, expected_for_mode, include_max_failures=False)
     if run.get("status") != "COMPLETED":
         raise OfficialRuntimeRunError(f"required {required_mode} report is not complete")
+    items = report.get("items")
+    if not isinstance(items, list):
+        raise OfficialRuntimeRunError(f"required {required_mode} report items are invalid")
+    item_ids = [item.get("id") for item in items if isinstance(item, dict)]
+    if len(item_ids) != len(items) or item_ids != record_ids:
+        raise OfficialRuntimeRunError(f"required {required_mode} report items do not match selectedRecordIds")
+    if any(
+        not isinstance(item.get("casePass"), bool)
+        or not isinstance(item.get("resultExact"), bool)
+        or item["casePass"] != item["resultExact"]
+        for item in items
+    ):
+        raise OfficialRuntimeRunError(
+            f"required {required_mode} report items violate casePass = resultExact"
+        )
     metrics = report.get("metrics")
-    if not isinstance(metrics, dict) or metrics.get("caseDenominator") != run.get("requestedCount"):
+    pass_hits = sum(item["casePass"] for item in items)
+    expected_accuracy = round(pass_hits / len(record_ids), 6)
+    if (
+        not isinstance(metrics, dict)
+        or metrics.get("caseDenominator") != len(record_ids)
+        or metrics.get("casePassHits") != pass_hits
+        or metrics.get("caseAccuracy") != expected_accuracy
+    ):
         raise OfficialRuntimeRunError(f"required {required_mode} report has an invalid denominator")
-    if require_green and metrics.get("caseAccuracy") != 1.0:
+    if require_green and pass_hits != len(record_ids):
         raise OfficialRuntimeRunError(f"required {required_mode} report is not all green")
 
 
@@ -469,15 +518,41 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if args.mode in {"train", "dev", "test"}:
+            smoke_record_ids = [str(record_id) for record_id in profile["smoke"]["recordIds"]]
             _assert_completed_gate(
                 run_dir / "smoke.json",
                 expected=base_run,
                 required_mode="smoke",
                 require_green=True,
+                expected_record_ids=smoke_record_ids,
             )
         if args.mode == "test":
-            _assert_completed_gate(run_dir / "train.json", expected=base_run, required_mode="train", require_green=False)
-            _assert_completed_gate(run_dir / "dev.json", expected=base_run, required_mode="dev", require_green=False)
+            _, train_records = _records_for_mode(
+                dataset_dir,
+                profile=profile,
+                mode="train",
+                acknowledge_final_test=False,
+            )
+            _, dev_records = _records_for_mode(
+                dataset_dir,
+                profile=profile,
+                mode="dev",
+                acknowledge_final_test=False,
+            )
+            _assert_completed_gate(
+                run_dir / "train.json",
+                expected=base_run,
+                required_mode="train",
+                require_green=False,
+                expected_record_ids=[str(record["id"]) for record in train_records],
+            )
+            _assert_completed_gate(
+                run_dir / "dev.json",
+                expected=base_run,
+                required_mode="dev",
+                require_green=False,
+                expected_record_ids=[str(record["id"]) for record in dev_records],
+            )
             existing_run = None
             if args.resume and output_path.is_file():
                 existing_report = _read_json(output_path)

@@ -171,6 +171,25 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void riskRatePairAcceptsEquivalentMetricOrderFromTheModel() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(reversedRiskRateRequirementsJson(),
+                reversedRiskRatePlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行在2025-09-30，逾期贷款率相较不良贷款率相差多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(List.of("ZB017", "ZB013"),
+                response.getBankRequestContract().getMetricCodes());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
     void explicitProvinceRankReturnsPointIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(pointRankRequirementsJson(),
@@ -486,6 +505,26 @@ class BankPlanGenStrategyTest {
                 "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"RATIO","baseline":"ZB018"},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB011","ZB018"],"orderSensitive":true}}
+                """;
+    }
+
+    private String reversedRiskRateRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metricCodes":["ZB017","ZB013"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2025-09-30","endDate":"2025-09-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","GAP_VALUE"],"clarification":null}
+                """;
+    }
+
+    private String reversedRiskRatePlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB017","aggregation":"DEFAULT","alias":null},{"bizName":"ZB013","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2025-09-30","endDate":"2025-09-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB017","ZB013"],"orderSensitive":false}}
                 """;
     }
 

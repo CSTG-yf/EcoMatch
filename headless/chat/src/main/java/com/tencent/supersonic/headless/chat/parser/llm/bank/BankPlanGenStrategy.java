@@ -342,16 +342,16 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (queryText.contains("存款") && queryText.contains("对公") && queryText.contains("个人")
                 && containsAny(queryText, "占比", "比重", "比例")) {
             validateQueryFamily("deposit_structure_share_mismatch", requirements,
-                    BankIntentType.POINT_QUERY, List.of("ZB003", "ZB004", "ZB001"), Set.of());
+                    BankIntentType.POINT_QUERY, List.of("ZB003", "ZB004", "ZB001"), Set.of(), false);
         }
         if (containsAny(queryText, "人均利润", "人均净利润")) {
             validateQueryFamily("per_capita_profit_mismatch", requirements, BankIntentType.RATIO,
-                    List.of("ZB011", "ZB018"), Set.of("DERIVED_ZB011_DIV_ZB018"));
+                    List.of("ZB011", "ZB018"), Set.of("DERIVED_ZB011_DIV_ZB018"), false);
         }
         if (queryText.contains("逾期贷款率") && queryText.contains("不良贷款率")
                 && containsAny(queryText, "高多少", "低多少", "相差", "差多少")) {
             validateQueryFamily("risk_rate_pair_mismatch", requirements, BankIntentType.POINT_QUERY,
-                    List.of("ZB013", "ZB017"), Set.of());
+                    List.of("ZB013", "ZB017"), Set.of(), true);
         }
     }
 
@@ -367,7 +367,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private void validateQueryFamily(String errorCode, BankRequestContract requirements,
             BankIntentType expectedIntent, List<String> expectedMetricOrder,
-            Set<String> expectedDerived) {
+            Set<String> expectedDerived, boolean allowEquivalentMetricOrder) {
         Set<String> expectedMetrics = new LinkedHashSet<>(expectedMetricOrder);
         List<String> actualMetricOrder = requirements.getMetricCodes();
         Set<String> actualMetrics = new LinkedHashSet<>(actualMetricOrder);
@@ -378,9 +378,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         Set<String> unexpected = difference(actualMetrics, expectedMetrics);
         Set<String> derivedMissing = difference(expectedDerived, actualDerived);
         Set<String> derivedUnexpected = difference(actualDerived, expectedDerived);
-        if (requirements.getIntent() == expectedIntent
-                && expectedMetricOrder.equals(actualMetricOrder) && missing.isEmpty()
-                && unexpected.isEmpty() && derivedMissing.isEmpty()
+        boolean metricOrderMatches = allowEquivalentMetricOrder
+                || expectedMetricOrder.equals(actualMetricOrder);
+        if (requirements.getIntent() == expectedIntent && metricOrderMatches
+                && missing.isEmpty() && unexpected.isEmpty() && derivedMissing.isEmpty()
                 && derivedUnexpected.isEmpty()) {
             return;
         }

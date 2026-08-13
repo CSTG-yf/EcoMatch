@@ -184,6 +184,30 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void systemPrefixKeepsQuarterlySeriesOutOfPointToPointChangePlans() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("逐季变化”必须使用 intent=TREND"));
+        assertTrue(sys.contains("time.comparison=NONE"));
+        assertTrue(sys.contains("dimensions 必须包含 \"bank_data_date\""));
+        assertTrue(sys.contains("calculation.type=DIRECT"));
+        assertTrue(sys.contains("不得压缩为起点与终点的 CHANGE"));
+    }
+
+    @Test
+    void systemPrefixDistinguishesProvinceAverageCountsAndAbsoluteRateDifferences() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("有多少家农商行"));
+        assertTrue(sys.contains("逐机构阈值计数"));
+        assertTrue(sys.contains("intent=THRESHOLD"));
+        assertTrue(sys.contains("organizationCodes=[]"));
+        assertTrue(sys.contains("必须保留 meets_condition"));
+        assertTrue(sys.contains("同一时点两个基础指标的绝对差值"));
+        assertTrue(sys.contains("不得使用 calculation.type=RATIO"));
+    }
+
+    @Test
     void rejectsCatalogDumpInUserContent() {
         String catalog = "可填写值目录（只能从下列内容中选择）：\n- /metrics/*/bizName: [ZB001]";
         assertThrows(IllegalArgumentException.class,

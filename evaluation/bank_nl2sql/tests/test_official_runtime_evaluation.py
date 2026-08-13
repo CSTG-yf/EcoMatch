@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from copy import deepcopy
 import json
 import subprocess
 import tempfile
@@ -245,6 +246,27 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
                 _load_resumed_items(report_path, expected_run=expected_run, records=[_record()])
 
     def test_completed_smoke_gate_ignores_a_later_train_stop_budget(self) -> None:
+        smoke_ids = [
+            "TRAIN-S-01",
+            "TRAIN-M-01",
+            "TRAIN-H-01",
+            "TRAIN-H-04",
+            "TRAIN-H-07",
+        ]
+        setup_receipt = {
+            "agentId": 33,
+            "modelId": 1,
+            "chatModelId": 65,
+            "dataSetId": 17,
+            "officialManifestSha256": "d" * 64,
+            "semanticImport": {
+                "organizations": 13,
+                "indicators": 21,
+                "factsValidated": 132678,
+            },
+            "agentProfileSha256": "e" * 64,
+            "systemParametersSha256": "f" * 64,
+        }
         expected_train = {
             "runId": "train-stop",
             "mode": "train",
@@ -257,16 +279,29 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
             "datasetVersion": "2.0.5",
             "concurrency": 1,
             "maxFailureCount": 5,
+            "selectedRecordIds": ["TRAIN-S-01", "TRAIN-S-02"],
+            "requestedCount": 2,
+            "setupReceipt": setup_receipt,
         }
         smoke_report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
             "run": {
                 **{key: value for key, value in expected_train.items() if key != "maxFailureCount"},
                 "mode": "smoke",
                 "split": "train",
                 "status": "COMPLETED",
-                "requestedCount": 1,
+                "selectedRecordIds": smoke_ids,
+                "requestedCount": len(smoke_ids),
             },
-            "metrics": {"caseDenominator": 1, "caseAccuracy": 1.0},
+            "metrics": {
+                "caseDenominator": len(smoke_ids),
+                "casePassHits": len(smoke_ids),
+                "caseAccuracy": 1.0,
+            },
+            "items": [
+                {"id": sample_id, "resultExact": True, "casePass": True}
+                for sample_id in smoke_ids
+            ],
         }
         with tempfile.TemporaryDirectory() as temp_dir:
             report_path = Path(temp_dir) / "smoke.json"
@@ -277,7 +312,96 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
                 expected=expected_train,
                 required_mode="smoke",
                 require_green=True,
+                expected_record_ids=smoke_ids,
             )
+
+    def test_completed_smoke_gate_rejects_forged_identity_or_incomplete_evidence(self) -> None:
+        smoke_ids = [
+            "TRAIN-S-01",
+            "TRAIN-M-01",
+            "TRAIN-H-01",
+            "TRAIN-H-04",
+            "TRAIN-H-07",
+        ]
+        setup_receipt = {
+            "agentId": 33,
+            "modelId": 1,
+            "chatModelId": 65,
+            "dataSetId": 17,
+            "officialManifestSha256": "d" * 64,
+            "semanticImport": {
+                "organizations": 13,
+                "indicators": 21,
+                "factsValidated": 132678,
+            },
+            "agentProfileSha256": "e" * 64,
+            "systemParametersSha256": "f" * 64,
+        }
+        expected = {
+            "runId": "forged-smoke",
+            "mode": "smoke",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.5",
+            "concurrency": 1,
+            "selectedRecordIds": smoke_ids,
+            "requestedCount": len(smoke_ids),
+            "setupReceipt": setup_receipt,
+        }
+        valid_report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
+            "run": {**expected, "status": "COMPLETED"},
+            "metrics": {
+                "caseDenominator": len(smoke_ids),
+                "casePassHits": len(smoke_ids),
+                "caseAccuracy": 1.0,
+            },
+            "items": [
+                {"id": sample_id, "resultExact": True, "casePass": True}
+                for sample_id in smoke_ids
+            ],
+        }
+
+        forged_reports = {}
+        wrong_schema = deepcopy(valid_report)
+        wrong_schema["schemaVersion"] = "forged-schema"
+        forged_reports["schemaVersion"] = wrong_schema
+
+        different_receipt = deepcopy(valid_report)
+        different_receipt["run"]["setupReceipt"]["chatModelId"] = 999
+        forged_reports["setupReceipt"] = different_receipt
+
+        subset = deepcopy(valid_report)
+        subset["run"]["selectedRecordIds"] = smoke_ids[:1]
+        subset["run"]["requestedCount"] = 1
+        subset["metrics"] = {"caseDenominator": 1, "casePassHits": 1, "caseAccuracy": 1.0}
+        subset["items"] = subset["items"][:1]
+        forged_reports["selectedRecordIds"] = subset
+
+        incomplete_items = deepcopy(valid_report)
+        incomplete_items["items"] = incomplete_items["items"][:-1]
+        forged_reports["items"] = incomplete_items
+
+        forged_case_pass = deepcopy(valid_report)
+        forged_case_pass["items"][0]["resultExact"] = False
+        forged_reports["casePass"] = forged_case_pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "smoke.json"
+            for expected_error, report in forged_reports.items():
+                with self.subTest(expected_error=expected_error):
+                    report_path.write_text(json.dumps(report), encoding="utf-8")
+                    with self.assertRaisesRegex(OfficialRuntimeRunError, expected_error):
+                        _assert_completed_gate(
+                            report_path,
+                            expected=expected,
+                            required_mode="smoke",
+                            require_green=True,
+                        )
 
     def test_all_public_scoring_commands_converge_or_fail_closed(self) -> None:
         official = subprocess.run(

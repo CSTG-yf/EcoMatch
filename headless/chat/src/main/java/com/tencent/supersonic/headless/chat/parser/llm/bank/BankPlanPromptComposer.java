@@ -51,6 +51,9 @@ public final class BankPlanPromptComposer {
                     同理，只有用户实际要求当前值、变化率、排名、全省均值或差额时，才填写相应类型；不得补充题干未要求的事实。
                     只有用户明确询问整体/总体趋势，或明确要求上升、下降、持平等方向性结论时，才必须填写 TREND_DIRECTION。
                     “请分析……逐季变化”表示需要逐期 VALUE；如果问题同时要求整体方向/趋势，也可填写 TREND_DIRECTION。
+                    “从某季度末到另一季度末的逐季变化”必须使用 intent=TREND，保留完整起止日期，
+                    time.comparison=NONE，dimensions 必须包含 "bank_data_date"，calculation.type=DIRECT；
+                    不得压缩为起点与终点的 CHANGE、同比或环比比较。
                     “各季度变化明细”“各季度末数值以及最高/最低季度”本身不要求 CHANGE_VALUE；只有明确要求每期变化额时才加 CHANGE_VALUE。
                     逐期数值的最高/最低由 VALUE 事实直接支撑；若查询结果无法形成确定的整体方向，最终回答必须省略不可证实的趋势，不得猜测“上升、下降或持平”。
                     “最高/最低、最高日/最低日”不是 answerFactTypes 枚举；它们只能填写 VALUE，
@@ -91,7 +94,8 @@ public final class BankPlanPromptComposer {
                     以完整日期范围计算 AVG；不要使用 MONTH 产生 yyyy-MM 字符串日期条件。
                     下面是需求阶段的语义判定优先规则；它们要求你完成自然语言理解，不是让后端替你猜测：
                     - “从某年某季度末到另一季度末的逐季变化/各季度末数值”已经给出起止范围。
-                      将每个季度解析为对应季度末日期，并直接 action=EXECUTE；不得要求用户重新提供起止日期。
+                      将每个季度解析为对应季度末日期，并直接 action=EXECUTE、intent=TREND；time.comparison=NONE，
+                      baselineStartDate/baselineEndDate=null；不得要求用户重新提供起止日期，也不得改写为 CHANGE。
                     - “从某个基期到当前期，全省某指标增幅排名前N/后N”已经给出机构范围、指标、两个日期和名次限制。
                       直接 action=EXECUTE，intent=CHANGE，organizationCodes=[]，requiredLimit=N；不得因没有目标机构而澄清。
                     - 只要 time.comparison 不是 NONE（包括同比、环比、较年初或两个明确时点的变动），
@@ -112,7 +116,9 @@ public final class BankPlanPromptComposer {
                       任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
                     - “某机构某日的逾期贷款率比不良贷款率高/低/相差多少”已经给出两个目录指标、机构和日期，
                       必须 action=EXECUTE、intent=POINT_QUERY，metricCodes=["ZB013","ZB017"]，
-                      answerFactTypes=["VALUE","GAP_VALUE"]；不得再次澄清，也不得生成自由差额 SQL。
+                      answerFactTypes=["VALUE","GAP_VALUE"]；这是同一时点两个基础指标的绝对差值，
+                      PLAN 必须 calculation.type=DIRECT，不得使用 calculation.type=RATIO 或 CHANGE；
+                      不得再次澄清，也不得生成自由差额 SQL。
                     - 题干明确问“某机构某指标是多少、全省排第几”时必须 intent=RANKING，
                       answerFactTypes=["VALUE","RANK"]；机构保留为目标机构，但编译器会在全省总体上先排名。
                     如果题干显式列出非空的封闭指标集合，
@@ -189,6 +195,12 @@ public final class BankPlanPromptComposer {
                        当问题还要求“高于”或“低于”全省均值时，才可以在该对象后额外加入方向对象：
                        {"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE","value":"PROVINCE_AVERAGE","values":[]}
                        不得把 COMPARE 或 benchmark 写到 metric_value 或任何其他 field。
+                       当问题询问“有多少家农商行高于/低于全省均值”时，这是逐机构阈值计数：
+                       REQUIREMENTS 与 PLAN 都必须 intent=THRESHOLD，REQUIREMENTS 的 organizationCodes=[]，
+                       PLAN 的 organizations=[]，dimensions 必须包含
+                       "bank_organization"，calculation.type=DIRECT，answerFactTypes 必须包含 COUNT；filters 必须同时
+                       保留上述 benchmark 对象和对应 GT/GTE/LT/LTE 方向对象。查询结果必须保留 meets_condition，
+                       再据此计数；不得把它改写为单机构省均值比较或普通排名。
                     2a. 绝对阈值判断的精确计划合同：当问题是“某机构某日某指标是否超过/低于某个明确数值、
                        是否达标”且没有“全省均值”基准时，REQUIREMENTS 与 PLAN 的 intent 都必须为 THRESHOLD，
                        即 JSON 中必须精确写入 "intent":"THRESHOLD"。
@@ -217,6 +229,13 @@ public final class BankPlanPromptComposer {
                        bank_organization，output.columns=["bank_organization","ZB011","ZB018"]。
                        存款结构双分项不使用 RATIO 计划：metrics 按 ZB003、ZB004、ZB001 排列，
                        calculation.type=DIRECT，output.orderSensitive=true；投影器会以 ZB001 为共同分母。
+                       同一时点两个基础指标的绝对差值也不使用 RATIO 或 CHANGE：metrics 保留题干中的两个指标，
+                       intent=POINT_QUERY、calculation.type=DIRECT，answerFactTypes 使用 VALUE、GAP_VALUE；
+                       不得使用 calculation.type=RATIO，也不得将其中一个指标当成基期。
+                    3a. 逐季序列的精确计划合同：intent=TREND，time 保留完整起止日期、granularity=DAY、
+                        comparison=NONE、baselineStartDate/baselineEndDate=null；dimensions 必须包含 "bank_data_date"，
+                        calculation.type=DIRECT，orderBy 按 bank_data_date ASC，output.columns 包含日期和所选指标。
+                        不得压缩为起点与终点的 CHANGE，也不得只返回两个端点。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -323,7 +342,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v45-ranking-slice-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v46-quarterly-threshold-difference";
 
     private BankPlanPromptComposer() {}
 

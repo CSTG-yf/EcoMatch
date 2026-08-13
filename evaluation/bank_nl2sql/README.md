@@ -234,8 +234,8 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 ```
 
 `validate_gold.py` 是发布完整性门禁：199 条生成 SQL 必须全部可执行，且查询结果与
-结构化 rows 一致。它不参与模型得分，也不比较 SQL 文本；模型效果仍以结果事实合同和
-最终答案为准。`freeze_dataset.py` 同时记录事实合同与上述完整性结果。
+结构化 rows 一致。它不参与模型得分，也不比较 SQL 文本；模型效果只以结果事实合同为准，
+最终回答文本仅作非计分诊断。`freeze_dataset.py` 同时记录事实合同与上述完整性结果。
 
 ## 官方运行时评测（唯一入口）
 
@@ -337,8 +337,9 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBank
 
 输出固定在 `.local-dev/bank-nl2sql/official-v3/<RunId>/`，每个模式同时生成 JSON 与 Markdown。
 报告必须记录代码提交、数据版本与哈希、数据库包哈希、Agent 配置指纹、模型标签、端点指纹、
-串行策略和完整题目清单。正式报告只包含 `caseAccuracy`、结果事实准确率和最终回答事实准确率；
-页面采集、离线实验和消融工具只能用于排障，不能产出或替代正式成绩。
+串行策略和完整题目清单。正式计分只包含 `caseAccuracy` 和与其等价的结果事实准确率；最终回答
+处理状态只能进入非计分运行时诊断，不得输出旧的最终回答准确率。页面采集、离线实验和消融
+工具只能用于排障，不能产出或替代正式成绩。
 仓库内既有 `reports/` 快照仅作历史排障留档，标准运行器不会读取或续跑其中任何文件。
 
 ## QA-03 语义缓存验收
