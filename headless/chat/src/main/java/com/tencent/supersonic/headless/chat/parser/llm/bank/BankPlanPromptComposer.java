@@ -71,7 +71,7 @@ public final class BankPlanPromptComposer {
                     必须 action=EXECUTE；不要因为“全年”、跨年、相对当前日期、字母城市占位名或“哪家”而 action=CLARIFY。
                     只有指标、机构或时间确实无法从权威目录和题干唯一确定时，才允许 action=CLARIFY。
                     “某机构在YYYY-MM-DD的存贷比是多少”已经明确给出唯一机构、完整日期和目录派生指标，
-                    必须 action=EXECUTE：metricCodes=["ZB002","ZB001"]，derivedMetrics 只填写目录中的
+                    必须 action=EXECUTE 且 intent=RATIO：metricCodes=["ZB002","ZB001"]，derivedMetrics 只填写目录中的
                     DERIVED_ZB002_DIV_ZB001，time 使用该日且 granularity=DAY，answerFactTypes=["RATIO_VALUE"]。
                     这类问题禁止要求用户再次提供银行、指标或时间，也禁止返回通用澄清文案。
                     最高优先级执行合同：用户显式枚举了非空的封闭指标清单，并同时给出唯一机构和明确
@@ -178,7 +178,10 @@ public final class BankPlanPromptComposer {
                        derivedMetrics 必须逐字段照目录填写。PLAN 对普通派生指标仍遵循相同规则；但“某机构某日
                        的存贷比/两个基础指标之比”属于确定性点值比率例外：PLAN 的 metrics 必须按“分子、分母”
                        顺序列出两个基础指标，derivedMetrics=[]，calculation.type=RATIO，calculation.baseline
-                       必须是分母代码，dimensions=[]、orderBy=[]、limit=null，output.columns 只列这两个基础指标。
+                       必须是分母代码，orderBy=[]、limit=null。若 requirements_contract.organizationCodes 非空，
+                       organizations 必须逐项保留这些机构，dimensions 必须包含 bank_organization，output.columns
+                       也必须先包含 bank_organization 再列两个基础指标；只有全省范围 organizationCodes=[] 时，
+                       organizations 才能为 []，且不得凭空添加目标机构。
                        不得把点值比率写成 DIRECT，也不得在 PLAN 重复派生项；编译器会计算 RATIO_VALUE。
                        例如目录中的存贷比对象只能写为：
                        {"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}
@@ -287,7 +290,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v40-ranking-ratio-date-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v41-ratio-organization-contract";
 
     private BankPlanPromptComposer() {}
 

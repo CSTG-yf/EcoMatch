@@ -161,7 +161,11 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("截至YYYY-MM-DD"));
         assertTrue(sys.contains("不得截断成 YYYY-MM"));
         assertTrue(sys.contains("某机构在YYYY-MM-DD的存贷比是多少"));
+        assertTrue(sys.contains("必须 action=EXECUTE 且 intent=RATIO"));
         assertTrue(sys.contains("answerFactTypes=[\"RATIO_VALUE\"]"));
+        assertTrue(sys.contains("requirements_contract.organizationCodes 非空"));
+        assertTrue(sys.contains("organizations 必须逐项保留这些机构"));
+        assertTrue(sys.contains("output.columns"));
         assertTrue(sys.contains("禁止返回通用澄清文案"));
     }
 
