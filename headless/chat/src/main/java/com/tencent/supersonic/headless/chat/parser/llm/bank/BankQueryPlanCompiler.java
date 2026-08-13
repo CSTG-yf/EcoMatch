@@ -211,9 +211,7 @@ public class BankQueryPlanCompiler {
             }
             case RATIO -> {
                 ResolvedMetric denominator = ratioDenominator(plan, metrics);
-                // 网点平均存款规模（万元/网点）: deposits * 10000 / outlet_count (M-43/M-44 gold).
-                double ratioScale = isDepositPerOutletScale(plan, metrics, denominator) ? 10000.0
-                        : 100.0;
+                double ratioScale = ratioScale(metrics, denominator);
                 BankResultProjector.Contract ratioContract =
                         ratioResultContract(plan, metrics, dimensions, index);
                 yield CompiledQuery.s2sql(
@@ -239,15 +237,22 @@ public class BankQueryPlanCompiler {
                         && "PROVINCE_AVERAGE".equals(filter.getValue()));
     }
 
-    /** Deposit / outlet (ZB001 / ZB019) uses 万元-per-outlet scale (*10000), not percent. */
-    private boolean isDepositPerOutletScale(BankQueryPlan plan, List<ResolvedMetric> metrics,
-            ResolvedMetric denominator) {
+    /** Selects the business unit scale for a controlled ratio family. */
+    private double ratioScale(List<ResolvedMetric> metrics, ResolvedMetric denominator) {
         if (metrics == null || metrics.size() < 1 || denominator == null) {
-            return false;
+            return 100.0;
         }
         String num = metricCode(metrics.get(0).schemaElement());
         String den = metricCode(denominator.schemaElement());
-        return "ZB001".equalsIgnoreCase(num) && "ZB019".equalsIgnoreCase(den);
+        if ("ZB001".equalsIgnoreCase(num) && "ZB019".equalsIgnoreCase(den)) {
+            // Deposits are stored in 亿元 while outlet_count is a count: convert to 万元/outlet.
+            return 10000.0;
+        }
+        if ("ZB011".equalsIgnoreCase(num) && "ZB018".equalsIgnoreCase(den)) {
+            // Net profit / employee count is already 万元/person and is not a percentage.
+            return 1.0;
+        }
+        return 100.0;
     }
 
     private List<String> calculatedOutputColumns(List<ResolvedDimension> dimensions,
@@ -426,10 +431,13 @@ public class BankQueryPlanCompiler {
                 ? BankResultProjector.ProjectionType.DAILY_EXTREMA_ORG
                 : BankResultProjector.ProjectionType.AGGREGATION_SUMMARY;
         if (metrics.size() == 1) {
-            return provinceAverageContract(plan, index, type,
+            BankResultProjector.Contract contract = provinceAverageContract(plan, index, type,
                     List.of(BankResultProjector.MetricBinding.builder()
                             .semanticColumn("aggregate_value")
                             .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
+            contract.setDailyAverageOnly(plan.getOutput() != null && plan.getOutput()
+                    .getAggregationMode() == BankQueryPlan.AggregationResultMode.AVERAGE_ONLY);
+            return contract;
         }
         return provinceAverageContract(plan, index, type,
                 metrics.stream()

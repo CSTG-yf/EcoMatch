@@ -28,6 +28,9 @@ public class BankQueryPlanValidator {
     private static final Pattern DERIVED_METRIC_CODE =
             Pattern.compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)");
     private static final Pattern BASE_METRIC_CODE = Pattern.compile("ZB\\d{3}");
+    private static final Pattern NUMERIC_THRESHOLD = Pattern.compile("-?\\d+(?:\\.\\d+)?%?");
+    private static final Set<String> ABSOLUTE_THRESHOLD_OPERATORS =
+            Set.of("GT", "GTE", "LT", "LTE", "EQ");
     private static final Set<String> FILTER_OPERATORS = BankSemanticRegistry.filterOperators();
     private static final Set<String> LOGICAL_FILTER_FIELDS =
             BankSemanticRegistry.logicalFilterFields();
@@ -55,6 +58,7 @@ public class BankQueryPlanValidator {
         validateDerivedMetrics(plan, hints, errors);
         validateOrderingAndLimit(plan, hints, errors);
         validateOutput(plan, hints, errors);
+        validateAbsoluteThresholdContract(plan, errors);
         return new ValidationResult(errors);
     }
 
@@ -368,6 +372,16 @@ public class BankQueryPlanValidator {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province-average direction requires the exact benchmark filter"));
             }
+            if (isRankFilter(filter)
+                    && (plan.getIntent() != BankIntentType.RANKING
+                            || !"LTE".equals(filter.getOperator())
+                            || StringUtils.isBlank(filter.getValue())
+                            || !filter.getValue().matches("[1-9]\\d*")
+                            || safe(filter.getValues()).findAny().isPresent())) {
+                errors.add(error("RANK_FILTER_CONTRACT_INVALID",
+                        "rank and rank_from_bottom filters require intent=RANKING, operator=LTE, "
+                                + "a positive integer value, and values=[]"));
+            }
             if ((provinceAverageBenchmark || provinceAverageDirection)
                     && safe(filter.getValues()).findAny().isPresent()) {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_VALUES_FORBIDDEN",
@@ -397,6 +411,86 @@ public class BankQueryPlanValidator {
                 && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
                         || "LT".equals(filter.getOperator()) || "LTE".equals(filter.getOperator()))
                 && "PROVINCE_AVERAGE".equals(filter.getValue());
+    }
+
+    private boolean isRankFilter(BankQueryPlan.Filter filter) {
+        return filter != null && ("rank".equals(filter.getField())
+                || "rank_from_bottom".equals(filter.getField()));
+    }
+
+    /**
+     * Fail closed on the exact plan shape required by the compiler-owned absolute-threshold S2SQL
+     * template. Province-average threshold plans have their own benchmark contract and are not
+     * subject to this gate. Without this validation, a superficially valid THRESHOLD plan can fall
+     * through to the generic STRUCT route and lose the organization/metric identity needed by the
+     * result fact contract.
+     */
+    private void validateAbsoluteThresholdContract(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        boolean hasAbsoluteMetricFilter = safe(plan.getFilters())
+                .anyMatch(filter -> "metric_value".equals(filter.getField()));
+        if (plan.getIntent() != BankIntentType.THRESHOLD || !hasAbsoluteMetricFilter
+                || safe(plan.getFilters()).anyMatch(this::isProvinceAverageBenchmark)) {
+            return;
+        }
+        List<String> metrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).collect(Collectors.toList());
+        if (metrics.size() != 1) {
+            errors.add(error("ABSOLUTE_THRESHOLD_SINGLE_METRIC_REQUIRED",
+                    "absolute threshold requires exactly one selected metric"));
+        }
+        List<String> organizations =
+                safe(plan.getOrganizations()).map(BankQueryPlan.Organization::getCode)
+                        .filter(StringUtils::isNotBlank).collect(Collectors.toList());
+        if (organizations.size() != 1) {
+            errors.add(error("ABSOLUTE_THRESHOLD_SINGLE_ORGANIZATION_REQUIRED",
+                    "absolute threshold requires exactly one selected organization"));
+        }
+        List<String> dimensions = safe(plan.getDimensions()).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toList());
+        if (!dimensions.equals(List.of("bank_organization"))) {
+            errors.add(error("ABSOLUTE_THRESHOLD_ORGANIZATION_DIMENSION_REQUIRED",
+                    "absolute threshold dimensions must be exactly [bank_organization]"));
+        }
+        List<BankQueryPlan.Filter> filters = safe(plan.getFilters()).collect(Collectors.toList());
+        boolean exactThresholdFilter =
+                filters.size() == 1 && "metric_value".equals(filters.get(0).getField())
+                        && ABSOLUTE_THRESHOLD_OPERATORS.contains(filters.get(0).getOperator())
+                        && StringUtils.isNotBlank(filters.get(0).getValue())
+                        && NUMERIC_THRESHOLD.matcher(filters.get(0).getValue()).matches()
+                        && safe(filters.get(0).getValues()).findAny().isEmpty();
+        if (!exactThresholdFilter) {
+            errors.add(error("ABSOLUTE_THRESHOLD_FILTER_REQUIRED",
+                    "absolute threshold requires exactly one numeric metric_value filter using "
+                            + "GT, GTE, LT, LTE, or EQ"));
+        }
+        if (plan.getCalculation() == null
+                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT) {
+            errors.add(error("ABSOLUTE_THRESHOLD_DIRECT_CALCULATION_REQUIRED",
+                    "absolute threshold requires calculation.type=DIRECT"));
+        }
+        if (plan.getTime() != null && plan.getTime().getComparison() != null
+                && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE) {
+            errors.add(error("ABSOLUTE_THRESHOLD_NO_COMPARISON_REQUIRED",
+                    "absolute threshold requires time.comparison=NONE"));
+        }
+        if (safe(plan.getOrderBy()).findAny().isPresent()) {
+            errors.add(error("ABSOLUTE_THRESHOLD_NO_ORDER_REQUIRED",
+                    "absolute threshold ordering is compiler-owned; set orderBy to []"));
+        }
+        if (plan.getLimit() != null) {
+            errors.add(error("ABSOLUTE_THRESHOLD_NO_LIMIT_REQUIRED",
+                    "absolute threshold requires limit=null"));
+        }
+        if (metrics.size() == 1) {
+            List<String> expectedOutput = List.of("bank_organization", metrics.get(0));
+            List<String> actualOutput = plan.getOutput() == null ? List.of()
+                    : safe(plan.getOutput().getColumns()).collect(Collectors.toList());
+            if (!actualOutput.equals(expectedOutput)) {
+                errors.add(error("ABSOLUTE_THRESHOLD_OUTPUT_REQUIRED",
+                        "absolute threshold output.columns must be exactly " + expectedOutput));
+            }
+        }
     }
 
     private static boolean isMultiMetricPointPlan(BankQueryPlan plan) {

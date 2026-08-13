@@ -230,7 +230,10 @@ public class BankResultProjector {
 
     private Projection projectDepositStructureShare(Contract contract,
             List<Map<String, Object>> rows, BigDecimal total) {
-        // Gold M-31 order: corporate (ZB003), personal (ZB004), total (ZB001) + ratio_percent.
+        // Keep every explicitly selected metric. ZB001 is the share denominator, but it is also
+        // required evidence for equality/difference questions such as ZB003 + ZB004 = ZB001.
+        // Projection must never discard a database fact merely because the model marked the same
+        // result shape as a structure-share presentation.
         List<String> order = List.of("ZB003", "ZB004", "ZB001");
         Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
@@ -251,7 +254,7 @@ public class BankResultProjector {
             row.put("metric_value", metricValue);
             row.put("ratio_percent",
                     num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
-                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 2,
                                     RoundingMode.HALF_UP));
             out.add(row);
         }
@@ -581,6 +584,7 @@ public class BankResultProjector {
     private Projection projectRatio(Contract contract, List<Map<String, Object>> sourceRows) {
         List<Map<String, Object>> rows = new ArrayList<>();
         boolean depositPerOutlet = isDepositPerOutletRatio(contract, sourceRows);
+        boolean perCapitaProfit = isPerCapitaProfitRatio(contract);
         for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
                 : sourceRows) {
             String organizationCode = resolveOrganizationCode(contract, sourceRow);
@@ -600,6 +604,12 @@ public class BankResultProjector {
                 row.put("deposit_value", numerator.value());
                 row.put("outlet_count", denominator.value());
                 row.put("deposit_per_outlet_wanyuan", ratio.value());
+            } else if (perCapitaProfit) {
+                row.put("net_profit", numerator.value());
+                row.put("employee_count", denominator.value());
+                BigDecimal perCapita = decimal(ratio.value());
+                row.put("per_capita_profit", perCapita == null ? ratio.value()
+                        : perCapita.setScale(2, RoundingMode.HALF_UP));
             } else {
                 row.put("numerator_value", numerator.value());
                 row.put("denominator_value", denominator.value());
@@ -611,7 +621,16 @@ public class BankResultProjector {
             return Projection.applied(List.of("org_code", "org_name", "deposit_value",
                     "outlet_count", "deposit_per_outlet_wanyuan"), rows);
         }
+        if (perCapitaProfit) {
+            return Projection.applied(List.of("org_code", "org_name", "net_profit",
+                    "employee_count", "per_capita_profit"), rows);
+        }
         return Projection.applied(columns(contract), rows);
+    }
+
+    private boolean isPerCapitaProfitRatio(Contract contract) {
+        Set<String> codes = metricCodes(contract);
+        return codes.contains("ZB011") && codes.contains("ZB018");
     }
 
     /**
@@ -1255,6 +1274,20 @@ public class BankResultProjector {
                                 .compareTo(String.valueOf(right.get("org_code")));
             });
         }
+        if (!multiMetric && contract.isDailyAverageOnly() && rows.size() == 1) {
+            BigDecimal average = decimal(rows.get(0).get("aggregate_value"));
+            if (average == null) {
+                return Projection.notApplied();
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", rows.get(0).get("org_code"));
+            row.put("org_name", rows.get(0).get("org_name"));
+            row.put("metric_code", rows.get(0).get("metric_code"));
+            row.put("daily_average", average.setScale(2, RoundingMode.HALF_UP));
+            row.put("observation_count", rows.get(0).get("observation_count"));
+            return Projection.applied(List.of("org_code", "org_name", "metric_code",
+                    "daily_average", "observation_count"), List.of(row));
+        }
         // Daily-average gold (M-45) is metric_value with whole-number average. H-19/20/21 ask for
         // 最高日/最低日 levels and must keep aggregate_value/min_value/max_value when min≠max.
         if (!multiMetric && rows.size() == 1) {
@@ -1431,6 +1464,7 @@ public class BankResultProjector {
          */
         @Builder.Default
         private boolean structureShare = false;
+        private boolean dailyAverageOnly = false;
     }
 
     @Data

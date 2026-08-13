@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
+import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
 import com.tencent.supersonic.common.pojo.enums.AggOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.enums.QueryType;
@@ -453,6 +454,32 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompilePerCapitaProfitWithoutPercentageScaling() {
+        BankQueryPlan plan = ratioPlan();
+        plan.setMetrics(List.of(metric("ZB011"), metric("ZB018")));
+        plan.getCalculation().setBaseline("ZB018");
+        plan.getOutput().setColumns(List.of("ZB011", "ZB018"));
+        LLMReq.LLMSchema perCapitaSchema = schema();
+        perCapitaSchema.setMetrics(List.of(
+                SchemaElement.builder().name("净利润").bizName("ZB011").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("员工人数").bizName("ZB018").defaultAgg("SUM").build()));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB011", "ZB018"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011", "ZB018")).requiredDerivedMetrics(
+                        List.of(new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB011_DIV_ZB018",
+                                "ZB011", "ZB018", "人均利润")))
+                .build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, hints, perCapitaSchema);
+
+        assertTrue(compiled.getS2sql()
+                .contains("ELSE numerator_value * 1.0 / denominator_value END AS ratio_percent"));
+        assertFalse(compiled.getS2sql().contains("numerator_value * 100.0 / denominator_value"));
+    }
+
+    @Test
     void shouldCompileQuarterlyTrendToDateGroupedStableResultContract() {
         BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
                 .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.TREND)
@@ -634,6 +661,7 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql()
                 .contains("CASE WHEN metric_value >= 10.5 THEN 1 ELSE 0 END AS meets_condition"));
         assertTrue(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
+        assertTrue(SqlSelectHelper.getSelect(compiled.getS2sql()) != null);
         assertEquals(BankResultProjector.ProjectionType.ABSOLUTE_THRESHOLD,
                 compiled.getResultContract().getType());
     }
@@ -787,6 +815,26 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql().contains("COUNT(metric_value) AS observation_count"));
         assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
                 compiled.getResultContract().getType());
+        assertFalse(compiled.getResultContract().isDailyAverageOnly());
+    }
+
+    @Test
+    void shouldMarkAverageOnlyAggregationForTheProjector() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setMetrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                .aggregation(BankQueryPlan.Aggregation.AVG).build()));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                .endDate(LocalDate.of(2025, 12, 31)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        plan.getOutput().setAggregationMode(BankQueryPlan.AggregationResultMode.AVERAGE_ONLY);
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, annualDailyAggregationHints(), schema());
+
+        assertTrue(compiled.getResultContract().isDailyAverageOnly());
     }
 
     @Test

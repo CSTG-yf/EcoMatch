@@ -72,6 +72,10 @@ public class BankQueryPlan {
         ASC, DESC
     }
 
+    public enum AggregationResultMode {
+        AVERAGE_ONLY, WITH_EXTREMA
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -153,5 +157,6 @@ public class BankQueryPlan {
         @Builder.Default
         private List<String> columns = new ArrayList<>();
         private boolean orderSensitive;
+        private AggregationResultMode aggregationMode;
     }
 }

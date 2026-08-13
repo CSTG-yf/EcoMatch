@@ -479,11 +479,39 @@ class BankResultProjectorTest {
         assertEquals(
                 List.of("org_code", "org_name", "metric_code", "metric_value", "ratio_percent"),
                 projection.getColumns());
+        assertEquals(3, projection.getRows().size());
         assertEquals("ZB003", projection.getRows().get(0).get("metric_code"));
         assertEquals("ZB004", projection.getRows().get(1).get("metric_code"));
         assertEquals("ZB001", projection.getRows().get(2).get("metric_code"));
-        assertEquals(new BigDecimal("100.000000000000000"),
+        assertEquals(new BigDecimal("35.52"), projection.getRows().get(0).get("ratio_percent"));
+        assertEquals(new BigDecimal("64.48"), projection.getRows().get(1).get("ratio_percent"));
+        assertEquals(new BigDecimal("100.00"),
                 projection.getRows().get(2).get("ratio_percent"));
+    }
+
+    @Test
+    void shouldProjectPerCapitaProfitToItsBusinessFactContract() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.RATIO)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG003", "江苏省C市农商行"))
+                .selectedOrganizationCodes(List.of("ORG003"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb011")
+                                .metricCode("ZB011").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb018")
+                                .metricCode("ZB018").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("numerator_value", new BigDecimal("271.69"), "denominator_value",
+                        new BigDecimal("288"), "ratio_percent", new BigDecimal("0.943368"))));
+
+        assertEquals(List.of("org_code", "org_name", "net_profit", "employee_count",
+                "per_capita_profit"), projection.getColumns());
+        assertEquals(List.of(row("org_code", "ORG003", "org_name", "江苏省C市农商行", "net_profit",
+                new BigDecimal("271.69"), "employee_count", new BigDecimal("288"),
+                "per_capita_profit", new BigDecimal("0.94"))), projection.getRows());
     }
 
     @Test
@@ -597,6 +625,30 @@ class BankResultProjectorTest {
         assertEquals(List.of(row("org_code", "ORG011", "org_name", "K", "metric_code", "ZB013",
                 "aggregate_value", new BigDecimal("1.27"), "min_value", new BigDecimal("1.27"),
                 "max_value", new BigDecimal("1.27"), "observation_count", 1)),
+                projection.getRows());
+    }
+
+    @Test
+    void shouldProjectAverageOnlyWithoutUnrequestedExtrema() {
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
+                        .organizationColumn("bank_organization")
+                        .organizationNames(Map.of("ORG002", "B")).dailyAverageOnly(true)
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("aggregate_value").metricCode("ZB002").build()))
+                        .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG002", "aggregate_value",
+                        new BigDecimal("42.3278904109589"), "min_value", new BigDecimal("41.5"),
+                        "max_value", new BigDecimal("43.15"), "observation_count", 365)));
+
+        assertEquals(List.of("org_code", "org_name", "metric_code", "daily_average",
+                "observation_count"), projection.getColumns());
+        assertEquals(
+                List.of(row("org_code", "ORG002", "org_name", "B", "metric_code", "ZB002",
+                        "daily_average", new BigDecimal("42.33"), "observation_count", 365)),
                 projection.getRows());
     }
 

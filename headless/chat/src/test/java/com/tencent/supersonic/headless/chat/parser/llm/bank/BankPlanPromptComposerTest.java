@@ -90,6 +90,14 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("DAYS_ABOVE_AVERAGE"));
         assertTrue(sys.contains("不得先对全年求和或平均后只比较一次"));
         assertTrue(sys.contains("只改正 error 指出的非法槽位"));
+        assertTrue(sys.contains("绝对阈值判断的精确计划合同"));
+        assertTrue(sys.contains("\"intent\":\"THRESHOLD\""));
+        assertTrue(sys
+                .contains("\"field\":\"metric_value\",\"operator\":\"GT 或 GTE 或 LT 或 LTE 或 EQ\""));
+        assertTrue(sys.contains("dimensions 必须精确为 [\"bank_organization\"]"));
+        assertTrue(sys.contains("output.columns 必须精确为 [\"bank_organization\",\"<所选 ZB###>\"]"));
+        assertTrue(sys.contains("排最后一名/倒数第一"));
+        assertTrue(sys.contains("operator=LTE、value=\"1\"、values=[]"));
     }
 
     @Test
@@ -119,6 +127,12 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("的 answerFactTypes 应为 [\"VALUE\",\"TREND_DIRECTION\"]"));
         assertTrue(sys.contains("派生指标（代码、公式、单位与方向）"));
         assertTrue(sys.contains("DERIVED_ZB002_DIV_ZB001"));
+        assertTrue(sys.contains("DERIVED_ZB011_DIV_ZB018"));
+        assertTrue(sys.contains("对公和个人分别占比"));
+        assertTrue(sys.contains("人均利润"));
+        assertTrue(sys.contains("aggregationMode"));
+        assertTrue(sys.contains("逾期贷款率"));
+        assertTrue(sys.contains("全省排第几"));
         assertTrue(sys.contains("CHANGE 变化查询"));
         assertTrue(sys.contains("\"field\":\"benchmark\",\"operator\":\"COMPARE\","
                 + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]"));

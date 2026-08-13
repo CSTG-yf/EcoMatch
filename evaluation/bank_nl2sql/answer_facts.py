@@ -34,6 +34,43 @@ OPERATIONS = {
     "ROUND",
 }
 
+_RESULT_VALUE_ALIASES: dict[str, tuple[str, ...]] = {
+    "metric_value": ("aggregate_value", "current_value"),
+    "aggregate_value": ("metric_value", "current_value"),
+    "current_value": ("metric_value", "aggregate_value"),
+}
+
+
+def _resolve_column(name: str, columns: list[str]) -> str | None:
+    by_folded = {column.casefold(): column for column in columns}
+    for candidate in (name, *_RESULT_VALUE_ALIASES.get(name, ())):
+        resolved = by_folded.get(candidate.casefold())
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _metric_pivot_column(metric_code: Any, columns: list[str]) -> str | None:
+    """Resolve a long-form metric operand from an equivalent pivot projection.
+
+    The runtime may return ``zb007`` or a SQL-expression label such as
+    ``SUM(CASE WHEN metric_code = 'ZB007' ...)`` instead of the canonical
+    ``metric_code, aggregate_value`` pair.  The metric literal in the column
+    label is still deterministic evidence; no positional matching is allowed.
+    """
+
+    if not isinstance(metric_code, str) or not METRIC_CODE.fullmatch(metric_code):
+        return None
+    folded_code = metric_code.casefold()
+    expression = re.compile(
+        rf"\bmetric_code\s*=\s*['\"]{re.escape(metric_code)}['\"]",
+        re.IGNORECASE,
+    )
+    for column in columns:
+        if column.casefold() == folded_code or expression.search(column):
+            return column
+    return None
+
 
 def _numeric(value: Any) -> bool:
     return isinstance(value, numbers.Real) and not isinstance(value, bool) and math.isfinite(float(value))
@@ -52,14 +89,26 @@ def _operand_values(
         return [] if value is None else [value]
     column = operand.get("column")
     where = operand.get("where", {})
-    if not isinstance(column, str) or column not in columns or not isinstance(where, dict):
+    if not isinstance(column, str) or not isinstance(where, dict):
         return []
-    value_index = columns.index(column)
+    resolved_column = _resolve_column(column, columns)
+    pivot_metric = None
+    if resolved_column is None:
+        pivot_metric = where.get("metric_code")
+        resolved_column = _metric_pivot_column(pivot_metric, columns)
+    if resolved_column is None:
+        return []
+    value_index = columns.index(resolved_column)
     filters: list[tuple[int, Any]] = []
     for name, expected_value in where.items():
-        if not isinstance(name, str) or name not in columns:
+        if name == "metric_code" and pivot_metric == expected_value:
+            continue
+        if not isinstance(name, str):
             return []
-        filters.append((columns.index(name), expected_value))
+        resolved_filter = _resolve_column(name, columns)
+        if resolved_filter is None:
+            return []
+        filters.append((columns.index(resolved_filter), expected_value))
     values: list[float] = []
     for row in rows:
         if not isinstance(row, (list, tuple)) or value_index >= len(row):

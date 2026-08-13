@@ -74,6 +74,14 @@ public final class BankPlanPromptComposer {
                     必须 action=EXECUTE 且 intent=RATIO：metricCodes=["ZB002","ZB001"]，derivedMetrics 只填写目录中的
                     DERIVED_ZB002_DIV_ZB001，time 使用该日且 granularity=DAY，answerFactTypes=["RATIO_VALUE"]。
                     这类问题禁止要求用户再次提供银行、指标或时间，也禁止返回通用澄清文案。
+                    “某机构某日的存款中，对公和个人分别占比多少”是存款结构双分项查询：必须
+                    action=EXECUTE、intent=POINT_QUERY，metricCodes 严格按 ["ZB003","ZB004","ZB001"] 填写，
+                    derivedMetrics=[]，answerFactTypes=["VALUE","RATIO_VALUE"]。ZB001 只作为共同分母；结果必须
+                    分别返回 ZB003、ZB004，不得缩成单个 ZB003/ZB001 比率。
+                    “某机构某日的人均利润/人均净利润”是目录派生指标：必须 action=EXECUTE、intent=RATIO，
+                    metricCodes=["ZB011","ZB018"]，derivedMetrics 逐字段填写目录中的
+                    DERIVED_ZB011_DIV_ZB018，answerFactTypes=["RATIO_VALUE"]；人均利润=净利润/员工人数，
+                    单位为万元/人，不乘以100。
                     最高优先级执行合同：用户显式枚举了非空的封闭指标清单，并同时给出唯一机构和明确
                     日期/日期范围时，必须将清单逐项映射为 metricCodes/derivedMetrics 并 action=EXECUTE。
                     标题、分类名称、排名或表现判定说明只能约束该封闭清单的组织和输出方式，不能成为
@@ -90,6 +98,8 @@ public final class BankPlanPromptComposer {
                       REQUIREMENTS 的 intent 必须为 CHANGE；“评估”“分析”“结构”等业务标题不改变这一执行意图。
                     - “某机构某指标全年/期间日均值，以及最高日和最低日”已经给出单机构、指标和期间。
                       直接 action=EXECUTE，intent=AGGREGATION；不得把“日均值”理解成缺少指标或时间。
+                      如果只问日均值，PLAN 的 output.aggregationMode="AVERAGE_ONLY"；如果还明确询问最高值、
+                      最低值或相应水平，则 output.aggregationMode="WITH_EXTREMA"。其他查询填 null。
                     - “某机构某指标在某日与全省均值比，是高还是低/差多少”已经给出唯一机构、指标、日期和
                       比较口径，必须 action=EXECUTE，intent=AGGREGATION，并填写 benchmark=COMPARE/PROVINCE_AVERAGE；
                       不得用泛化澄清替代完整的省均值比较计划。
@@ -100,6 +110,11 @@ public final class BankPlanPromptComposer {
                     - “收入结构”是权威目录定义的复合业务语义：必须同时选择中间业务收入（ZB007）和
                       净利息收入（ZB008）。它不是无代码的描述性类别；用户明确请求收入结构时，不得遗漏
                       任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
+                    - “某机构某日的逾期贷款率比不良贷款率高/低/相差多少”已经给出两个目录指标、机构和日期，
+                      必须 action=EXECUTE、intent=POINT_QUERY，metricCodes=["ZB013","ZB017"]，
+                      answerFactTypes=["VALUE","GAP_VALUE"]；不得再次澄清，也不得生成自由差额 SQL。
+                    - 题干明确问“某机构某指标是多少、全省排第几”时必须 intent=RANKING，
+                      answerFactTypes=["VALUE","RANK"]；机构保留为目标机构，但编译器会在全省总体上先排名。
                     如果题干显式列出非空的封闭指标集合，
                     且每一项都能在目录中命中，同时机构和日期已明确，必须把集合中的全部指标写入 metricCodes
                     并 action=EXECUTE；不要因“主要经营指标”“盈利能力”等宽泛标题再次要求用户拆分。
@@ -160,7 +175,7 @@ public final class BankPlanPromptComposer {
                       "calculation":{"type":"<calculation 枚举>","baseline":null},
                       "orderBy":[{"field":"<已选指标或维度>","direction":"ASC 或 DESC"}],
                       "limit":null,
-                      "output":{"columns":["<已选维度或指标>"],"orderSensitive":false}
+                      "output":{"columns":["<已选维度或指标>"],"orderSensitive":false,"aggregationMode":null}
                     }
 
                     查询计划字段填写规则（以下只说明输出 JSON 合同，不代替你依据用户问题进行自然语言理解）：
@@ -174,6 +189,17 @@ public final class BankPlanPromptComposer {
                        当问题还要求“高于”或“低于”全省均值时，才可以在该对象后额外加入方向对象：
                        {"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE","value":"PROVINCE_AVERAGE","values":[]}
                        不得把 COMPARE 或 benchmark 写到 metric_value 或任何其他 field。
+                    2a. 绝对阈值判断的精确计划合同：当问题是“某机构某日某指标是否超过/低于某个明确数值、
+                       是否达标”且没有“全省均值”基准时，REQUIREMENTS 与 PLAN 的 intent 都必须为 THRESHOLD，
+                       即 JSON 中必须精确写入 "intent":"THRESHOLD"。
+                       metricCodes/metrics 只选择该一个指标，organizationCodes/organizations 只选择该一个机构，
+                       time 使用题目明确日期且 comparison=NONE。PLAN 的 dimensions 必须精确为 ["bank_organization"]，
+                       filters 必须精确为
+                       [{"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE 或 EQ","value":"<题目阈值>","values":[]}]
+                       （operator 必须替换为其中一个枚举，value 可写数字或百分数字符串），calculation.type=DIRECT，
+                       orderBy=[]、limit=null，output.columns 必须精确为 ["bank_organization","<所选 ZB###>"]。
+                       answerFactTypes 应包含 VALUE 和 COMPARISON_VALUE。
+                       不得省略机构维度，不得把阈值字段写成指标代码，也不得加入 benchmark 或其他指标。
                     3. REQUIREMENTS 使用目录中的派生指标时，metricCodes 必须同时列出分子和分母，
                        derivedMetrics 必须逐字段照目录填写。PLAN 对普通派生指标仍遵循相同规则；但“某机构某日
                        的存贷比/两个基础指标之比”属于确定性点值比率例外：PLAN 的 metrics 必须按“分子、分母”
@@ -186,6 +212,11 @@ public final class BankPlanPromptComposer {
                        例如目录中的存贷比对象只能写为：
                        {"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}
                        不得用中文名称、别名或自行拼造派生指标代码。
+                       人均利润的 PLAN 使用同一受控点值比率形状：metrics 按 ZB011、ZB018 排列，
+                       derivedMetrics=[]，calculation.type=RATIO、baseline="ZB018"，dimensions 包含
+                       bank_organization，output.columns=["bank_organization","ZB011","ZB018"]。
+                       存款结构双分项不使用 RATIO 计划：metrics 按 ZB003、ZB004、ZB001 排列，
+                       calculation.type=DIRECT，output.orderSensitive=true；投影器会以 ZB001 为共同分母。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -232,6 +263,8 @@ public final class BankPlanPromptComposer {
                        {"field":"rank_from_bottom","operator":"LTE","value":"N","values":[]}，
                        并将 limit 设为 2*N（例如前三和后三为 6）。只问单侧前N或后N时只填写对应一个过滤器，
                        limit 设为 N。排名过滤器只能用于 RANKING，不能用来代替机构或指标过滤。
+                       “排最后一名/倒数第一”就是后1名：只填写 rank_from_bottom 过滤器，必须
+                       operator=LTE、value="1"、values=[]，并令 limit=1；不得使用 GTE、EQ 或总机构数。
                     10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                        聚合成一个值再比较。REQUIREMENTS 必须使用 intent=AGGREGATION、单一机构、单一指标、
                        granularity=DAY、comparison=NONE、answerFactTypes=["COUNT"]，并包含精确的
@@ -290,7 +323,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v41-ratio-organization-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v45-ranking-slice-contract";
 
     private BankPlanPromptComposer() {}
 

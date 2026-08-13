@@ -62,6 +62,25 @@ _RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "above_ratio_percent": ("ratio_percent",),
 }
 
+_FACT_RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    **_RESULT_COLUMN_ALIASES,
+    "org_name": ("bank_organization",),
+    "data_date": ("bank_data_date",),
+    "bank_data_date": ("data_date",),
+    "metric_value": ("aggregate_value", "current_value"),
+    "aggregate_value": ("metric_value", "current_value"),
+    "value_difference": ("absolute_gap", "gap_value", "absolute_change"),
+}
+_FACT_IDENTITY_COLUMNS = {
+    "org_code",
+    "org_name",
+    "metric_code",
+    "data_date",
+    "bank_data_date",
+    "comparison_type",
+}
+_DIFFERENCE_REQUEST = re.compile(r"差多少|相差|差额")
+
 
 @dataclass(frozen=True)
 class FactDraft:
@@ -156,6 +175,85 @@ def _condition_true_count(
 def _close(left: float, right: float, *, kind: str, tolerance: float) -> bool:
     fact_tolerance = max(tolerance, 0.02) if kind in {"PERCENT", "NUMBER"} else tolerance
     return values_close(left, right, abs_tol=fact_tolerance, rel_tol=DEFAULT_REL_TOL)
+
+
+def _reviewed_difference_formula(
+    question: str,
+    expected: dict[str, Any],
+    *,
+    fact_value: float,
+    kind: str,
+    tolerance: float,
+) -> dict[str, Any] | None:
+    """Recover a difference formula only from an explicit structured-gold column.
+
+    This is not free-form arithmetic inference.  The source table must already
+    publish ``value_difference`` and two identity-bound operand values whose
+    absolute difference equals that reviewed value.
+    """
+
+    if not _DIFFERENCE_REQUEST.search(question):
+        return None
+    columns = expected.get("columns")
+    rows = expected.get("rows")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        return None
+    names = [str(column) for column in columns]
+    if "value_difference" not in names:
+        return None
+    difference_index = names.index("value_difference")
+    if not any(
+        isinstance(row, (list, tuple))
+        and difference_index < len(row)
+        and _is_numeric_cell(row[difference_index])
+        and _close(
+            fact_value,
+            float(row[difference_index]),
+            kind=kind,
+            tolerance=tolerance,
+        )
+        for row in rows
+    ):
+        return None
+
+    value_column = next(
+        (name for name in ("metric_value", "aggregate_value", "current_value") if name in names),
+        None,
+    )
+    identity_column = next(
+        (name for name in ("org_code", "org_name") if name in names),
+        None,
+    )
+    if value_column is None or identity_column is None:
+        return None
+    value_index = names.index(value_column)
+    identity_index = names.index(identity_column)
+    operands: list[tuple[Any, float]] = []
+    for row in rows:
+        if (
+            not isinstance(row, (list, tuple))
+            or max(value_index, identity_index) >= len(row)
+            or row[identity_index] is None
+            or not _is_numeric_cell(row[value_index])
+        ):
+            continue
+        candidate = (row[identity_index], float(row[value_index]))
+        if candidate not in operands:
+            operands.append(candidate)
+    if len(operands) != 2 or not _close(
+        fact_value,
+        abs(operands[0][1] - operands[1][1]),
+        kind=kind,
+        tolerance=tolerance,
+    ):
+        return None
+    return {
+        "operation": "ABS_DIFFERENCE",
+        "operands": [
+            {"column": value_column, "where": {identity_column: identity}}
+            for identity, _ in operands
+        ],
+    }
 
 
 def _non_date_slots(text: str) -> list[Any]:
@@ -270,10 +368,20 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
 
         in_question = any(_close(value, candidate, kind=kind, tolerance=tolerance) for candidate in question_values)
         derivation = candidate_derivation
+        difference_formula = _reviewed_difference_formula(
+            question,
+            expected,
+            fact_value=value,
+            kind=kind,
+            tolerance=tolerance,
+        )
         if in_question:
             support = "QUESTION_CONTEXT"
             derivation = None
             required = False
+        elif difference_formula is not None:
+            support = "DERIVED_RESULT"
+            derivation = "ABS_DIFFERENCE"
         elif any(_close(value, candidate, kind=kind, tolerance=tolerance) for candidate in table_values):
             support = "DIRECT_RESULT"
             derivation = None
@@ -296,6 +404,9 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
                 required=required,
                 support=support,
                 derivation=derivation,
+                evidence={"formula": difference_formula}
+                if difference_formula is not None
+                else None,
             )
         )
 
@@ -679,6 +790,171 @@ def _expected_rows_are_bound(
     return not unmatched if require_exact_rows else True
 
 
+def _resolve_fact_result_column(name: str, columns: list[str]) -> str | None:
+    by_folded = {column.casefold(): column for column in columns}
+    for candidate in (name, *_FACT_RESULT_COLUMN_ALIASES.get(name, ())):
+        resolved = by_folded.get(candidate.casefold())
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def _resolved_identity_group(
+    expected_by_name: dict[str, Any],
+    columns: list[str],
+    names: tuple[str, ...],
+) -> tuple[bool, list[tuple[int, Any]]]:
+    expected_values = [
+        (name, expected_by_name[name])
+        for name in names
+        if name in expected_by_name and expected_by_name[name] is not None
+    ]
+    pairs: list[tuple[int, Any]] = []
+    for name, value in expected_values:
+        resolved = _resolve_fact_result_column(name, columns)
+        if resolved is not None:
+            pairs.append((columns.index(resolved), value))
+    return bool(expected_values), pairs
+
+
+def _metric_pivot_result_column(metric_code: Any, columns: list[str]) -> str | None:
+    if not isinstance(metric_code, str) or not _METRIC_CODE.fullmatch(metric_code):
+        return None
+    expression = re.compile(
+        rf"\bmetric_code\s*=\s*['\"]{re.escape(metric_code)}['\"]",
+        re.IGNORECASE,
+    )
+    for column in columns:
+        if column.casefold() == metric_code.casefold() or expression.search(column):
+            return column
+    return None
+
+
+def _legacy_direct_fact_is_bound(
+    fact: FactDraft,
+    expected: dict[str, Any],
+    *,
+    columns: list[str],
+    rows: list[list[Any]],
+) -> bool:
+    """Bind one required value to its reviewed entity without enforcing table shape."""
+
+    expected_columns = expected.get("columns")
+    expected_rows = expected.get("rows")
+    if not isinstance(expected_columns, list) or not isinstance(expected_rows, list):
+        return False
+    expected_names = [str(column) for column in expected_columns]
+    tolerance_raw = expected.get("numericTolerance")
+    tolerance = float(tolerance_raw) if isinstance(tolerance_raw, numbers.Real) else DEFAULT_ABS_TOL
+
+    for expected_row in expected_rows:
+        if not isinstance(expected_row, (list, tuple)) or len(expected_row) != len(expected_names):
+            continue
+        fact_columns = [
+            name
+            for name, cell in zip(expected_names, expected_row)
+            if _is_numeric_cell(cell)
+            and _close(fact.value, float(cell), kind=fact.kind, tolerance=tolerance)
+            and name not in _FACT_IDENTITY_COLUMNS
+        ]
+        if not fact_columns:
+            continue
+        expected_by_name = dict(zip(expected_names, expected_row))
+        implicit_metric_column = None
+        expected_metric_code = expected_by_name.get("metric_code")
+        if expected_metric_code is not None and _resolve_fact_result_column(
+            "metric_code", columns
+        ) is None:
+            implicit_metric_column = _metric_pivot_result_column(
+                expected_metric_code, columns
+            )
+            if implicit_metric_column is None:
+                # A matching number and organization cannot prove which metric
+                # produced the answer.  Fail closed unless the result exposes
+                # metric_code or a metric-specific pivot column.
+                continue
+        identity_pairs: list[tuple[int, Any]] = []
+        missing_identity_group = False
+        for group in (
+            ("org_code", "org_name"),
+            ("data_date", "bank_data_date"),
+            ("comparison_type",),
+        ):
+            expected_group, group_pairs = _resolved_identity_group(
+                expected_by_name, columns, group
+            )
+            if expected_group and not group_pairs:
+                missing_identity_group = True
+                break
+            identity_pairs.extend(group_pairs)
+        if missing_identity_group:
+            continue
+        resolved_metric_code = _resolve_fact_result_column("metric_code", columns)
+        if expected_metric_code is not None and resolved_metric_code is not None:
+            identity_pairs.append(
+                (columns.index(resolved_metric_code), expected_metric_code)
+            )
+
+        actual_value_columns: list[str] = []
+        for name in fact_columns:
+            resolved = (
+                implicit_metric_column
+                if implicit_metric_column is not None
+                and name in {"metric_value", "aggregate_value", "current_value"}
+                else _resolve_fact_result_column(name, columns)
+            )
+            if resolved is None:
+                resolved = _metric_pivot_result_column(
+                    expected_by_name.get("metric_code"), columns
+                )
+            if resolved is not None and resolved not in actual_value_columns:
+                actual_value_columns.append(resolved)
+        for row in rows:
+            if not isinstance(row, (list, tuple)):
+                continue
+            if any(index >= len(row) or row[index] != value for index, value in identity_pairs):
+                continue
+            if any(
+                columns.index(name) < len(row)
+                and _is_numeric_cell(row[columns.index(name)])
+                and _close(
+                    fact.value,
+                    float(row[columns.index(name)]),
+                    kind=fact.kind,
+                    tolerance=tolerance,
+                )
+                for name in actual_value_columns
+            ):
+                return True
+    return False
+
+
+def _required_facts_are_bound(
+    required_facts: list[FactDraft],
+    expected: dict[str, Any],
+    *,
+    columns: list[str],
+    rows: list[list[Any]],
+) -> bool:
+    """Bind answer facts, while treating all other rows as non-scored evidence."""
+
+    direct_facts = [fact for fact in required_facts if fact.support == "DIRECT_RESULT"]
+    if not all(
+        _legacy_direct_fact_is_bound(fact, expected, columns=columns, rows=rows)
+        for fact in direct_facts
+    ):
+        return False
+    missing_facts = [fact for fact in required_facts if fact.support == "MISSING"]
+    if missing_facts:
+        return _expected_rows_are_bound(
+            expected,
+            columns=columns,
+            rows=rows,
+            require_exact_rows=False,
+        )
+    return True
+
+
 def _fact_is_grounded_in_result(
     fact: FactDraft,
     *,
@@ -715,6 +991,20 @@ def _fact_is_grounded_in_result(
             kind=fact.kind,
             tolerance=tolerance,
         )
+    if fact.support == "DERIVED_RESULT" and isinstance(fact.evidence, dict):
+        formula = fact.evidence.get("formula")
+        calculated = (
+            evaluate_formula(formula, columns or [], rows or [])
+            if isinstance(formula, dict)
+            else None
+        )
+        if calculated is not None:
+            return _close(
+                fact.value,
+                calculated,
+                kind=fact.kind,
+                tolerance=DEFAULT_ABS_TOL,
+            )
     if fact.derivation == "COUNT_TRUE" and fact.support == "DERIVED_RESULT":
         condition_true_count = _condition_true_count(columns, rows)
         return condition_true_count is not None and _close(
@@ -1007,7 +1297,9 @@ def score_fact_contract_report(
             )
             required_facts = [fact for fact in contract.facts if fact.required]
             if has_table:
-                require_exact_rows = contract.legacyGoldGrade == "GOLD_OK"
+                require_exact_rows = (
+                    score_final_answer and contract.legacyGoldGrade == "GOLD_OK"
+                )
                 explicit_semantic_values = _standard_provincial_average_semantic_values(
                     expected,
                     columns=[str(column) for column in columns],
@@ -1024,12 +1316,20 @@ def score_fact_contract_report(
                     )
                     for fact in required_facts
                 )
-                row_binding_ok = _expected_rows_are_bound(
-                    expected,
-                    columns=[str(column) for column in columns],
-                    rows=rows,
-                    require_exact_rows=require_exact_rows,
-                )
+                if score_final_answer:
+                    row_binding_ok = _expected_rows_are_bound(
+                        expected,
+                        columns=[str(column) for column in columns],
+                        rows=rows,
+                        require_exact_rows=require_exact_rows,
+                    )
+                else:
+                    row_binding_ok = _required_facts_are_bound(
+                        required_facts,
+                        expected,
+                        columns=[str(column) for column in columns],
+                        rows=rows,
+                    )
                 result_facts_exact = facts_grounded and row_binding_ok
             if score_final_answer:
                 final_numeric_ok = bool(text_summary) and bool(required_facts) and all(

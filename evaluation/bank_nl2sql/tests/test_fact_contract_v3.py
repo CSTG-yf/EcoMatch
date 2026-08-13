@@ -534,6 +534,229 @@ class FactContractV3Test(unittest.TestCase):
         self.assertNotIn("finalFactAccuracy", scored["metrics"])
         self.assertNotIn("finalFactsExactHits", scored["metrics"])
 
+    def test_result_only_allows_extra_support_rows_when_required_fact_is_bound(self) -> None:
+        record = _record(
+            "RANKING-SUPPORT-ROWS-1",
+            question="三家机构谁的存款最多？",
+            answer_text="江苏省I市农商行，84.02亿元",
+            columns=["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+            rows=[["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": record["expected"]["columns"],
+                    "resultRows": [
+                        ["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1],
+                        ["ORG005", "江苏省E市农商行", "ZB001", 77.84, 2],
+                        ["ORG001", "江苏省A市农商行", "ZB001", 42.25, 3],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_result_only_binds_required_fact_without_requiring_legacy_table_shape(self) -> None:
+        record = _record(
+            "RANKING-PROJECTION-1",
+            question="三家机构谁的不良率控制得最好？",
+            answer_text="江苏省J市农商行，不良率0.73%",
+            columns=["org_code", "org_name", "metric_value", "value_difference"],
+            rows=[
+                ["ORG006", "江苏省F市农商行", 1.36, 0.63],
+                ["ORG002", "江苏省B市农商行", 0.99, 0.63],
+                ["ORG010", "江苏省J市农商行", 0.73, 0.63],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "metric_value",
+                        "rank_position",
+                    ],
+                    "resultRows": [
+                        ["ORG010", "江苏省J市农商行", "ZB013", 0.73, 1],
+                        ["ORG002", "江苏省B市农商行", "ZB013", 0.99, 2],
+                        ["ORG006", "江苏省F市农商行", "ZB013", 1.36, 3],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_rejects_required_value_bound_to_wrong_organization(self) -> None:
+        record = _record(
+            "RANKING-WRONG-ORG-1",
+            question="三家机构谁的存款最多？",
+            answer_text="江苏省I市农商行，84.02亿元",
+            columns=["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+            rows=[["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": record["expected"]["columns"],
+                    "resultRows": [["ORG005", "江苏省E市农商行", "ZB001", 84.02, 1]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_rejects_required_value_without_metric_identity(self) -> None:
+        record = _record(
+            "POINT-MISSING-METRIC-1",
+            question="A行的存款是多少？",
+            answer_text="42.25亿元",
+            columns=["org_code", "metric_code", "metric_value"],
+            rows=[["ORG001", "ZB001", 42.25]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["org_code", "metric_value"],
+                    "resultRows": [["ORG001", 42.25]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_requires_organization_and_date_identity_groups(self) -> None:
+        record = _record(
+            "POINT-IDENTITY-GROUPS-1",
+            question="A行在2025年6月30日的存款是多少？",
+            answer_text="42.25亿元",
+            columns=["org_code", "metric_code", "data_date", "metric_value"],
+            rows=[["ORG001", "ZB001", "2025-06-30", 42.25]],
+        )
+        predictions = [
+            {
+                "resultColumns": ["metric_code", "data_date", "metric_value"],
+                "resultRows": [["ZB001", "2025-06-30", 42.25]],
+            },
+            {
+                "resultColumns": ["org_code", "metric_code", "metric_value"],
+                "resultRows": [["ORG001", "ZB001", 42.25]],
+            },
+        ]
+
+        for prediction in predictions:
+            with self.subTest(columns=prediction["resultColumns"]):
+                prediction.update({"id": record["id"], "textSummary": None})
+                scored = score_fact_contract_report(
+                    {"items": [prediction]}, [record], score_mode="result_only"
+                )
+
+                self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_evaluates_typed_sum_from_metric_pivot_columns(self) -> None:
+        record = _record(
+            "PIVOT-SUM-1",
+            question="两项收入合计多少？",
+            answer_text="合计223.77万元",
+            columns=["org_code", "metric_code", "aggregate_value"],
+            rows=[
+                ["ORG011", "ZB007", 172.05],
+                ["ORG011", "ZB008", 51.72],
+            ],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "income_total",
+                "value": 223.77,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG011"],
+                    "metricCodes": ["ZB007", "ZB008"],
+                    "dates": ["2026-04-30"],
+                    "comparisonType": "SUM",
+                },
+                "formula": {
+                    "operation": "SUM",
+                    "operands": [
+                        {"column": "aggregate_value", "where": {"metric_code": "ZB007"}},
+                        {"column": "aggregate_value", "where": {"metric_code": "ZB008"}},
+                    ],
+                },
+            }
+        ]
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["bank_organization", "zb008", "zb007"],
+                    "resultRows": [["江苏省K市农商行", 51.72, 172.05]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_derives_reviewed_value_difference_from_bound_operands(self) -> None:
+        record = _record(
+            "BOUND-DIFFERENCE-1",
+            question="两家机构的拨备覆盖率差多少个百分点？",
+            answer_text="差46.7个百分点（A行202.91%，I行156.21%）",
+            columns=["org_code", "org_name", "metric_value", "value_difference"],
+            rows=[
+                ["ORG001", "A行", 202.91, 46.69999999999999],
+                ["ORG009", "I行", 156.21, 46.69999999999999],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "aggregate_value",
+                    ],
+                    "resultRows": [
+                        ["ORG001", "A行", "ZB015", 202.91],
+                        ["ORG009", "I行", "ZB015", 156.21],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        contract = build_fact_contract(record)
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        difference = next(fact for fact in contract.facts if fact.value == 46.7)
+        self.assertEqual(difference.support, "DERIVED_RESULT")
+        self.assertEqual(difference.derivation, "ABS_DIFFERENCE")
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
     def test_result_only_rejects_cross_metric_arithmetic_coincidence(self) -> None:
         record = _record(
             "CROSS-METRIC-COINCIDENCE-1",
