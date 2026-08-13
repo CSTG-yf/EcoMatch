@@ -27,13 +27,13 @@
   },
   "augmentationCount": 12,
   "contentSha256": {
-    "augmentation.jsonl": "e67d038f2f180d0b8f59f75f80f80391c871df8e077688891efda4f0c796e133",
-    "dev.jsonl": "43cb8a1282655210ac6159db80db2eff96a0e9e115541b4ebfdb4e5a4613b4ab",
-    "gold_manifest.json": "47d87643dc963475cea3b6bc030190d8f0c25d8d74effc8a680be618db7a9c93",
+    "augmentation.jsonl": "0223f195e961399fa4c6d1cd914d5a66d5a2649d63d7d68cbac9c39ef83f3418",
+    "dev.jsonl": "a61b009c390a92dc27b0a71bce2cccd736bda5aa40297956aa6d97a23ef8c4a6",
+    "gold_manifest.json": "13a69428838a84d99947fbdb2f7f20cb9ff03dc389ddde10cc4b31bfbc7bed37",
     "manifest.json": "d87afcd4fe52b4507e8ebe00db794391caf59b104f181c34208c81fb39ca90ca",
-    "schema.json": "33b96f823e976cb2cb74b5fb960db556b33e3eb3e3d8a6f09ef7a9b4ca617a03",
-    "test.jsonl": "d20932f52e8b345575aae4b70fa99eae8a66b0fffbef67f2992b20b35d19071e",
-    "train.jsonl": "82bb350bb80c53f727a0a00ecfe300d100a1c9ee7c8740a27d24be4c754c5053"
+    "schema.json": "1256d7a09f5a8e4d691780b98e1e25181a1d2b654d31b8f58c5faa6f4e24ed18",
+    "test.jsonl": "9c6c38147463acaa780d9f2663cdaa0e74f1bf21d1130052de5e4e827baeb74d",
+    "train.jsonl": "ef04ec0174ca0f7c1357fe7c98268f24fe1dfdc14e3327545a3e9eb99e79cb58"
   },
   "evaluationSplitCounts": {
     "dev": 40,
@@ -44,15 +44,7 @@
     "officialCount": 199,
     "result": "PASS",
     "resultMatchCount": 199,
-    "sqlExecutionCount": 199,
-    "timingMs": {
-      "average": 0.913,
-      "count": 199,
-      "max": 19.838,
-      "p50": 0.133,
-      "p95": 8.048,
-      "p99": 18.839
-    }
+    "sqlExecutionCount": 199
   },
   "officialCount": 199,
   "sourceSha256": "74ee679343fbd02b04740ae8ae2e1af569d5e59002d8e4eb3f07caa263323763",

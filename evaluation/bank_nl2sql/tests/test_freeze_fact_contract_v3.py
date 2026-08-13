@@ -63,6 +63,7 @@ class FreezeFactContractV3Test(unittest.TestCase):
                 "officialCount": 1,
                 "sqlExecutionCount": 1,
                 "resultMatchCount": 1,
+                "timingMs": {"average": 1.0, "count": 1},
             }
             with patch("freeze_dataset.validate_dataset", return_value=dataset_report), patch(
                 "freeze_dataset.validate_gold_dataset", return_value=gold_report
@@ -73,7 +74,16 @@ class FreezeFactContractV3Test(unittest.TestCase):
             self.assertEqual(release["answerContractValidation"]["readyCount"], 1)
             self.assertEqual(release["answerContractValidation"]["reviewRequiredCount"], 0)
             self.assertEqual(release["answerContractValidation"]["excludedCount"], 0)
-            self.assertEqual(release["goldValidation"], gold_report)
+            self.assertNotIn("timingMs", release["goldValidation"])
+            self.assertEqual(
+                release["goldValidation"],
+                {key: value for key, value in gold_report.items() if key != "timingMs"},
+            )
+            self.assertNotIn(
+                b"\r\n",
+                (root / "release_manifest.json").read_bytes(),
+                "release manifest must use LF so its declared content hashes match Git blobs",
+            )
 
 
 if __name__ == "__main__":

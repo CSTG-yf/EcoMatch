@@ -1,2 +1,9 @@
 evaluation/bank_nl2sql/official/** -text
 evaluation/bank_nl2sql/db/releases/** -text
+evaluation/bank_nl2sql/schema.json -text
+evaluation/bank_nl2sql/manifest.json -text
+evaluation/bank_nl2sql/gold_manifest.json -text
+evaluation/bank_nl2sql/train.jsonl -text
+evaluation/bank_nl2sql/dev.jsonl -text
+evaluation/bank_nl2sql/test.jsonl -text
+evaluation/bank_nl2sql/augmentation.jsonl -text
