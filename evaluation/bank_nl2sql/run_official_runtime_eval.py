@@ -35,6 +35,7 @@ from run_supersonic_eval import (
     _http_post_json,
     _latency_distribution,
     _unwrap_api_value,
+    warm_up_runtime_prefix,
     run_supersonic_evaluation,
 )
 
@@ -104,7 +105,12 @@ def _records_for_mode(
     return split, [by_id[record_id] for record_id in expected_ids]
 
 
-def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[str, Any]:
+def _capture_report(
+    items: list[dict[str, Any]],
+    run: dict[str, Any],
+    *,
+    warmup: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     def average(key: str) -> float | None:
         values = [item[key] for item in items if isinstance(item.get(key), (int, float))]
         return round(sum(values) / len(values), 3) if values else None
@@ -115,6 +121,7 @@ def _capture_report(items: list[dict[str, Any]], run: dict[str, Any]) -> dict[st
     )
     return {
         "run": run,
+        "warmup": warmup,
         "items": items,
         "timingMs": {
             "averageParseMs": average("parseMs"),
@@ -152,8 +159,9 @@ def _base_run_metadata(
     model_label: str,
     base_url: str,
     record_ids: list[str],
+    max_failures: int | None,
 ) -> dict[str, Any]:
-    return {
+    metadata = {
         "runId": run_id,
         "mode": mode,
         "split": split,
@@ -173,18 +181,36 @@ def _base_run_metadata(
         "selectedRecordIds": record_ids,
         "requestedCount": len(record_ids),
     }
+    if max_failures is not None:
+        metadata["maxFailureCount"] = max_failures
+    return metadata
 
 
-def _run_metadata(base: dict[str, Any], *, status: str, completed_count: int, started_at: float) -> dict[str, Any]:
-    return {
+def _run_metadata(
+    base: dict[str, Any],
+    *,
+    status: str,
+    completed_count: int,
+    started_at: float,
+    early_stop: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = {
         **base,
         "status": status,
         "completedCount": completed_count,
         "durationSeconds": round(time.time() - started_at, 3),
     }
+    if early_stop is not None:
+        metadata["earlyStop"] = early_stop
+    return metadata
 
 
-def _assert_same_run(run: dict[str, Any], expected: dict[str, Any]) -> None:
+def _assert_same_run(
+    run: dict[str, Any],
+    expected: dict[str, Any],
+    *,
+    include_max_failures: bool = True,
+) -> None:
     for key in (
         "runId",
         "mode",
@@ -193,12 +219,82 @@ def _assert_same_run(run: dict[str, Any], expected: dict[str, Any]) -> None:
         "modelLabel",
         "endpointFingerprint",
         "protocolProfileSha256",
+        "protocolSchemaVersion",
         "sourceRevision",
+        "requiredBaseRevision",
         "datasetVersion",
+        "databaseArtifacts",
+        "setupReceipt",
+        "captureMethod",
+        "authentication",
         "concurrency",
+        "selectedRecordIds",
+        "requestedCount",
     ):
         if run.get(key) != expected.get(key):
             raise OfficialRuntimeRunError(f"existing report is not compatible with this run: {key}")
+    if include_max_failures and run.get("maxFailureCount") != expected.get("maxFailureCount"):
+        raise OfficialRuntimeRunError("existing report is not compatible with this run: maxFailureCount")
+
+
+def _early_stop_state(
+    *,
+    max_failures: int | None,
+    scored_items: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a non-promotable stop reason only after the budget is exceeded."""
+    if max_failures is None:
+        return None
+    failed_ids = [str(item.get("id")) for item in scored_items if item.get("casePass") is False]
+    if len(failed_ids) <= max_failures:
+        return None
+    return {
+        "reason": "MAX_FAILURES_EXCEEDED",
+        "maxFailures": max_failures,
+        "observedFailures": len(failed_ids),
+        "failedIds": failed_ids,
+        "triggeredAfterId": str(scored_items[-1].get("id")) if scored_items else None,
+        "promotable": False,
+    }
+
+
+def _build_stopped_early_report(
+    capture: dict[str, Any],
+    records: list[dict[str, Any]],
+    *,
+    early_stop: dict[str, Any],
+) -> dict[str, Any]:
+    """Mark a partial capture as diagnostic-only instead of a formal score."""
+    report = build_official_runtime_report(capture, records)
+    report["partialEvaluation"] = {
+        "status": "STOPPED_EARLY",
+        "promotable": False,
+        "reason": "max-failures budget exceeded before all selected records completed",
+        "requestedCount": capture["run"]["requestedCount"],
+        "completedCount": len(records),
+        "earlyStop": early_stop,
+    }
+    return report
+
+
+def _mark_bounded_diagnostic_report(
+    report: dict[str, Any], *, max_failures: int | None
+) -> dict[str, Any]:
+    """Keep a completed failure-budget run explicitly diagnostic-only."""
+    if max_failures is None:
+        return report
+    run = report.get("run")
+    if not isinstance(run, dict):
+        raise OfficialRuntimeRunError("completed diagnostic report has no run metadata")
+    report["diagnosticEvaluation"] = {
+        "status": "COMPLETED_WITH_FAILURE_BUDGET",
+        "promotable": False,
+        "reason": "max-failures budget was configured",
+        "maxFailures": max_failures,
+        "completedCount": run.get("completedCount"),
+        "requestedCount": run.get("requestedCount"),
+    }
+    return report
 
 
 def _load_resumed_items(path: Path, *, expected_run: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -211,6 +307,10 @@ def _load_resumed_items(path: Path, *, expected_run: dict[str, Any], records: li
     if not isinstance(run, dict):
         raise OfficialRuntimeRunError("existing report has no run metadata")
     _assert_same_run(run, expected_run)
+    if run.get("status") == "STOPPED_EARLY":
+        raise OfficialRuntimeRunError(
+            "existing report stopped early and is diagnostic-only; repair the candidate and use a new run-id"
+        )
     items = report.get("items")
     if not isinstance(items, list):
         raise OfficialRuntimeRunError("existing report has no items")
@@ -226,21 +326,75 @@ def _load_resumed_items(path: Path, *, expected_run: dict[str, Any], records: li
     return resumed
 
 
-def _assert_completed_gate(path: Path, *, expected: dict[str, Any], required_mode: str, require_green: bool) -> None:
+def _assert_completed_gate(
+    path: Path,
+    *,
+    expected: dict[str, Any],
+    required_mode: str,
+    require_green: bool,
+    expected_record_ids: list[str] | None = None,
+) -> None:
     if not path.is_file():
         raise OfficialRuntimeRunError(f"required {required_mode} report does not exist: {path}")
     report = _read_json(path)
+    if report.get("schemaVersion") != OFFICIAL_RUNTIME_SCHEMA_VERSION:
+        raise OfficialRuntimeRunError(f"required {required_mode} report schemaVersion is invalid")
+    record_ids = expected_record_ids if expected_record_ids is not None else expected.get("selectedRecordIds")
+    if (
+        not isinstance(record_ids, list)
+        or not record_ids
+        or any(not isinstance(record_id, str) or not record_id for record_id in record_ids)
+        or len(set(record_ids)) != len(record_ids)
+    ):
+        raise OfficialRuntimeRunError(f"required {required_mode} expected selectedRecordIds are invalid")
     run = report.get("run")
     if not isinstance(run, dict):
         raise OfficialRuntimeRunError(f"required {required_mode} report has no run metadata")
-    expected_for_mode = {**expected, "mode": required_mode, "split": "train" if required_mode == "smoke" else required_mode}
-    _assert_same_run(run, expected_for_mode)
+    expected_for_mode = {
+        **expected,
+        "mode": required_mode,
+        "split": "train" if required_mode == "smoke" else required_mode,
+        "selectedRecordIds": record_ids,
+        "requestedCount": len(record_ids),
+    }
+    # maxFailureCount is a diagnostic stop budget for a selected train/dev
+    # capture, not part of the common source/runtime identity required by an
+    # earlier gate.  Keeping it here would make a normal completed smoke report
+    # unusable as the prerequisite for a bounded train diagnostic.
+    _assert_same_run(run, expected_for_mode, include_max_failures=False)
     if run.get("status") != "COMPLETED":
         raise OfficialRuntimeRunError(f"required {required_mode} report is not complete")
+    diagnostic = report.get("diagnosticEvaluation")
+    if isinstance(diagnostic, dict) and diagnostic.get("promotable") is False:
+        raise OfficialRuntimeRunError(
+            f"required {required_mode} report is diagnostic-only and cannot satisfy a formal gate"
+        )
+    items = report.get("items")
+    if not isinstance(items, list):
+        raise OfficialRuntimeRunError(f"required {required_mode} report items are invalid")
+    item_ids = [item.get("id") for item in items if isinstance(item, dict)]
+    if len(item_ids) != len(items) or item_ids != record_ids:
+        raise OfficialRuntimeRunError(f"required {required_mode} report items do not match selectedRecordIds")
+    if any(
+        not isinstance(item.get("casePass"), bool)
+        or not isinstance(item.get("resultExact"), bool)
+        or item["casePass"] != item["resultExact"]
+        for item in items
+    ):
+        raise OfficialRuntimeRunError(
+            f"required {required_mode} report items violate casePass = resultExact"
+        )
     metrics = report.get("metrics")
-    if not isinstance(metrics, dict) or metrics.get("caseDenominator") != run.get("requestedCount"):
+    pass_hits = sum(item["casePass"] for item in items)
+    expected_accuracy = round(pass_hits / len(record_ids), 6)
+    if (
+        not isinstance(metrics, dict)
+        or metrics.get("caseDenominator") != len(record_ids)
+        or metrics.get("casePassHits") != pass_hits
+        or metrics.get("caseAccuracy") != expected_accuracy
+    ):
         raise OfficialRuntimeRunError(f"required {required_mode} report has an invalid denominator")
-    if require_green and metrics.get("caseAccuracy") != 1.0:
+    if require_green and pass_hits != len(record_ids):
         raise OfficialRuntimeRunError(f"required {required_mode} report is not all green")
 
 
@@ -260,9 +414,32 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "- final answer text: non-scoring presentation output",
         f"- parse/execution/summary: {diagnostics['parseSuccessRate']:.6f} / {diagnostics['executionSuccessRate']:.6f} / {diagnostics['summarySuccessRate']:.6f}",
         "",
-        "## Failed cases",
-        "",
     ]
+    partial = report.get("partialEvaluation")
+    if isinstance(partial, dict):
+        early_stop = partial.get("earlyStop") if isinstance(partial.get("earlyStop"), dict) else {}
+        lines.extend(
+            [
+                "## Stop status",
+                "",
+                "This is a partial diagnostic and is not a promotable official score.",
+                f"- Reason: `{early_stop.get('reason', 'STOPPED_EARLY')}`",
+                f"- Failures: {early_stop.get('observedFailures')} (budget: {early_stop.get('maxFailures')})",
+                "",
+            ]
+        )
+    diagnostic = report.get("diagnosticEvaluation")
+    if isinstance(diagnostic, dict):
+        lines.extend(
+            [
+                "## Qualification",
+                "",
+                "This completed run used a failure budget and is diagnostic-only, not a promotable official score.",
+                f"- Failure budget: {diagnostic.get('maxFailures')}",
+                "",
+            ]
+        )
+    lines.extend(["## Failed cases", ""])
     if failed:
         lines.extend(["| ID | Stage | Reason |", "| --- | --- | --- |"])
         for item in failed:
@@ -305,6 +482,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bootstrap-receipt", type=Path, required=True)
     parser.add_argument("--evidence-root", type=Path)
     parser.add_argument("--run-registry", type=Path)
+    parser.add_argument(
+        "--max-failures",
+        type=int,
+        help="Stop a serial train/dev diagnostic after failures exceed this budget; output is non-promotable",
+    )
     parser.add_argument("--acknowledge-final-test", action="store_true")
     parser.add_argument(
         "--resume",
@@ -326,6 +508,10 @@ def main(argv: list[str] | None = None) -> int:
             raise OfficialRuntimeRunError("acknowledge-final-test is only valid for test mode")
         if args.mode == "test" and (not args.acknowledge_final_test or args.run_registry is None):
             raise OfficialRuntimeRunError("test mode requires --acknowledge-final-test and --run-registry")
+        if args.max_failures is not None and args.max_failures < 0:
+            raise OfficialRuntimeRunError("max-failures must be zero or greater")
+        if args.max_failures is not None and args.mode not in {"train", "dev"}:
+            raise OfficialRuntimeRunError("max-failures is only valid for train or dev mode")
 
         profile, profile_sha256 = load_official_runtime_profile(dataset_dir)
         split, records = _records_for_mode(
@@ -364,18 +550,45 @@ def main(argv: list[str] | None = None) -> int:
             model_label=model_label,
             base_url=args.base_url,
             record_ids=[str(record["id"]) for record in records],
+            max_failures=args.max_failures,
         )
 
         if args.mode in {"train", "dev", "test"}:
+            smoke_record_ids = [str(record_id) for record_id in profile["smoke"]["recordIds"]]
             _assert_completed_gate(
                 run_dir / "smoke.json",
                 expected=base_run,
                 required_mode="smoke",
                 require_green=True,
+                expected_record_ids=smoke_record_ids,
             )
         if args.mode == "test":
-            _assert_completed_gate(run_dir / "train.json", expected=base_run, required_mode="train", require_green=False)
-            _assert_completed_gate(run_dir / "dev.json", expected=base_run, required_mode="dev", require_green=False)
+            _, train_records = _records_for_mode(
+                dataset_dir,
+                profile=profile,
+                mode="train",
+                acknowledge_final_test=False,
+            )
+            _, dev_records = _records_for_mode(
+                dataset_dir,
+                profile=profile,
+                mode="dev",
+                acknowledge_final_test=False,
+            )
+            _assert_completed_gate(
+                run_dir / "train.json",
+                expected=base_run,
+                required_mode="train",
+                require_green=False,
+                expected_record_ids=[str(record["id"]) for record in train_records],
+            )
+            _assert_completed_gate(
+                run_dir / "dev.json",
+                expected=base_run,
+                required_mode="dev",
+                require_green=False,
+                expected_record_ids=[str(record["id"]) for record in dev_records],
+            )
             existing_run = None
             if args.resume and output_path.is_file():
                 existing_report = _read_json(output_path)
@@ -402,20 +615,50 @@ def main(argv: list[str] | None = None) -> int:
         resumed_by_id = _load_resumed_items(output_path, expected_run=base_run, records=records) if args.resume else {}
         pending_records = [record for record in records if record["id"] not in resumed_by_id]
         completed_by_id: dict[str, dict[str, Any]] = dict(resumed_by_id)
-        started_at = time.time()
+        early_stop: dict[str, Any] | None = None
 
         def ordered_items() -> list[dict[str, Any]]:
             return [completed_by_id[str(record["id"])] for record in records if str(record["id"]) in completed_by_id]
 
         def checkpoint(item: dict[str, Any], _: int, __: int) -> None:
+            nonlocal early_stop
             completed_by_id[str(item["id"])] = item
             partial_records = [record for record in records if str(record["id"]) in completed_by_id]
+            provisional_capture = _capture_report(
+                ordered_items(),
+                _run_metadata(
+                    base_run,
+                    status="RUNNING",
+                    completed_count=len(partial_records),
+                    started_at=started_at,
+                ),
+                warmup=warmup_info,
+            )
+            provisional_report = build_official_runtime_report(provisional_capture, partial_records)
+            early_stop = _early_stop_state(
+                max_failures=args.max_failures,
+                scored_items=provisional_report["items"],
+            )
+            status = "STOPPED_EARLY" if early_stop is not None else "RUNNING"
             partial_capture = _capture_report(
                 ordered_items(),
-                _run_metadata(base_run, status="RUNNING", completed_count=len(partial_records), started_at=started_at),
+                _run_metadata(
+                    base_run,
+                    status=status,
+                    completed_count=len(partial_records),
+                    started_at=started_at,
+                    early_stop=early_stop,
+                ),
+                warmup=warmup_info,
             )
-            partial_report = build_official_runtime_report(partial_capture, partial_records)
+            partial_report = (
+                _build_stopped_early_report(partial_capture, partial_records, early_stop=early_stop)
+                if early_stop is not None
+                else build_official_runtime_report(partial_capture, partial_records)
+            )
             _write_json(output_path, partial_report)
+            if early_stop is not None:
+                _write_markdown(markdown_path, partial_report)
 
         capture = profile["capture"]
         post_json = _http_post_json(
@@ -426,6 +669,18 @@ def main(argv: list[str] | None = None) -> int:
             network_retries=capture["networkRetries"],
             retry_backoff_seconds=float(capture["retryBackoffSeconds"]),
         )
+        # Prefix materialization is deliberately outside the official run clock.  The first
+        # real record must never be charged for loading the fixed bank prompt into the model KV
+        # cache; the separate evidence is retained in the report for auditability.
+        warmup_info = None
+        if pending_records:
+            warmup_info = warm_up_runtime_prefix(
+                post_json=post_json,
+                agent_id=args.agent_id,
+                query_api_prefix=DEFAULT_QUERY_API_PREFIX,
+                manage_api_prefix=DEFAULT_MANAGE_API_PREFIX,
+            )
+        started_at = time.time()
         if pending_records:
             run_supersonic_evaluation(
                 pending_records,
@@ -439,15 +694,59 @@ def main(argv: list[str] | None = None) -> int:
                 result_only=bool(capture["resultOnly"]),
                 cleanup_conversations=False,
                 on_item_complete=checkpoint,
+                stop_predicate=lambda _item, _completed, _total: early_stop is not None,
             )
+
+        if early_stop is not None:
+            partial_records = [record for record in records if str(record["id"]) in completed_by_id]
+            stopped_capture = _capture_report(
+                ordered_items(),
+                _run_metadata(
+                    base_run,
+                    status="STOPPED_EARLY",
+                    completed_count=len(partial_records),
+                    started_at=started_at,
+                    early_stop=early_stop,
+                ),
+                warmup=warmup_info,
+            )
+            stopped_report = _build_stopped_early_report(
+                stopped_capture,
+                partial_records,
+                early_stop=early_stop,
+            )
+            _cleanup_successful_conversations(
+                stopped_report,
+                post_json=post_json,
+                manage_api_prefix=DEFAULT_MANAGE_API_PREFIX,
+            )
+            _write_json(output_path, stopped_report)
+            _write_markdown(markdown_path, stopped_report)
+            print(
+                json.dumps(
+                    {
+                        "mode": args.mode,
+                        "output": str(output_path),
+                        "summary": str(markdown_path),
+                        "metrics": stopped_report["metrics"],
+                        "runtimeDiagnostics": stopped_report["runtimeDiagnostics"],
+                        "partialEvaluation": stopped_report["partialEvaluation"],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 3
 
         if len(completed_by_id) != len(records):
             raise OfficialRuntimeRunError("runtime capture completed with an inconsistent record count")
         final_capture = _capture_report(
             ordered_items(),
             _run_metadata(base_run, status="COMPLETED", completed_count=len(records), started_at=started_at),
+            warmup=warmup_info,
         )
         final_report = build_official_runtime_report(final_capture, records)
+        _mark_bounded_diagnostic_report(final_report, max_failures=args.max_failures)
         _cleanup_successful_conversations(
             final_report,
             post_json=post_json,

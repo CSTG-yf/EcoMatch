@@ -29,6 +29,9 @@ public class LLMReq {
     private SqlGenType sqlGenType;
     private SemanticIntentHints semanticIntentHints;
     private int bankMaxCandidates = 1;
+    /** Per-turn diagnostics for requirements-contract retries; never contains model text. */
+    private int bankRequirementsAttempts;
+    private List<String> bankRequirementsRepairReasons = new ArrayList<>();
     private Map<String, Object> bankRoutingTelemetry;
     private Map<String, ChatApp> chatAppConfig;
     private String customPrompt;

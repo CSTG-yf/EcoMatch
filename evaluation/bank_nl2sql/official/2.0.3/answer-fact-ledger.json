@@ -1,0 +1,2070 @@
+{
+  "count": 32,
+  "entries": [
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB001"
+            ],
+            "organizationCodes": [
+              "ORG004"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB001"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "deposit_difference",
+          "kind": "NUMBER",
+          "value": 18.11
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB002"
+            ],
+            "organizationCodes": [
+              "ORG004"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB002"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "loan_difference",
+          "kind": "NUMBER",
+          "value": 14.83
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG004"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "PERCENT",
+          "value": 0.41
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG004"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "profit_difference",
+          "kind": "NUMBER",
+          "value": 54.9
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-07-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG004' ORDER BY v.metric_code",
+      "id": "TRAIN-H-04",
+      "reason": "补齐目标机构四项指标的全省均值差额结果",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "MULTI_METRIC",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB001"
+            ],
+            "organizationCodes": [
+              "ORG008"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB001"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "deposit_difference",
+          "kind": "NUMBER",
+          "value": 34.8
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB002"
+            ],
+            "organizationCodes": [
+              "ORG008"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB002"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "loan_difference",
+          "kind": "NUMBER",
+          "value": 27.13
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG008"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "PERCENT",
+          "value": 0.23
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG008"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "profit_difference",
+          "kind": "NUMBER",
+          "value": 82.78
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-08-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG008' ORDER BY v.metric_code",
+      "id": "TRAIN-H-05",
+      "reason": "补齐目标机构四项指标的全省均值差额结果",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "MULTI_METRIC",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-09-30"
+            ],
+            "metricCodes": [
+              "ZB001"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB001"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "deposit_difference",
+          "kind": "NUMBER",
+          "value": 15.6
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-09-30"
+            ],
+            "metricCodes": [
+              "ZB002"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB002"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "loan_difference",
+          "kind": "NUMBER",
+          "value": 12.43
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-09-30"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "PERCENT",
+          "value": 0.29
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2025-09-30"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "profit_difference",
+          "kind": "NUMBER",
+          "value": 50.73
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date = '2025-09-30' AND metric_code IN ('ZB001','ZB002','ZB011','ZB013')), provincial AS (SELECT metric_code, AVG(metric_value) AS provincial_average FROM values_at_date GROUP BY metric_code) SELECT o.org_code, o.org_name, v.metric_code, v.metric_value, p.provincial_average, v.metric_value-p.provincial_average AS gap_value, ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v JOIN provincial p ON p.metric_code=v.metric_code JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012' ORDER BY v.metric_code",
+      "id": "TRAIN-H-06",
+      "reason": "补齐目标机构四项指标的全省均值差额结果",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "MULTI_METRIC",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "baseline_value",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "baseline_npl",
+          "kind": "NUMBER",
+          "value": 1.3
+        },
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_change",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "profit_change",
+          "kind": "NUMBER",
+          "value": 4.68
+        }
+      ],
+      "goldSql": "WITH current_base AS (SELECT org_code,metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-12-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB012','ZB013','ZB015','ZB016','ZB017')), current_values AS (SELECT * FROM current_base UNION ALL SELECT org_code,'DERIVED_ZB002_DIV_ZB001',MAX(CASE WHEN metric_code='ZB002' THEN metric_value END)*100.0/MAX(CASE WHEN metric_code='ZB001' THEN metric_value END) FROM current_base GROUP BY org_code), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric_code ORDER BY CASE WHEN metric_code IN ('ZB012','ZB013','ZB017') THEN metric_value END ASC,CASE WHEN metric_code NOT IN ('ZB012','ZB013','ZB017') THEN metric_value END DESC,org_code) AS rank_position,AVG(metric_value) OVER(PARTITION BY metric_code) AS provincial_average FROM current_values), baseline AS (SELECT org_code,metric_code,metric_value AS baseline_value FROM bank_metric_daily WHERE data_date='2024-12-31' AND metric_code IN ('ZB011','ZB013')) SELECT r.metric_code,r.org_code,o.org_name,r.metric_value,r.rank_position,b.baseline_value,CASE WHEN b.baseline_value IS NULL THEN NULL ELSE ROUND(r.metric_value-b.baseline_value,2) END AS absolute_change,r.provincial_average FROM ranked r JOIN bank_organization o ON o.org_code=r.org_code LEFT JOIN baseline b ON b.org_code=r.org_code AND b.metric_code=r.metric_code WHERE r.org_code='ORG011' ORDER BY r.metric_code",
+      "id": "TRAIN-H-08",
+      "reason": "补齐综合经营评价中的年初基线、变化值、排名与省均值",
+      "split": "train",
+      "sqlFeatures": [
+        "RANKING",
+        "MULTI_METRIC",
+        "BASELINE_COMPARISON",
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2026-01-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "baseline_value",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "baseline_npl",
+          "kind": "NUMBER",
+          "value": 1.03
+        },
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2026-01-31"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_change",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "profit_change",
+          "kind": "NUMBER",
+          "value": 26.6
+        }
+      ],
+      "goldSql": "WITH current_base AS (SELECT org_code,metric_code,metric_value FROM bank_metric_daily WHERE data_date='2026-01-31' AND metric_code IN ('ZB001','ZB002','ZB011','ZB012','ZB013','ZB015','ZB016','ZB017')), current_values AS (SELECT * FROM current_base UNION ALL SELECT org_code,'DERIVED_ZB002_DIV_ZB001',MAX(CASE WHEN metric_code='ZB002' THEN metric_value END)*100.0/MAX(CASE WHEN metric_code='ZB001' THEN metric_value END) FROM current_base GROUP BY org_code), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric_code ORDER BY CASE WHEN metric_code IN ('ZB012','ZB013','ZB017') THEN metric_value END ASC,CASE WHEN metric_code NOT IN ('ZB012','ZB013','ZB017') THEN metric_value END DESC,org_code) AS rank_position,AVG(metric_value) OVER(PARTITION BY metric_code) AS provincial_average FROM current_values), baseline AS (SELECT org_code,metric_code,metric_value AS baseline_value FROM bank_metric_daily WHERE data_date='2024-12-31' AND metric_code IN ('ZB011','ZB013')) SELECT r.metric_code,r.org_code,o.org_name,r.metric_value,r.rank_position,b.baseline_value,CASE WHEN b.baseline_value IS NULL THEN NULL ELSE ROUND(r.metric_value-b.baseline_value,2) END AS absolute_change,r.provincial_average FROM ranked r JOIN bank_organization o ON o.org_code=r.org_code LEFT JOIN baseline b ON b.org_code=r.org_code AND b.metric_code=r.metric_code WHERE r.org_code='ORG002' ORDER BY r.metric_code",
+      "id": "TRAIN-H-09",
+      "reason": "补齐综合经营评价中的年初基线、变化值、排名与省均值",
+      "split": "train",
+      "sqlFeatures": [
+        "RANKING",
+        "MULTI_METRIC",
+        "BASELINE_COMPARISON",
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "net_interest_income",
+          "kind": "NUMBER",
+          "value": 51.72
+        },
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "intermediary_income",
+          "kind": "NUMBER",
+          "value": 172.05
+        },
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "profit_change",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "profit_change",
+          "kind": "NUMBER",
+          "value": 21.25
+        }
+      ],
+      "goldSql": "WITH current_values AS (SELECT org_code,metric_code,metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code IN ('ZB007','ZB008','ZB011','ZB012')), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric_code ORDER BY CASE WHEN metric_code='ZB012' THEN metric_value END ASC,CASE WHEN metric_code!='ZB012' THEN metric_value END DESC,org_code) AS rank_position FROM current_values), baseline AS (SELECT org_code,metric_value AS baseline_value FROM bank_metric_daily WHERE data_date='2024-12-31' AND metric_code='ZB011') SELECT r.org_code,o.org_name,r.metric_code,r.metric_value,r.rank_position,CASE WHEN r.metric_code='ZB011' THEN b.baseline_value END AS baseline_value,CASE WHEN r.metric_code='ZB011' THEN ROUND(ABS(r.metric_value-b.baseline_value),2) END AS profit_change FROM ranked r JOIN bank_organization o ON o.org_code=r.org_code LEFT JOIN baseline b ON b.org_code=r.org_code WHERE r.org_code='ORG011' ORDER BY r.metric_code",
+      "id": "TRAIN-H-22",
+      "reason": "补齐盈利能力评价中的收入结构、排名和年初净利润变化",
+      "split": "train",
+      "sqlFeatures": [
+        "RANKING",
+        "INCOME_STRUCTURE",
+        "BASELINE_COMPARISON",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "net_interest_income",
+          "kind": "NUMBER",
+          "value": 12.91
+        },
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "intermediary_income",
+          "kind": "NUMBER",
+          "value": 166.77
+        },
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "profit_change",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "profit_change",
+          "kind": "NUMBER",
+          "value": 0.69
+        }
+      ],
+      "goldSql": "WITH current_values AS (SELECT org_code,metric_code,metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code IN ('ZB007','ZB008','ZB011','ZB012')), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric_code ORDER BY CASE WHEN metric_code='ZB012' THEN metric_value END ASC,CASE WHEN metric_code!='ZB012' THEN metric_value END DESC,org_code) AS rank_position FROM current_values), baseline AS (SELECT org_code,metric_value AS baseline_value FROM bank_metric_daily WHERE data_date='2024-12-31' AND metric_code='ZB011') SELECT r.org_code,o.org_name,r.metric_code,r.metric_value,r.rank_position,CASE WHEN r.metric_code='ZB011' THEN b.baseline_value END AS baseline_value,CASE WHEN r.metric_code='ZB011' THEN ROUND(ABS(r.metric_value-b.baseline_value),2) END AS profit_change FROM ranked r JOIN bank_organization o ON o.org_code=r.org_code LEFT JOIN baseline b ON b.org_code=r.org_code WHERE r.org_code='ORG002' ORDER BY r.metric_code",
+      "id": "TRAIN-H-23",
+      "reason": "补齐盈利能力评价中的收入结构、排名和年初净利润变化",
+      "split": "train",
+      "sqlFeatures": [
+        "RANKING",
+        "INCOME_STRUCTURE",
+        "BASELINE_COMPARISON",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "net_interest_income",
+          "kind": "NUMBER",
+          "value": 1.87
+        },
+        {
+          "binding": {
+            "comparisonType": "POINT",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "intermediary_income",
+          "kind": "NUMBER",
+          "value": 370.43
+        },
+        {
+          "binding": {
+            "comparisonType": "CHANGE",
+            "dates": [
+              "2024-12-31",
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB011"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "profit_change",
+                "where": {
+                  "metric_code": "ZB011"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "profit_change",
+          "kind": "NUMBER",
+          "value": 6.25
+        }
+      ],
+      "goldSql": "WITH current_values AS (SELECT org_code,metric_code,metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code IN ('ZB007','ZB008','ZB011','ZB012')), ranked AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY metric_code ORDER BY CASE WHEN metric_code='ZB012' THEN metric_value END ASC,CASE WHEN metric_code!='ZB012' THEN metric_value END DESC,org_code) AS rank_position FROM current_values), baseline AS (SELECT org_code,metric_value AS baseline_value FROM bank_metric_daily WHERE data_date='2024-12-31' AND metric_code='ZB011') SELECT r.org_code,o.org_name,r.metric_code,r.metric_value,r.rank_position,CASE WHEN r.metric_code='ZB011' THEN b.baseline_value END AS baseline_value,CASE WHEN r.metric_code='ZB011' THEN ROUND(ABS(r.metric_value-b.baseline_value),2) END AS profit_change FROM ranked r JOIN bank_organization o ON o.org_code=r.org_code LEFT JOIN baseline b ON b.org_code=r.org_code WHERE r.org_code='ORG006' ORDER BY r.metric_code",
+      "id": "TRAIN-H-24",
+      "reason": "补齐盈利能力评价中的收入结构、排名和年初净利润变化",
+      "split": "train",
+      "sqlFeatures": [
+        "RANKING",
+        "INCOME_STRUCTURE",
+        "BASELINE_COMPARISON",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-01-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "NUMBER",
+          "value": 0.16
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-01-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "provincial_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "provincial_average",
+          "kind": "PERCENT",
+          "value": 1.1415384615384616
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-01-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG006'",
+      "id": "TRAIN-M-16",
+      "reason": "补齐目标机构不良率的全省均值与差额",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-02-28"
+            ],
+            "metricCodes": [
+              "ZB012"
+            ],
+            "organizationCodes": [
+              "ORG010"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "cost_income_difference",
+          "kind": "NUMBER",
+          "value": 5.54
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-02-28"
+            ],
+            "metricCodes": [
+              "ZB012"
+            ],
+            "organizationCodes": [
+              "ORG010"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "provincial_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "provincial_average",
+          "kind": "PERCENT",
+          "value": 31.86769230769231
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-02-28' AND metric_code='ZB012'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG010'",
+      "id": "TRAIN-M-17",
+      "reason": "补齐目标机构成本收入比的全省均值与差额",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB015"
+            ],
+            "organizationCodes": [
+              "ORG001"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "provision_difference",
+          "kind": "NUMBER",
+          "value": 23.95
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB015"
+            ],
+            "organizationCodes": [
+              "ORG001"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "provincial_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "provincial_average",
+          "kind": "PERCENT",
+          "value": 178.5176923076923
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB015'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG001'",
+      "id": "TRAIN-M-18",
+      "reason": "补齐目标机构拨备覆盖率的全省均值与差额",
+      "split": "train",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-06-30"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB003"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB003"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "corporate_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 35.52
+        },
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-06-30"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB004"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB004"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "personal_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 64.48
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-06-30' AND org_code='ORG002' AND metric_code IN ('ZB001','ZB003','ZB004')), total AS (SELECT metric_value AS total_value FROM values_at_date WHERE metric_code='ZB001') SELECT 'ORG002' AS org_code,o.org_name,v.metric_code,v.metric_value,ROUND(v.metric_value*100.0/t.total_value,2) AS ratio_percent FROM values_at_date v CROSS JOIN total t JOIN bank_organization o ON o.org_code='ORG002' WHERE v.metric_code IN ('ZB003','ZB004') ORDER BY v.metric_code",
+      "id": "TRAIN-M-31",
+      "reason": "补齐对公与个人存款相对各项存款的占比结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "DEPOSIT_COMPOSITION",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB003"
+            ],
+            "organizationCodes": [
+              "ORG007"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB003"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "corporate_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 38.79
+        },
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-07-31"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB004"
+            ],
+            "organizationCodes": [
+              "ORG007"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB004"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "personal_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 61.21
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-07-31' AND org_code='ORG007' AND metric_code IN ('ZB001','ZB003','ZB004')), total AS (SELECT metric_value AS total_value FROM values_at_date WHERE metric_code='ZB001') SELECT 'ORG007' AS org_code,o.org_name,v.metric_code,v.metric_value,ROUND(v.metric_value*100.0/t.total_value,2) AS ratio_percent FROM values_at_date v CROSS JOIN total t JOIN bank_organization o ON o.org_code='ORG007' WHERE v.metric_code IN ('ZB003','ZB004') ORDER BY v.metric_code",
+      "id": "TRAIN-M-32",
+      "reason": "补齐对公与个人存款相对各项存款的占比结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "DEPOSIT_COMPOSITION",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB003"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB003"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "corporate_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 40.41
+        },
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB004"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB004"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "personal_deposit_ratio",
+          "kind": "PERCENT",
+          "value": 59.59
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-08-31' AND org_code='ORG012' AND metric_code IN ('ZB001','ZB003','ZB004')), total AS (SELECT metric_value AS total_value FROM values_at_date WHERE metric_code='ZB001') SELECT 'ORG012' AS org_code,o.org_name,v.metric_code,v.metric_value,ROUND(v.metric_value*100.0/t.total_value,2) AS ratio_percent FROM values_at_date v CROSS JOIN total t JOIN bank_organization o ON o.org_code='ORG012' WHERE v.metric_code IN ('ZB003','ZB004') ORDER BY v.metric_code",
+      "id": "TRAIN-M-33",
+      "reason": "补齐对公与个人存款相对各项存款的占比结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "DEPOSIT_COMPOSITION",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-08-31"
+            ],
+            "metricCodes": [
+              "ZB011",
+              "ZB018"
+            ],
+            "organizationCodes": [
+              "ORG003"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "per_capita_profit"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "per_capita_profit",
+          "kind": "NUMBER",
+          "value": 0.94
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-08-31' AND org_code='ORG003' AND metric_code IN ('ZB011','ZB018')) SELECT 'ORG003' AS org_code,o.org_name,MAX(CASE WHEN metric_code='ZB011' THEN metric_value END) AS net_profit,MAX(CASE WHEN metric_code='ZB018' THEN metric_value END) AS employee_count,ROUND(MAX(CASE WHEN metric_code='ZB011' THEN metric_value END)/MAX(CASE WHEN metric_code='ZB018' THEN metric_value END),2) AS per_capita_profit FROM values_at_date JOIN bank_organization o ON o.org_code='ORG003' GROUP BY o.org_name",
+      "id": "TRAIN-M-34",
+      "reason": "补齐净利润除以员工人数的人均利润结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "PER_CAPITA",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-09-30"
+            ],
+            "metricCodes": [
+              "ZB011",
+              "ZB018"
+            ],
+            "organizationCodes": [
+              "ORG008"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "per_capita_profit"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "per_capita_profit",
+          "kind": "NUMBER",
+          "value": 0.93
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-09-30' AND org_code='ORG008' AND metric_code IN ('ZB011','ZB018')) SELECT 'ORG008' AS org_code,o.org_name,MAX(CASE WHEN metric_code='ZB011' THEN metric_value END) AS net_profit,MAX(CASE WHEN metric_code='ZB018' THEN metric_value END) AS employee_count,ROUND(MAX(CASE WHEN metric_code='ZB011' THEN metric_value END)/MAX(CASE WHEN metric_code='ZB018' THEN metric_value END),2) AS per_capita_profit FROM values_at_date JOIN bank_organization o ON o.org_code='ORG008' GROUP BY o.org_name",
+      "id": "TRAIN-M-35",
+      "reason": "补齐净利润除以员工人数的人均利润结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "PER_CAPITA",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "MEAN",
+            "dates": [
+              "2025-01-31",
+              "2025-03-31"
+            ],
+            "metricCodes": [
+              "ZB001"
+            ],
+            "organizationCodes": [
+              "ORG013"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "daily_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "daily_average",
+          "kind": "NUMBER",
+          "value": 73.62
+        }
+      ],
+      "goldSql": "SELECT 'ORG013' AS org_code,o.org_name,'ZB001' AS metric_code,ROUND(AVG(d.metric_value),2) AS daily_average,COUNT(*) AS observation_count FROM bank_metric_daily d JOIN bank_organization o ON o.org_code=d.org_code WHERE d.org_code='ORG013' AND d.metric_code='ZB001' AND d.data_date BETWEEN '2025-01-31' AND '2025-03-31' GROUP BY o.org_name",
+      "id": "TRAIN-M-36",
+      "reason": "按题目答案口径补齐一季度区间日均存款结果",
+      "split": "train",
+      "sqlFeatures": [
+        "DATE_RANGE",
+        "MEAN",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "MEAN",
+            "dates": [
+              "2025-01-01",
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB002"
+            ],
+            "organizationCodes": [
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "daily_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "daily_average",
+          "kind": "NUMBER",
+          "value": 42.33
+        }
+      ],
+      "goldSql": "SELECT 'ORG002' AS org_code,o.org_name,'ZB002' AS metric_code,ROUND(AVG(d.metric_value),2) AS daily_average,COUNT(*) AS observation_count FROM bank_metric_daily d JOIN bank_organization o ON o.org_code=d.org_code WHERE d.org_code='ORG002' AND d.metric_code='ZB002' AND d.data_date BETWEEN '2025-01-01' AND '2025-12-31' GROUP BY o.org_name",
+      "id": "TRAIN-M-45",
+      "reason": "补齐全年每日贷款余额的平均值结果",
+      "split": "train",
+      "sqlFeatures": [
+        "DATE_RANGE",
+        "MEAN",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "DIFFERENCE",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013",
+              "ZB017"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB017"
+                }
+              },
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ABS_DIFFERENCE"
+          },
+          "id": "rate_gap",
+          "kind": "NUMBER",
+          "value": 0.2
+        }
+      ],
+      "id": "TRAIN-M-46",
+      "reason": "将答案中的两项利率差绑定到同日查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "DIFFERENCE",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013",
+              "ZB017"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB017"
+                }
+              },
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ABS_DIFFERENCE"
+          },
+          "id": "rate_gap",
+          "kind": "NUMBER",
+          "value": 0.19
+        }
+      ],
+      "id": "TRAIN-M-47",
+      "reason": "将答案中的两项利率差绑定到同日查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "DIFFERENCE",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013",
+              "ZB017"
+            ],
+            "organizationCodes": [
+              "ORG003"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB017"
+                }
+              },
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB013"
+                }
+              }
+            ],
+            "operation": "ABS_DIFFERENCE"
+          },
+          "id": "rate_gap",
+          "kind": "NUMBER",
+          "value": 0.15
+        }
+      ],
+      "id": "TRAIN-M-48",
+      "reason": "将答案中的两项利率差绑定到同日查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "SUM",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007",
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG003"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              },
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "SUM"
+          },
+          "id": "income_total",
+          "kind": "NUMBER",
+          "value": 463.61
+        }
+      ],
+      "id": "TRAIN-M-58",
+      "reason": "将答案中的两项收入合计绑定到查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "SUM",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007",
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              },
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "SUM"
+          },
+          "id": "income_total",
+          "kind": "NUMBER",
+          "value": 223.77
+        }
+      ],
+      "id": "TRAIN-M-59",
+      "reason": "将答案中的两项收入合计绑定到查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "SUM",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB007",
+              "ZB008"
+            ],
+            "organizationCodes": [
+              "ORG006"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB007"
+                }
+              },
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB008"
+                }
+              }
+            ],
+            "operation": "SUM"
+          },
+          "id": "income_total",
+          "kind": "NUMBER",
+          "value": 372.3
+        }
+      ],
+      "id": "TRAIN-M-60",
+      "reason": "将答案中的两项收入合计绑定到查询结果",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "SUM",
+            "dates": [
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB001"
+            ],
+            "organizationCodes": [
+              "ORG001",
+              "ORG002"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB001",
+                  "org_code": "ORG001"
+                }
+              },
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB001",
+                  "org_code": "ORG002"
+                }
+              }
+            ],
+            "operation": "SUM"
+          },
+          "id": "deposit_total",
+          "kind": "NUMBER",
+          "value": 94.64
+        }
+      ],
+      "id": "TRAIN-S-21",
+      "reason": "将两家机构存款合计绑定到各机构结果行",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "DIFFERENCE",
+            "dates": [
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB001",
+              "ZB003",
+              "ZB004"
+            ],
+            "organizationCodes": [
+              "ORG003"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "formula": {
+                  "operands": [
+                    {
+                      "column": "metric_value",
+                      "where": {
+                        "metric_code": "ZB003"
+                      }
+                    },
+                    {
+                      "column": "metric_value",
+                      "where": {
+                        "metric_code": "ZB004"
+                      }
+                    }
+                  ],
+                  "operation": "SUM"
+                }
+              },
+              {
+                "column": "metric_value",
+                "where": {
+                  "metric_code": "ZB001"
+                }
+              }
+            ],
+            "operation": "ABS_DIFFERENCE"
+          },
+          "id": "deposit_composition_gap",
+          "kind": "NUMBER",
+          "value": 0.0
+        }
+      ],
+      "id": "TRAIN-S-22",
+      "reason": "将对公与个人存款之和同各项存款的差额绑定到结果行",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "SUM",
+            "dates": [
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB020",
+              "ZB021"
+            ],
+            "organizationCodes": [
+              "ORG005"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB020"
+                }
+              },
+              {
+                "column": "aggregate_value",
+                "where": {
+                  "metric_code": "ZB021"
+                }
+              }
+            ],
+            "operation": "SUM"
+          },
+          "id": "customer_total",
+          "kind": "NUMBER",
+          "value": 147938.0
+        }
+      ],
+      "id": "TRAIN-S-23",
+      "reason": "将对公与个人客户数合计绑定到结果行",
+      "split": "train"
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB002",
+              "ZB006"
+            ],
+            "organizationCodes": [
+              "ORG007"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB006"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "personal_loan_ratio",
+          "kind": "PERCENT",
+          "value": 46.46
+        },
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB002",
+              "ZB005"
+            ],
+            "organizationCodes": [
+              "ORG007"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "ratio_percent",
+                "where": {
+                  "metric_code": "ZB005"
+                }
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "corporate_loan_ratio",
+          "kind": "PERCENT",
+          "value": 53.54
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND org_code='ORG007' AND metric_code IN ('ZB002','ZB005','ZB006')), total AS (SELECT metric_value AS total_value FROM values_at_date WHERE metric_code='ZB002') SELECT 'ORG007' AS org_code,o.org_name,v.metric_code,v.metric_value,ROUND(v.metric_value*100.0/t.total_value,2) AS ratio_percent FROM values_at_date v CROSS JOIN total t JOIN bank_organization o ON o.org_code='ORG007' WHERE v.metric_code IN ('ZB005','ZB006') ORDER BY CASE v.metric_code WHEN 'ZB006' THEN 1 ELSE 2 END",
+      "id": "TRAIN-S-24",
+      "reason": "补齐个人与对公贷款相对各项贷款的占比结果",
+      "split": "train",
+      "sqlFeatures": [
+        "RATIO",
+        "LOAN_COMPOSITION",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "NUMBER",
+          "value": 0.13
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-03-31"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG011"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "provincial_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "provincial_average",
+          "kind": "PERCENT",
+          "value": 1.136923076923077
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-03-31' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG011'",
+      "id": "VAL-M-16",
+      "reason": "补齐目标机构不良率的全省均值与差额",
+      "split": "dev",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "NUMBER",
+          "value": 0.29
+        },
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG012"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "provincial_average"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "provincial_average",
+          "kind": "PERCENT",
+          "value": 1.143076923076923
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG012'",
+      "id": "VAL-M-17",
+      "reason": "补齐目标机构不良率的全省均值与差额",
+      "split": "dev",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "PROVINCE_COMPARISON",
+            "dates": [
+              "2026-04-30"
+            ],
+            "metricCodes": [
+              "ZB013"
+            ],
+            "organizationCodes": [
+              "ORG013"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "absolute_gap"
+              }
+            ],
+            "operation": "ROUND",
+            "scale": 2
+          },
+          "id": "npl_difference",
+          "kind": "NUMBER",
+          "value": 0.0
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT org_code, metric_code, metric_value FROM bank_metric_daily WHERE data_date='2026-04-30' AND metric_code='ZB013'), provincial AS (SELECT AVG(metric_value) AS provincial_average FROM values_at_date) SELECT o.org_code,o.org_name,v.metric_code,v.metric_value,p.provincial_average,v.metric_value-p.provincial_average AS gap_value,ABS(v.metric_value-p.provincial_average) AS absolute_gap FROM values_at_date v CROSS JOIN provincial p JOIN bank_organization o ON o.org_code=v.org_code WHERE v.org_code='ORG013'",
+      "id": "VAL-M-18",
+      "reason": "补齐目标机构不良率与全省均值的四舍五入差额",
+      "split": "dev",
+      "sqlFeatures": [
+        "PROVINCIAL_AVERAGE",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    },
+    {
+      "answerFacts": [
+        {
+          "binding": {
+            "comparisonType": "RATIO",
+            "dates": [
+              "2025-12-31"
+            ],
+            "metricCodes": [
+              "ZB011",
+              "ZB018"
+            ],
+            "organizationCodes": [
+              "ORG013"
+            ]
+          },
+          "formula": {
+            "operands": [
+              {
+                "column": "per_capita_profit"
+              }
+            ],
+            "operation": "DIRECT"
+          },
+          "id": "per_capita_profit",
+          "kind": "NUMBER",
+          "value": 1.02
+        }
+      ],
+      "goldSql": "WITH values_at_date AS (SELECT metric_code,metric_value FROM bank_metric_daily WHERE data_date='2025-12-31' AND org_code='ORG013' AND metric_code IN ('ZB011','ZB018')) SELECT 'ORG013' AS org_code,o.org_name,MAX(CASE WHEN metric_code='ZB011' THEN metric_value END) AS net_profit,MAX(CASE WHEN metric_code='ZB018' THEN metric_value END) AS employee_count,ROUND(MAX(CASE WHEN metric_code='ZB011' THEN metric_value END)/MAX(CASE WHEN metric_code='ZB018' THEN metric_value END),2) AS per_capita_profit FROM values_at_date JOIN bank_organization o ON o.org_code='ORG013' GROUP BY o.org_name",
+      "id": "VAL-M-20",
+      "reason": "补齐净利润除以员工人数的人均利润结果",
+      "split": "dev",
+      "sqlFeatures": [
+        "RATIO",
+        "PER_CAPITA",
+        "ANSWER_FACT_CONTRACT"
+      ]
+    }
+  ],
+  "generator": {
+    "name": "amend_official_answer_facts",
+    "version": "1.0.0"
+  },
+  "parentDatasetVersion": "2.0.2",
+  "parentOfficialManifestSha256": "A20047BC9E95511BAB61CB589DB721174B95FFBAE2029F219A3158670788716A",
+  "schemaVersion": "1.0",
+  "specSha256": "99B47C6DCE126CE4F1F0330DA7AFFD71B300F7535F457761E5875AD2496B2905",
+  "targetDatasetVersion": "2.0.3"
+}

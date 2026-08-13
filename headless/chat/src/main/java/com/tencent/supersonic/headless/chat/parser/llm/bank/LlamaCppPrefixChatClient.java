@@ -23,11 +23,13 @@ import java.util.regex.Pattern;
 /**
  * Direct llama.cpp OpenAI-compatible chat client with true prompt/prefix caching.
  *
- * <p>llama-server reuses KV tokens for the longest common token prefix when
- * {@code cache_prompt=true}. We always send a stable system message first, then only the dynamic
- * user payload, so the system prefix can stay resident across requests after warm-up.
+ * <p>
+ * llama-server reuses KV tokens for the longest common token prefix when {@code cache_prompt=true}.
+ * We always send a stable system message first, then only the dynamic user payload, so the system
+ * prefix can stay resident across requests after warm-up.
  *
- * <p>Optional deep-thinking mode sets {@code chat_template_kwargs.enable_thinking} (Qwen3 / compatible
+ * <p>
+ * Optional deep-thinking mode sets {@code chat_template_kwargs.enable_thinking} (Qwen3 / compatible
  * llama.cpp builds) and strips {@code <think>} / {@code reasoning_content} before returning the
  * final answer text.
  */
@@ -37,19 +39,26 @@ public class LlamaCppPrefixChatClient {
     private static final Logger KEY_PIPELINE = LoggerFactory.getLogger("keyPipeline");
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final Pattern THINK_BLOCK =
-            Pattern.compile("(?is)<think\\b[^>]*>.*?</think>");
+    private static final Pattern THINK_BLOCK = Pattern.compile("(?is)<think\\b[^>]*>.*?</think>");
     private static final Pattern THINK_BLOCK_ALT =
             Pattern.compile("(?is)<thinking\\b[^>]*>.*?</thinking>");
     private static final Pattern REDACTED_THINKING =
             Pattern.compile("(?is)<\\|?redacted_thinking\\|?>.*?<\\/?redacted_thinking\\|?>");
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10)).build();
+    private final HttpClient httpClient =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public record ChatOptions(boolean enableThinking, int maxTokens) {
         public static ChatOptions defaults() {
             return new ChatOptions(false, 0);
+        }
+
+        /**
+         * Options for warming a fixed prompt prefix. The warm-up response is discarded, so it
+         * should consume the smallest possible completion while still exercising the chat template.
+         */
+        public static ChatOptions warmup(boolean thinkingEnabled) {
+            return new ChatOptions(thinkingEnabled, thinkingEnabled ? 1024 : 1);
         }
 
         public static ChatOptions thinking(int maxTokens) {
@@ -57,8 +66,8 @@ public class LlamaCppPrefixChatClient {
         }
     }
 
-    public record ChatResult(String content, Map<String, Object> timings, boolean cachePromptEnabled,
-            boolean thinkingEnabled, int reasoningChars) {}
+    public record ChatResult(String content, Map<String, Object> timings,
+            boolean cachePromptEnabled, boolean thinkingEnabled, int reasoningChars) {}
 
     public ChatResult chat(ChatModelConfig config, String systemPrefix, String userContent) {
         return chat(config, systemPrefix, userContent, ChatOptions.defaults());
@@ -92,18 +101,7 @@ public class LlamaCppPrefixChatClient {
             body.put("max_tokens", opts.maxTokens());
         }
 
-        // Thinking mode: Qwen3 / llama.cpp chat templates. Skip forced json_object so the model can
-        // emit reasoning tokens before the final JSON answer.
-        if (opts.enableThinking()) {
-            ObjectNode templateKwargs = body.putObject("chat_template_kwargs");
-            templateKwargs.put("enable_thinking", true);
-            // Some builds accept top-level enable_thinking as well.
-            body.put("enable_thinking", true);
-        } else if (Boolean.TRUE.equals(config.getJsonFormat())) {
-            ObjectNode responseFormat = body.putObject("response_format");
-            String type = StringUtils.defaultIfBlank(config.getJsonFormatType(), "json_object");
-            responseFormat.put("type", "json_schema".equalsIgnoreCase(type) ? "json_object" : type);
-        }
+        applyThinkingOptions(body, config, opts);
 
         ArrayNode messages = body.putArray("messages");
         ObjectNode system = messages.addObject();
@@ -114,8 +112,8 @@ public class LlamaCppPrefixChatClient {
         user.put("content", userContent);
 
         // Thinking runs longer; default timeout floors higher when enabled.
-        long configured = config.getTimeOut() == null || config.getTimeOut() <= 0 ? 0L
-                : config.getTimeOut();
+        long configured =
+                config.getTimeOut() == null || config.getTimeOut() <= 0 ? 0L : config.getTimeOut();
         long timeoutSec = opts.enableThinking() ? Math.max(configured, 300L)
                 : (configured <= 0 ? 120L : configured);
         try {
@@ -132,8 +130,9 @@ public class LlamaCppPrefixChatClient {
             HttpResponse<String> response =
                     httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("llama.cpp chat failed status=" + response.statusCode()
-                        + " body=" + StringUtils.left(response.body(), 300));
+                throw new IllegalStateException(
+                        "llama.cpp chat failed status=" + response.statusCode() + " body="
+                                + StringUtils.left(response.body(), 300));
             }
             return parseResponse(response.body(), opts.enableThinking());
         } catch (InterruptedException e) {
@@ -144,6 +143,24 @@ public class LlamaCppPrefixChatClient {
                 throw runtime;
             }
             throw new IllegalStateException("llama.cpp chat request failed", e);
+        }
+    }
+
+    /**
+     * Applies the model-native thinking switch before serializing the request. Qwen3.6 defaults to
+     * emitting reasoning_content even when the caller asks for JSON; explicitly sending false is
+     * required for the final JSON to be returned in message.content.
+     */
+    static void applyThinkingOptions(ObjectNode body, ChatModelConfig config, ChatOptions options) {
+        ChatOptions opts = options == null ? ChatOptions.defaults() : options;
+        ObjectNode templateKwargs = body.putObject("chat_template_kwargs");
+        templateKwargs.put("enable_thinking", opts.enableThinking());
+        // Some llama.cpp builds only inspect the top-level flag.
+        body.put("enable_thinking", opts.enableThinking());
+        if (!opts.enableThinking() && Boolean.TRUE.equals(config.getJsonFormat())) {
+            ObjectNode responseFormat = body.putObject("response_format");
+            String type = StringUtils.defaultIfBlank(config.getJsonFormatType(), "json_object");
+            responseFormat.put("type", "json_schema".equalsIgnoreCase(type) ? "json_object" : type);
         }
     }
 

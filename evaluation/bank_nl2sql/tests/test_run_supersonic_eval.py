@@ -10,6 +10,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from unittest import mock
 from pathlib import Path
 
 
@@ -19,9 +20,12 @@ sys.path.insert(0, str(ROOT))
 from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run  # noqa: E402
 from run_supersonic_eval import (  # noqa: E402
     SuperSonicEvaluationError,
+    _http_post_json,
     _latency_distribution,
     _load_resumable_items,
+    _unwrap_api_value,
     run_supersonic_evaluation,
+    warm_up_runtime_prefix,
 )
 
 
@@ -55,6 +59,128 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
 
 
 class RunSuperSonicEvalTest(unittest.TestCase):
+    def test_http_transport_failure_preserves_endpoint_and_retry_diagnostics(self) -> None:
+        post_json = _http_post_json(
+            base_url="http://127.0.0.1:9080",
+            authorization_token=None,
+            cookie=None,
+            timeout_seconds=1,
+            network_retries=2,
+            retry_backoff_seconds=0,
+        )
+
+        with mock.patch(
+            "run_supersonic_eval.urllib.request.urlopen",
+            side_effect=ConnectionResetError("connection reset by peer"),
+        ) as urlopen:
+            with self.assertRaises(SuperSonicEvaluationError) as raised:
+                post_json("/openapi/chat/query/parse", {"queryText": "smoke"})
+
+        self.assertEqual(urlopen.call_count, 3)
+        error = raised.exception
+        self.assertEqual(error.error_code, "HTTP_TRANSPORT_ERROR")
+        self.assertEqual(error.error_stage, "TRANSPORT")
+        self.assertEqual(error.endpoint, "/openapi/chat/query/parse")
+        self.assertEqual(error.retry_count, 3)
+        self.assertTrue(error.transport)
+
+    def test_api_status_error_preserves_api_code(self) -> None:
+        with self.assertRaises(SuperSonicEvaluationError) as raised:
+            _unwrap_api_value({"code": 503, "data": None})
+
+        error = raised.exception
+        self.assertEqual(error.error_code, "API_STATUS_ERROR")
+        self.assertEqual(error.error_stage, "API_RESPONSE")
+        self.assertEqual(error.api_code, "503")
+
+    def test_report_classifies_transport_parse_failure_with_structured_fields(self) -> None:
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 505}
+            if path.endswith("/parse"):
+                raise SuperSonicEvaluationError(
+                    "SuperSonic HTTP request failed",
+                    error_code="HTTP_TRANSPORT_ERROR",
+                    error_stage="TRANSPORT",
+                    endpoint="/openapi/chat/query/parse",
+                    retry_count=3,
+                    transport=True,
+                )
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [{"id": "DEV-TRANSPORT", "question": "offline", "expected": {}}],
+            agent_id=7,
+            post_json=post_json,
+        )
+
+        item = report["items"][0]
+        self.assertEqual(item["errorCategory"], "ENVIRONMENT_TRANSPORT")
+        self.assertEqual(item["errorType"], "SuperSonicEvaluationError")
+        self.assertEqual(item["errorCode"], "HTTP_TRANSPORT_ERROR")
+        self.assertEqual(item["errorStage"], "TRANSPORT")
+        self.assertEqual(item["errorEndpoint"], "/openapi/chat/query/parse")
+        self.assertEqual(item["errorRetries"], 3)
+        self.assertTrue(item["errorTransport"])
+
+    def test_parse_backend_error_is_retained_without_treating_it_as_transport(self) -> None:
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 506}
+            if path.endswith("/parse"):
+                return {
+                    "code": 200,
+                    "data": {
+                        "state": "FAILED",
+                        "errorMsg": "[BANK_CONSTRAINED_PLAN]plan output order mismatch",
+                    },
+                }
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [{"id": "DEV-PARSE-BACKEND", "question": "invalid", "expected": {}}],
+            agent_id=7,
+            post_json=post_json,
+        )
+
+        item = report["items"][0]
+        self.assertEqual(item["errorCategory"], "PARSE_ERROR")
+        self.assertEqual(item["errorCode"], "PARSE_BACKEND_ERROR")
+        self.assertEqual(item["errorStage"], "PARSE_RESPONSE")
+        self.assertFalse(item["errorTransport"])
+        self.assertEqual(item["backendError"], "[BANK_CONSTRAINED_PLAN]plan output order mismatch")
+
+    def test_warmup_uses_disposable_parse_only_chain_and_returns_separate_timing(self) -> None:
+        requests: list[tuple[str, dict]] = []
+
+        def post_json(path: str, payload: dict) -> dict:
+            requests.append((path, payload))
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 900}
+            if path == "/openapi/chat/query/parse":
+                return {"code": 200, "data": {"state": "FAILED", "errorMsg": "placeholder"}}
+            if path == "/openapi/chat/manage/delete?chatId=900":
+                return {"code": 200, "data": True}
+            raise AssertionError(f"Unexpected path: {path}")
+
+        evidence = warm_up_runtime_prefix(post_json=post_json, agent_id=33)
+
+        self.assertEqual(
+            [path.split("?")[0] for path, _ in requests],
+            [
+                "/openapi/chat/manage/save",
+                "/openapi/chat/query/parse",
+                "/openapi/chat/manage/delete",
+            ],
+        )
+        self.assertEqual(requests[1][1]["agentId"], 33)
+        self.assertEqual(requests[1][1]["chatId"], 900)
+        self.assertNotIn("execute", " ".join(path for path, _ in requests))
+        self.assertEqual(evidence["status"], "COMPLETED")
+        self.assertEqual(evidence["parseState"], "FAILED")
+        self.assertTrue(evidence["conversationCleaned"])
+        self.assertGreaterEqual(evidence["durationMs"], 0)
+
     def test_reports_nearest_rank_latency_percentiles(self) -> None:
         self.assertEqual(
             _latency_distribution([1, 2, 3, 4, 100, None]),
@@ -355,6 +481,54 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(requests[601], ["save", "parse", "execute", "summary", "delete"])
         self.assertEqual(requests[602], ["save", "parse", "execute", "summary", "delete"])
         self.assertEqual([item["id"] for item in report["items"]], ["DEV-A", "DEV-B"])
+
+    def test_serial_stop_predicate_stops_before_the_next_record(self) -> None:
+        parsed_ids: list[int] = []
+
+        def post_json(path: str, payload: dict) -> dict:
+            if path.startswith("/openapi/chat/manage/save?"):
+                return {"code": 200, "data": 701 if "DEV-A" in path else 702}
+            if path.endswith("/parse"):
+                parsed_ids.append(payload["chatId"])
+                return {
+                    "code": 200,
+                    "data": {"queryId": payload["chatId"] + 1000, "selectedParses": [{"id": 1}]},
+                }
+            if path.endswith("/execute"):
+                return {
+                    "code": 200,
+                    "data": {"queryState": "SUCCESS", "queryColumns": [], "queryResults": []},
+                }
+            if path.endswith("/getExecuteSummary"):
+                return {"code": 200, "data": {"queryMode": "METRIC", "textSummary": "done"}}
+            if path.startswith("/openapi/chat/manage/delete?"):
+                return {"code": 200, "data": True}
+            raise AssertionError(f"Unexpected path: {path}")
+
+        report = run_supersonic_evaluation(
+            [
+                {"id": "DEV-A", "question": "first", "expected": {"columns": [], "rows": []}},
+                {"id": "DEV-B", "question": "second", "expected": {"columns": [], "rows": []}},
+            ],
+            agent_id=7,
+            post_json=post_json,
+            concurrency=1,
+            stop_predicate=lambda _item, completed, _total: completed == 1,
+        )
+
+        self.assertTrue(report["stoppedEarly"])
+        self.assertEqual(parsed_ids, [701])
+        self.assertEqual([item["id"] for item in report["items"]], ["DEV-A"])
+
+    def test_stop_predicate_rejects_parallel_execution(self) -> None:
+        with self.assertRaises(SuperSonicEvaluationError):
+            run_supersonic_evaluation(
+                [{"id": "DEV-A", "question": "first", "expected": {}}],
+                agent_id=7,
+                post_json=lambda _path, _payload: {"code": 200, "data": 1},
+                concurrency=2,
+                stop_predicate=lambda _item, _completed, _total: False,
+            )
 
     def test_resume_checkpoint_requires_the_same_split_agent_and_runner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

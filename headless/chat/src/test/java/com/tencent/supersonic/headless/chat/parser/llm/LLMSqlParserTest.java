@@ -37,6 +37,20 @@ class LLMSqlParserTest {
     }
 
     @Test
+    void compilationRepairExplainsThatTimeComparisonRequiresChangeCalculation() {
+        List<String> hints = LLMSqlParser.compilationCorrectionHints(
+                BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION, """
+                        {"intent":"AGGREGATION","time":{"comparison":"START_OF_YEAR"},
+                        "calculation":{"type":"DIRECT"}}
+                        """);
+
+        assertEquals(List.of("当前计划已声明 time.comparison 非 NONE，却填写了 "
+                + "calculation.type=DIRECT：只将 calculation.type 改为 CHANGE；"
+                + "保留已合法的 intent、指标、机构、日期、基期、dimensions、filters、"
+                + "output 和 limit 后，重新输出完整 BankQueryPlan。"), hints);
+    }
+
+    @Test
     void shouldRetryCompilationOnceWithSanitizedToolFeedbackThenStopOnRepeatedFailure() {
         LLMRequestService requestService = mock(LLMRequestService.class);
         LLMResponseService responseService = mock(LLMResponseService.class);

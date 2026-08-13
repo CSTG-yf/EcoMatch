@@ -45,7 +45,9 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
     dataset_report = validate_dataset(dataset_path)
     source_manifest = json.loads((dataset_path / "manifest.json").read_text(encoding="utf-8"))
     answer_contract_validation: dict[str, Any] | None = None
-    if isinstance(source_manifest.get("answerAmendment"), dict):
+    if isinstance(source_manifest.get("answerAmendment"), dict) or isinstance(
+        source_manifest.get("answerFactContract"), dict
+    ):
         records_by_split: dict[str, list[dict[str, Any]]] = {}
         for split in ("train", "dev"):
             path = dataset_path / f"{split}.jsonl"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from copy import deepcopy
 import json
 import subprocess
 import tempfile
@@ -21,6 +22,13 @@ from official_runtime_evaluation import (  # noqa: E402
     load_official_runtime_profile,
     verify_bootstrap_receipt,
     verify_official_runtime_release,
+)
+from run_official_runtime_eval import (  # noqa: E402
+    OfficialRuntimeRunError,
+    _assert_completed_gate,
+    _early_stop_state,
+    _load_resumed_items,
+    _mark_bounded_diagnostic_report,
 )
 
 
@@ -191,6 +199,237 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertIn("run_official_runtime_eval.py", launcher)
         self.assertNotIn("run_supersonic_eval.py", launcher)
         self.assertNotIn("--concurrency", launcher)
+        self.assertIn("MaxFailures", launcher)
+        self.assertIn("--max-failures", launcher)
+
+    def test_early_stop_requires_more_than_the_failure_budget(self) -> None:
+        scored_items = [
+            {"id": "TRAIN-S-01", "casePass": False},
+            {"id": "TRAIN-M-01", "casePass": False},
+            {"id": "TRAIN-H-01", "casePass": False},
+        ]
+
+        self.assertIsNone(_early_stop_state(max_failures=3, scored_items=scored_items))
+        stop = _early_stop_state(max_failures=2, scored_items=scored_items)
+
+        self.assertEqual(stop["reason"], "MAX_FAILURES_EXCEEDED")
+        self.assertEqual(stop["maxFailures"], 2)
+        self.assertEqual(stop["observedFailures"], 3)
+        self.assertEqual(stop["triggeredAfterId"], "TRAIN-H-01")
+        self.assertFalse(stop["promotable"])
+
+    def test_completed_run_with_failure_budget_remains_non_promotable(self) -> None:
+        report = {
+            "run": {
+                "status": "COMPLETED",
+                "completedCount": 119,
+                "requestedCount": 119,
+                "maxFailureCount": 5,
+            },
+            "metrics": {"casePassHits": 119, "caseDenominator": 119},
+        }
+
+        marked = _mark_bounded_diagnostic_report(report, max_failures=5)
+
+        self.assertIs(marked, report)
+        self.assertEqual(marked["run"]["status"], "COMPLETED")
+        self.assertEqual(
+            marked["diagnosticEvaluation"],
+            {
+                "status": "COMPLETED_WITH_FAILURE_BUDGET",
+                "promotable": False,
+                "reason": "max-failures budget was configured",
+                "maxFailures": 5,
+                "completedCount": 119,
+                "requestedCount": 119,
+            },
+        )
+
+    def test_resume_rejects_a_diagnostic_stopped_early_report(self) -> None:
+        expected_run = {
+            "runId": "train-stop",
+            "mode": "train",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.5",
+            "concurrency": 1,
+            "maxFailureCount": 5,
+        }
+        report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
+            "run": {**expected_run, "status": "STOPPED_EARLY"},
+            "items": [
+                {"id": "TRAIN-S-01"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "train.json"
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+
+            with self.assertRaisesRegex(OfficialRuntimeRunError, "stopped early and is diagnostic-only"):
+                _load_resumed_items(report_path, expected_run=expected_run, records=[_record()])
+
+    def test_completed_smoke_gate_ignores_a_later_train_stop_budget(self) -> None:
+        smoke_ids = [
+            "TRAIN-S-01",
+            "TRAIN-M-01",
+            "TRAIN-H-01",
+            "TRAIN-H-04",
+            "TRAIN-H-07",
+        ]
+        setup_receipt = {
+            "agentId": 33,
+            "modelId": 1,
+            "chatModelId": 65,
+            "dataSetId": 17,
+            "officialManifestSha256": "d" * 64,
+            "semanticImport": {
+                "organizations": 13,
+                "indicators": 21,
+                "factsValidated": 132678,
+            },
+            "agentProfileSha256": "e" * 64,
+            "systemParametersSha256": "f" * 64,
+        }
+        expected_train = {
+            "runId": "train-stop",
+            "mode": "train",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.5",
+            "concurrency": 1,
+            "maxFailureCount": 5,
+            "selectedRecordIds": ["TRAIN-S-01", "TRAIN-S-02"],
+            "requestedCount": 2,
+            "setupReceipt": setup_receipt,
+        }
+        smoke_report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
+            "run": {
+                **{key: value for key, value in expected_train.items() if key != "maxFailureCount"},
+                "mode": "smoke",
+                "split": "train",
+                "status": "COMPLETED",
+                "selectedRecordIds": smoke_ids,
+                "requestedCount": len(smoke_ids),
+            },
+            "metrics": {
+                "caseDenominator": len(smoke_ids),
+                "casePassHits": len(smoke_ids),
+                "caseAccuracy": 1.0,
+            },
+            "items": [
+                {"id": sample_id, "resultExact": True, "casePass": True}
+                for sample_id in smoke_ids
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "smoke.json"
+            report_path.write_text(json.dumps(smoke_report), encoding="utf-8")
+
+            _assert_completed_gate(
+                report_path,
+                expected=expected_train,
+                required_mode="smoke",
+                require_green=True,
+                expected_record_ids=smoke_ids,
+            )
+
+    def test_completed_smoke_gate_rejects_forged_identity_or_incomplete_evidence(self) -> None:
+        smoke_ids = [
+            "TRAIN-S-01",
+            "TRAIN-M-01",
+            "TRAIN-H-01",
+            "TRAIN-H-04",
+            "TRAIN-H-07",
+        ]
+        setup_receipt = {
+            "agentId": 33,
+            "modelId": 1,
+            "chatModelId": 65,
+            "dataSetId": 17,
+            "officialManifestSha256": "d" * 64,
+            "semanticImport": {
+                "organizations": 13,
+                "indicators": 21,
+                "factsValidated": 132678,
+            },
+            "agentProfileSha256": "e" * 64,
+            "systemParametersSha256": "f" * 64,
+        }
+        expected = {
+            "runId": "forged-smoke",
+            "mode": "smoke",
+            "split": "train",
+            "agentId": 33,
+            "modelLabel": "model-66",
+            "endpointFingerprint": "a" * 64,
+            "protocolProfileSha256": "b" * 64,
+            "sourceRevision": "c" * 40,
+            "datasetVersion": "2.0.5",
+            "concurrency": 1,
+            "selectedRecordIds": smoke_ids,
+            "requestedCount": len(smoke_ids),
+            "setupReceipt": setup_receipt,
+        }
+        valid_report = {
+            "schemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
+            "run": {**expected, "status": "COMPLETED"},
+            "metrics": {
+                "caseDenominator": len(smoke_ids),
+                "casePassHits": len(smoke_ids),
+                "caseAccuracy": 1.0,
+            },
+            "items": [
+                {"id": sample_id, "resultExact": True, "casePass": True}
+                for sample_id in smoke_ids
+            ],
+        }
+
+        forged_reports = {}
+        wrong_schema = deepcopy(valid_report)
+        wrong_schema["schemaVersion"] = "forged-schema"
+        forged_reports["schemaVersion"] = wrong_schema
+
+        different_receipt = deepcopy(valid_report)
+        different_receipt["run"]["setupReceipt"]["chatModelId"] = 999
+        forged_reports["setupReceipt"] = different_receipt
+
+        subset = deepcopy(valid_report)
+        subset["run"]["selectedRecordIds"] = smoke_ids[:1]
+        subset["run"]["requestedCount"] = 1
+        subset["metrics"] = {"caseDenominator": 1, "casePassHits": 1, "caseAccuracy": 1.0}
+        subset["items"] = subset["items"][:1]
+        forged_reports["selectedRecordIds"] = subset
+
+        incomplete_items = deepcopy(valid_report)
+        incomplete_items["items"] = incomplete_items["items"][:-1]
+        forged_reports["items"] = incomplete_items
+
+        forged_case_pass = deepcopy(valid_report)
+        forged_case_pass["items"][0]["resultExact"] = False
+        forged_reports["casePass"] = forged_case_pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "smoke.json"
+            for expected_error, report in forged_reports.items():
+                with self.subTest(expected_error=expected_error):
+                    report_path.write_text(json.dumps(report), encoding="utf-8")
+                    with self.assertRaisesRegex(OfficialRuntimeRunError, expected_error):
+                        _assert_completed_gate(
+                            report_path,
+                            expected=expected,
+                            required_mode="smoke",
+                            require_green=True,
+                        )
 
     def test_all_public_scoring_commands_converge_or_fail_closed(self) -> None:
         official = subprocess.run(
@@ -243,7 +482,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         profile, profile_sha256 = load_official_runtime_profile(ROOT)
         release = verify_official_runtime_release(ROOT, profile=profile, split="train")
 
-        self.assertEqual(profile["datasetVersion"], "2.0.2")
+        self.assertEqual(profile["datasetVersion"], "2.0.5")
         self.assertEqual(len(profile_sha256), 64)
         self.assertEqual(release["recordCount"], 119)
         self.assertIn("train.jsonl", release["checkedAssets"])

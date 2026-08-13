@@ -21,7 +21,7 @@ from fact_contract_v3 import score_fact_contract_report
 
 OFFICIAL_RUNTIME_SCHEMA_VERSION = "3.2.0"
 OFFICIAL_RUNTIME_PROFILE = "official_runtime_evaluation_v3.json"
-OFFICIAL_DATASET_VERSION = "2.0.2"
+OFFICIAL_DATASET_VERSION = "2.0.5"
 OFFICIAL_MINIMUM_SOURCE_COMMIT = "565bc74ed313acff1b192aef4ab9a974893e1a53"
 OFFICIAL_SMOKE_IDS = (
     "TRAIN-S-01",
@@ -399,6 +399,7 @@ def _runtime_diagnostics(
         ),
         "finalAnswerProcessorStates": dict(sorted(final_answer_states.items())),
         "errorCategories": dict(sorted(errors.items())),
+        "warmup": capture_report.get("warmup"),
         "timingMs": capture_report.get("timingMs"),
         "timingDistributionsMs": capture_report.get("timingDistributionsMs"),
     }

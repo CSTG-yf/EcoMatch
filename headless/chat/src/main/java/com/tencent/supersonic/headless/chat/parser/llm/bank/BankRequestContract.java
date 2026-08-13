@@ -76,6 +76,9 @@ public class BankRequestContract {
                                 metric.getNumerator(), metric.getDenominator(), metric.getName()))
                         .toList())
                 .requiredStartDate(time.getStartDate()).requiredEndDate(time.getEndDate())
+                .requiredTimeComparison(time.getComparison())
+                .requiredBaselineStartDate(time.getBaselineStartDate())
+                .requiredBaselineEndDate(time.getBaselineEndDate())
                 .requiredFilters(filters.stream().map(filter ->
                         new SemanticIntentHints.RequiredFilter(filter.getField(),
                                 filter.getOperator(), filter.getValue())).toList())

@@ -161,6 +161,7 @@ public class BankPlanCandidateRanker {
             diagnostics.put("bank.nl2sql.candidateCount", inputCandidateCount);
             diagnostics.put("bank.nl2sql.uniqueCandidateCount", uniqueCandidateCount);
             diagnostics.put("bank.nl2sql.rejectedCandidateCount", getRejectedCandidateCount());
+            diagnostics.put("bank.nl2sql.rejectionReasons", rejectionReasons);
             diagnostics.put("bank.nl2sql.semanticScore", selected.getSemanticScore());
             return diagnostics;
         }

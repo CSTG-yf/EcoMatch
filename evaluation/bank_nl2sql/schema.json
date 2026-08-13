@@ -2,6 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "expected": {
+      "properties": {
+        "answerFacts": {
+          "minItems": 1,
+          "type": "array"
+        }
+      },
       "required": [
         "answerText",
         "columns",

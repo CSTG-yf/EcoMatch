@@ -10,6 +10,7 @@ import com.tencent.supersonic.headless.chat.intent.BankIntentType;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import org.apache.commons.lang3.StringUtils;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -44,6 +45,15 @@ public class BankRequestContractResponseParser {
             throw failure(BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
                     "model requirements response contains an unsupported property", exception);
         } catch (InvalidFormatException exception) {
+            if (isUnsupportedAnswerFactType(exception)) {
+                throw failure(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                        "answerFactTypes only accepts VALUE, TREND_DIRECTION, "
+                                + "COMPARISON_VALUE, PROVINCE_AVERAGE, GAP_VALUE, RANK, "
+                                + "CHANGE_VALUE, CHANGE_RATE, RATIO_VALUE, or COUNT. "
+                                + "Highest/lowest values and dates use VALUE; do not use "
+                                + "MINIMUM_VALUE or MAXIMUM_VALUE",
+                        exception);
+            }
             throw failure(BankQueryPlanParseException.Reason.MALFORMED_JSON,
                     "model requirements response is not complete strict JSON", exception);
         } catch (JsonProcessingException exception) {
@@ -81,6 +91,7 @@ public class BankRequestContractResponseParser {
         validateExactCodes("organizationCodes", contract.getOrganizationCodes(),
                 BankSemanticRegistry.organizationCodes(), Set.of(), false, errors);
         validateTime(contract.getTime(), errors);
+        validateComparisonIntent(contract, errors);
         validateFilters(contract.getFilters(), errors);
         validateAnswerFacts(contract.getAnswerFactTypes(), errors);
         if (contract.getRequiredLimit() != null && (contract.getRequiredLimit() < 1
@@ -124,6 +135,37 @@ public class BankRequestContractResponseParser {
         if (time.getEndDate().isBefore(time.getStartDate())) {
             errors.add("time.endDate must not be before time.startDate");
         }
+        if (time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                && time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY) {
+            if (time.getBaselineStartDate() == null || time.getBaselineEndDate() == null) {
+                errors.add("comparison requires baselineStartDate and baselineEndDate");
+            } else if (time.getBaselineStartDate().isAfter(time.getBaselineEndDate())
+                    || !time.getBaselineEndDate().isBefore(time.getStartDate())) {
+                errors.add("comparison baseline must be a complete range earlier than the current "
+                        + "range: baselineStartDate <= baselineEndDate < startDate. For a point "
+                        + "comparison, set startDate=endDate to the current point and "
+                        + "baselineStartDate=baselineEndDate to the earlier point");
+            }
+        }
+        if (time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && time.getBaselineStartDate() != null && time.getBaselineEndDate() != null) {
+            LocalDate priorYearEnd = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+            if (!priorYearEnd.equals(time.getBaselineStartDate())
+                    || !priorYearEnd.equals(time.getBaselineEndDate())) {
+                errors.add("START_OF_YEAR means compare to the prior calendar year end: "
+                        + "baselineStartDate and baselineEndDate must both be the prior "
+                        + "year's 12-31, not current-year 01-01");
+            }
+        }
+    }
+
+    private void validateComparisonIntent(BankRequestContract contract, List<String> errors) {
+        BankQueryPlan.TimeRange time = contract.getTime();
+        if (time != null && time.getComparison() != null
+                && time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                && contract.getIntent() != BankIntentType.CHANGE) {
+            errors.add("a non-NONE time comparison requires intent=CHANGE");
+        }
     }
 
     private void validateAnswerFacts(List<BankRequestContract.AnswerFactType> facts,
@@ -135,6 +177,11 @@ public class BankRequestContractResponseParser {
         if (new LinkedHashSet<>(facts).size() != facts.size()) {
             errors.add("answerFactTypes must not contain duplicates");
         }
+    }
+
+    private boolean isUnsupportedAnswerFactType(InvalidFormatException exception) {
+        return exception.getPath().stream()
+                .anyMatch(reference -> "answerFactTypes".equals(reference.getFieldName()));
     }
 
     private void validateFilters(List<BankQueryPlan.Filter> filters, List<String> errors) {

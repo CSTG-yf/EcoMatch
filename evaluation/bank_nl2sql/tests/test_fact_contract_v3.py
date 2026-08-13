@@ -62,8 +62,9 @@ class FactContractV3Test(unittest.TestCase):
         self.assertFalse(facts[150.0].required)
         self.assertEqual(facts[150.0].support, "QUESTION_CONTEXT")
         self.assertEqual(contract.status, "READY")
+        self.assertNotIn("MISSING_RESULT_SUPPORT", contract.reasons)
 
-    def test_sum_fact_is_supported_by_deterministic_projection(self) -> None:
+    def test_sum_fact_without_explicit_result_column_is_not_auto_derived(self) -> None:
         record = _record(
             "TRAIN-M-58",
             question="净利息收入和中间业务收入合计多少？",
@@ -76,9 +77,308 @@ class FactContractV3Test(unittest.TestCase):
 
         total = next(fact for fact in contract.facts if fact.value == 463.61)
         self.assertTrue(total.required)
-        self.assertEqual(total.support, "DERIVED_RESULT")
-        self.assertEqual(total.derivation, "SUM")
+        self.assertEqual(total.support, "MISSING")
+        self.assertIsNone(total.derivation)
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("MISSING_RESULT_SUPPORT", contract.reasons)
+
+    def test_typed_sum_fact_is_ready_when_formula_matches_rows(self) -> None:
+        record = _record(
+            "SUM-TYPED",
+            question="两项收入合计多少？",
+            answer_text="合计463.61万元",
+            columns=["metric_code", "metric_value"],
+            rows=[["ZB008", 64.1], ["ZB007", 399.51]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "total_income",
+                "value": 463.61,
+                "kind": "NUMBER",
+                "required": True,
+                "binding": {
+                    "organizationCodes": ["ORG003"],
+                    "metricCodes": ["ZB008", "ZB007"],
+                    "dates": ["2026-04-30"],
+                    "comparisonType": "SUM",
+                },
+                "formula": {
+                    "operation": "SUM",
+                    "operands": [
+                        {"column": "metric_value", "where": {"metric_code": "ZB008"}},
+                        {"column": "metric_value", "where": {"metric_code": "ZB007"}},
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
         self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
+        self.assertEqual(contract.facts[0].derivation, "SUM")
+
+    def test_typed_nested_formula_can_compare_a_sum_with_a_total(self) -> None:
+        record = _record(
+            "SUM-DIFFERENCE-TYPED",
+            question="分项之和与总额相差多少？",
+            answer_text="相差0.01亿元",
+            columns=["metric_code", "metric_value"],
+            rows=[["ZB003", 35.52], ["ZB004", 64.48], ["ZB001", 99.99]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "composition_gap",
+                "value": 0.01,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG003"],
+                    "metricCodes": ["ZB003", "ZB004", "ZB001"],
+                    "dates": ["2025-06-30"],
+                    "comparisonType": "DIFFERENCE",
+                },
+                "formula": {
+                    "operation": "DIFFERENCE",
+                    "operands": [
+                        {
+                            "formula": {
+                                "operation": "SUM",
+                                "operands": [
+                                    {"column": "metric_value", "where": {"metric_code": "ZB003"}},
+                                    {"column": "metric_value", "where": {"metric_code": "ZB004"}},
+                                ],
+                            }
+                        },
+                        {"column": "metric_value", "where": {"metric_code": "ZB001"}},
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
+
+    def test_typed_fact_can_add_identity_to_an_existing_result_value(self) -> None:
+        record = _record(
+            "PROVINCE-TYPED",
+            question="与全省均值相比差多少？",
+            answer_text="低于全省均值18.11亿元",
+            columns=["metric_code", "rounded_difference"],
+            rows=[["ZB001", 18.11]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit_difference",
+                "value": 18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "PROVINCE_COMPARISON",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [
+                        {"column": "rounded_difference", "where": {"metric_code": "ZB001"}}
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
+
+    def test_typed_fact_can_round_runtime_province_gap_with_financial_rounding(self) -> None:
+        record = _record(
+            "PROVINCE-ROUND-TYPED",
+            question="与全省均值相比差多少？",
+            answer_text="低于全省均值18.11亿元",
+            columns=["org_code", "metric_code", "absolute_gap"],
+            rows=[["ORG004", "ZB001", 18.10846153846154]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit_difference",
+                "value": 18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "PROVINCE_COMPARISON",
+                },
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": 2,
+                    "operands": [
+                        {"column": "absolute_gap", "where": {"metric_code": "ZB001"}}
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.facts[0].support, "TYPED_RESULT")
+
+    def test_typed_round_formula_rejects_invalid_scale(self) -> None:
+        record = _record(
+            "PROVINCE-ROUND-INVALID",
+            question="与全省均值相比差多少？",
+            answer_text="低于全省均值18.11亿元",
+            columns=["metric_code", "absolute_gap"],
+            rows=[["ZB001", 18.10846153846154]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit_difference",
+                "value": 18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "PROVINCE_COMPARISON",
+                },
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": "2",
+                    "operands": [{"column": "absolute_gap"}],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("ANSWER_FACT_0_INVALID_FORMULA", contract.reasons)
+
+    def test_distinct_typed_facts_can_share_the_same_numeric_rank(self) -> None:
+        record = _record(
+            "TIED-RANKS-TYPED",
+            question="列出两项指标的排名。",
+            answer_text="各项存款余额第11名，各项贷款余额第11名。",
+            columns=["metric_code", "rank_position"],
+            rows=[["ZB001", 11], ["ZB002", 11]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": f"{metric}_rank",
+                "value": 11,
+                "kind": "RANK",
+                "binding": {
+                    "organizationCodes": ["ORG011"],
+                    "metricCodes": [metric],
+                    "dates": ["2025-12-31"],
+                    "comparisonType": "POINT",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [
+                        {"column": "rank_position", "where": {"metric_code": metric}}
+                    ],
+                },
+            }
+            for metric in ("ZB001", "ZB002")
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(
+            [fact.evidence["id"] for fact in contract.facts if fact.kind == "RANK"],
+            ["ZB001_rank", "ZB002_rank"],
+        )
+
+    def test_typed_fact_fails_closed_when_declared_value_disagrees_with_formula(self) -> None:
+        record = _record(
+            "SUM-TYPED-BAD",
+            question="两项收入合计多少？",
+            answer_text="合计999万元",
+            columns=["metric_code", "metric_value"],
+            rows=[["ZB008", 64.1], ["ZB007", 399.51]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "total_income",
+                "value": 999.0,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG003"],
+                    "metricCodes": ["ZB008", "ZB007"],
+                    "dates": ["2026-04-30"],
+                    "comparisonType": "SUM",
+                },
+                "formula": {
+                    "operation": "SUM",
+                    "operands": [
+                        {"column": "metric_value", "where": {"metric_code": "ZB008"}},
+                        {"column": "metric_value", "where": {"metric_code": "ZB007"}},
+                    ],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("ANSWER_FACT_0_FORMULA_MISMATCH", contract.reasons)
+
+    def test_typed_fact_requires_identity_and_formula_contract(self) -> None:
+        record = _record(
+            "TYPED-INVALID",
+            question="合计多少？",
+            answer_text="合计3万元",
+            columns=["metric_value"],
+            rows=[[3.0]],
+        )
+        record["expected"]["answerFacts"] = [
+            {"id": "total", "value": 3.0, "kind": "NUMBER", "binding": {}}
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("ANSWER_FACT_0_INVALID_BINDING", contract.reasons)
+
+    def test_typed_fact_rejects_result_rows_outside_declared_binding(self) -> None:
+        record = _record(
+            "TYPED-WRONG-IDENTITY",
+            question="江苏省D市农商行2025-07-31的存款是多少？",
+            answer_text="9亿元",
+            columns=["org_code", "metric_code", "data_date", "metric_value"],
+            rows=[["ORG999", "ZB999", "2099-01-01", 9.0]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "deposit",
+                "value": 9.0,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "POINT",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [{"column": "metric_value"}],
+                },
+            }
+        ]
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn(
+            "ANSWER_FACT_0_FORMULA_RESULT_OUTSIDE_BINDING", contract.reasons
+        )
 
     def test_missing_legacy_table_support_is_scorable_from_answer_fact(self) -> None:
         record = _record(
@@ -91,8 +391,8 @@ class FactContractV3Test(unittest.TestCase):
 
         contract = build_fact_contract(record)
 
-        self.assertEqual(contract.status, "READY")
-        self.assertNotIn("MISSING_RESULT_SUPPORT", contract.reasons)
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("MISSING_RESULT_SUPPORT", contract.reasons)
         self.assertEqual(contract.facts[0].support, "MISSING")
 
     def test_negative_value_after_higher_wording_is_source_semantic_risk(self) -> None:
@@ -125,10 +425,11 @@ class FactContractV3Test(unittest.TestCase):
 
         contract = build_fact_contract(record)
 
-        self.assertEqual(contract.status, "READY")
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("MISSING_RESULT_SUPPORT", contract.reasons)
         self.assertIn("SEMANTIC_BINDING_DIAGNOSTIC", contract.warnings)
 
-    def test_equality_gap_can_be_derived_from_two_parts_and_total(self) -> None:
+    def test_equality_gap_without_explicit_result_column_is_not_auto_derived(self) -> None:
         record = _record(
             "TRAIN-S-22",
             question="对公存款加个人存款是不是等于各项存款？差额多少？",
@@ -140,9 +441,10 @@ class FactContractV3Test(unittest.TestCase):
         contract = build_fact_contract(record)
 
         zero = next(fact for fact in contract.facts if fact.value == 0.0)
-        self.assertEqual(zero.support, "DERIVED_RESULT")
-        self.assertEqual(zero.derivation, "SUM_DIFFERENCE")
-        self.assertEqual(contract.status, "READY")
+        self.assertEqual(zero.support, "MISSING")
+        self.assertIsNone(zero.derivation)
+        self.assertEqual(contract.status, "REVIEW_REQUIRED")
+        self.assertIn("MISSING_RESULT_SUPPORT", contract.reasons)
 
     def test_condition_count_is_derived_from_meets_condition_column(self) -> None:
         record = _record(
@@ -174,6 +476,34 @@ class FactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
+    def test_incidental_binary_flag_does_not_satisfy_an_unasked_count(self) -> None:
+        record = _record(
+            "INCIDENTAL-BINARY-FLAG-1",
+            question="请列出满足条件的机构。",
+            answer_text="共有2家机构满足条件。",
+            columns=["org_code", "meets_condition"],
+            rows=[["ORG001", 1], ["ORG002", 1], ["ORG003", 0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "INCIDENTAL-BINARY-FLAG-1",
+                    "resultColumns": ["org_code", "meets_condition"],
+                    "resultRows": [["ORG001", 1], ["ORG002", 1], ["ORG003", 0]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        contract = build_fact_contract(record)
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        count_fact = next(fact for fact in contract.facts if fact.value == 2.0)
+        self.assertEqual(count_fact.support, "MISSING")
+        self.assertIsNone(count_fact.derivation)
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
     def test_result_only_score_does_not_gate_on_final_answer_text(self) -> None:
         record = _record(
             "RESULT-ONLY-1",
@@ -203,6 +533,309 @@ class FactContractV3Test(unittest.TestCase):
         self.assertNotIn("finalFactsExact", scored["items"][0])
         self.assertNotIn("finalFactAccuracy", scored["metrics"])
         self.assertNotIn("finalFactsExactHits", scored["metrics"])
+
+    def test_result_only_allows_extra_support_rows_when_required_fact_is_bound(self) -> None:
+        record = _record(
+            "RANKING-SUPPORT-ROWS-1",
+            question="三家机构谁的存款最多？",
+            answer_text="江苏省I市农商行，84.02亿元",
+            columns=["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+            rows=[["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": record["expected"]["columns"],
+                    "resultRows": [
+                        ["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1],
+                        ["ORG005", "江苏省E市农商行", "ZB001", 77.84, 2],
+                        ["ORG001", "江苏省A市农商行", "ZB001", 42.25, 3],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_result_only_binds_required_fact_without_requiring_legacy_table_shape(self) -> None:
+        record = _record(
+            "RANKING-PROJECTION-1",
+            question="三家机构谁的不良率控制得最好？",
+            answer_text="江苏省J市农商行，不良率0.73%",
+            columns=["org_code", "org_name", "metric_value", "value_difference"],
+            rows=[
+                ["ORG006", "江苏省F市农商行", 1.36, 0.63],
+                ["ORG002", "江苏省B市农商行", 0.99, 0.63],
+                ["ORG010", "江苏省J市农商行", 0.73, 0.63],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "metric_value",
+                        "rank_position",
+                    ],
+                    "resultRows": [
+                        ["ORG010", "江苏省J市农商行", "ZB013", 0.73, 1],
+                        ["ORG002", "江苏省B市农商行", "ZB013", 0.99, 2],
+                        ["ORG006", "江苏省F市农商行", "ZB013", 1.36, 3],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_rejects_required_value_bound_to_wrong_organization(self) -> None:
+        record = _record(
+            "RANKING-WRONG-ORG-1",
+            question="三家机构谁的存款最多？",
+            answer_text="江苏省I市农商行，84.02亿元",
+            columns=["org_code", "org_name", "metric_code", "metric_value", "rank_position"],
+            rows=[["ORG009", "江苏省I市农商行", "ZB001", 84.02, 1]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": record["expected"]["columns"],
+                    "resultRows": [["ORG005", "江苏省E市农商行", "ZB001", 84.02, 1]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_rejects_required_value_without_metric_identity(self) -> None:
+        record = _record(
+            "POINT-MISSING-METRIC-1",
+            question="A行的存款是多少？",
+            answer_text="42.25亿元",
+            columns=["org_code", "metric_code", "metric_value"],
+            rows=[["ORG001", "ZB001", 42.25]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["org_code", "metric_value"],
+                    "resultRows": [["ORG001", 42.25]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_requires_organization_and_date_identity_groups(self) -> None:
+        record = _record(
+            "POINT-IDENTITY-GROUPS-1",
+            question="A行在2025年6月30日的存款是多少？",
+            answer_text="42.25亿元",
+            columns=["org_code", "metric_code", "data_date", "metric_value"],
+            rows=[["ORG001", "ZB001", "2025-06-30", 42.25]],
+        )
+        predictions = [
+            {
+                "resultColumns": ["metric_code", "data_date", "metric_value"],
+                "resultRows": [["ZB001", "2025-06-30", 42.25]],
+            },
+            {
+                "resultColumns": ["org_code", "metric_code", "metric_value"],
+                "resultRows": [["ORG001", "ZB001", 42.25]],
+            },
+        ]
+
+        for prediction in predictions:
+            with self.subTest(columns=prediction["resultColumns"]):
+                prediction.update({"id": record["id"], "textSummary": None})
+                scored = score_fact_contract_report(
+                    {"items": [prediction]}, [record], score_mode="result_only"
+                )
+
+                self.assertFalse(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_evaluates_typed_sum_from_metric_pivot_columns(self) -> None:
+        record = _record(
+            "PIVOT-SUM-1",
+            question="两项收入合计多少？",
+            answer_text="合计223.77万元",
+            columns=["org_code", "metric_code", "aggregate_value"],
+            rows=[
+                ["ORG011", "ZB007", 172.05],
+                ["ORG011", "ZB008", 51.72],
+            ],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "income_total",
+                "value": 223.77,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG011"],
+                    "metricCodes": ["ZB007", "ZB008"],
+                    "dates": ["2026-04-30"],
+                    "comparisonType": "SUM",
+                },
+                "formula": {
+                    "operation": "SUM",
+                    "operands": [
+                        {"column": "aggregate_value", "where": {"metric_code": "ZB007"}},
+                        {"column": "aggregate_value", "where": {"metric_code": "ZB008"}},
+                    ],
+                },
+            }
+        ]
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["bank_organization", "zb008", "zb007"],
+                    "resultRows": [["江苏省K市农商行", 51.72, 172.05]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_derives_reviewed_value_difference_from_bound_operands(self) -> None:
+        record = _record(
+            "BOUND-DIFFERENCE-1",
+            question="两家机构的拨备覆盖率差多少个百分点？",
+            answer_text="差46.7个百分点（A行202.91%，I行156.21%）",
+            columns=["org_code", "org_name", "metric_value", "value_difference"],
+            rows=[
+                ["ORG001", "A行", 202.91, 46.69999999999999],
+                ["ORG009", "I行", 156.21, 46.69999999999999],
+            ],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "aggregate_value",
+                    ],
+                    "resultRows": [
+                        ["ORG001", "A行", "ZB015", 202.91],
+                        ["ORG009", "I行", "ZB015", 156.21],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        contract = build_fact_contract(record)
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        difference = next(fact for fact in contract.facts if fact.value == 46.7)
+        self.assertEqual(difference.support, "DERIVED_RESULT")
+        self.assertEqual(difference.derivation, "ABS_DIFFERENCE")
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+
+    def test_result_only_rejects_cross_metric_arithmetic_coincidence(self) -> None:
+        record = _record(
+            "CROSS-METRIC-COINCIDENCE-1",
+            question="请评估净利润较年初变化。",
+            answer_text="净利润较年初增长21.25万元。",
+            columns=[
+                "org_code",
+                "metric_code",
+                "current_value",
+                "baseline_value",
+                "absolute_change",
+            ],
+            rows=[["ORG011", "ZB011", 122.43, 105.86, 16.57]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "CROSS-METRIC-COINCIDENCE-1",
+                    "resultColumns": [
+                        "org_code",
+                        "metric_code",
+                        "current_value",
+                        "baseline_value",
+                        "absolute_change",
+                    ],
+                    "resultRows": [
+                        ["ORG011", "ZB007", 172.05, 184.48, -12.43],
+                        ["ORG011", "ZB008", 51.72, 8.71, 43.01],
+                        ["ORG011", "ZB011", 122.43, 105.86, 16.57],
+                        ["ORG011", "ZB012", 34.86, 34.77, 0.09],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_result_only_rejects_unbound_runtime_number_for_missing_gold_fact(self) -> None:
+        record = _record(
+            "UNBOUND-RUNTIME-NUMBER-1",
+            question="请评估净利润较年初变化。",
+            answer_text="净利润较年初增长21.25万元。",
+            columns=[
+                "org_code",
+                "metric_code",
+                "current_value",
+                "baseline_value",
+                "absolute_change",
+            ],
+            rows=[["ORG011", "ZB011", 122.43, 105.86, 16.57]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": "UNBOUND-RUNTIME-NUMBER-1",
+                    "resultColumns": [
+                        "org_code",
+                        "metric_code",
+                        "current_value",
+                        "baseline_value",
+                        "absolute_change",
+                    ],
+                    "resultRows": [
+                        ["ORG011", "ZB011", 122.43, 105.86, 16.57],
+                        ["ORG011", "ZB007", 21.25, 0.0, 21.25],
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_report_keeps_every_record_in_denominator(self) -> None:
         ready = _record(
@@ -278,6 +911,49 @@ class BuildFactContractV3CliTest(unittest.TestCase):
 
 
 class ScoreFactContractV3Test(unittest.TestCase):
+    def test_typed_sum_fact_is_recomputed_from_captured_rows(self) -> None:
+        record = _record(
+            "SUM-TYPED-SCORE",
+            question="两项收入合计多少？",
+            answer_text="合计463.61万元",
+            columns=["metric_code", "metric_value"],
+            rows=[["ZB008", 64.1], ["ZB007", 399.51]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "total_income",
+                "value": 463.61,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG003"],
+                    "metricCodes": ["ZB008", "ZB007"],
+                    "dates": ["2026-04-30"],
+                    "comparisonType": "SUM",
+                },
+                "formula": {
+                    "operation": "SUM",
+                    "operands": [
+                        {"column": "metric_value", "where": {"metric_code": "ZB008"}},
+                        {"column": "metric_value", "where": {"metric_code": "ZB007"}},
+                    ],
+                },
+            }
+        ]
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": record["expected"]["columns"],
+                    "resultRows": record["expected"]["rows"],
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_score_emits_only_fact_v3_score_fields(self) -> None:
         record = _record(
             "V3-ONLY-1",
@@ -409,7 +1085,8 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["finalFactsExact"])
-        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertFalse(scored["items"][0]["casePass"])
+        self.assertEqual(scored["items"][0]["reason"], "contract_review_required")
 
     def test_complete_gold_rejects_extra_result_row(self) -> None:
         record = _record(
@@ -665,7 +1342,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["finalFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
-    def test_captured_result_can_supply_approved_derivation_missing_from_legacy_table(self) -> None:
+    def test_captured_result_cannot_supply_untyped_derivation_missing_from_legacy_table(self) -> None:
         record = _record(
             "DERIVE-1",
             question="两项合计多少？",
@@ -687,8 +1364,75 @@ class ScoreFactContractV3Test(unittest.TestCase):
         scored = score_fact_contract_report(report, [record])
 
         self.assertEqual(build_fact_contract(record).facts[0].support, "MISSING")
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_days_above_projection_binds_reviewed_legacy_column_aliases(self) -> None:
+        record = _record(
+            "DAYS-ABOVE-ALIASES-1",
+            question="2025年全年，该机构的不良贷款率有多少天高于全省均值？",
+            answer_text="高于全省均值的天数：0天；总天数：365天；占比：0%",
+            columns=[
+                "org_code",
+                "org_name",
+                "days_above_province_average",
+                "observation_count",
+                "above_ratio_percent",
+            ],
+            rows=[["ORG002", "江苏省B市农商行", 0, 365, 0.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "days_above_average",
+                        "total_days",
+                        "ratio_percent",
+                    ],
+                    "resultRows": [
+                        ["ORG002", "江苏省B市农商行", "ZB013", 0, 365, 0.0]
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
         self.assertTrue(scored["items"][0]["resultFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_days_above_projection_rejects_unreviewed_column_aliases(self) -> None:
+        record = _record(
+            "DAYS-ABOVE-ALIASES-2",
+            question="有多少天高于全省均值？",
+            answer_text="高于全省均值0天；总天数365天；占比0%",
+            columns=[
+                "days_above_province_average",
+                "observation_count",
+                "above_ratio_percent",
+            ],
+            rows=[[0, 365, 0.0]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": ["days", "count", "percent"],
+                    "resultRows": [[0, 365, 0.0]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertFalse(scored["items"][0]["resultFactsExact"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
         record = _record(
@@ -755,7 +1499,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertEqual(scored["metrics"]["caseAccuracy"], 0.5)
         review_item = next(item for item in scored["items"] if item["id"] == "REVIEW-1")
         self.assertFalse(review_item["casePass"])
-        self.assertTrue(review_item["resultExact"])
+        self.assertFalse(review_item["resultExact"])
         self.assertEqual(review_item["reason"], "contract_review_required")
 
     def test_correct_summary_cannot_hide_wrong_result_table(self) -> None:
@@ -849,7 +1593,7 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertTrue(scored["items"][0]["finalFactsExact"])
         self.assertTrue(scored["items"][0]["casePass"])
 
-    def test_approved_sum_projection_can_ground_final_fact(self) -> None:
+    def test_sum_projection_without_typed_total_cannot_ground_final_fact(self) -> None:
         record = _record(
             "SUM-1",
             question="两项收入合计多少？",
@@ -870,9 +1614,9 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         scored = score_fact_contract_report(report, [record])
 
-        self.assertTrue(scored["items"][0]["resultExact"])
+        self.assertFalse(scored["items"][0]["resultExact"])
         self.assertTrue(scored["items"][0]["finalFactsExact"])
-        self.assertTrue(scored["items"][0]["casePass"])
+        self.assertFalse(scored["items"][0]["casePass"])
 
     def test_missing_captured_rows_fails_closed(self) -> None:
         record = _record(

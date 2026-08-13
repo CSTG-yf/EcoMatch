@@ -15,6 +15,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from answer_facts import validate_answer_facts
+
 
 EVALUATION_SPLITS = ("train", "dev", "test")
 REQUIRED_FIELDS = {
@@ -70,6 +72,20 @@ def _validate_record(record: dict[str, Any], filename: str, index: int, official
         raise DatasetValidationError(f"{filename}:{index} has invalid expectedAction")
     if not isinstance(record["expected"], dict) or EXPECTED_FIELDS - set(record["expected"]):
         raise DatasetValidationError(f"{filename}:{index} has invalid expected object")
+    answer_facts = record["expected"].get("answerFacts")
+    if answer_facts is not None:
+        _, errors = validate_answer_facts(
+            answer_facts,
+            record["expected"],
+            default_tolerance=1e-6,
+            require_result_match=bool(
+                record["expected"].get("columns") and record["expected"].get("rows")
+            ),
+        )
+        if errors:
+            raise DatasetValidationError(
+                f"{filename}:{index} has invalid expected.answerFacts: {errors}"
+            )
     if official:
         if record["sourceSplit"] not in EVALUATION_SPLITS:
             raise DatasetValidationError(f"{filename}:{index} official record has invalid sourceSplit")

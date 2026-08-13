@@ -203,7 +203,8 @@ public final class BankSemanticRegistry {
                 "limit":{"type":["integer","null"],"minimum":1},"output":{"type":"object",
                 "additionalProperties":false,"required":["columns","orderSensitive"],"properties":{
                 "columns":{"type":"array","items":{"type":"string"}},"orderSensitive":{
-                "type":"boolean"}}},"derivedMetrics":{"type":"array","items":{"type":"object",
+                "type":"boolean"},"aggregationMode":{"enum":["AVERAGE_ONLY","WITH_EXTREMA",null]}}},
+                "derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
                 "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},
                 "denominator":{"enum":%s},"name":{"type":"string"}}}}}}
@@ -214,8 +215,7 @@ public final class BankSemanticRegistry {
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(CALCULATION_TYPES),
                         jsonArray(SORT_DIRECTIONS), jsonArray(derivedMetricCodes()),
-                        jsonArray(metricCodes()),
-                        jsonArray(metricCodes()))
+                        jsonArray(metricCodes()), jsonArray(metricCodes()))
                 .strip();
     }
 
@@ -229,19 +229,19 @@ public final class BankSemanticRegistry {
                     field.allowedValues(), field.exampleShape());
         }).collect(Collectors.joining("\n"));
         String metricLines = METRICS.values().stream()
-                .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s）"
-                        .formatted(metric.code(), metric.name(), metric.aliases(), metric.unit(),
-                                metric.defaultAggregation(), metric.direction()))
+                .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s）".formatted(
+                        metric.code(), metric.name(), metric.aliases(), metric.unit(),
+                        metric.defaultAggregation(), metric.direction()))
                 .collect(Collectors.joining("\n"));
         String derivedMetricLines = DERIVED_METRICS.values().stream()
-                .map(metric -> "%s %s（formula=%s, unit=%s, direction=%s）"
-                        .formatted(metric.code(), metric.name(), metric.formula(), metric.unit(),
-                                metric.direction()))
+                .map(metric -> "%s %s（formula=%s, unit=%s, direction=%s）".formatted(metric.code(),
+                        metric.name(), metric.formula(), metric.unit(), metric.direction()))
                 .collect(Collectors.joining("\n"));
-        String organizationLines = ORGANIZATIONS.values().stream()
-                .map(org -> "%s %s（aliases=%s, scope=%s）".formatted(org.code(), org.name(),
-                        org.aliases(), org.scope()))
-                .collect(Collectors.joining("\n"));
+        String organizationLines =
+                ORGANIZATIONS
+                        .values().stream().map(org -> "%s %s（aliases=%s, scope=%s）"
+                                .formatted(org.code(), org.name(), org.aliases(), org.scope()))
+                        .collect(Collectors.joining("\n"));
         String factLines =
                 OUTPUT_FACTS.entrySet().stream()
                         .map(entry -> entry.getKey() + " -> " + entry.getValue().outputColumn()
