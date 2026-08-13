@@ -125,7 +125,7 @@ class BankPlanGenStrategyTest {
                 depositShareRequirementsJson(), depositSharePlanJson());
 
         LLMReq request = request();
-        request.setQueryText("江苏省B市农商行在2025-06-30的存款中，对公和个人分别占比多少？");
+        request.setQueryText("请计算江苏省I市农商行在2026-02-28的对公与个人存款构成比例。");
         request.setSemanticIntentHints(
                 SemanticIntentHints.builder().expectedIntent(BankIntentType.UNKNOWN)
                         .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
@@ -152,7 +152,7 @@ class BankPlanGenStrategyTest {
                 perCapitaRequirementsJson(), perCapitaPlanJson());
 
         LLMReq request = request();
-        request.setQueryText("江苏省C市农商行在2025-08-31的人均利润是多少？");
+        request.setQueryText("请计算江苏省J市农商行2026-01-31的人均利润。");
         request.setSemanticIntentHints(SemanticIntentHints.builder()
                 .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB011", "ZB018"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
@@ -313,7 +313,7 @@ class BankPlanGenStrategyTest {
                 dailyAveragePlanJson(null), dailyAveragePlanJson("AVERAGE_ONLY"));
 
         LLMReq request = request();
-        request.setQueryText("江苏省B市农商行2025年全年的日均贷款余额是多少？");
+        request.setQueryText("请给出江苏省I市农商行2026全年的日均各项贷款余额。");
         request.setSemanticIntentHints(SemanticIntentHints.builder()
                 .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB002"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
@@ -424,7 +424,7 @@ class BankPlanGenStrategyTest {
         when(model.generate(anyString())).thenReturn(clarificationJson(), ratioRequirementsJson(),
                 ratioPlanJson());
         LLMReq request = request();
-        request.setQueryText("江苏省A市农商行在2025-01-31的存贷比是多少？");
+        request.setQueryText("江苏省L市农商行2026-02-28的存贷比请帮我查一下。");
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
@@ -433,10 +433,10 @@ class BankPlanGenStrategyTest {
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         verify(model, times(3)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
-        assertTrue(repair.contains("organizationCodes=[ORG001(江苏省A市农商行)]"));
+        assertTrue(repair.contains("organizationCodes=[ORG012(江苏省L市农商行)]"));
         assertTrue(repair.contains("metricCodes=[ZB002(各项贷款余额), ZB001(各项存款余额)]"));
         assertTrue(repair.contains("DERIVED_ZB002_DIV_ZB001(存贷比=ZB002/ZB001)"));
-        assertTrue(repair.contains("time=2025-01-31..2025-01-31 granularity=DAY"));
+        assertTrue(repair.contains("time=2026-02-28..2026-02-28 granularity=DAY"));
         assertTrue(repair.contains("regenerate the entire requirements JSON yourself"));
         assertEquals(Set.of("ZB001", "ZB002"),
                 request.getSemanticIntentHints().getRequiredMetrics());
@@ -527,8 +527,8 @@ class BankPlanGenStrategyTest {
                 {"version":"1.0","action":"EXECUTE","intent":"RATIO",
                 "metricCodes":["ZB002","ZB001"],
                 "derivedMetrics":[{"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}],
-                "organizationCodes":["ORG001"],
-                "time":{"startDate":"2025-01-31","endDate":"2025-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "organizationCodes":["ORG012"],
+                "time":{"startDate":"2026-02-28","endDate":"2026-02-28","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
                 """;
     }
@@ -538,8 +538,8 @@ class BankPlanGenStrategyTest {
                 {"version":"1.0","action":"EXECUTE","intent":"RATIO",
                 "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
                 "derivedMetrics":[],
-                "dimensions":["bank_organization"],"organizations":[{"code":"ORG001","bizName":null}],
-                "time":{"startDate":"2025-01-31","endDate":"2025-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "dimensions":["bank_organization"],"organizations":[{"code":"ORG012","bizName":null}],
+                "time":{"startDate":"2026-02-28","endDate":"2026-02-28","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"RATIO","baseline":"ZB001"},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB002","ZB001"],"orderSensitive":false}}
                 """;
@@ -548,8 +548,8 @@ class BankPlanGenStrategyTest {
     private String incompleteDepositShareRequirementsJson() {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"RATIO",
-                "metricCodes":["ZB003","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG002"],
-                "time":{"startDate":"2025-06-30","endDate":"2025-06-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "metricCodes":["ZB003","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG009"],
+                "time":{"startDate":"2026-02-28","endDate":"2026-02-28","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
                 """;
     }
@@ -557,8 +557,8 @@ class BankPlanGenStrategyTest {
     private String depositShareRequirementsJson() {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
-                "metricCodes":["ZB003","ZB004","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG002"],
-                "time":{"startDate":"2025-06-30","endDate":"2025-06-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "metricCodes":["ZB003","ZB004","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG009"],
+                "time":{"startDate":"2026-02-28","endDate":"2026-02-28","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","RATIO_VALUE"],"clarification":null}
                 """;
     }
@@ -567,8 +567,8 @@ class BankPlanGenStrategyTest {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
                 "metrics":[{"bizName":"ZB003","aggregation":"DEFAULT","alias":null},{"bizName":"ZB004","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
-                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
-                "time":{"startDate":"2025-06-30","endDate":"2025-06-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG009","bizName":null}],
+                "time":{"startDate":"2026-02-28","endDate":"2026-02-28","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB003","ZB004","ZB001"],"orderSensitive":true}}
                 """;
@@ -577,8 +577,8 @@ class BankPlanGenStrategyTest {
     private String incompletePerCapitaRequirementsJson() {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
-                "metricCodes":["ZB011"],"derivedMetrics":[],"organizationCodes":["ORG003"],
-                "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "metricCodes":["ZB011"],"derivedMetrics":[],"organizationCodes":["ORG010"],
+                "time":{"startDate":"2026-01-31","endDate":"2026-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
                 """;
     }
@@ -588,8 +588,8 @@ class BankPlanGenStrategyTest {
                 {"version":"1.0","action":"EXECUTE","intent":"RATIO",
                 "metricCodes":["ZB011","ZB018"],
                 "derivedMetrics":[{"metricCode":"DERIVED_ZB011_DIV_ZB018","numerator":"ZB011","denominator":"ZB018","name":"人均利润"}],
-                "organizationCodes":["ORG003"],
-                "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "organizationCodes":["ORG010"],
+                "time":{"startDate":"2026-01-31","endDate":"2026-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
                 """;
     }
@@ -598,8 +598,8 @@ class BankPlanGenStrategyTest {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"RATIO",
                 "metrics":[{"bizName":"ZB011","aggregation":"DEFAULT","alias":null},{"bizName":"ZB018","aggregation":"DEFAULT","alias":null}],
-                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG003","bizName":null}],
-                "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG010","bizName":null}],
+                "time":{"startDate":"2026-01-31","endDate":"2026-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"RATIO","baseline":"ZB018"},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB011","ZB018"],"orderSensitive":true}}
                 """;
@@ -654,8 +654,8 @@ class BankPlanGenStrategyTest {
     private String dailyAverageRequirementsJson() {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"AGGREGATION",
-                "metricCodes":["ZB002"],"derivedMetrics":[],"organizationCodes":["ORG002"],
-                "time":{"startDate":"2025-01-01","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "metricCodes":["ZB002"],"derivedMetrics":[],"organizationCodes":["ORG009"],
+                "time":{"startDate":"2026-01-01","endDate":"2026-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
                 """;
     }
@@ -752,8 +752,8 @@ class BankPlanGenStrategyTest {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"AGGREGATION",
                 "metrics":[{"bizName":"ZB002","aggregation":"AVG","alias":null}],
-                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
-                "time":{"startDate":"2025-01-01","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG009","bizName":null}],
+                "time":{"startDate":"2026-01-01","endDate":"2026-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB002"],"orderSensitive":false,"aggregationMode":%s}}
                 """

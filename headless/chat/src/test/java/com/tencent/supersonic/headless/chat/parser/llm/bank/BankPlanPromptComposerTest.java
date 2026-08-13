@@ -14,7 +14,7 @@ class BankPlanPromptComposerTest {
 
     @Test
     void dynamicUserIsQuestionOnly() {
-        String question = "江苏省A市农商行在2025年6月15日，各项存款余额是多少？";
+        String question = "江苏省M市农商行在2026年2月18日的各项存款余额是多少？";
         assertEquals(question, BankPlanPromptComposer.buildDynamicUserContent(question));
         assertFalse(BankPlanPromptComposer.looksLikeCatalogDump(question));
     }
@@ -217,7 +217,7 @@ class BankPlanPromptComposerTest {
     @Test
     void clarificationRepairIncludesGenericSlotNormalizationGuidance() {
         String content = BankPlanPromptComposer.buildRequirementsRepairUserContent(
-                "从2024年末到2026-03-31，全省各项存款余额增幅排名前三的是哪几家？增幅各是多少？", "{\"action\":\"CLARIFY\"}",
+                "请按2024年末至2026-02-28的增长幅度，列出全省各项存款余额排名最高的三家机构。", "{\"action\":\"CLARIFY\"}",
                 "model selected CLARIFY");
 
         assertTrue(content.contains("<clarification_recheck>"));

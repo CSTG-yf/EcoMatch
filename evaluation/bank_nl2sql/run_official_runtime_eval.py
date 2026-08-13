@@ -277,6 +277,26 @@ def _build_stopped_early_report(
     return report
 
 
+def _mark_bounded_diagnostic_report(
+    report: dict[str, Any], *, max_failures: int | None
+) -> dict[str, Any]:
+    """Keep a completed failure-budget run explicitly diagnostic-only."""
+    if max_failures is None:
+        return report
+    run = report.get("run")
+    if not isinstance(run, dict):
+        raise OfficialRuntimeRunError("completed diagnostic report has no run metadata")
+    report["diagnosticEvaluation"] = {
+        "status": "COMPLETED_WITH_FAILURE_BUDGET",
+        "promotable": False,
+        "reason": "max-failures budget was configured",
+        "maxFailures": max_failures,
+        "completedCount": run.get("completedCount"),
+        "requestedCount": run.get("requestedCount"),
+    }
+    return report
+
+
 def _load_resumed_items(path: Path, *, expected_run: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
@@ -344,6 +364,11 @@ def _assert_completed_gate(
     _assert_same_run(run, expected_for_mode, include_max_failures=False)
     if run.get("status") != "COMPLETED":
         raise OfficialRuntimeRunError(f"required {required_mode} report is not complete")
+    diagnostic = report.get("diagnosticEvaluation")
+    if isinstance(diagnostic, dict) and diagnostic.get("promotable") is False:
+        raise OfficialRuntimeRunError(
+            f"required {required_mode} report is diagnostic-only and cannot satisfy a formal gate"
+        )
     items = report.get("items")
     if not isinstance(items, list):
         raise OfficialRuntimeRunError(f"required {required_mode} report items are invalid")
@@ -400,6 +425,17 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
                 "This is a partial diagnostic and is not a promotable official score.",
                 f"- Reason: `{early_stop.get('reason', 'STOPPED_EARLY')}`",
                 f"- Failures: {early_stop.get('observedFailures')} (budget: {early_stop.get('maxFailures')})",
+                "",
+            ]
+        )
+    diagnostic = report.get("diagnosticEvaluation")
+    if isinstance(diagnostic, dict):
+        lines.extend(
+            [
+                "## Qualification",
+                "",
+                "This completed run used a failure budget and is diagnostic-only, not a promotable official score.",
+                f"- Failure budget: {diagnostic.get('maxFailures')}",
                 "",
             ]
         )
@@ -710,6 +746,7 @@ def main(argv: list[str] | None = None) -> int:
             warmup=warmup_info,
         )
         final_report = build_official_runtime_report(final_capture, records)
+        _mark_bounded_diagnostic_report(final_report, max_failures=args.max_failures)
         _cleanup_successful_conversations(
             final_report,
             post_json=post_json,

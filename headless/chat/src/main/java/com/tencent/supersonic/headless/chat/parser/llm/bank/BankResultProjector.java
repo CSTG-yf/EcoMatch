@@ -217,7 +217,7 @@ public class BankResultProjector {
 
     /**
      * Rate-like multi-metric points that gold scores as plain metric_value long-form (not aggregate
-     * summary). Covers M-37 不良+拨备、M-46 逾期 vs 不良、VAL-H-07 风险四率.
+     * summary). Covers multi-rate point comparisons such as risk and provision ratios.
      */
     private static boolean prefersPlainMultiMetricPoint(Contract contract) {
         Set<String> codes = metricCodes(contract);
@@ -1125,7 +1125,7 @@ public class BankResultProjector {
 
     /**
      * From per-org min/max aggregation rows, keep only the org that owns the single-day maximum and
-     * the org that owns the single-day minimum (TRAIN-H-13 style 单日最高/最低).
+     * the org that owns the single-day minimum for annual daily-extrema questions.
      */
     private Projection projectDailyExtremaOrg(Contract contract,
             List<Map<String, Object>> sourceRows) {

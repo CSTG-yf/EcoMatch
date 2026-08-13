@@ -28,6 +28,7 @@ from run_official_runtime_eval import (  # noqa: E402
     _assert_completed_gate,
     _early_stop_state,
     _load_resumed_items,
+    _mark_bounded_diagnostic_report,
 )
 
 
@@ -216,6 +217,33 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertEqual(stop["observedFailures"], 3)
         self.assertEqual(stop["triggeredAfterId"], "TRAIN-H-01")
         self.assertFalse(stop["promotable"])
+
+    def test_completed_run_with_failure_budget_remains_non_promotable(self) -> None:
+        report = {
+            "run": {
+                "status": "COMPLETED",
+                "completedCount": 119,
+                "requestedCount": 119,
+                "maxFailureCount": 5,
+            },
+            "metrics": {"casePassHits": 119, "caseDenominator": 119},
+        }
+
+        marked = _mark_bounded_diagnostic_report(report, max_failures=5)
+
+        self.assertIs(marked, report)
+        self.assertEqual(marked["run"]["status"], "COMPLETED")
+        self.assertEqual(
+            marked["diagnosticEvaluation"],
+            {
+                "status": "COMPLETED_WITH_FAILURE_BUDGET",
+                "promotable": False,
+                "reason": "max-failures budget was configured",
+                "maxFailures": 5,
+                "completedCount": 119,
+                "requestedCount": 119,
+            },
+        )
 
     def test_resume_rejects_a_diagnostic_stopped_early_report(self) -> None:
         expected_run = {

@@ -423,8 +423,8 @@ public class BankFinancialIntentRecognizer {
     }
 
     /**
-     * "2025年全年，各项贷款余额的单日最高值出现在哪家？单日最低值在哪家？" — no per-org daily average wording,
-     * only which institution owns the single-day extremes over the full year.
+     * Recognizes annual questions asking which institutions own the single-day maximum and
+     * minimum, without per-organization daily-average wording.
      */
     private boolean isAnnualDailyExtremaRanking(String text) {
         if (text == null || !text.contains("全年") || isAnnualDailyExtremaSummary(text)) {
