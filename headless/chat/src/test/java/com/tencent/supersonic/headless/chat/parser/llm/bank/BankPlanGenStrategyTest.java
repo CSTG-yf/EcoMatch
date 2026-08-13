@@ -89,6 +89,37 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void explicitClosedMetricListRejectsModelCatalogExpansionAndRepairsRequirements() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String expandedRequirements = requirementsJson().replace(
+                "\"ZB001\",\"ZB002\"", "\"ZB001\",\"ZB002\",\"ZB003\"");
+        when(model.generate(anyString())).thenReturn(expandedRequirements, requirementsJson(),
+                validPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("请比较江苏省D市农商行在2025-07-31的指标。"
+                + "待评价指标集合：\n各项存款余额、各项贷款余额。");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(Set.of("ZB001", "ZB002"), response.getBankRequestContract().getMetricCodes()
+                .stream().collect(java.util.stream.Collectors.toSet()));
+        assertEquals(2,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("explicit_closed_metric_list_mismatch"));
+        assertTrue(repair.contains("unexpected=[ZB003]"));
+        assertTrue(repair.contains("Regenerate the complete requirements JSON"));
+        assertFalse(repair.contains("SELECT "));
+    }
+
+    @Test
     void invalidComparisonRangeIsReturnedToTheModelBeforePlanGeneration() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(invalidChangeRequirementsJson(),

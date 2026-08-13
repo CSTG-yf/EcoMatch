@@ -21,8 +21,10 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Model-owned constrained bank planning.
@@ -30,8 +32,9 @@ import java.util.Map;
  * <p>
  * The first model response is a requirement contract, the second is an executable semantic plan.
  * This class never creates or rewrites a plan from question rules. The catalog recognizer is used
- * only to explain why a model-generated CLARIFY response failed validation; the model must still
- * return the complete requirements contract and plan itself.
+ * only to validate an explicitly declared closed metric list or explain why a model-generated
+ * CLARIFY response failed validation; the model must still return the complete requirements
+ * contract and plan itself.
  */
 @Service
 public class BankPlanGenStrategy extends SqlGenStrategy {
@@ -40,6 +43,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
     private static final int MAX_REQUIREMENT_ATTEMPTS = 3;
+    private static final List<String> CLOSED_METRIC_LIST_MARKERS = List.of(
+            "待评价指标集合", "待评价指标", "指标清单", "指标集合", "维度与指标映射");
     private static final String CLARIFICATION_RECHECK_MESSAGE =
             "model selected CLARIFY, but this is a validation failure rather than a user turn. "
                     + "Re-read the original question and the complete semantic registry now. "
@@ -206,6 +211,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             try {
                 candidate = prefixCache.generate(model, config, user, attempt == 0);
                 BankRequestContract parsed = requestContractParser.parse(candidate, admissionHints);
+                validateExplicitClosedMetricList(llmReq.getQueryText(), parsed);
                 if (parsed.getAction() == BankRequestContract.Action.CLARIFY
                         && clarificationRechecks < MAX_REQUIREMENT_ATTEMPTS - 1) {
                     clarificationRechecks++;
@@ -229,6 +235,88 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                 BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                                 "model did not return an executable requirements contract")
                         : lastError);
+    }
+
+    /**
+     * Rejects a model requirement contract that expands or drops an explicitly declared closed
+     * metric list. This is validation-only: it returns exact catalog differences to the next model
+     * attempt and never mutates the model-owned contract or creates a replacement plan.
+     */
+    private void validateExplicitClosedMetricList(String queryText,
+            BankRequestContract requirements) {
+        if (requirements == null || requirements.getAction() != BankRequestContract.Action.EXECUTE) {
+            return;
+        }
+        String closedListText = explicitClosedMetricListText(queryText);
+        if (closedListText == null) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(closedListText, LocalDate.now());
+        Set<String> expectedMetrics = new LinkedHashSet<>();
+        evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                .forEach(expectedMetrics::add);
+        evidence.getDerivedMetrics().forEach(metric -> {
+            expectedMetrics.add(metric.getNumerator());
+            expectedMetrics.add(metric.getDenominator());
+        });
+        if (expectedMetrics.isEmpty()) {
+            return;
+        }
+        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
+        Set<String> expectedDerived = new LinkedHashSet<>();
+        evidence.getDerivedMetrics().stream().map(BankIntentResult.DerivedMetricCandidate::getCode)
+                .forEach(expectedDerived::add);
+        Set<String> actualDerived = new LinkedHashSet<>();
+        requirements.getDerivedMetrics().stream().map(BankQueryPlan.DerivedMetric::getMetricCode)
+                .forEach(actualDerived::add);
+
+        Set<String> missing = difference(expectedMetrics, actualMetrics);
+        Set<String> unexpected = difference(actualMetrics, expectedMetrics);
+        Set<String> missingDerived = difference(expectedDerived, actualDerived);
+        Set<String> unexpectedDerived = difference(actualDerived, expectedDerived);
+        if (missing.isEmpty() && unexpected.isEmpty() && missingDerived.isEmpty()
+                && unexpectedDerived.isEmpty()) {
+            return;
+        }
+        throw new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "explicit_closed_metric_list_mismatch: the original question declares a closed "
+                        + "metric list; expected metricCodes=" + expectedMetrics
+                        + "; model metricCodes=" + actualMetrics + "; missing=" + missing
+                        + "; unexpected=" + unexpected + "; expected derivedMetrics="
+                        + expectedDerived + "; model derivedMetrics=" + actualDerived
+                        + "; derivedMissing=" + missingDerived + "; derivedUnexpected="
+                        + unexpectedDerived + ". Regenerate the complete requirements JSON "
+                        + "yourself and do not add or remove catalog metrics.");
+    }
+
+    private String explicitClosedMetricListText(String queryText) {
+        if (queryText == null || queryText.isBlank()) {
+            return null;
+        }
+        int start = -1;
+        for (String marker : CLOSED_METRIC_LIST_MARKERS) {
+            int markerIndex = queryText.indexOf(marker);
+            if (markerIndex >= 0 && (start < 0 || markerIndex < start)) {
+                start = markerIndex;
+            }
+        }
+        if (start < 0) {
+            return null;
+        }
+        int end = queryText.length();
+        int delimiterIndex = queryText.indexOf("。", start);
+        if (delimiterIndex >= 0) {
+            end = delimiterIndex;
+        }
+        return queryText.substring(start, end);
+    }
+
+    private Set<String> difference(Set<String> left, Set<String> right) {
+        Set<String> difference = new LinkedHashSet<>(left);
+        difference.removeAll(right);
+        return difference;
     }
 
     private String clarificationRecheckMessage(String queryText) {
