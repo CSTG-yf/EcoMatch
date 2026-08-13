@@ -336,6 +336,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (containsAny(queryText, "全省排第几", "全省排名第几", "全省排名")) {
             validateRankingIntent(requirements);
         }
+        if (queryText.contains("全省均值")
+                && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
+            validateProvinceAverageComparison(queryText, requirements);
+        }
+        if (isEndpointChangeDirectionQuery(queryText)) {
+            validateExpectedIntent("endpoint_change_direction_mismatch", requirements,
+                    BankIntentType.CHANGE);
+        }
         if (!isStandalonePointRatioContext(queryText, requirements)) {
             return;
         }
@@ -347,6 +355,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (containsAny(queryText, "人均利润", "人均净利润")) {
             validateQueryFamily("per_capita_profit_mismatch", requirements, BankIntentType.RATIO,
                     List.of("ZB011", "ZB018"), Set.of("DERIVED_ZB011_DIV_ZB018"), false);
+        }
+        if (queryText.contains("不良贷款余额") && queryText.contains("贷款总额")
+                && containsAny(queryText, "占", "比重", "比例")) {
+            validateQueryFamily("loan_share_ratio_mismatch", requirements, BankIntentType.RATIO,
+                    List.of("ZB014", "ZB002"), Set.of(), false);
         }
         if (queryText.contains("逾期贷款率") && queryText.contains("不良贷款率")
                 && containsAny(queryText, "高多少", "低多少", "相差", "差多少")) {
@@ -407,6 +420,47 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + "and preserve the requested VALUE and RANK facts.");
     }
 
+    private void validateExpectedIntent(String errorCode, BankRequestContract requirements,
+            BankIntentType expectedIntent) {
+        if (requirements.getIntent() == expectedIntent) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                errorCode + ": expected intent=" + expectedIntent + " but model intent="
+                        + requirements.getIntent()
+                        + ". Regenerate the complete requirements JSON and preserve every "
+                        + "explicit metric, organization, date, and requested answer fact.");
+    }
+
+    private void validateProvinceAverageComparison(String queryText,
+            BankRequestContract requirements) {
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
+        boolean supportedIntent = requirements.getIntent() == BankIntentType.AGGREGATION
+                || requirements.getIntent() == BankIntentType.COMPARISON
+                        && actualMetrics.size() > 1;
+        boolean hasBenchmark = requirements.getFilters().stream()
+                .anyMatch(filter -> "benchmark".equals(filter.getField())
+                        && "COMPARE".equals(filter.getOperator())
+                        && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        if (supportedIntent && hasBenchmark && !expectedMetrics.isEmpty()
+                && expectedMetrics.equals(actualMetrics)) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "province_average_comparison_mismatch: expected intent=AGGREGATION or "
+                        + "multi-metric COMPARISON, metricCodes=" + expectedMetrics
+                        + ", and benchmark/COMPARE/PROVINCE_AVERAGE; model intent="
+                        + requirements.getIntent() + ", metricCodes=" + actualMetrics
+                        + ", benchmarkPresent=" + hasBenchmark
+                        + ". Regenerate the complete requirements JSON from the catalog; do not "
+                        + "drop an explicitly named metric or change the comparison family.");
+    }
+
     private boolean containsAny(String text, String... values) {
         for (String value : values) {
             if (text.contains(value)) {
@@ -414,6 +468,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             }
         }
         return false;
+    }
+
+    private boolean isEndpointChangeDirectionQuery(String queryText) {
+        return queryText.contains("从") && queryText.contains("到")
+                && containsAny(queryText, "变动方向", "变化方向")
+                && !containsAny(queryText, "逐日", "逐月", "逐季", "逐季度", "各日", "各月", "各季度",
+                        "趋势", "走势", "序列");
     }
 
     private String clarificationRecheckMessage(String queryText) {
@@ -498,6 +559,18 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         BankQueryPlan.AggregationResultMode actual =
                 plan.getOutput() == null ? null : plan.getOutput().getAggregationMode();
+        if (containsAny(queryText, "加起来", "合计", "总和")
+                && plan.getOrganizations() != null && plan.getOrganizations().size() > 1
+                && (plan.getDimensions() == null
+                        || !plan.getDimensions().contains("bank_organization"))) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "multi_organization_total_dimension_mismatch: a total over multiple named "
+                            + "organizations must retain dimensions=[\"bank_organization\"] and "
+                            + "output.columns must retain bank_organization so result facts can "
+                            + "prove every addend; regenerate the complete plan without pre-summing "
+                            + "away organization identity.");
+        }
         if (queryText.contains("日均") && !containsAny(queryText, "最高", "最低", "最大", "最小")) {
             requireAggregationMode(actual, BankQueryPlan.AggregationResultMode.AVERAGE_ONLY,
                     "daily_average_output_mode_mismatch");

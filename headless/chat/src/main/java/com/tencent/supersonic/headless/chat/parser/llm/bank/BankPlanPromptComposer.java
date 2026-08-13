@@ -236,6 +236,17 @@ public final class BankPlanPromptComposer {
                         comparison=NONE、baselineStartDate/baselineEndDate=null；dimensions 必须包含 "bank_data_date"，
                         calculation.type=DIRECT，orderBy 按 bank_data_date ASC，output.columns 包含日期和所选指标。
                         不得压缩为起点与终点的 CHANGE，也不得只返回两个端点。
+                    3b. “从某个明确期末到另一个明确期末，多个指标的变动方向分别是什么”是端点变化，
+                        不是逐日趋势序列。REQUIREMENTS 必须 intent=CHANGE、comparison=PERIOD_OVER_PERIOD，
+                        当前端点写 startDate=endDate，较早端点写 baselineStartDate=baselineEndDate；PLAN 必须
+                        calculation.type=CHANGE，dimensions=["bank_organization"]，保留全部明示指标。
+                    3c. “不良贷款余额占贷款总额的比重/比例”是点值比率：REQUIREMENTS 必须 intent=RATIO、
+                        metricCodes=["ZB014","ZB002"]、derivedMetrics=[]、answerFactTypes=["RATIO_VALUE"]；
+                        PLAN 必须 metrics 按 ZB014、ZB002 排列，calculation.type=RATIO、baseline="ZB002"，
+                        dimensions=["bank_organization"]，不得退化为两个基础指标的 DIRECT 查询。
+                    3d. 多个明确机构“加起来/合计/总和”的查询，PLAN 必须保留所有 organizations，并使用
+                        dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
+                        返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -342,7 +353,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v46-quarterly-threshold-difference";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v47-query-family-contracts";
 
     private BankPlanPromptComposer() {}
 

@@ -11,6 +11,7 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -835,6 +836,50 @@ class BankQueryPlanCompilerTest {
                 compiler.compile(plan, annualDailyAggregationHints(), schema());
 
         assertTrue(compiled.getResultContract().isDailyAverageOnly());
+    }
+
+    @Test
+    void shouldAttachAndApplyStableContractForMultiOrganizationSingleMetricAggregation() {
+        LLMReq.LLMSchema schema = schema();
+        SchemaValueMap organizationA = new SchemaValueMap();
+        organizationA.setTechName("ORG001");
+        organizationA.setBizName("A");
+        SchemaValueMap organizationB = new SchemaValueMap();
+        organizationB.setTechName("ORG002");
+        organizationB.setBizName("B");
+        schema.getDimensions().get(0)
+                .setSchemaValueMaps(List.of(organizationA, organizationB));
+        BankQueryPlan plan = rankingPlan();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setOrganizations(List.of(organization("ORG001"), organization("ORG002")));
+        plan.setOrderBy(List.of());
+        plan.setLimit(null);
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001"))
+                .requiredOrganizationCodes(Set.of("ORG001", "ORG002"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema);
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.STRUCT, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.LONG_FORM,
+                compiled.getResultContract().getType());
+
+        BankResultProjector.Projection projection = new BankResultProjector().project(
+                compiled.getResultContract(),
+                List.of(Map.of("bank_organization", "A", "zb001", new BigDecimal("40.00")),
+                        Map.of("bank_organization", "B", "zb001", new BigDecimal("55.00"))));
+
+        assertEquals(List.of("org_code", "org_name", "metric_code", "aggregate_value",
+                "min_value", "max_value", "observation_count"), projection.getColumns());
+        assertEquals(List.of("ORG002", "ORG001"),
+                projection.getRows().stream().map(row -> row.get("org_code")).toList());
+        assertEquals(List.of(new BigDecimal("55.00"), new BigDecimal("40.00")),
+                projection.getRows().stream().map(row -> row.get("aggregate_value")).toList());
     }
 
     @Test

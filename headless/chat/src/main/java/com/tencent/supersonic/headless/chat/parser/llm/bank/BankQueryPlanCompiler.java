@@ -600,9 +600,15 @@ public class BankQueryPlanCompiler {
         if (plan.getIntent() == BankIntentType.TREND) {
             return trendResultContract(plan, metrics, dimensions);
         }
+        boolean multiOrganizationSingleMetricAggregation =
+                plan.getIntent() == BankIntentType.AGGREGATION
+                        && plan.getOrganizations().size() > 1 && metrics.size() == 1
+                        && dimensions.stream().map(ResolvedDimension::identifier)
+                                .anyMatch(ORGANIZATION_DIMENSION::equals);
         if (plan.getIntent() != BankIntentType.POINT_QUERY
                 && plan.getIntent() != BankIntentType.RANKING
-                && plan.getIntent() != BankIntentType.COMPARISON) {
+                && plan.getIntent() != BankIntentType.COMPARISON
+                && !multiOrganizationSingleMetricAggregation) {
             return null;
         }
         SchemaElement organization = dimensions.stream().map(ResolvedDimension::schemaElement)
