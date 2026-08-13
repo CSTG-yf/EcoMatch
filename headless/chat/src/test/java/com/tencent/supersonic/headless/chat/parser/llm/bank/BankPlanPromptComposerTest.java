@@ -181,6 +181,21 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void systemPrefixDistinguishesCompositionSharesThresholdCountsAndDifferences() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("对公和个人分别占比"));
+        assertTrue(sys.contains("分母必须是各项存款余额"));
+        assertTrue(sys.contains("不要把两个构成项互相相除"));
+        assertTrue(sys.contains("有多少家农商行"));
+        assertTrue(sys.contains("intent=THRESHOLD"));
+        assertTrue(sys.contains("必须保留 meets_condition"));
+        assertTrue(sys.contains("比另一个指标高多少"));
+        assertTrue(sys.contains("绝对差值"));
+        assertTrue(sys.contains("不要使用 calculation.type=RATIO"));
+    }
+
+    @Test
     void rejectsCatalogDumpInUserContent() {
         String catalog = "可填写值目录（只能从下列内容中选择）：\n- /metrics/*/bizName: [ZB001]";
         assertThrows(IllegalArgumentException.class,

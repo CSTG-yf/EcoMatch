@@ -481,9 +481,11 @@ class BankResultProjectorTest {
                 projection.getColumns());
         assertEquals("ZB003", projection.getRows().get(0).get("metric_code"));
         assertEquals("ZB004", projection.getRows().get(1).get("metric_code"));
-        assertEquals("ZB001", projection.getRows().get(2).get("metric_code"));
-        assertEquals(new BigDecimal("100.000000000000000"),
-                projection.getRows().get(2).get("ratio_percent"));
+        assertEquals(2, projection.getRows().size());
+        assertEquals(new BigDecimal("35.52"),
+                projection.getRows().get(0).get("ratio_percent"));
+        assertEquals(new BigDecimal("64.48"),
+                projection.getRows().get(1).get("ratio_percent"));
     }
 
     @Test

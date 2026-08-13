@@ -230,8 +230,8 @@ public class BankResultProjector {
 
     private Projection projectDepositStructureShare(Contract contract,
             List<Map<String, Object>> rows, BigDecimal total) {
-        // Gold M-31 order: corporate (ZB003), personal (ZB004), total (ZB001) + ratio_percent.
-        List<String> order = List.of("ZB003", "ZB004", "ZB001");
+        // The total metric is the denominator only; emit the two requested composition rows.
+        List<String> order = List.of("ZB003", "ZB004");
         Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             byCode.put(StringUtils.upperCase(String.valueOf(row.get("metric_code"))), row);
@@ -251,7 +251,7 @@ public class BankResultProjector {
             row.put("metric_value", metricValue);
             row.put("ratio_percent",
                     num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
-                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 2,
                                     RoundingMode.HALF_UP));
             out.add(row);
         }

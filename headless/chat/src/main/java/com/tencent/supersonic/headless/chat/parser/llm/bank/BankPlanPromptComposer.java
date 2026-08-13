@@ -104,6 +104,15 @@ public final class BankPlanPromptComposer {
                     - “收入结构”是权威目录定义的复合业务语义：必须同时选择中间业务收入（ZB007）和
                       净利息收入（ZB008）。它不是无代码的描述性类别；用户明确请求收入结构时，不得遗漏
                       任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
+                    - “存款中，对公和个人分别占比多少”是两个构成项分别除以存款总额，不是两个构成项
+                      互相相除。REQUIREMENTS 必须使用 intent=POINT_QUERY、answerFactTypes=["RATIO_VALUE"]，
+                      metricCodes 同时包含各项存款余额、对公存款余额和个人存款余额；分母必须是各项存款余额。
+                    - “有多少家农商行的某指标高于/低于全省均值”是逐机构阈值计数，必须使用
+                      intent=THRESHOLD、organizationCodes=[]、answerFactTypes=["COUNT"]，并同时包含精确的
+                      benchmark/COMPARE/PROVINCE_AVERAGE 过滤器和 metric_value 的 GT/LT 方向过滤器。
+                    - “某机构某日，一个指标比另一个指标高多少”询问同一时点两个基础指标的绝对差值，
+                      必须使用 intent=POINT_QUERY，metricCodes 按题干顺序保留两个指标，answerFactTypes
+                      使用 VALUE；不要使用 calculation.type=RATIO，也不要误判为跨时间的 CHANGE。
                     如果题干显式列出非空的封闭指标集合，
                     且每一项都能在目录中命中，同时机构和日期已明确，必须把集合中的全部指标写入 metricCodes
                     并 action=EXECUTE；不要因“主要经营指标”“盈利能力”等宽泛标题再次要求用户拆分。
@@ -256,6 +265,18 @@ public final class BankPlanPromptComposer {
                     13. 题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，PLAN 必须原样保留
                         startDate=endDate=该日期且 time.granularity=DAY；不得因为日期恰好是月末就改为 MONTH，
                         也不得截断成 YYYY-MM。只有用户明确询问按月分组时才允许 MONTH。
+                    14. “对公和个人分别占比”必须使用 intent=POINT_QUERY、calculation.type=DIRECT，metrics
+                        按各项存款余额、对公存款余额、个人存款余额排列，dimensions=["bank_organization"]，
+                        orderBy=[]、limit=null、output.orderSensitive=true。结果投影器会分别计算两个构成项占比；
+                        分母必须是各项存款余额，不要把两个构成项互相相除。
+                    15. “有多少家农商行的某指标高于/低于全省均值”必须使用 intent=THRESHOLD、
+                        calculation.type=DIRECT、organizations=[]、dimensions=["bank_organization"]，保留基准
+                        过滤器及对应 GT/LT 方向过滤器，output.columns 只写 ["bank_organization","ZB###"]，
+                        output.orderSensitive=false。编译结果必须保留 meets_condition，由评估器统计满足条件的机构数。
+                    16. “一个指标比另一个指标高多少”若比较的是同一机构同一日期的两个基础指标，必须使用
+                        intent=POINT_QUERY、calculation.type=DIRECT、comparison=NONE，metrics 按题干顺序保留
+                        两个指标，dimensions=["bank_organization"]，orderBy=[]、limit=null；其含义是绝对差值，
+                        不要使用 calculation.type=RATIO，也不要填写比例分母。
 
                     ════════════════════════════════
                     严格合同
@@ -299,7 +320,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v42-quarterly-trend-contract";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v43-composition-threshold-difference";
 
     private BankPlanPromptComposer() {}
 

@@ -821,6 +821,75 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileProvinceAverageOrganizationCountAsThresholdRows() {
+        BankQueryPlan plan = thresholdPlan();
+        plan.setIntent(BankIntentType.THRESHOLD);
+        plan.setMetrics(List.of(metric("ZB013")));
+        plan.setOrganizations(List.of());
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setFilters(List.of(provinceAverageBenchmark(), BankQueryPlan.Filter.builder()
+                .field("metric_value").operator("LT").value("PROVINCE_AVERAGE").build()));
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB013"));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 12, 31))
+                .endDate(LocalDate.of(2025, 12, 31)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013"))
+                .requiredStartDate(LocalDate.of(2025, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 12, 31))
+                .requiredFilters(List.of(
+                        new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
+                                "PROVINCE_AVERAGE"),
+                        new SemanticIntentHints.RequiredFilter("metric_value", "LT",
+                                "PROVINCE_AVERAGE")))
+                .maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertTrue(compiled.getS2sql().contains("CASE WHEN metric_value < provincial_average"));
+        assertTrue(compiled.getS2sql().contains("AS meets_condition"));
+        assertEquals(List.of("bank_organization", "metric_value", "provincial_average",
+                "meets_condition"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.PROVINCIAL_AVERAGE_THRESHOLD,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
+    void shouldCompileRateHowMuchHigherAsPlainMultiMetricPointRows() {
+        BankQueryPlan plan = thresholdPlan();
+        plan.setIntent(BankIntentType.POINT_QUERY);
+        plan.setMetrics(List.of(metric("ZB017"), metric("ZB013")));
+        plan.setOrganizations(List.of(organization("ORG011")));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.setFilters(List.of());
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB017", "ZB013"));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 4, 30))
+                .endDate(LocalDate.of(2026, 4, 30)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013", "ZB017"))
+                .requiredOrganizationCodes(Set.of("ORG011"))
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30)).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.STRUCT, compiled.getRoute());
+        assertEquals(List.of("bank_organization"), compiled.getStructReq().getGroups());
+        assertEquals(List.of("ZB017", "ZB013"), compiled.getStructReq().getAggregators().stream()
+                .map(aggregator -> aggregator.getColumn()).toList());
+        assertEquals(BankResultProjector.ProjectionType.LONG_FORM,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldRejectDaysAboveProvinceAverageWithoutAnOrganization() {
         BankQueryPlan plan = daysAboveProvinceAveragePlan();
         plan.setOrganizations(List.of());
@@ -1143,7 +1212,9 @@ class BankQueryPlanCompilerTest {
         schema.setDataSetName("银行指标数据集");
         schema.setMetrics(List.of(
                 SchemaElement.builder().name("各项存款余额").bizName("ZB001").defaultAgg("SUM").build(),
-                SchemaElement.builder().name("各项贷款余额").bizName("ZB002").defaultAgg("SUM").build()));
+                SchemaElement.builder().name("各项贷款余额").bizName("ZB002").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("不良贷款率").bizName("ZB013").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("逾期贷款率").bizName("ZB017").defaultAgg("SUM").build()));
         schema.setDimensions(
                 List.of(SchemaElement.builder().name("机构").bizName("bank_organization").build()));
         schema.setPartitionTime(
