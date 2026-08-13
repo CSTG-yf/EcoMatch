@@ -5,6 +5,8 @@ import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.headless.chat.intent.BankFinancialIntentRecognizer;
+import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.chat.parser.llm.OnePassSCSqlGenStrategy;
 import com.tencent.supersonic.headless.chat.parser.llm.SqlGenStrategy;
 import com.tencent.supersonic.headless.chat.parser.llm.SqlGenStrategyFactory;
@@ -16,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,8 +29,9 @@ import java.util.Map;
  *
  * <p>
  * The first model response is a requirement contract, the second is an executable semantic plan.
- * This class intentionally contains no question keyword recognizer, business-code mapper,
- * deterministic plan template, or post-generation plan rewrite.
+ * This class never creates or rewrites a plan from question rules. The catalog recognizer is used
+ * only to explain why a model-generated CLARIFY response failed validation; the model must still
+ * return the complete requirements contract and plan itself.
  */
 @Service
 public class BankPlanGenStrategy extends SqlGenStrategy {
@@ -50,6 +54,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private final BankQueryPlanResponseParser responseParser = new BankQueryPlanResponseParser();
     private final BankPlanCandidateRanker candidateRanker = new BankPlanCandidateRanker();
     private final BankPlanLlmPrefixCache prefixCache = new BankPlanLlmPrefixCache();
+    private final BankFinancialIntentRecognizer clarificationEvidenceRecognizer =
+            new BankFinancialIntentRecognizer();
 
     public BankPlanGenStrategy() {
         ChatAppManager.register(APP_KEY,
@@ -205,7 +211,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     clarificationRechecks++;
                     lastError = new BankQueryPlanParseException(
                             BankQueryPlanParseException.Reason.VALIDATION_FAILED,
-                            CLARIFICATION_RECHECK_MESSAGE);
+                            clarificationRecheckMessage(llmReq.getQueryText()));
                     repairReasons.add("CLARIFICATION_RECHECK");
                     continue;
                 }
@@ -223,6 +229,40 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                 BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                                 "model did not return an executable requirements contract")
                         : lastError);
+    }
+
+    private String clarificationRecheckMessage(String queryText) {
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        List<String> slots = new ArrayList<>();
+        if (!evidence.getOrganizations().isEmpty()) {
+            slots.add("organizationCodes=" + evidence.getOrganizations().stream()
+                    .map(org -> org.getCode() + "(" + org.getName() + ")").toList());
+        }
+        if (!evidence.getMetrics().isEmpty()) {
+            slots.add("metricCodes=" + evidence.getMetrics().stream()
+                    .map(metric -> metric.getCode() + "(" + metric.getName() + ")").toList());
+        }
+        if (!evidence.getDerivedMetrics().isEmpty()) {
+            slots.add("derivedMetrics=" + evidence.getDerivedMetrics().stream()
+                    .map(metric -> metric.getCode() + "(" + metric.getName() + "="
+                            + metric.getNumerator() + "/" + metric.getDenominator() + ")")
+                    .toList());
+        }
+        if (evidence.getTime() != null && evidence.getTime().getStartDate() != null
+                && evidence.getTime().getEndDate() != null) {
+            slots.add("time=" + evidence.getTime().getStartDate() + ".."
+                    + evidence.getTime().getEndDate() + " granularity="
+                    + evidence.getTime().getGranularity());
+        }
+        if (slots.isEmpty()) {
+            return CLARIFICATION_RECHECK_MESSAGE;
+        }
+        return CLARIFICATION_RECHECK_MESSAGE
+                + " Deterministic catalog validation found these explicit slots in the original "
+                + "question: " + String.join("; ", slots) + ". Treat this only as validation "
+                + "feedback: regenerate the entire requirements JSON yourself, include all listed "
+                + "base operands for each derived metric, and do not return CLARIFY for these slots.";
     }
 
     private PlanRepairAttempt repairPlan(LLMReq llmReq, String requirementsJson,

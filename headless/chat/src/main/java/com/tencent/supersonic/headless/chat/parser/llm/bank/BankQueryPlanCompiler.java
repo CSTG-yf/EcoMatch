@@ -138,8 +138,8 @@ public class BankQueryPlanCompiler {
                 if (plan.getIntent() == BankIntentType.AGGREGATION) {
                     return CompiledQuery.s2sql(
                             templateFactory.compileProvinceAverageAggregation(templateContext),
-                            aggregationSummaryOutputColumns(metrics),
-                            aggregationSummaryResultContract(plan, metrics, index));
+                            multiMetricProvinceAverageOutputColumns(metrics),
+                            multiMetricProvinceAverageResultContract(plan, metrics, index));
                 }
                 throw new BankPlanCompilationException(
                         BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
@@ -176,14 +176,30 @@ public class BankQueryPlanCompiler {
             case CHANGE -> {
                 boolean monthAndYear =
                         plan.getTime().getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY;
+                List<String> changeDimensions = new ArrayList<>(templateContext.dimensions());
+                if (!monthAndYear && metrics.size() > 1 && !plan.getOrganizations().isEmpty()
+                        && !changeDimensions.contains(ORGANIZATION_DIMENSION)) {
+                    // Long-form multi-metric projection requires an organization key even for a
+                    // single selected bank. Keeping it in SELECT/GROUP BY also makes the physical
+                    // translator retain the dimension used by the organization predicate.
+                    changeDimensions.add(0, ORGANIZATION_DIMENSION);
+                }
+                BankS2SqlTemplateFactory.TemplateContext changeContext =
+                        new BankS2SqlTemplateFactory.TemplateContext(templateContext.plan(),
+                                templateContext.dataSetName(), templateContext.metrics(),
+                                List.copyOf(changeDimensions), templateContext.dateField(),
+                                templateContext.dimensionFilters(), templateContext.metricFilters());
                 yield CompiledQuery.s2sql(
-                        monthAndYear ? templateFactory.compileMonthAndYearChange(templateContext)
-                                : templateFactory.compileChange(templateContext),
+                        monthAndYear ? templateFactory.compileMonthAndYearChange(changeContext)
+                                : templateFactory.compileChange(changeContext),
                         metrics.size() == 1
                                 ? calculatedOutputColumns(dimensions, "current_value",
                                         "baseline_value", "absolute_change", "percent_change")
-                                : calculatedOutputColumns(dimensions, "metric_code", "current_value",
-                                        "baseline_value", "absolute_change", "percent_change"),
+                                : Stream.concat(changeDimensions.stream(),
+                                        Stream.concat(Stream.of(dateField(index.partitionTime())),
+                                                java.util.stream.IntStream.range(0, metrics.size())
+                                                        .mapToObj(i -> "metric_value_" + i)))
+                                        .toList(),
                         monthAndYear ? BankResultProjector.Contract.builder()
                                 .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE).build()
                                 // Single-org scalar change keeps raw columns; multi-org/metric
@@ -262,10 +278,11 @@ public class BankQueryPlanCompiler {
             List<ResolvedMetric> metrics, List<ResolvedDimension> dimensions,
             List<Filter> metricFilters) {
         // size 0 = province-wide annual extrema (all institutions); size 1 = single-org summary.
-        return plan.getIntent() == BankIntentType.AGGREGATION
-                && plan.getOrganizations().size() <= 1
-                && !metrics.isEmpty() && metrics.stream().allMatch(metric -> metric.planMetric()
-                        .getAggregation() == BankQueryPlan.Aggregation.AVG)
+        return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() <= 1
+                && !metrics.isEmpty()
+                && metrics.stream()
+                        .allMatch(metric -> metric.planMetric()
+                                .getAggregation() == BankQueryPlan.Aggregation.AVG)
                 && metricFilters.isEmpty() && dimensions.stream().map(ResolvedDimension::identifier)
                         .toList().equals(List.of(ORGANIZATION_DIMENSION));
     }
@@ -325,14 +342,21 @@ public class BankQueryPlanCompiler {
                 }
             }
         }
-        List<BankResultProjector.MetricBinding> metricBindings = plan.getMetrics().stream()
-                .map(metric -> BankResultProjector.MetricBinding.builder()
-                        .semanticColumn(metric.getBizName())
-                        .metricCode(StringUtils.upperCase(metric.getBizName())).build())
-                .toList();
+        List<BankResultProjector.MetricBinding> metricBindings = new ArrayList<>();
+        for (int metricIndex = 0; metricIndex < plan.getMetrics().size(); metricIndex++) {
+            BankQueryPlan.Metric metric = plan.getMetrics().get(metricIndex);
+            metricBindings.add(BankResultProjector.MetricBinding.builder()
+                    .semanticColumn("metric_value_" + metricIndex)
+                    .metricCode(StringUtils.upperCase(metric.getBizName())).build());
+        }
         return BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
                 .organizationColumn(identifier(organization)).organizationNames(organizationNames)
+                .timeColumn(identifier(index.partitionTime()))
+                .selectedDates(List.of(plan.getTime().getStartDate().toString(),
+                        plan.getTime().getEndDate().toString(),
+                        plan.getTime().getBaselineStartDate().toString(),
+                        plan.getTime().getBaselineEndDate().toString()))
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
@@ -356,6 +380,8 @@ public class BankQueryPlanCompiler {
                 .map(metric -> BankResultProjector.MetricBinding.builder()
                         .semanticColumn("metric_value")
                         .metricCode(metricCode(metric.schemaElement())).build())
+                .sorted(java.util.Comparator
+                        .comparing(BankResultProjector.MetricBinding::getMetricCode))
                 .toList();
         return provinceAverageContract(plan, index,
                 BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE, bindings);
@@ -406,17 +432,18 @@ public class BankQueryPlanCompiler {
                             .metricCode(metricCode(metrics.get(0).schemaElement())).build()));
         }
         return provinceAverageContract(plan, index, type,
-                metrics.stream().map(metric -> BankResultProjector.MetricBinding.builder()
-                        .semanticColumn("aggregate_value")
-                        .metricCode(metricCode(metric.schemaElement())).build())
+                metrics.stream()
+                        .map(metric -> BankResultProjector.MetricBinding
+                                .builder().semanticColumn("aggregate_value")
+                                .metricCode(metricCode(metric.schemaElement())).build())
                         .sorted(java.util.Comparator
                                 .comparing(BankResultProjector.MetricBinding::getMetricCode))
                         .toList());
     }
 
     /**
-     * Province-wide annual "单日最高/最低在哪家" uses empty organizations + limit 2 so the projector
-     * can collapse per-org min/max into the two extreme orgs.
+     * Province-wide annual "单日最高/最低在哪家" uses empty organizations + limit 2 so the projector can
+     * collapse per-org min/max into the two extreme orgs.
      */
     private boolean isDailyExtremaOrgPlan(BankQueryPlan plan, List<ResolvedMetric> metrics) {
         return plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().isEmpty()
@@ -432,10 +459,15 @@ public class BankQueryPlanCompiler {
                         "max_value", "observation_count");
     }
 
+    private List<String> multiMetricProvinceAverageOutputColumns(List<ResolvedMetric> metrics) {
+        return List.of(ORGANIZATION_DIMENSION, "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count");
+    }
+
     /**
-     * The auditable projection contract for the compiler-owned derived-metric ranking template.
-     * The SQL already ranks over the full organization population, so the projector must preserve
-     * the source rank_position verbatim instead of recomputing ranks from the returned rows.
+     * The auditable projection contract for the compiler-owned derived-metric ranking template. The
+     * SQL already ranks over the full organization population, so the projector must preserve the
+     * source rank_position verbatim instead of recomputing ranks from the returned rows.
      */
     private BankResultProjector.Contract derivedRankingResultContract(BankQueryPlan plan,
             SchemaIndex index) {
@@ -581,11 +613,10 @@ public class BankQueryPlanCompiler {
                         .semanticColumn(metric.identifier())
                         .metricCode(metricCode(metric.schemaElement())).build());
         List<BankResultProjector.MetricBinding> metricBindings =
-                plan.getIntent() == BankIntentType.RANKING
-                        ? bindingStream.sorted(java.util.Comparator
+                plan.getIntent() == BankIntentType.RANKING ? bindingStream
+                        .sorted(java.util.Comparator
                                 .comparing(BankResultProjector.MetricBinding::getMetricCode))
-                                .toList()
-                        : bindingStream.toList();
+                        .toList() : bindingStream.toList();
         Map<String, String> organizationNames = new LinkedHashMap<>();
         if (organization.getSchemaValueMaps() != null) {
             for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
@@ -698,9 +729,8 @@ public class BankQueryPlanCompiler {
 
     private String metricCode(SchemaElement metric) {
         String registryCode = BankSemanticRegistry.metrics().values().stream()
-                .filter(definition -> matchesRegistryMetric(metric, definition)).map(
-                        BankSemanticRegistry.MetricDefinition::code)
-                .findFirst().orElse(null);
+                .filter(definition -> matchesRegistryMetric(metric, definition))
+                .map(BankSemanticRegistry.MetricDefinition::code).findFirst().orElse(null);
         if (registryCode != null) {
             return registryCode;
         }
@@ -717,8 +747,9 @@ public class BankQueryPlanCompiler {
 
     private boolean matchesRegistryMetric(SchemaElement element,
             BankSemanticRegistry.MetricDefinition definition) {
-        return matchesIdentifier(element, definition.code()) || matchesIdentifier(element, definition.name())
-                || definition.aliases().stream().anyMatch(alias -> matchesIdentifier(element, alias));
+        return matchesIdentifier(element, definition.code())
+                || matchesIdentifier(element, definition.name()) || definition.aliases().stream()
+                        .anyMatch(alias -> matchesIdentifier(element, alias));
     }
 
     private boolean matchesIdentifier(SchemaElement element, String value) {
@@ -973,8 +1004,9 @@ public class BankQueryPlanCompiler {
     private String selectedIdentifier(String requested, List<ResolvedMetric> metrics,
             List<ResolvedDimension> dimensions) {
         return Stream.concat(
-                metrics.stream().filter(metric -> metric.planMetric().getBizName().equals(requested)
-                        || matches(metric.schemaElement(), requested))
+                metrics.stream()
+                        .filter(metric -> metric.planMetric().getBizName().equals(requested)
+                                || matches(metric.schemaElement(), requested))
                         .map(ResolvedMetric::identifier),
                 dimensions.stream()
                         .filter(dimension -> matches(dimension.schemaElement(), requested))
@@ -1095,7 +1127,8 @@ public class BankQueryPlanCompiler {
             });
         }
 
-        private static void registerBankDimensionIdentifiers(Map<String, SchemaElement> dimensions) {
+        private static void registerBankDimensionIdentifiers(
+                Map<String, SchemaElement> dimensions) {
             registerDimensionIdentifier(dimensions, "bank_organization", "机构");
             registerDimensionIdentifier(dimensions, "bank_data_date", "数据日期");
         }

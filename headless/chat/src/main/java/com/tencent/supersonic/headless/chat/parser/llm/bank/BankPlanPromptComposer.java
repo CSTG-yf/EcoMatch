@@ -70,6 +70,17 @@ public final class BankPlanPromptComposer {
                     并且机构范围可以从题干直接确定（例如“全省”“各家银行”表示 organizationCodes=[]），
                     必须 action=EXECUTE；不要因为“全年”、跨年、相对当前日期、字母城市占位名或“哪家”而 action=CLARIFY。
                     只有指标、机构或时间确实无法从权威目录和题干唯一确定时，才允许 action=CLARIFY。
+                    “某机构在YYYY-MM-DD的存贷比是多少”已经明确给出唯一机构、完整日期和目录派生指标，
+                    必须 action=EXECUTE：metricCodes=["ZB002","ZB001"]，derivedMetrics 只填写目录中的
+                    DERIVED_ZB002_DIV_ZB001，time 使用该日且 granularity=DAY，answerFactTypes=["RATIO_VALUE"]。
+                    这类问题禁止要求用户再次提供银行、指标或时间，也禁止返回通用澄清文案。
+                    最高优先级执行合同：用户显式枚举了非空的封闭指标清单，并同时给出唯一机构和明确
+                    日期/日期范围时，必须将清单逐项映射为 metricCodes/derivedMetrics 并 action=EXECUTE。
+                    标题、分类名称、排名或表现判定说明只能约束该封闭清单的组织和输出方式，不能成为
+                    CLARIFY 的理由，也不能触发目录指标扩展。每个输出代码必须能回指清单中的原始短语，
+                    或是清单中派生指标明确声明的分子/分母；否则必须删除。
+                    对“全年/期间均值排名”“平均值排名”，底层事实按日存储，time.granularity 必须为 DAY，
+                    以完整日期范围计算 AVG；不要使用 MONTH 产生 yyyy-MM 字符串日期条件。
                     下面是需求阶段的语义判定优先规则；它们要求你完成自然语言理解，不是让后端替你猜测：
                     - “从某年某季度末到另一季度末的逐季变化/各季度末数值”已经给出起止范围。
                       将每个季度解析为对应季度末日期，并直接 action=EXECUTE；不得要求用户重新提供起止日期。
@@ -79,14 +90,30 @@ public final class BankPlanPromptComposer {
                       REQUIREMENTS 的 intent 必须为 CHANGE；“评估”“分析”“结构”等业务标题不改变这一执行意图。
                     - “某机构某指标全年/期间日均值，以及最高日和最低日”已经给出单机构、指标和期间。
                       直接 action=EXECUTE，intent=AGGREGATION；不得把“日均值”理解成缺少指标或时间。
+                    - “某机构某指标在某日与全省均值比，是高还是低/差多少”已经给出唯一机构、指标、日期和
+                      比较口径，必须 action=EXECUTE，intent=AGGREGATION，并填写 benchmark=COMPARE/PROVINCE_AVERAGE；
+                      不得用泛化澄清替代完整的省均值比较计划。
+                    - “上季度末/上季度末相比”必须按自然季度末解析：当前日期所在季度的上一季度末，
+                      例如当前期 2025-10-31 的上季度末是 2025-09-30，不是简单减三个月得到 2025-07-31。
+                      该语义使用 intent=CHANGE、comparison=PERIOD_OVER_PERIOD，并将 baselineStartDate 和
+                      baselineEndDate 都设为该自然季度末。
                     - “收入结构”是权威目录定义的复合业务语义：必须同时选择中间业务收入（ZB007）和
                       净利息收入（ZB008）。它不是无代码的描述性类别；用户明确请求收入结构时，不得遗漏
                       任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
-                    如果题干显式列出“待评价指标集合”“指标清单”或“包含 A、B、C”等封闭指标集合，
+                    如果题干显式列出非空的封闭指标集合，
                     且每一项都能在目录中命中，同时机构和日期已明确，必须把集合中的全部指标写入 metricCodes
                     并 action=EXECUTE；不要因“主要经营指标”“盈利能力”等宽泛标题再次要求用户拆分。
-                    “维度与指标映射：维度=A、B；另一维度=C”也是封闭指标集合：metricCodes 只能是映射右侧
-                    所列指标（及其中明确的目录派生指标），即使同一句前面出现“各项指标”也不得扩展到全目录。
+                    分类标签与其右侧指标列表构成封闭映射时，metricCodes 只能来自右侧所列指标
+                    （及其中明确的目录派生指标），即使同一句出现宽泛标题也不得扩展到全目录。
+                    当映射右侧包含派生指标（例如“存贷比”）时，只添加该派生指标所需的分子、分母和派生项；
+                    不得因为“各项指标”或维度名称擅自加入映射之外的目录指标。
+                    封闭映射解析算法（优先级高于任何分类常识）：只读取每个分类标签右侧明确列出的
+                    指标短语；逐一在权威目录中映射这些短语，得到的
+                    直接 ZB### 代码并集就是唯一 metricCodes 集合。若右侧短语命中目录派生指标，metricCodes
+                    还必须加入其明确的分子、分母，derivedMetrics 加入该派生项。左侧的“规模/资产质量/盈利能力”
+                    只是分组标签，没有任何默认指标含义；“各项指标”也只能指右侧集合。输出前逐项自检：
+                    每个 metricCodes 都能指出对应的右侧短语或派生项依赖，找不到对应短语的代码必须删除，
+                    不得按维度、业务常识或“主要指标”补全目录。
                     宽泛标题旁若同时出现了目录未提供、且无法映射为任何目录指标的描述性类别，
                     只执行其中明确且可映射的目录指标，不得发明代码，也不得因该描述性类别丢失而 action=CLARIFY。
                     下面两类是可直接执行的通用语义，不需要用户拆分问题：
@@ -147,7 +174,12 @@ public final class BankPlanPromptComposer {
                        当问题还要求“高于”或“低于”全省均值时，才可以在该对象后额外加入方向对象：
                        {"field":"metric_value","operator":"GT 或 GTE 或 LT 或 LTE","value":"PROVINCE_AVERAGE","values":[]}
                        不得把 COMPARE 或 benchmark 写到 metric_value 或任何其他 field。
-                    3. 使用目录中的派生指标时，metrics 必须同时列出分子和分母，derivedMetrics 必须逐字段照目录填写。
+                    3. REQUIREMENTS 使用目录中的派生指标时，metricCodes 必须同时列出分子和分母，
+                       derivedMetrics 必须逐字段照目录填写。PLAN 对普通派生指标仍遵循相同规则；但“某机构某日
+                       的存贷比/两个基础指标之比”属于确定性点值比率例外：PLAN 的 metrics 必须按“分子、分母”
+                       顺序列出两个基础指标，derivedMetrics=[]，calculation.type=RATIO，calculation.baseline
+                       必须是分母代码，dimensions=[]、orderBy=[]、limit=null，output.columns 只列这两个基础指标。
+                       不得把点值比率写成 DIRECT，也不得在 PLAN 重复派生项；编译器会计算 RATIO_VALUE。
                        例如目录中的存贷比对象只能写为：
                        {"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}
                        不得用中文名称、别名或自行拼造派生指标代码。
@@ -159,6 +191,8 @@ public final class BankPlanPromptComposer {
                        "filters":[],
                        "calculation":{"type":"DIRECT","baseline":null}
                        并在 metrics 写出全部直接指标、在 derivedMetrics 写出目录中的派生指标；organizations 保留被评价机构。
+                       “某机构在全省13家里排第几”必须 organizations 保留该机构、limit=13，orderBy 使用该指标
+                       的目录排名方向，output.columns=["bank_organization","ZB###"]；不得在修复时删除目标机构。
                     5. “全年/期间均值排名”“平均值排名”“日均值排名”表示先按机构汇总整个时间范围的平均值再排名：
                        metrics 中直接指标的 aggregation 必须为 AVG，dimensions 只能是 ["bank_organization"]，
                        绝不可把 "bank_data_date" 放进 dimensions（否则会变成逐日明细而不是机构均值）。
@@ -203,6 +237,13 @@ public final class BankPlanPromptComposer {
                        orderBy=[]、limit=null，output.columns 只写 ["bank_organization","ZB###"]；
                        编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
                        不得先对全年求和或平均后只比较一次，也不得用 COMPARISON_VALUE 代替逐日计数。
+                    11. “某机构某指标在明确日期与全省均值比较”属于已确定的 AGGREGATION 省均值合同：
+                        使用 benchmark/COMPARE/PROVINCE_AVERAGE，保留单机构、单指标和日期；不得输出 CLARIFY。
+                    12. “上季度末”是自然季度边界，不是固定回退三个月：2025-10-31→2025-09-30、
+                        2025-07-31→2025-06-30、2025-04-30→2025-03-31、2025-01-31→2024-12-31。
+                    13. 题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，PLAN 必须原样保留
+                        startDate=endDate=该日期且 time.granularity=DAY；不得因为日期恰好是月末就改为 MONTH，
+                        也不得截断成 YYYY-MM。只有用户明确询问按月分组时才允许 MONTH。
 
                     ════════════════════════════════
                     严格合同
@@ -223,8 +264,10 @@ public final class BankPlanPromptComposer {
                        不得再以“请明确具体指标、机构和时间范围”之类的口径确认替代执行。
                        “主要经营指标”“相关指标”等泛称在没有封闭清单时不是全量目录；只有此时确实无法从问题确定具体指标集合，
                        才必须 action=CLARIFY，不得用全目录代替理解结果。
-                       如果题干同时给出“维度与指标映射”，映射右侧的指标即为封闭清单；“各项指标”只修饰
-                       该映射中的各项，绝不表示查询 21 个目录指标。
+                       如果题干同时给出分类标签和对应指标清单，右侧指标即为封闭清单；宽泛标题只修饰
+                       该清单中的各项，绝不表示查询 21 个目录指标。最终检查必须满足：metricCodes
+                       的每个代码都可回指“=”右侧的一个短语或右侧派生指标的分子/分母；不能回指的额外代码
+                       属于合同错误，必须移除后再输出。
                     3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
                        对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
                        基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
@@ -244,7 +287,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v34-days-above-province-average";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v40-ranking-ratio-date-contract";
 
     private BankPlanPromptComposer() {}
 
@@ -338,7 +381,17 @@ public final class BankPlanPromptComposer {
                   “各季度末数值”或“哪个季度最高”再要求用户补充数据范围或具体指标。
                 - 增幅排名前三表示 intent=CHANGE、comparison=PERIOD_OVER_PERIOD、requiredLimit=3，并包含 CHANGE_RATE 事实类型。
                 - 目录别名：各项存款余额/存款余额 -> ZB001；各项贷款余额/贷款余额 -> ZB002；净利润 -> ZB011。
+                - “某机构在YYYY-MM-DD的存贷比是多少”槽位已经完整：必须 action=EXECUTE，直接指标为
+                  ZB002、ZB001，派生指标为 DERIVED_ZB002_DIV_ZB001，事实类型为 RATIO_VALUE；不得再次澄清。
                 - 某机构全年日均值、最高日、最低日表示该机构和指标的 AGGREGATION 查询，覆盖该年度完整日期范围。
+                - “某机构某指标在明确日期和全省均值比，是高还是低/差多少”已经具备完整槽位，必须输出
+                  action=EXECUTE、intent=AGGREGATION、benchmark=COMPARE/PROVINCE_AVERAGE；不得再次要求
+                  用户补充指标、日期或数据来源。
+                - “上季度末”按自然季度末解析：2025-10-31 的上季度末是 2025-09-30，不能写成 2025-07-31。
+                - 用户显式枚举非空目录指标并给出机构和日期时，这是可直接执行的封闭集合；必须逐项映射
+                  并 action=EXECUTE。分类标题、排名、表现判定或排序方向只是输出约束，不能触发 CLARIFY。
+                  只输出该集合的直接指标及其明确派生指标的分子、分母，不得加入清单之外的任何 ZB###。
+                - 全年/期间均值排名必须使用完整日期范围与 time.granularity=DAY；底层是日事实，禁止 MONTH 或 yyyy-MM 日期条件。
                 若指标、机构或时间确实无法从题干和权威目录唯一确定，只能保留 CLARIFY；否则输出 action=EXECUTE 的完整 JSON。
                 </clarification_recheck>
                 """;

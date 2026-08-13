@@ -10,6 +10,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -633,11 +634,14 @@ public class BankResultProjector {
 
     private Projection projectMultiMetricChange(Contract contract,
             List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> inputRows = sourceRows == null ? List.of() : sourceRows;
+        if (!inputRows.isEmpty() && !value(inputRows.get(0), "current_value").found()) {
+            return projectWideMultiMetricChange(contract, inputRows);
+        }
         String fallbackMetricCode = contract.getMetrics().isEmpty() ? null
                 : contract.getMetrics().get(0).getMetricCode();
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
-                : sourceRows) {
+        for (Map<String, Object> sourceRow : inputRows) {
             String organizationCode = resolveOrganizationCode(contract, sourceRow);
             ValueLookup metricCode = value(sourceRow, "metric_code");
             ValueLookup current = value(sourceRow, "current_value");
@@ -694,6 +698,100 @@ public class BankResultProjector {
             });
         }
         return Projection.applied(columns(contract), rows);
+    }
+
+    private Projection projectWideMultiMetricChange(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getSelectedDates() == null
+                || contract.getSelectedDates().size() != 2
+                        && contract.getSelectedDates().size() != 4
+                || StringUtils.isBlank(contract.getTimeColumn()) || contract.getMetrics() == null
+                || contract.getMetrics().isEmpty()) {
+            return Projection.notApplied();
+        }
+        List<String> dates = contract.getSelectedDates();
+        LocalDate currentStart = parseDate(dates.get(0));
+        LocalDate currentEnd = parseDate(dates.size() == 2 ? dates.get(0) : dates.get(1));
+        LocalDate baselineStart = parseDate(dates.size() == 2 ? dates.get(1) : dates.get(2));
+        LocalDate baselineEnd = parseDate(dates.size() == 2 ? dates.get(1) : dates.get(3));
+        if (currentStart == null || currentEnd == null || baselineStart == null
+                || baselineEnd == null) {
+            return Projection.notApplied();
+        }
+        Map<String, Map<String, BigDecimal>> currentByOrg = new LinkedHashMap<>();
+        Map<String, Map<String, BigDecimal>> baselineByOrg = new LinkedHashMap<>();
+        for (Map<String, Object> sourceRow : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup date = value(sourceRow, contract.getTimeColumn());
+            if (StringUtils.isBlank(organizationCode) || !date.found() || date.value() == null) {
+                return Projection.notApplied();
+            }
+            LocalDate observationDate = parseDate(String.valueOf(date.value()));
+            if (observationDate == null) {
+                return Projection.notApplied();
+            }
+            Map<String, Map<String, BigDecimal>> target = null;
+            if (!observationDate.isBefore(currentStart) && !observationDate.isAfter(currentEnd)) {
+                target = currentByOrg;
+            } else if (!observationDate.isBefore(baselineStart)
+                    && !observationDate.isAfter(baselineEnd)) {
+                target = baselineByOrg;
+            }
+            if (target == null) {
+                continue;
+            }
+            Map<String, BigDecimal> metricValues =
+                    target.computeIfAbsent(organizationCode, ignored -> new LinkedHashMap<>());
+            for (MetricBinding metric : contract.getMetrics()) {
+                ValueLookup sourceValue = value(sourceRow, metric.getSemanticColumn());
+                BigDecimal numeric = sourceValue.found() ? decimal(sourceValue.value()) : null;
+                if (numeric == null) {
+                    return Projection.notApplied();
+                }
+                metricValues.merge(metric.getMetricCode(), numeric, BigDecimal::add);
+            }
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (String organizationCode : currentByOrg.keySet()) {
+            Map<String, BigDecimal> currentRow = currentByOrg.get(organizationCode);
+            Map<String, BigDecimal> baselineRow = baselineByOrg.get(organizationCode);
+            if (baselineRow == null) {
+                return Projection.notApplied();
+            }
+            for (MetricBinding metric : contract.getMetrics()) {
+                BigDecimal currentNumeric = currentRow.get(metric.getMetricCode());
+                BigDecimal baselineNumeric = baselineRow.get(metric.getMetricCode());
+                if (currentNumeric == null || baselineNumeric == null) {
+                    return Projection.notApplied();
+                }
+                BigDecimal change = currentNumeric.subtract(baselineNumeric);
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("org_code", organizationCode);
+                row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                        organizationCode));
+                row.put("metric_code", metric.getMetricCode());
+                row.put("current_value", currentNumeric);
+                row.put("baseline_value", baselineNumeric);
+                row.put("absolute_change", change);
+                row.put("percent_change",
+                        baselineNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
+                                : change.multiply(BigDecimal.valueOf(100)).divide(baselineNumeric,
+                                        15, RoundingMode.HALF_UP));
+                rows.add(row);
+            }
+        }
+        rows.sort(Comparator
+                .comparing((Map<String, Object> row) -> String.valueOf(row.get("metric_code")))
+                .thenComparing(row -> String.valueOf(row.get("org_code"))));
+        return Projection.applied(columns(contract), rows);
+    }
+
+    private LocalDate parseDate(String value) {
+        try {
+            return LocalDate.parse(value);
+        } catch (RuntimeException exception) {
+            return null;
+        }
     }
 
     /**

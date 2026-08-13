@@ -67,8 +67,7 @@ public class BankQueryPlanValidator {
 
     private void validateAction(BankQueryPlan plan, List<ValidationError> errors) {
         if (plan.getAction() != BankQueryPlan.PlanAction.EXECUTE) {
-            errors.add(error("PLAN_ACTION_REQUIRED",
-                    "execution plans must set action to EXECUTE"));
+            errors.add(error("PLAN_ACTION_REQUIRED", "execution plans must set action to EXECUTE"));
         }
     }
 
@@ -83,9 +82,9 @@ public class BankQueryPlanValidator {
     private Stream<String> strings(BankQueryPlan plan) {
         Stream<String> metrics = safe(plan.getMetrics())
                 .flatMap(metric -> Stream.of(metric.getBizName(), metric.getAlias()));
-        Stream<String> derivedMetrics = safe(plan.getDerivedMetrics()).flatMap(
-                derived -> Stream.of(derived.getMetricCode(), derived.getNumerator(),
-                        derived.getDenominator(), derived.getName()));
+        Stream<String> derivedMetrics =
+                safe(plan.getDerivedMetrics()).flatMap(derived -> Stream.of(derived.getMetricCode(),
+                        derived.getNumerator(), derived.getDenominator(), derived.getName()));
         Stream<String> organizations = safe(plan.getOrganizations()).flatMap(
                 organization -> Stream.of(organization.getCode(), organization.getBizName()));
         Stream<String> filters = safe(plan.getFilters()).flatMap(filter -> Stream.concat(
@@ -94,10 +93,8 @@ public class BankQueryPlanValidator {
         Stream<String> orderBy = safe(plan.getOrderBy()).map(BankQueryPlan.OrderBy::getField);
         Stream<String> output =
                 plan.getOutput() == null ? Stream.empty() : safe(plan.getOutput().getColumns());
-        return Stream
-                .of(metrics, derivedMetrics, safe(plan.getDimensions()), organizations, filters,
-                        orderBy, output)
-                .flatMap(stream -> stream);
+        return Stream.of(metrics, derivedMetrics, safe(plan.getDimensions()), organizations,
+                filters, orderBy, output).flatMap(stream -> stream);
     }
 
     private void validateIntent(BankQueryPlan plan, SemanticIntentHints hints,
@@ -165,7 +162,8 @@ public class BankQueryPlanValidator {
 
     private boolean requiredMetricsIntersect(Collection<String> planMetrics,
             Collection<String> required) {
-        if (required == null || required.isEmpty() || planMetrics == null || planMetrics.isEmpty()) {
+        if (required == null || required.isEmpty() || planMetrics == null
+                || planMetrics.isEmpty()) {
             return true;
         }
         for (String planMetric : planMetrics) {
@@ -275,12 +273,10 @@ public class BankQueryPlanValidator {
             errors.add(error("TIME_COMPARISON_MISMATCH",
                     "plan must preserve the model requirements time comparison"));
         }
-        if ((hints.getRequiredBaselineStartDate() != null
-                && !Objects.equals(hints.getRequiredBaselineStartDate(),
-                        time.getBaselineStartDate()))
-                || (hints.getRequiredBaselineEndDate() != null
-                        && !Objects.equals(hints.getRequiredBaselineEndDate(),
-                                time.getBaselineEndDate()))) {
+        if ((hints.getRequiredBaselineStartDate() != null && !Objects
+                .equals(hints.getRequiredBaselineStartDate(), time.getBaselineStartDate()))
+                || (hints.getRequiredBaselineEndDate() != null && !Objects
+                        .equals(hints.getRequiredBaselineEndDate(), time.getBaselineEndDate()))) {
             errors.add(error("COMPARISON_BASELINE_MISMATCH",
                     "plan must preserve the model requirements baseline range"));
         }
@@ -321,16 +317,18 @@ public class BankQueryPlanValidator {
 
     private static boolean isFullCalendarYear(BankQueryPlan.TimeRange time) {
         return time != null && time.getStartDate() != null && time.getEndDate() != null
-                && time.getStartDate().getMonthValue() == 1 && time.getStartDate().getDayOfMonth() == 1
-                && time.getEndDate().getMonthValue() == 12 && time.getEndDate().getDayOfMonth() == 31
+                && time.getStartDate().getMonthValue() == 1
+                && time.getStartDate().getDayOfMonth() == 1
+                && time.getEndDate().getMonthValue() == 12
+                && time.getEndDate().getDayOfMonth() == 31
                 && time.getStartDate().getYear() == time.getEndDate().getYear();
     }
 
     private void validateFilters(BankQueryPlan plan, SemanticIntentHints hints,
             List<ValidationError> errors) {
         List<BankQueryPlan.Filter> filters = safe(plan.getFilters()).collect(Collectors.toList());
-        boolean hasProvinceAverageBenchmark = filters.stream()
-                .anyMatch(this::isProvinceAverageBenchmark);
+        boolean hasProvinceAverageBenchmark =
+                filters.stream().anyMatch(this::isProvinceAverageBenchmark);
         Set<String> allowedFields = Stream
                 .concat(Stream.concat(hints.getAllowedMetrics().stream(),
                         hints.getAllowedDimensions().stream()), LOGICAL_FILTER_FIELDS.stream())
@@ -415,8 +413,8 @@ public class BankQueryPlanValidator {
             errors.add(error("CALCULATION_REQUIRED", "calculation type is required"));
             return;
         }
-        BankQueryPlan.TimeComparison comparison = plan.getTime() == null ? null
-                : plan.getTime().getComparison();
+        BankQueryPlan.TimeComparison comparison =
+                plan.getTime() == null ? null : plan.getTime().getComparison();
         if (comparison != null && comparison != BankQueryPlan.TimeComparison.NONE
                 && calculation.getType() != BankQueryPlan.CalculationType.CHANGE) {
             errors.add(error("COMPARISON_CALCULATION_REQUIRED",
@@ -430,8 +428,8 @@ public class BankQueryPlanValidator {
         BankQueryPlan.CalculationType expected = switch (hints.getExpectedIntent()) {
             case CHANGE -> BankQueryPlan.CalculationType.CHANGE;
             case RATIO -> BankQueryPlan.CalculationType.RATIO;
-            case AGGREGATION -> calculation.getType() == BankQueryPlan.CalculationType
-                    .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+            case AGGREGATION -> calculation
+                    .getType() == BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
                             ? BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
                             : calculation.getType() == BankQueryPlan.CalculationType.DIRECT
                                     ? BankQueryPlan.CalculationType.DIRECT
@@ -457,7 +455,8 @@ public class BankQueryPlanValidator {
             errors.add(error("CALCULATION_MISMATCH",
                     "calculation type conflicts with financial intent"));
         }
-        if (calculation.getType() == BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+        if (calculation
+                .getType() == BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
             validateDaysAboveProvinceAverageCount(plan, errors);
         }
         if (calculation.getType() == BankQueryPlan.CalculationType.RATIO) {
@@ -476,10 +475,10 @@ public class BankQueryPlanValidator {
     /**
      * Fail-closed gate for the runtime derived metric contract (e.g. 存贷比 =
      * DERIVED_ZB002_DIV_ZB001). A derived metric is only accepted when the code equals
-     * DERIVED_&lt;numerator&gt;_DIV_&lt;denominator&gt;, the operands are distinct legal ZB###
-     * base metrics also selected as direct metrics, the plan is RANKING with a DIRECT
-     * calculation, and the plan derived metrics match the mapper evidence exactly in content and
-     * order. Missing, duplicate, extra, reordered or illegal entries are all rejected.
+     * DERIVED_&lt;numerator&gt;_DIV_&lt;denominator&gt;, the operands are distinct legal ZB### base
+     * metrics also selected as direct metrics, the plan is RANKING with a DIRECT calculation, and
+     * the plan derived metrics match the mapper evidence exactly in content and order. Missing,
+     * duplicate, extra, reordered or illegal entries are all rejected.
      */
     private void validateDerivedMetrics(BankQueryPlan plan, SemanticIntentHints hints,
             List<ValidationError> errors) {
@@ -559,8 +558,7 @@ public class BankQueryPlanValidator {
         if (!matcher.matches()) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric code must be DERIVED_<numerator>_DIV_<denominator>: " + code));
-        } else if (!matcher.group(1).equals(numerator)
-                || !matcher.group(2).equals(denominator)) {
+        } else if (!matcher.group(1).equals(numerator) || !matcher.group(2).equals(denominator)) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric code operands must match the declared numerator and "
                             + "denominator: " + code));
@@ -575,7 +573,8 @@ public class BankQueryPlanValidator {
         }
         if (!BASE_METRIC_CODE.matcher(denominator).matches()) {
             errors.add(error("DERIVED_METRIC_INVALID",
-                    "derived metric denominator must be a legal ZB### base metric: " + denominator));
+                    "derived metric denominator must be a legal ZB### base metric: "
+                            + denominator));
         }
     }
 
@@ -591,8 +590,8 @@ public class BankQueryPlanValidator {
      * Fail-closed gate for the explicit per-day province-average comparison contract. The
      * calculation is only legal as an AGGREGATION over exactly one metric and one organization,
      * scoped to a DAY range, grouped on the organization dimension, carrying the PROVINCE_AVERAGE
-     * benchmark, without any absolute metric threshold, ordering, or TopN limit. An ordinary
-     * COUNT or THRESHOLD plan must never be mistaken for this semantics.
+     * benchmark, without any absolute metric threshold, ordering, or TopN limit. An ordinary COUNT
+     * or THRESHOLD plan must never be mistaken for this semantics.
      */
     private void validateDaysAboveProvinceAverageCount(BankQueryPlan plan,
             List<ValidationError> errors) {
@@ -606,9 +605,9 @@ public class BankQueryPlanValidator {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_SINGLE_METRIC_REQUIRED",
                     "days-above-province-average count requires exactly one metric"));
         }
-        List<String> planOrganizations = safe(plan.getOrganizations())
-                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank)
-                .collect(Collectors.toList());
+        List<String> planOrganizations =
+                safe(plan.getOrganizations()).map(BankQueryPlan.Organization::getCode)
+                        .filter(StringUtils::isNotBlank).collect(Collectors.toList());
         if (planOrganizations.size() != 1) {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_SINGLE_ORGANIZATION_REQUIRED",
                     "days-above-province-average count requires exactly one organization"));
@@ -623,9 +622,10 @@ public class BankQueryPlanValidator {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_COMPARISON_REQUIRED",
                     "days-above-province-average count requires no baseline comparison"));
         }
-        boolean benchmark = safe(plan.getFilters()).anyMatch(filter -> "benchmark".equals(
-                filter.getField()) && "COMPARE".equals(filter.getOperator())
-                && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        boolean benchmark =
+                safe(plan.getFilters()).anyMatch(filter -> "benchmark".equals(filter.getField())
+                        && "COMPARE".equals(filter.getOperator())
+                        && "PROVINCE_AVERAGE".equals(filter.getValue()));
         if (!benchmark) {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_BENCHMARK_REQUIRED",
                     "days-above-province-average count requires the PROVINCE_AVERAGE benchmark"));
@@ -655,7 +655,9 @@ public class BankQueryPlanValidator {
     private void validateOrderingAndLimit(BankQueryPlan plan, SemanticIntentHints hints,
             List<ValidationError> errors) {
         List<BankQueryPlan.OrderBy> orderBy = safe(plan.getOrderBy()).collect(Collectors.toList());
-        if (plan.getIntent() == BankIntentType.RANKING && orderBy.isEmpty()) {
+        boolean compilerOwnedRankingOrder = usesCompilerOwnedRankingOrder(plan);
+        if (plan.getIntent() == BankIntentType.RANKING && orderBy.isEmpty()
+                && !compilerOwnedRankingOrder) {
             errors.add(error("RANKING_ORDER_REQUIRED", "ranking requires explicit sort direction"));
         }
         if (plan.getIntent() == BankIntentType.CHANGE && !orderBy.isEmpty()) {
@@ -700,11 +702,21 @@ public class BankQueryPlanValidator {
                 && !Objects.equals(hints.getRequiredLimit(), plan.getLimit())
                 && !isCompatibleTopBottomLimit(plan, hints)
                 // Province growth CHANGE returns the full org set; TopN is applied by answer text.
-                && !(plan.getIntent() == BankIntentType.CHANGE
-                        && plan.getTime() != null && plan.getTime()
-                                .getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)) {
+                && !(plan.getIntent() == BankIntentType.CHANGE && plan.getTime() != null && plan
+                        .getTime()
+                        .getComparison() == BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)) {
             errors.add(error("LIMIT_MISMATCH", "plan must preserve the recognized TopN limit"));
         }
+    }
+
+    /**
+     * Derived-metric ranking is compiled as one full-population ranking per metric. Its direction
+     * comes from the semantic catalog (and derived-ratio definition), so one model-provided
+     * {@code orderBy} cannot represent mixed higher-is-better and lower-is-better metrics.
+     */
+    private boolean usesCompilerOwnedRankingOrder(BankQueryPlan plan) {
+        return plan.getIntent() == BankIntentType.RANKING
+                && safe(plan.getDerivedMetrics()).findAny().isPresent();
     }
 
     /**
@@ -718,8 +730,7 @@ public class BankQueryPlanValidator {
         }
         Integer top = rankFilterLimit(plan, "rank");
         Integer bottom = rankFilterLimit(plan, "rank_from_bottom");
-        return top != null && bottom != null
-                && Objects.equals(plan.getLimit(), top + bottom)
+        return top != null && bottom != null && Objects.equals(plan.getLimit(), top + bottom)
                 && (Objects.equals(hints.getRequiredLimit(), top)
                         || Objects.equals(hints.getRequiredLimit(), bottom));
     }
@@ -762,14 +773,14 @@ public class BankQueryPlanValidator {
         if (!containsAllIgnoreCase(output, metrics)) {
             errors.add(error("OUTPUT_MISSING_METRIC", "output must retain every requested metric"));
         }
-        Set<String> dimensions = safe(plan.getDimensions())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> dimensions =
+                safe(plan.getDimensions()).collect(Collectors.toCollection(LinkedHashSet::new));
         if (!containsAllIgnoreCase(output, dimensions)) {
             errors.add(error("OUTPUT_MISSING_DIMENSION",
                     "output must retain every requested dimension"));
         }
-        Set<String> selected = Stream.concat(metrics.stream(), dimensions.stream())
-                .collect(Collectors.toSet());
+        Set<String> selected =
+                Stream.concat(metrics.stream(), dimensions.stream()).collect(Collectors.toSet());
         for (String column : output) {
             if (!containsIgnoreCase(selected, column)) {
                 errors.add(error("OUTPUT_EXTRA_COLUMN",
@@ -779,8 +790,8 @@ public class BankQueryPlanValidator {
     }
 
     /**
-     * Point-query 存贷比 / structure share is often recognized with derived-metric evidence, but
-     * the deterministic RATIO template expresses the same operands as direct metrics + baseline.
+     * Point-query 存贷比 / structure share is often recognized with derived-metric evidence, but the
+     * deterministic RATIO template expresses the same operands as direct metrics + baseline.
      */
     private boolean ratioPlanCoversRequiredDerived(BankQueryPlan plan,
             List<SemanticIntentHints.DerivedMetricSpec> required) {
@@ -789,9 +800,8 @@ public class BankQueryPlanValidator {
         }
         List<String> planMetrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
                 .filter(StringUtils::isNotBlank).collect(Collectors.toList());
-        return required.stream()
-                .allMatch(spec -> containsIgnoreCase(planMetrics, spec.numerator())
-                        && containsIgnoreCase(planMetrics, spec.denominator()));
+        return required.stream().allMatch(spec -> containsIgnoreCase(planMetrics, spec.numerator())
+                && containsIgnoreCase(planMetrics, spec.denominator()));
     }
 
     private boolean containsIgnoreCase(Collection<String> values, String target) {
@@ -813,8 +823,7 @@ public class BankQueryPlanValidator {
         return allowed != null && allowed.contains(metric);
     }
 
-    private boolean containsAllIgnoreCase(Collection<String> haystack,
-            Collection<String> needles) {
+    private boolean containsAllIgnoreCase(Collection<String> haystack, Collection<String> needles) {
         if (needles == null || needles.isEmpty()) {
             return true;
         }

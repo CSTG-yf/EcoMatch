@@ -57,6 +57,67 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldProjectWideCurrentAndBaselineRowsToMultiMetricChange() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
+                .organizationColumn("bank_organization").timeColumn("bank_data_date")
+                .selectedDates(List.of("2026-04-30", "2025-12-31"))
+                .organizationNames(Map.of("ORG006", "江苏省F市农商行"))
+                .selectedOrganizationCodes(List.of("ORG006"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb011")
+                                .metricCode("ZB011").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb012")
+                                .metricCode("ZB012").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG006", "bank_data_date", "2025-12-31", "zb011",
+                        new BigDecimal("2"), "zb012", new BigDecimal("4")),
+                        row("bank_organization", "ORG006", "bank_data_date", "2026-04-30", "zb011",
+                                new BigDecimal("3"), "zb012", new BigDecimal("3"))));
+
+        assertEquals(2, projection.getRows().size());
+        assertEquals("ZB011", projection.getRows().get(0).get("metric_code"));
+        assertEquals(new BigDecimal("1"), projection.getRows().get(0).get("absolute_change"));
+        assertEquals(new BigDecimal("50.000000000000000"),
+                projection.getRows().get(0).get("percent_change"));
+        assertEquals(new BigDecimal("-1"), projection.getRows().get(1).get("absolute_change"));
+    }
+
+    @Test
+    void shouldAggregateEveryObservationInsideMultiMetricChangeRanges() {
+        BankResultProjector.Contract contract =
+                BankResultProjector.Contract.builder()
+                        .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)
+                        .organizationColumn("bank_organization").timeColumn("bank_data_date")
+                        .selectedDates(
+                                List.of("2026-04-01", "2026-04-30", "2025-04-01", "2025-04-30"))
+                        .organizationNames(Map.of("ORG006", "江苏省F市农商行"))
+                        .selectedOrganizationCodes(List.of("ORG006"))
+                        .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                                .semanticColumn("metric_value_0").metricCode("ZB011").build()))
+                        .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG006", "bank_data_date", "2025-04-01",
+                        "metric_value_0", new BigDecimal("2")),
+                        row("bank_organization", "ORG006", "bank_data_date", "2025-04-30",
+                                "metric_value_0", new BigDecimal("3")),
+                        row("bank_organization", "ORG006", "bank_data_date", "2026-04-01",
+                                "metric_value_0", new BigDecimal("7")),
+                        row("bank_organization", "ORG006", "bank_data_date", "2026-04-30",
+                                "metric_value_0", new BigDecimal("8"))));
+
+        assertTrue(projection.isApplied());
+        assertEquals(new BigDecimal("15"), projection.getRows().get(0).get("current_value"));
+        assertEquals(new BigDecimal("5"), projection.getRows().get(0).get("baseline_value"));
+        assertEquals(new BigDecimal("10"), projection.getRows().get(0).get("absolute_change"));
+        assertEquals(new BigDecimal("200.000000000000000"),
+                projection.getRows().get(0).get("percent_change"));
+    }
+
+    @Test
     void shouldKeepProvinceWideChangeRowsInPublishedMetricOrganizationOrder() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)

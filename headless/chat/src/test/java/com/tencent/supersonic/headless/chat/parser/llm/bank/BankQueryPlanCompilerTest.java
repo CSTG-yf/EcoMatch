@@ -158,8 +158,8 @@ class BankQueryPlanCompilerTest {
                 "SELECT 'ZB001' AS metric_code, bank_organization, SUM(ZB001) AS metric_value"));
         assertTrue(sql.contains(
                 "SELECT 'ZB002' AS metric_code, bank_organization, SUM(ZB002) AS metric_value"));
-        assertTrue(sql.contains("SELECT 'DERIVED_ZB002_DIV_ZB001' AS metric_code, "
-                + "bank_organization,"));
+        assertTrue(sql.contains(
+                "SELECT 'DERIVED_ZB002_DIV_ZB001' AS metric_code, " + "bank_organization,"));
         // 派生指标 = 分子 / NULLIF(分母, 0) * 100,零分母不会产生可排名的比值。
         assertTrue(sql.contains("SUM(ZB002) / NULLIF(SUM(ZB001), 0) * 100.0 AS metric_value"));
         // 全量机构先完成排名,选中机构只在最外层 WHERE 限制。
@@ -168,8 +168,8 @@ class BankQueryPlanCompilerTest {
                 "WHERE \u6570\u636e\u65e5\u671f >= '2026-03-31' AND \u6570\u636e\u65e5\u671f"
                         + " <= '2026-03-31'\n  GROUP BY bank_organization"));
         // ROW_NUMBER 稳定序位,绝不使用会合并并列的 RANK。
-        assertTrue(sql.contains(
-                "ROW_NUMBER() OVER (ORDER BY metric_value DESC, bank_organization ASC)"
+        assertTrue(
+                sql.contains("ROW_NUMBER() OVER (ORDER BY metric_value DESC, bank_organization ASC)"
                         + " AS rank_position"));
         assertFalse(sql.contains("RANK()"));
         // 无效比值在排名前被排除,不会凭空得到排名。
@@ -180,8 +180,7 @@ class BankQueryPlanCompilerTest {
                 compiled.getOutputColumns());
         assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
                 compiled.getResultContract().getType());
-        assertEquals("bank_organization",
-                compiled.getResultContract().getOrganizationColumn());
+        assertEquals("bank_organization", compiled.getResultContract().getOrganizationColumn());
         assertEquals(List.of("ORG004"),
                 compiled.getResultContract().getSelectedOrganizationCodes());
     }
@@ -190,28 +189,25 @@ class BankQueryPlanCompilerTest {
     void shouldRankLowerIsBetterDirectMetricsAscendingInsideTheDerivedTemplate() {
         LLMReq.LLMSchema schema = schema();
         schema.setMetrics(List.of(
-                SchemaElement.builder().name("各项存款余额").bizName("ZB001").defaultAgg("SUM")
-                        .build(),
-                SchemaElement.builder().name("各项贷款余额").bizName("ZB002").defaultAgg("SUM")
-                        .build(),
-                SchemaElement.builder().name("不良贷款率").bizName("ZB013").defaultAgg("SUM")
-                        .build()));
+                SchemaElement.builder().name("各项存款余额").bizName("ZB001").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("各项贷款余额").bizName("ZB002").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("不良贷款率").bizName("ZB013").defaultAgg("SUM").build()));
         BankQueryPlan plan = derivedRankingPlan();
         plan.setMetrics(List.of(metric("ZB001"), metric("ZB002"), metric("ZB013")));
         plan.getOutput().setColumns(List.of("bank_organization", "ZB001", "ZB002", "ZB013"));
         plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
                 .direction(BankQueryPlan.SortDirection.DESC).build()));
-        SemanticIntentHints hints = SemanticIntentHints.builder()
-                .expectedIntent(BankIntentType.RANKING)
-                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB013"))
-                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
-                .requiredMetrics(Set.of("ZB001", "ZB002", "ZB013"))
-                .requiredOrganizationCodes(Set.of("ORG004"))
-                .requiredStartDate(LocalDate.of(2026, 3, 31))
-                .requiredEndDate(LocalDate.of(2026, 3, 31))
-                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
-                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
-                .maxLimit(100).build();
+        SemanticIntentHints hints =
+                SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                        .allowedMetrics(Set.of("ZB001", "ZB002", "ZB013"))
+                        .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                        .requiredMetrics(Set.of("ZB001", "ZB002", "ZB013"))
+                        .requiredOrganizationCodes(Set.of("ORG004"))
+                        .requiredStartDate(LocalDate.of(2026, 3, 31))
+                        .requiredEndDate(LocalDate.of(2026, 3, 31))
+                        .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                                "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                        .maxLimit(100).build();
 
         BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema);
 
@@ -297,16 +293,22 @@ class BankQueryPlanCompilerTest {
         plan.getOutput().setColumns(List.of("ZB001", "ZB002"));
         SemanticIntentHints hints = multiMetricChangeHints();
 
-        BankQueryPlanCompiler.CompiledQuery compiled =
-                compiler.compile(plan, hints, schema());
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
-        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
-        assertTrue(compiled.getS2sql().contains("'ZB002' AS metric_code"));
-        assertTrue(compiled.getS2sql().contains("UNION ALL"));
-        assertTrue(compiled.getS2sql().contains("ORDER BY metric_code ASC"));
-        assertEquals(List.of("metric_code", "current_value", "baseline_value", "absolute_change",
-                "percent_change"), compiled.getOutputColumns());
+        assertTrue(compiled.getS2sql().contains("SUM(ZB001) AS metric_value_0"));
+        assertTrue(compiled.getS2sql().contains("SUM(ZB002) AS metric_value_1"));
+        assertFalse(compiled.getS2sql().contains("UNION ALL"));
+        assertFalse(compiled.getS2sql().contains("WITH bank_current AS"));
+        assertTrue(compiled.getS2sql().contains("FROM 银行指标数据集"));
+        assertTrue(compiled.getS2sql().contains("SELECT bank_organization, 数据日期"));
+        assertTrue(compiled.getS2sql().contains("GROUP BY bank_organization, 数据日期"));
+        assertTrue(compiled.getS2sql().contains("数据日期 IN ('2026-03-31', '2026-02-28')"));
+        assertEquals(List.of("bank_organization", "数据日期", "metric_value_0", "metric_value_1"),
+                compiled.getOutputColumns());
+        assertEquals(List.of("metric_value_0", "metric_value_1"),
+                compiled.getResultContract().getMetrics().stream()
+                        .map(BankResultProjector.MetricBinding::getSemanticColumn).toList());
         assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
                 compiled.getResultContract().getType());
     }
@@ -323,8 +325,7 @@ class BankQueryPlanCompilerTest {
         plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
         plan.getOutput().setColumns(List.of("ZB001", "ZB002"));
         SemanticIntentHints hints = multiMetricChangeHints();
-        BankQueryPlanCompiler.CompiledQuery compiled =
-                compiler.compile(plan, hints, schema);
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema);
 
         assertEquals(Map.of("ORG004", "江苏省D市农商行"),
                 compiled.getResultContract().getOrganizationNames());
@@ -403,7 +404,8 @@ class BankQueryPlanCompilerTest {
         assertTrue(sql.contains("IN ('2026-03-31', '2026-02-28')")
                 || sql.contains("IN ('2026-02-28', '2026-03-31')")
                 || (sql.contains("'2026-03-31'") && sql.contains("'2026-02-28'")));
-        assertTrue(sql.contains("MAX(CASE WHEN observation_date = '2026-03-31' THEN metric_value END) AS current_value"));
+        assertTrue(sql.contains(
+                "MAX(CASE WHEN observation_date = '2026-03-31' THEN metric_value END) AS current_value"));
         assertTrue(sql.contains(
                 "MAX(CASE WHEN observation_date = '2026-02-28' THEN metric_value END) AS baseline_value"));
         assertTrue(sql.contains("ORDER BY bank_organization ASC"));
@@ -453,9 +455,8 @@ class BankQueryPlanCompilerTest {
     @Test
     void shouldCompileQuarterlyTrendToDateGroupedStableResultContract() {
         BankQueryPlan plan = BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.TREND).metrics(List.of(metric("ZB001")))
-                .dimensions(List.of("bank_data_date"))
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.TREND)
+                .metrics(List.of(metric("ZB001"))).dimensions(List.of("bank_data_date"))
                 .organizations(List.of(organization("ORG004")))
                 .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 3, 31))
                         .endDate(LocalDate.of(2026, 3, 31))
@@ -526,8 +527,7 @@ class BankQueryPlanCompilerTest {
         plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("各项存款余额")
                 .direction(BankQueryPlan.SortDirection.DESC).build()));
         SemanticIntentHints hints = SemanticIntentHints.builder()
-                .expectedIntent(BankIntentType.RANKING)
-                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB002"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
@@ -596,9 +596,8 @@ class BankQueryPlanCompilerTest {
     @Test
     void shouldCompileProvinceAverageThresholdWithBelowDirection() {
         BankQueryPlan plan = thresholdPlan();
-        plan.setFilters(List.of(provinceAverageBenchmark(),
-                BankQueryPlan.Filter.builder().field("metric_value").operator("LT")
-                        .value("PROVINCE_AVERAGE").build()));
+        plan.setFilters(List.of(provinceAverageBenchmark(), BankQueryPlan.Filter.builder()
+                .field("metric_value").operator("LT").value("PROVINCE_AVERAGE").build()));
 
         BankQueryPlanCompiler.CompiledQuery compiled =
                 compiler.compile(plan, provinceAverageThresholdHints(), schema());
@@ -650,16 +649,15 @@ class BankQueryPlanCompilerTest {
                 compiler.compile(plan, provinceAverageAggregationHints(), schema());
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
-        assertTrue(compiled.getS2sql().contains("WITH bank_daily_values AS"));
+        assertTrue(compiled.getS2sql().contains("bank_daily_values_0 AS"));
         assertTrue(compiled.getS2sql().contains("SUM(ZB001) AS metric_value"));
         assertTrue(compiled.getS2sql().contains("GROUP BY bank_organization, aggregation_date"));
         assertTrue(compiled.getS2sql().contains("AVG(metric_value) AS aggregate_value"));
-        assertTrue(compiled.getS2sql().contains("MIN(metric_value) AS min_value"));
-        assertTrue(compiled.getS2sql().contains("MAX(metric_value) AS max_value"));
-        assertTrue(compiled.getS2sql().contains("COUNT(metric_value) AS observation_count"));
-        assertEquals(List.of("bank_organization", "aggregate_value", "min_value", "max_value",
-                "observation_count"), compiled.getOutputColumns());
-        assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
+        assertFalse(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
+        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count"), compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
                 compiled.getResultContract().getType());
     }
 
@@ -695,7 +693,7 @@ class BankQueryPlanCompilerTest {
                 "max_value", "observation_count"), compiled.getOutputColumns());
         assertEquals(List.of("ZB001", "ZB002"), compiled.getResultContract().getMetrics().stream()
                 .map(BankResultProjector.MetricBinding::getMetricCode).toList());
-        assertEquals(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY,
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
                 compiled.getResultContract().getType());
     }
 
@@ -712,8 +710,7 @@ class BankQueryPlanCompilerTest {
         plan.getOutput().setColumns(List.of("bank_organization", "ZB001", "ZB002"));
         plan.setTime(time(BankQueryPlan.TimeComparison.NONE, null, null));
         SemanticIntentHints hints = SemanticIntentHints.builder()
-                .expectedIntent(BankIntentType.THRESHOLD)
-                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .expectedIntent(BankIntentType.THRESHOLD).allowedMetrics(Set.of("ZB001", "ZB002"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.of("ZB001", "ZB002"))
                 .requiredOrganizationCodes(Set.of("ORG004"))
@@ -731,8 +728,7 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
         assertFalse(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
         assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
-                "max_value", "observation_count"),
-                compiled.getOutputColumns());
+                "max_value", "observation_count"), compiled.getOutputColumns());
         assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
                 compiled.getResultContract().getType());
     }
@@ -748,8 +744,7 @@ class BankQueryPlanCompilerTest {
         plan.getOutput().setColumns(List.of("bank_organization", "ZB001", "ZB002"));
         plan.setTime(time(BankQueryPlan.TimeComparison.NONE, null, null));
         SemanticIntentHints hints = SemanticIntentHints.builder()
-                .expectedIntent(BankIntentType.COMPARISON)
-                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .expectedIntent(BankIntentType.COMPARISON).allowedMetrics(Set.of("ZB001", "ZB002"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.of("ZB001", "ZB002"))
                 .requiredOrganizationCodes(Set.of("ORG004"))
@@ -796,9 +791,8 @@ class BankQueryPlanCompilerTest {
 
     @Test
     void shouldCompileDaysAboveProvinceAverageToPerDayComparisonSql() {
-        BankQueryPlanCompiler.CompiledQuery compiled =
-                compiler.compile(daysAboveProvinceAveragePlan(), daysAboveProvinceAverageHints(),
-                        schema());
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler
+                .compile(daysAboveProvinceAveragePlan(), daysAboveProvinceAverageHints(), schema());
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
         String sql = compiled.getS2sql();
@@ -821,8 +815,7 @@ class BankQueryPlanCompilerTest {
                 "observation_count", "above_ratio_percent"), compiled.getOutputColumns());
         assertEquals(BankResultProjector.ProjectionType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
                 compiled.getResultContract().getType());
-        assertEquals("ZB001",
-                compiled.getResultContract().getMetrics().get(0).getMetricCode());
+        assertEquals("ZB001", compiled.getResultContract().getMetrics().get(0).getMetricCode());
         assertEquals(List.of("ORG004"),
                 compiled.getResultContract().getSelectedOrganizationCodes());
     }
@@ -849,8 +842,8 @@ class BankQueryPlanCompilerTest {
                 () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
 
         assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
-        assertTrue(exception.getMessage()
-                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_BENCHMARK_REQUIRED"));
+        assertTrue(
+                exception.getMessage().contains("DAYS_ABOVE_PROVINCE_AVERAGE_BENCHMARK_REQUIRED"));
     }
 
     @Test
@@ -862,8 +855,7 @@ class BankQueryPlanCompilerTest {
                 () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
 
         assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
-        assertTrue(exception.getMessage()
-                .contains("DAYS_ABOVE_PROVINCE_AVERAGE_INTENT_REQUIRED"));
+        assertTrue(exception.getMessage().contains("DAYS_ABOVE_PROVINCE_AVERAGE_INTENT_REQUIRED"));
     }
 
     @Test
@@ -883,9 +875,8 @@ class BankQueryPlanCompilerTest {
     @Test
     void shouldRejectDaysAboveProvinceAverageCarryingAnAbsoluteMetricThreshold() {
         BankQueryPlan plan = daysAboveProvinceAveragePlan();
-        plan.setFilters(List.of(provinceAverageBenchmark(),
-                BankQueryPlan.Filter.builder().field("metric_value").operator("GT").value("100")
-                        .build()));
+        plan.setFilters(List.of(provinceAverageBenchmark(), BankQueryPlan.Filter.builder()
+                .field("metric_value").operator("GT").value("100").build()));
 
         BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
                 () -> compiler.compile(plan, daysAboveProvinceAverageHints(), schema()));
@@ -897,9 +888,8 @@ class BankQueryPlanCompilerTest {
 
     private BankQueryPlan rankingPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.RANKING).metrics(List.of(metric("ZB001")))
-                .dimensions(List.of("bank_organization"))
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.RANKING)
+                .metrics(List.of(metric("ZB001"))).dimensions(List.of("bank_organization"))
                 .organizations(List.of(organization("ORG004")))
                 .time(time(BankQueryPlan.TimeComparison.NONE, null, null))
                 .calculation(BankQueryPlan.Calculation.builder()
@@ -915,11 +905,11 @@ class BankQueryPlanCompilerTest {
 
     private BankQueryPlan derivedRankingPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.RANKING).metrics(List.of(metric("ZB001"), metric("ZB002")))
-                .derivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
-                        .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002")
-                        .denominator("ZB001").name("存贷比").build()))
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.RANKING)
+                .metrics(List.of(metric("ZB001"), metric("ZB002")))
+                .derivedMetrics(List.of(
+                        BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                                .numerator("ZB002").denominator("ZB001").name("存贷比").build()))
                 .dimensions(List.of("bank_organization"))
                 .organizations(List.of(organization("ORG004")))
                 .time(time(BankQueryPlan.TimeComparison.NONE, null, null))
@@ -941,17 +931,17 @@ class BankQueryPlanCompilerTest {
                 .requiredMetrics(Set.of("ZB001", "ZB002"))
                 .requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
-                .requiredEndDate(LocalDate.of(2026, 3, 31))
-                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
-                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredDerivedMetrics(
+                        List.of(new SemanticIntentHints.DerivedMetricSpec("DERIVED_ZB002_DIV_ZB001",
+                                "ZB002", "ZB001", "存贷比")))
                 .maxLimit(100).build();
     }
 
     private BankQueryPlan changePlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.CHANGE).metrics(List.of(metric("ZB001")))
-                .dimensions(List.of()).organizations(List.of(organization("ORG004")))
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.CHANGE)
+                .metrics(List.of(metric("ZB001"))).dimensions(List.of())
+                .organizations(List.of(organization("ORG004")))
                 .time(time(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
                         LocalDate.of(2026, 2, 28), LocalDate.of(2026, 2, 28)))
                 .calculation(BankQueryPlan.Calculation.builder()
@@ -963,10 +953,9 @@ class BankQueryPlanCompilerTest {
 
     private BankQueryPlan ratioPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.RATIO).metrics(List.of(metric("ZB001"), metric("ZB002")))
-                .dimensions(List.of()).organizations(List.of())
-                .time(time(BankQueryPlan.TimeComparison.NONE, null, null))
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.RATIO)
+                .metrics(List.of(metric("ZB001"), metric("ZB002"))).dimensions(List.of())
+                .organizations(List.of()).time(time(BankQueryPlan.TimeComparison.NONE, null, null))
                 .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB002").build())
                 .orderBy(List.of()).output(BankQueryPlan.Output.builder()
@@ -976,9 +965,8 @@ class BankQueryPlanCompilerTest {
 
     private BankQueryPlan thresholdPlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.THRESHOLD).metrics(List.of(metric("ZB001")))
-                .dimensions(List.of()).organizations(List.of())
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.THRESHOLD)
+                .metrics(List.of(metric("ZB001"))).dimensions(List.of()).organizations(List.of())
                 .time(time(BankQueryPlan.TimeComparison.NONE, null, null))
                 .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.DIRECT).build())
@@ -1117,8 +1105,7 @@ class BankQueryPlanCompilerTest {
 
     private BankQueryPlan daysAboveProvinceAveragePlan() {
         return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
-                .action(BankQueryPlan.PlanAction.EXECUTE)
-                .intent(BankIntentType.AGGREGATION)
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.AGGREGATION)
                 .metrics(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
                         .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()))
                 .dimensions(List.of("bank_organization"))
@@ -1131,8 +1118,7 @@ class BankQueryPlanCompilerTest {
                 .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE)
                         .build())
-                .orderBy(List.of())
-                .limit(null)
+                .orderBy(List.of()).limit(null)
                 .output(BankQueryPlan.Output.builder()
                         .columns(List.of("bank_organization", "ZB001")).orderSensitive(true)
                         .build())

@@ -142,8 +142,27 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("“收入结构”是权威目录定义的复合业务语义"));
         assertTrue(sys.contains("中间业务收入（ZB007）"));
         assertTrue(sys.contains("净利息收入（ZB008）"));
-        assertTrue(sys.contains("“维度与指标映射：维度=A、B；另一维度=C”也是封闭指标集合"));
+        assertTrue(sys.contains("分类标签与其右侧指标列表构成封闭映射"));
+        assertTrue(sys.contains("必须按自然季度末解析"));
+        assertTrue(sys.contains("明确日期与全省均值比较"));
+        assertTrue(sys.contains("不得因为“各项指标”或维度名称擅自加入映射之外的目录指标"));
+        assertTrue(sys.contains("封闭映射解析算法"));
+        assertTrue(sys.contains("每个代码都可回指"));
         assertTrue(sys.contains("不得扩展到全目录"));
+        assertTrue(sys.contains("最高优先级执行合同"));
+        assertTrue(sys.contains("用户显式枚举了非空的封闭指标清单"));
+        assertTrue(sys.contains("每个输出代码必须能回指清单中的原始短语"));
+        assertTrue(sys.contains("底层事实按日存储"));
+        assertTrue(sys.contains("确定性点值比率例外"));
+        assertTrue(sys.contains("metrics 必须按“分子、分母”"));
+        assertTrue(sys.contains("calculation.type=RATIO"));
+        assertTrue(sys.contains("某机构在全省13家里排第几"));
+        assertTrue(sys.contains("不得在修复时删除目标机构"));
+        assertTrue(sys.contains("截至YYYY-MM-DD"));
+        assertTrue(sys.contains("不得截断成 YYYY-MM"));
+        assertTrue(sys.contains("某机构在YYYY-MM-DD的存贷比是多少"));
+        assertTrue(sys.contains("answerFactTypes=[\"RATIO_VALUE\"]"));
+        assertTrue(sys.contains("禁止返回通用澄清文案"));
     }
 
     @Test
@@ -168,5 +187,9 @@ class BankPlanPromptComposerTest {
         assertTrue(content.contains("只能保留 CLARIFY"));
         assertTrue(content.contains("季度末"));
         assertTrue(content.contains("哪个季度最高"));
+        assertTrue(content.contains("用户显式枚举非空目录指标"));
+        assertTrue(content.contains("不能触发 CLARIFY"));
+        assertTrue(content.contains("不得加入清单之外的任何 ZB###"));
+        assertTrue(content.contains("禁止 MONTH"));
     }
 }

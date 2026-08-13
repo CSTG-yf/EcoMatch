@@ -97,7 +97,8 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
-        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+        assertEquals(2,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         verify(model, times(3)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
@@ -115,7 +116,8 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
-        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+        assertEquals(2,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         verify(model, times(3)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
@@ -127,14 +129,17 @@ class BankPlanGenStrategyTest {
     @Test
     void unsupportedAnswerFactTypeIsReturnedToTheModelBeforePlanGeneration() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(requirementsJson().replace(
-                "\"VALUE\",\"PROVINCE_AVERAGE\",\"GAP_VALUE\"",
-                "\"VALUE\",\"MINIMUM_VALUE\""), requirementsJson(), validPlanJson());
+        when(model.generate(anyString()))
+                .thenReturn(
+                        requirementsJson().replace("\"VALUE\",\"PROVINCE_AVERAGE\",\"GAP_VALUE\"",
+                                "\"VALUE\",\"MINIMUM_VALUE\""),
+                        requirementsJson(), validPlanJson());
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertNotNull(response.getBankQueryPlan());
-        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+        assertEquals(2,
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         verify(model, times(3)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
@@ -172,6 +177,30 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("CLARIFICATION_RECHECK", "CLARIFICATION_RECHECK"),
                 request.getBankRequirementsRepairReasons());
         verify(model, times(4)).generate(anyString());
+    }
+
+    @Test
+    void clarificationRepairReturnsExactCatalogEvidenceWithoutReplacingTheModelPlan() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(), ratioRequirementsJson(),
+                ratioPlanJson());
+        LLMReq request = request();
+        request.setQueryText("江苏省A市农商行在2025-01-31的存贷比是多少？");
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals("MODEL", response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
+        assertEquals(BankIntentType.RATIO, response.getBankQueryPlan().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("organizationCodes=[ORG001(江苏省A市农商行)]"));
+        assertTrue(repair.contains("metricCodes=[ZB002(各项贷款余额), ZB001(各项存款余额)]"));
+        assertTrue(repair.contains("DERIVED_ZB002_DIV_ZB001(存贷比=ZB002/ZB001)"));
+        assertTrue(repair.contains("time=2025-01-31..2025-01-31 granularity=DAY"));
+        assertTrue(repair.contains("regenerate the entire requirements JSON yourself"));
+        assertEquals(Set.of("ZB001", "ZB002"),
+                request.getSemanticIntentHints().getRequiredMetrics());
     }
 
     @Test
@@ -254,10 +283,33 @@ class BankPlanGenStrategyTest {
                 """;
     }
 
+    private String ratioRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metricCodes":["ZB002","ZB001"],
+                "derivedMetrics":[{"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}],
+                "organizationCodes":["ORG001"],
+                "time":{"startDate":"2025-01-31","endDate":"2025-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
+                """;
+    }
+
+    private String ratioPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],
+                "dimensions":["bank_organization"],"organizations":[{"code":"ORG001","bizName":null}],
+                "time":{"startDate":"2025-01-31","endDate":"2025-01-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB001"},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB002","ZB001"],"orderSensitive":false}}
+                """;
+    }
+
     private String invalidChangeRequirementsJson() {
-        return validChangeRequirementsJson().replace("\"startDate\":\"2026-03-31\","
-                + "\"endDate\":\"2026-03-31\"", "\"startDate\":\"2024-12-31\","
-                        + "\"endDate\":\"2026-03-31\"");
+        return validChangeRequirementsJson().replace(
+                "\"startDate\":\"2026-03-31\"," + "\"endDate\":\"2026-03-31\"",
+                "\"startDate\":\"2024-12-31\"," + "\"endDate\":\"2026-03-31\"");
     }
 
     private String validChangeRequirementsJson() {
@@ -270,15 +322,19 @@ class BankPlanGenStrategyTest {
     }
 
     private String invalidStartOfYearRequirementsJson() {
-        return validStartOfYearRequirementsJson().replace("\"baselineStartDate\":\"2025-12-31\","
-                + "\"baselineEndDate\":\"2025-12-31\"", "\"baselineStartDate\":\"2026-01-01\","
-                        + "\"baselineEndDate\":\"2026-01-01\"");
+        return validStartOfYearRequirementsJson().replace(
+                "\"baselineStartDate\":\"2025-12-31\"," + "\"baselineEndDate\":\"2025-12-31\"",
+                "\"baselineStartDate\":\"2026-01-01\"," + "\"baselineEndDate\":\"2026-01-01\"");
     }
 
     private String validStartOfYearRequirementsJson() {
-        return validChangeRequirementsJson().replace("\"comparison\":\"PERIOD_OVER_PERIOD\"",
-                "\"comparison\":\"START_OF_YEAR\"").replace("\"baselineStartDate\":\"2024-12-31\","
-                        + "\"baselineEndDate\":\"2024-12-31\"", "\"baselineStartDate\":\"2025-12-31\","
+        return validChangeRequirementsJson()
+                .replace("\"comparison\":\"PERIOD_OVER_PERIOD\"",
+                        "\"comparison\":\"START_OF_YEAR\"")
+                .replace(
+                        "\"baselineStartDate\":\"2024-12-31\","
+                                + "\"baselineEndDate\":\"2024-12-31\"",
+                        "\"baselineStartDate\":\"2025-12-31\","
                                 + "\"baselineEndDate\":\"2025-12-31\"");
     }
 
@@ -294,9 +350,13 @@ class BankPlanGenStrategyTest {
     }
 
     private String validStartOfYearPlanJson() {
-        return validChangePlanJson().replace("\"comparison\":\"PERIOD_OVER_PERIOD\"",
-                "\"comparison\":\"START_OF_YEAR\"").replace("\"baselineStartDate\":\"2024-12-31\","
-                        + "\"baselineEndDate\":\"2024-12-31\"", "\"baselineStartDate\":\"2025-12-31\","
+        return validChangePlanJson()
+                .replace("\"comparison\":\"PERIOD_OVER_PERIOD\"",
+                        "\"comparison\":\"START_OF_YEAR\"")
+                .replace(
+                        "\"baselineStartDate\":\"2024-12-31\","
+                                + "\"baselineEndDate\":\"2024-12-31\"",
+                        "\"baselineStartDate\":\"2025-12-31\","
                                 + "\"baselineEndDate\":\"2025-12-31\"");
     }
 

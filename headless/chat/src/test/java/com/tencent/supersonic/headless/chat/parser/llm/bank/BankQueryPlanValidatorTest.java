@@ -105,16 +105,18 @@ class BankQueryPlanValidatorTest {
                 .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.CHANGE)
                 .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
                         .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
-                .derivedMetrics(new ArrayList<>()).dimensions(new ArrayList<>(List.of("bank_data_date")))
-                .organizations(new ArrayList<>(List.of(BankQueryPlan.Organization.builder()
-                        .code("ORG004").build())))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_data_date")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
                 .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 3, 31))
                         .endDate(LocalDate.of(2025, 3, 31))
                         .granularity(BankQueryPlan.TimeGranularity.DAY)
                         .comparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
                         .baselineStartDate(LocalDate.of(2024, 12, 31))
                         .baselineEndDate(LocalDate.of(2024, 12, 31)).build())
-                .filters(new ArrayList<>()).calculation(BankQueryPlan.Calculation.builder()
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.CHANGE).build())
                 .orderBy(new ArrayList<>()).limit(null)
                 .output(BankQueryPlan.Output.builder()
@@ -128,7 +130,8 @@ class BankQueryPlanValidatorTest {
                 .requiredStartDate(LocalDate.of(2025, 3, 31))
                 .requiredEndDate(LocalDate.of(2025, 3, 31)).build();
 
-        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, changeRequirements);
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, changeRequirements);
 
         assertFalse(result.isValid());
         assertTrue(result.codes().contains("CHANGE_DATE_DIMENSION_FORBIDDEN"));
@@ -140,8 +143,8 @@ class BankQueryPlanValidatorTest {
         plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("percent_change")
                 .direction(BankQueryPlan.SortDirection.DESC).build()));
 
-        BankQueryPlanValidator.ValidationResult ordered = validator.validate(plan,
-                provinceWideChangeTopNRequirements());
+        BankQueryPlanValidator.ValidationResult ordered =
+                validator.validate(plan, provinceWideChangeTopNRequirements());
 
         assertFalse(ordered.isValid());
         assertTrue(ordered.codes().contains("CHANGE_RESULT_ORDER_FORBIDDEN"));
@@ -155,6 +158,13 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void allowsDerivedMetricRankingToUseTheCompilerOwnedPerMetricOrder() {
+        BankQueryPlan plan = derivedMetricRankingPlan();
+
+        assertTrue(validator.validate(plan, derivedMetricRankingRequirements()).isValid());
+    }
+
+    @Test
     void rejectsCurrentYearFirstDayAsTheStartOfYearPlanBaseline() {
         BankQueryPlan plan = provinceWideChangeTopNPlan();
         plan.setDimensions(List.of("bank_organization"));
@@ -163,8 +173,8 @@ class BankQueryPlanValidatorTest {
         plan.getTime().setBaselineStartDate(LocalDate.of(2026, 1, 1));
         plan.getTime().setBaselineEndDate(LocalDate.of(2026, 1, 1));
 
-        BankQueryPlanValidator.ValidationResult invalid = validator.validate(plan,
-                provinceWideChangeTopNRequirements());
+        BankQueryPlanValidator.ValidationResult invalid =
+                validator.validate(plan, provinceWideChangeTopNRequirements());
 
         assertFalse(invalid.isValid());
         assertTrue(invalid.codes().contains("START_OF_YEAR_BASELINE_INVALID"));
@@ -183,8 +193,8 @@ class BankQueryPlanValidatorTest {
         plan.getTime().setBaselineEndDate(LocalDate.of(2025, 12, 31));
         plan.getCalculation().setType(BankQueryPlan.CalculationType.DIRECT);
 
-        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
-                provinceWideChangeTopNRequirements());
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, provinceWideChangeTopNRequirements());
 
         assertFalse(result.isValid());
         assertTrue(result.codes().contains("COMPARISON_CALCULATION_REQUIRED"));
@@ -248,10 +258,54 @@ class BankQueryPlanValidatorTest {
                         .comparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
                         .baselineStartDate(LocalDate.of(2024, 12, 31))
                         .baselineEndDate(LocalDate.of(2024, 12, 31)).build())
-                .filters(new ArrayList<>()).calculation(BankQueryPlan.Calculation.builder()
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.CHANGE).build())
-                .orderBy(new ArrayList<>()).limit(3)
-                .output(BankQueryPlan.Output.builder().columns(new ArrayList<>(List.of("ZB001")))
+                .orderBy(new ArrayList<>()).limit(3).output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("ZB001"))).orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints derivedMetricRankingRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build();
+    }
+
+    private BankQueryPlan derivedMetricRankingPlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.RANKING)
+                .metrics(new ArrayList<>(List.of(
+                        BankQueryPlan.Metric.builder().bizName("ZB001")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                        BankQueryPlan.Metric.builder().bizName("ZB002")
+                                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>(List.of(
+                        BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB002_DIV_ZB001")
+                                .numerator("ZB002").denominator("ZB001").name("存贷比").build())))
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 7, 31))
+                        .endDate(LocalDate.of(2025, 7, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>(List.of(
+                        BankQueryPlan.Filter.builder().field("rank").operator("LTE").value("3")
+                                .values(new ArrayList<>()).build(),
+                        BankQueryPlan.Filter.builder().field("rank_from_bottom").operator("LTE")
+                                .value("4").values(new ArrayList<>()).build())))
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(new ArrayList<>()).limit(7)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", "ZB001", "ZB002")))
                         .orderSensitive(false).build())
                 .build();
     }
@@ -264,22 +318,23 @@ class BankQueryPlanValidatorTest {
                                 .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
                         BankQueryPlan.Metric.builder().bizName("ZB002")
                                 .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
-                .derivedMetrics(new ArrayList<>()).dimensions(new ArrayList<>(List.of("bank_organization")))
-                .organizations(new ArrayList<>(List.of(BankQueryPlan.Organization.builder()
-                        .code("ORG004").build())))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
                 .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 7, 31))
                         .endDate(LocalDate.of(2025, 7, 31))
                         .granularity(BankQueryPlan.TimeGranularity.DAY)
                         .comparison(BankQueryPlan.TimeComparison.NONE).build())
-                .filters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder().field("benchmark")
-                        .operator("COMPARE").value("PROVINCE_AVERAGE").values(new ArrayList<>())
-                        .build())))
+                .filters(new ArrayList<>(List
+                        .of(BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                                .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())))
                 .calculation(BankQueryPlan.Calculation.builder()
                         .type(BankQueryPlan.CalculationType.DIRECT).build())
                 .orderBy(new ArrayList<>()).limit(null)
-                .output(BankQueryPlan.Output.builder().columns(new ArrayList<>(
-                        List.of("bank_organization", "ZB001", "ZB002"))).orderSensitive(false)
-                        .build())
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", "ZB001", "ZB002")))
+                        .orderSensitive(false).build())
                 .build();
     }
 }
