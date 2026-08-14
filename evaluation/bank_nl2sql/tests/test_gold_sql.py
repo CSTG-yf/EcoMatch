@@ -78,6 +78,79 @@ def execute_gold_sql(sql: str, daily: list[tuple[str, str, str, float]]) -> list
 
 
 class GoldSqlTest(unittest.TestCase):
+    def test_point_intent_daily_mean_uses_range_average(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年全年各项存款余额日均是多少？", "POINT_QUERY", ["ZB001"], ["2025年全年"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2025-01-01", "ORG001", "ZB001", 10.0),
+            ("2025-12-31", "ORG001", "ZB001", 14.0),
+        ])
+        self.assertEqual(rows[0][3:], (12.0, 10.0, 14.0, 2))
+        self.assertEqual(spec.features, ["AGGREGATION", "DATE_RANGE", "AVERAGE"])
+
+    def test_change_intent_rank_change_returns_rank_delta_per_metric(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末存款和不良率排名分别变化多少？", "CHANGE", ["ZB001", "ZB013"], ["2025年末", "年初"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2024-12-31", "ORG001", "ZB001", 10.0), ("2024-12-31", "ORG002", "ZB001", 20.0),
+            ("2025-12-31", "ORG001", "ZB001", 30.0), ("2025-12-31", "ORG002", "ZB001", 20.0),
+            ("2024-12-31", "ORG001", "ZB013", 2.0), ("2024-12-31", "ORG002", "ZB013", 1.0),
+            ("2025-12-31", "ORG001", "ZB013", 0.5), ("2025-12-31", "ORG002", "ZB013", 1.0),
+        ])
+        self.assertEqual(rows, [("ORG001", "江苏省A市农商行", "ZB001", 1, 2, 1), ("ORG001", "江苏省A市农商行", "ZB013", 1, 2, 1)])
+
+    def test_aggregation_intent_province_comparison_returns_value_mean_and_difference(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末资本充足率与全省均值差多少？", "AGGREGATION", ["ZB012"], ["2025年末"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2025-12-31", "ORG001", "ZB012", 10.0),
+            ("2025-12-31", "ORG002", "ZB012", 14.0),
+        ])
+        self.assertEqual(rows[0][3:], (10.0, 12.0, -2.0))
+
+    def test_aggregation_intent_ratio_sum_returns_both_rates_and_sum(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末不良率和逾期率合计多少？", "AGGREGATION", ["ZB013", "ZB017"], ["2025年末"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2025-12-31", "ORG001", "ZB013", 1.2),
+            ("2025-12-31", "ORG001", "ZB017", 2.3),
+        ])
+        self.assertAlmostEqual(rows[0][-1], 3.5)
+
+    def test_ratio_intent_dual_deposit_share_returns_both_ratios(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末对公和个人存款分别占比多少？", "RATIO", ["ZB001"], ["2025年末"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2025-12-31", "ORG001", "ZB001", 100.0),
+            ("2025-12-31", "ORG001", "ZB003", 35.0),
+            ("2025-12-31", "ORG001", "ZB004", 65.0),
+        ])
+        self.assertEqual([row[2] for row in rows], ["ZB003", "ZB004"])
+        self.assertEqual([row[-1] for row in rows], [35.0, 65.0])
+
+    def test_point_intent_per_capita_profit_returns_derived_value(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末人均利润是多少？", "POINT_QUERY", ["ZB011"], ["2025年末"], ["ORG001"])
+        )
+        rows = execute_gold_sql(spec.sql, [
+            ("2025-12-31", "ORG001", "ZB011", 120.0),
+            ("2025-12-31", "ORG001", "ZB018", 60.0),
+        ])
+        self.assertEqual(rows[0][-1], 2.0)
+
+    def test_profitability_change_includes_all_four_reviewed_metrics(self) -> None:
+        spec = build_gold_sql(
+            record("江苏省A市农商行2025年末盈利能力变化如何？", "CHANGE", ["ZB011", "ZB012"], ["2025年末", "年初"], ["ORG001"])
+        )
+        for code in ("ZB007", "ZB008", "ZB011", "ZB012"):
+            self.assertIn(f"'{code}'", spec.sql)
+
+
     def test_point_query_uses_metric_org_and_resolved_month_end(self) -> None:
         spec = build_gold_sql(
             record(
@@ -262,6 +335,9 @@ class GoldSqlTest(unittest.TestCase):
         self.assertIn("UNION ALL", spec.sql)
         self.assertIn("'2026-03-31'", spec.sql)
         self.assertIn("'2025-04-30'", spec.sql)
+        self.assertIn("'MOM' AS comparison_type", spec.sql)
+        self.assertIn("'YOY' AS comparison_type", spec.sql)
+        self.assertIn("SELECT comparison_type, current_value", spec.sql)
         self.assertEqual(spec.features, ["CHANGE", "BASELINE_COMPARISON", "MOM_YOY"])
 
     def test_unsupported_intent_is_rejected(self) -> None:

@@ -6,6 +6,9 @@
         "answerFacts": {
           "minItems": 1,
           "type": "array"
+        },
+        "answerFactsAuthoritative": {
+          "type": "boolean"
         }
       },
       "required": [

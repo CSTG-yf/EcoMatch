@@ -5,7 +5,7 @@
 - `official/`：版本化正式评估库目录，`official/CURRENT.json` 指向当前正式版本；
 - `db/build_database.py`：将比赛工作簿转换为标准基准库；
 - `build_dataset.py`：冻结官方题、意图标注和来源评测切分；
-- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（当前 2.0.5 正式评估库，唯一正式评分依据）；
+- `train.jsonl`、`dev.jsonl`、`test.jsonl`：199 条官方题（当前 2.0.6 正式评估库，唯一正式评分依据）；
 - `augmentation.jsonl`：12 条隔离增强题，禁止参与官方评分；
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
@@ -24,20 +24,20 @@ evaluation\.venv\Scripts\python.exe -m pip install -r evaluation\requirements.tx
 模型服务地址、管理员 Token 和目标环境生成的 Agent ID 属于本地部署配置，不提交到仓库；
 请按“导入正式数据库与初始化 Agent”章节执行并使用脚本输出的 Agent ID。
 
-## 正式评估库 2.0.5
+## 正式评估库 2.0.6
 
 `evaluation/bank_nl2sql/official/CURRENT.json` 当前指向
-`evaluation/bank_nl2sql/official/2.0.5/`。2.0.5 是**唯一当前正式评分依据**，
-2.0.3、2.0.4 作为不可变历史版本继续保留。
+`evaluation/bank_nl2sql/official/2.0.6/`。2.0.6 是**唯一当前正式评分依据**，
+2.0.3 至 2.0.5 作为不可变历史版本继续保留。
 
-2.0.5 包含：
+2.0.6 包含：
 
 - `bank-nl2sql-ground-truth-v2.0.4.xlsx`：仅修正 5 条 train 答案、事实区域不变的 ground-truth 工作簿（199 题）；
-- `official-manifest.json`：`datasetVersion=2.0.5`、`canonicalReady=true`、
+- `official-manifest.json`：`datasetVersion=2.0.6`、`canonicalReady=true`、
   `officialCount=199`、来源切分 train/dev/test = 119/40/40、`removedIds`、
   父版本、事实区哈希与 answer-fact 发布证据；
 - `contract-change-ledger.json`：从原始工作簿到2.0.0的既有题目/答案契约账本；
-- `answer-fact-ledger.json`：32 条 train/dev 类型化答案事实与必要的可执行结果查询；
+- `answer-fact-ledger.json`：199 条 train/dev/test 类型化答案事实与确定性结果公式；
 - `answer-fact-audit-summary.json`：父版本答案修正与本版本事实契约的审计摘要；
 - 以上各产物的 SHA-256 sidecar（`<UPPER_SHA256>  <文件名>\n`）。
 
@@ -49,10 +49,10 @@ evaluation\.venv\Scripts\python.exe -m pip install -r evaluation\requirements.tx
   已从正式库移除（`removedIds` 仅含账本声明的这一条）；
 - 0 个契约错误，事实区域哈希不变。
 
-2.0.5 不修改数据库事实；它在 2.0.4 中修正 5 条题意与答案不一致的 train 答案，
-并为 32 条 train/dev 答案提供完整类型化 `expected.answerFacts`。其中综合排名完整评分
-9 项当前值与 9 项排名，“较年初”统一使用当前期前一年 12-31。Fact v3 发布门禁为
-train+dev 159/159 READY，test.jsonl 与 2.0.3 逐字节一致。
+2.0.6 不修改工作簿或数据库事实；它继承 2.0.5 的唯一事实源，并为全部 199 条题提供
+完整类型化 `expected.answerFacts`。SQL 只负责生成可核对的结构化结果，正式评分不比较
+SQL 文本和最终回答文本。发布门禁为 199/199 READY、SQL 可执行 199/199、结果匹配
+199/199。
 
 正式统计：`officialCount=199`，来源与正式评测均为 train/dev/test =
 119/40/40（199 条，原始 200 条减去 1 条账本声明的训练题删除），增强样本
@@ -63,9 +63,9 @@ train+dev 159/159 READY，test.jsonl 与 2.0.3 逐字节一致。
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/amend_official_answer_facts.py `
-  --parent evaluation/bank_nl2sql/official/2.0.4 `
-  --spec evaluation/bank_nl2sql/answer-facts/2.0.5.json `
-  --output evaluation/bank_nl2sql/official/2.0.5 `
+  --parent evaluation/bank_nl2sql/official/2.0.5 `
+  --spec evaluation/bank_nl2sql/answer-facts/2.0.6.json `
+  --output evaluation/bank_nl2sql/official/2.0.6 `
   --update-current
 ```
 
@@ -116,7 +116,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/validate_database.
 
 ## 官方数据库伴随导入包（companion import package）
 
-`db/releases/2.0.5/` 是基于当前 2.0.5 官方工作簿冻结的**伴随导入包**，**不是运行时
+`db/releases/2.0.6/` 是基于当前 2.0.6 官方工作簿冻结的**伴随导入包**，**不是运行时
 `semantic.mv.db`**：它只包含不可变产物与导入器，运行时数据库由导入器按需生成。
 包内文件：
 
@@ -155,17 +155,17 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/db/Import-Offici
 `db/releases/**` 已在 `.gitattributes` 标记为 `-text`，保证包内产物校验和在
 跨平台检出时保持稳定。
 
-从 v2.0.5 唯一事实源重建该包时，必须由生成器同时写入 SQLite、H2 脚本和
+从 v2.0.6 唯一事实源重建该包时，必须由生成器同时写入 SQLite、H2 脚本和
 `database-manifest.json`，不得手工修改其中任一产物：
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py `
-  evaluation/bank_nl2sql/official/2.0.5/bank-nl2sql-ground-truth-v2.0.4.xlsx `
-  --sqlite-output evaluation/bank_nl2sql/db/releases/2.0.5/bank.sqlite `
-  --h2-script-output evaluation/bank_nl2sql/db/releases/2.0.5/bank-h2.sql `
-  --database-manifest-output evaluation/bank_nl2sql/db/releases/2.0.5/database-manifest.json `
-  --official-version 2.0.5 `
-  --source-relative-path evaluation/bank_nl2sql/official/2.0.5/bank-nl2sql-ground-truth-v2.0.4.xlsx
+  evaluation/bank_nl2sql/official/2.0.6/bank-nl2sql-ground-truth-v2.0.4.xlsx `
+  --sqlite-output evaluation/bank_nl2sql/db/releases/2.0.6/bank.sqlite `
+  --h2-script-output evaluation/bank_nl2sql/db/releases/2.0.6/bank-h2.sql `
+  --database-manifest-output evaluation/bank_nl2sql/db/releases/2.0.6/database-manifest.json `
+  --official-version 2.0.6 `
+  --source-relative-path evaluation/bank_nl2sql/official/2.0.6/bank-nl2sql-ground-truth-v2.0.4.xlsx
 ```
 
 ## 可移植「银行问数」Agent 导入
@@ -210,7 +210,7 @@ manifest 哈希，队友应使用输出的 `agentId` 打开页面或运行评测
 
 ## 构建标注数据集
 
-正式版必须使用 `official/CURRENT.json` 指向的2.0.5工作簿与
+正式版必须使用 `official/CURRENT.json` 指向的2.0.6工作簿与
 `official-manifest.json`（manifest严格
 匹配工作簿名称/SHA-256/题数/来源切分/`canonicalReady` 后，才允许忽略
 `removedIds`；无 manifest 时保持原严格未知意图行为；除 `removedIds` 外
@@ -218,33 +218,33 @@ manifest 哈希，队友应使用输出的 `agentId` 打开页面或运行评测
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_dataset.py `
-  evaluation/bank_nl2sql/official/2.0.5/bank-nl2sql-ground-truth-v2.0.4.xlsx `
+  evaluation/bank_nl2sql/official/2.0.6/bank-nl2sql-ground-truth-v2.0.4.xlsx `
   --intent-root evaluation/bank_intent `
-  --official-manifest evaluation/bank_nl2sql/official/2.0.5/official-manifest.json `
-  --output .local-dev/bank-nl2sql/rebuild-2.0.5
+  --official-manifest evaluation/bank_nl2sql/official/2.0.6/official-manifest.json `
+  --output .local-dev/bank-nl2sql/rebuild-2.0.6
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_dataset.py `
-  .local-dev/bank-nl2sql/rebuild-2.0.5
+  .local-dev/bank-nl2sql/rebuild-2.0.6
 ```
 
-正式版基于 v2.0.5 唯一事实源 SHA-256
+正式版基于 v2.0.6 唯一事实源 SHA-256
 `50159f20de30ef1a4a9cd436aa16965c55725bf226bd0de4b932d3d94a981ee0`
 （工作簿只读、永不手工修改）。199 条官方题的来源
 与正式评测均为 train/dev/test = 119/40/40，增强样本 12 条。
-`manifest.json` 记录 v2.0.5 的 answer-fact 溯源与 `templateOverlap` 风险披露，
+`manifest.json` 记录 v2.0.6 的 answer-fact 溯源与 `templateOverlap` 风险披露，
 绝不改变题目归属。
 
 ## 发布完整性校验
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/build_gold.py `
-  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.5/bank.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.6/bank.sqlite
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/validate_gold.py `
-  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.5/bank.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.6/bank.sqlite
 
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
-  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.5/bank.sqlite
+  evaluation/bank_nl2sql evaluation/bank_nl2sql/db/releases/2.0.6/bank.sqlite
 ```
 
 `validate_gold.py` 是发布完整性门禁：199 条生成 SQL 必须全部可执行，且查询结果与
@@ -254,7 +254,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 ## 官方运行时评测（唯一入口）
 
 所有成员只能通过 `Run-OfficialBankEvaluation.ps1` 产出可比较的成绩。它使用
-`official_runtime_evaluation_v3.json` 固定：v2.0.5 数据库包、Fact v3 评分、独立会话、
+`official_runtime_evaluation_v3.json` 固定：v2.0.6 数据库包、Fact v3 评分、独立会话、
 串行执行、结果-only 执行模式、固定 smoke 和完整分母。它仍按前端真实顺序调用：新建会话
 → 解析 → 执行 → 轮询结果；评测请求显式携带 `resultOnly=true`，服务端保留查询编译、
 结果投影和结构化事实处理，跳过最终回答/通用摘要模型。金标 SQL、结果和答案文本始终只在
@@ -279,7 +279,7 @@ casePass = resultExact
 
 ### 0. 一次性准备
 
-1. 停止 standalone，使用上文 `Import-OfficialBankData.ps1` 导入 v2.0.5；再启动服务。
+1. 停止 standalone，使用上文 `Import-OfficialBankData.ps1` 导入 v2.0.6；再启动服务。
 2. 创建目标环境的语义模型与聊天模型。
 3. 导入 Agent，并保存不含密钥的启动回执：
 

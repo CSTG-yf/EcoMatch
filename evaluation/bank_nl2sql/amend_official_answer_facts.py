@@ -21,6 +21,7 @@ from amend_official_ground_truth import (
 )
 from answer_facts import validate_answer_facts
 from build_dataset import _load_workbook_questions
+from fact_contract_v3 import validate_typed_facts_against_answer
 
 
 GENERATOR = {"name": "amend_official_answer_facts", "version": "1.0.0"}
@@ -46,6 +47,9 @@ def _load_spec(
     if not isinstance(contracts, list) or not contracts:
         raise OfficialAmendmentError("答案事实清单 contracts 必须为非空列表")
     questions = {item["id"]: item for item in _load_workbook_questions(workbook_path)}
+    coverage_mode = spec.get("coverageMode", "INCREMENTAL")
+    if coverage_mode not in {"INCREMENTAL", "FULL_OFFICIAL"}:
+        raise OfficialAmendmentError("答案事实清单 coverageMode 非法")
     seen: set[str] = set()
     normalized: list[dict[str, Any]] = []
     for contract in contracts:
@@ -58,7 +62,7 @@ def _load_spec(
         question = questions.get(sample_id)
         if question is None:
             raise OfficialAmendmentError(f"答案事实 ID 不在父工作簿: {sample_id}")
-        if question["sourceSplit"] not in {"train", "dev"}:
+        if coverage_mode != "FULL_OFFICIAL" and question["sourceSplit"] not in {"train", "dev"}:
             raise OfficialAmendmentError(f"答案事实禁止修改 test: {sample_id}")
         reason = contract.get("reason")
         if not isinstance(reason, str) or not reason.strip():
@@ -72,6 +76,14 @@ def _load_spec(
         )
         if errors:
             raise OfficialAmendmentError(f"答案事实结构非法 {sample_id}: {errors}")
+        if coverage_mode == "FULL_OFFICIAL":
+            source_errors = validate_typed_facts_against_answer(
+                question["question"], question["answerText"], answer_facts
+            )
+            if source_errors:
+                raise OfficialAmendmentError(
+                    f"答案事实未与父工作簿答案对齐 {sample_id}: {source_errors}"
+                )
         entry = {
             "id": sample_id,
             "split": question["sourceSplit"],
@@ -94,6 +106,12 @@ def _load_spec(
             entry["goldSql"] = sql
             entry["sqlFeatures"] = features
         normalized.append(entry)
+    if coverage_mode == "FULL_OFFICIAL" and seen != set(questions):
+        missing = sorted(set(questions) - seen)
+        extra = sorted(seen - set(questions))
+        raise OfficialAmendmentError(
+            f"FULL_OFFICIAL 必须完整覆盖父工作簿: missing={missing}, extra={extra}"
+        )
     normalized.sort(key=lambda item: item["id"])
     return spec, normalized
 
@@ -147,6 +165,7 @@ def amend_official_answer_facts(
                 "parentDatasetVersion": parent_manifest["datasetVersion"],
                 "parentOfficialManifestSha256": parent_manifest_sha,
                 "targetDatasetVersion": target_version,
+                "coverageMode": spec.get("coverageMode", "INCREMENTAL"),
                 "specSha256": sha256_file(spec_path),
                 "count": len(contracts),
                 "entries": contracts,
@@ -160,6 +179,7 @@ def amend_official_answer_facts(
                 "datasetVersion": target_version,
                 "parentDatasetVersion": parent_manifest["datasetVersion"],
                 "answerFactCount": len(contracts),
+                "answerFactCoverageMode": spec.get("coverageMode", "INCREMENTAL"),
                 "verifiedIds": [contract["id"] for contract in contracts],
                 "parentWorkbookSha256": sha256_file(parent_workbook),
                 "candidateWorkbookSha256": sha256_file(workbook),
@@ -172,7 +192,11 @@ def amend_official_answer_facts(
         _write_sidecar(audit)
         manifest = {
             "schemaVersion": "2.2",
-            "releaseMode": "INCREMENTAL_ANSWER_FACT_CONTRACT",
+            "releaseMode": (
+                "FULL_OFFICIAL_ANSWER_FACT_CONTRACT"
+                if spec.get("coverageMode") == "FULL_OFFICIAL"
+                else "INCREMENTAL_ANSWER_FACT_CONTRACT"
+            ),
             "datasetVersion": target_version,
             "parent": {
                 "datasetVersion": parent_manifest["datasetVersion"],
@@ -191,6 +215,7 @@ def amend_official_answer_facts(
             "changeCounts": parent_manifest["changeCounts"],
             "answerFactLedger": fact_ledger.name,
             "answerFactCount": len(contracts),
+            "answerFactCoverageMode": spec.get("coverageMode", "INCREMENTAL"),
             "answerFactGenerator": GENERATOR,
             "groundTruthWorkbook": workbook.name,
             "finalAuditSummary": audit.name,

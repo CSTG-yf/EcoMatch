@@ -35,9 +35,10 @@ def _json_value(value: Any) -> Any:
 
 
 def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
-    path.write_text(
-        "".join(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n" for record in records), encoding="utf-8"
-    )
+    with path.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(
+            "".join(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n" for record in records)
+        )
 
 
 def _dataset_manifest(dataset_path: Path) -> dict[str, Any]:
@@ -141,9 +142,10 @@ def build_gold_dataset(
         if isinstance(ledger_sha, str) and len(ledger_sha) == 64:
             report["answerFactLedgerSha256"] = ledger_sha.upper()
     if write_gold_manifest:
-        (dataset_path / "gold_manifest.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        with (dataset_path / "gold_manifest.json").open(
+            "w", encoding="utf-8", newline="\n"
+        ) as output:
+            output.write(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return report
 
 
