@@ -329,8 +329,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
      */
     private void validateHighConfidenceQueryFamily(String queryText,
             BankRequestContract requirements) {
-        if (queryText == null || requirements == null
-                || requirements.getAction() != BankRequestContract.Action.EXECUTE) {
+        if (queryText == null || requirements == null) {
+            return;
+        }
+        // Validation only: the model still supplies the identifiers, order and intent. The
+        // catalog recognizer is used to return a repairable error when a complete two-operand
+        // point ratio is incorrectly clarified or classified as another query family.
+        validateGenericPointRatioQuery(queryText, requirements);
+        if (requirements.getAction() != BankRequestContract.Action.EXECUTE) {
             return;
         }
         if (containsAny(queryText, "全省排第几", "全省排名第几", "全省排名")) {
@@ -510,6 +516,31 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 && time.getComparison() == BankQueryPlan.TimeComparison.NONE
                 && !containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "变化", "变动", "增长",
                         "下降", "最高", "最低", "全省均值", "对比", "比较");
+    }
+
+    private void validateGenericPointRatioQuery(String queryText,
+            BankRequestContract requirements) {
+        if (!isGenericPointRatioQuestion(queryText)) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getMetrics().size() != 2 || evidence.getOrganizations().size() != 1
+                || evidence.getTime() == null || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null) {
+            return;
+        }
+        List<String> expectedMetricOrder = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        validateQueryFamily("generic_point_ratio_mismatch", requirements, BankIntentType.RATIO,
+                expectedMetricOrder, Set.of(), false);
+    }
+
+    private boolean isGenericPointRatioQuestion(String queryText) {
+        return queryText != null && queryText.contains("占")
+                && containsAny(queryText, "比重", "比例", "占比", "比率")
+                && !containsAny(queryText, "分别", "各自", "构成", "结构", "排名", "排行", "趋势", "走势",
+                        "同比", "环比", "较年初", "全省均值", "对比", "比较");
     }
 
     private void validateQueryFamily(String errorCode, BankRequestContract requirements,

@@ -310,6 +310,27 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void genericPointRatioClarificationIsReturnedToTheModelWithCatalogOperands() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(),
+                genericPointRatioRequirementsJson("RATIO"), genericPointRatioPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("江苏省A市农商行在2026-04-30的净利息收入占营业收入的比重有多大？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB008", "ZB009"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RATIO, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("generic_point_ratio_mismatch"));
+        assertTrue(prompts.getAllValues().get(1).contains("ZB008"));
+    }
+
+    @Test
     void endpointDirectionReturnsIntentMismatchToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(endpointChangeRequirementsJson("TREND"),
@@ -839,6 +860,26 @@ class BankPlanGenStrategyTest {
                 "time":{"startDate":"2025-12-31","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
                 "filters":[],"calculation":{"type":"RATIO","baseline":"ZB002"},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB014","ZB002"],"orderSensitive":false}}
+                """;
+    }
+
+    private String genericPointRatioRequirementsJson(String intent) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"%s",
+                "metricCodes":["ZB008","ZB009"],"derivedMetrics":[],"organizationCodes":["ORG001"],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
+                """.formatted(intent);
+    }
+
+    private String genericPointRatioPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metrics":[{"bizName":"ZB008","aggregation":"DEFAULT","alias":null},{"bizName":"ZB009","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG001","bizName":null}],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB009"},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB008","ZB009"],"orderSensitive":true}}
                 """;
     }
 

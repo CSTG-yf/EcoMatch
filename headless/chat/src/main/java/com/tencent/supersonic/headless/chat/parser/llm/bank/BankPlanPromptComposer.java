@@ -94,7 +94,12 @@ public final class BankPlanPromptComposer {
                     “某机构某日的人均利润/人均净利润”是目录派生指标：必须 action=EXECUTE、intent=RATIO，
                     metricCodes=["ZB011","ZB018"]，derivedMetrics 逐字段填写目录中的
                     DERIVED_ZB011_DIV_ZB018，answerFactTypes=["RATIO_VALUE"]；人均利润=净利润/员工人数，
-                    单位为万元/人，不乘以100。
+                     单位为万元/人，不乘以100。
+                     “某机构某日的<分子指标>占<分母指标>的比重/比例/占比”是通用点值比率：当题干明确给出
+                     恰好两个目录基础指标、一个机构和一个日期时，必须 action=EXECUTE、intent=RATIO，
+                     metricCodes 严格按题干分子到分母的顺序填写，derivedMetrics=[]（除非题干明确点名目录
+                     中的派生指标），answerFactTypes=["RATIO_VALUE"]。不得因为日期属于2026年、机构使用
+                     字母城市占位名或模型认为数据“未来”而 action=CLARIFY；这些日期和机构均以权威事实目录为准。
                     最高优先级执行合同：用户显式枚举了非空的封闭指标清单，并同时给出唯一机构和明确
                     日期/日期范围时，必须将清单逐项映射为 metricCodes/derivedMetrics 并 action=EXECUTE。
                     标题、分类名称、排名或表现判定说明只能约束该封闭清单的组织和输出方式，不能成为
@@ -254,7 +259,11 @@ public final class BankPlanPromptComposer {
                         metricCodes=["ZB014","ZB002"]、derivedMetrics=[]、answerFactTypes=["RATIO_VALUE"]；
                         PLAN 必须 metrics 按 ZB014、ZB002 排列，calculation.type=RATIO、baseline="ZB002"，
                         dimensions=["bank_organization"]，不得退化为两个基础指标的 DIRECT 查询。
-                    3d. 多个明确机构“加起来/合计/总和”的查询，PLAN 必须保留所有 organizations，并使用
+                     3d. 通用两个基础指标的点值比率也使用同一计划形状：metrics 按题干分子、分母排列，
+                     derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，dimensions 必须包含
+                     bank_organization，output.columns 先列机构再列两个基础指标；编译器会计算 RATIO_VALUE。
+                     不得把这类明确比重问题改成 CLARIFY、POINT_QUERY 或 DIRECT。
+                     3e. 多个明确机构“加起来/合计/总和”的查询，PLAN 必须保留所有 organizations，并使用
                         dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
                         返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
@@ -376,7 +385,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v48-query-family-contracts";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v49-query-family-contracts";
 
     private BankPlanPromptComposer() {}
 
