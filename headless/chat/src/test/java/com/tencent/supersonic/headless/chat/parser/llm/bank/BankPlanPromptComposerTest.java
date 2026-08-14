@@ -86,6 +86,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("orderBy 必须为 []"));
         assertTrue(sys.contains("dimensions 必须为 [\"bank_organization\"]"));
         assertTrue(sys.contains("有多少天高于全省均值"));
+        assertTrue(sys.contains("评测事实库中的日粒度计数"));
         assertTrue(sys.contains("COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"));
         assertTrue(sys.contains("DAYS_ABOVE_AVERAGE"));
         assertTrue(sys.contains("不得先对全年求和或平均后只比较一次"));
@@ -113,6 +114,10 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("\"answerFactTypes\":[\"CHANGE_VALUE\"]"));
         assertTrue(sys.contains("COMPARISON_VALUE 仅表示布尔阈值结论"));
         assertTrue(sys.contains("普通“与全省均值逐项对比”"));
+        assertTrue(sys.contains("机构间普通比较与局部排名必须严格区分"));
+        assertTrue(sys.contains("机构A比机构B多多少/少多少/相差多少"));
+        assertTrue(sys.contains("机构A、机构B、机构C三家谁/哪家某指标最多/最少/最高/最低"));
+        assertTrue(sys.contains("不得把“谁最多”理解为 COMPARISON"));
         assertTrue(sys.contains("“高于/低于全省均值多少”只要求目标值和差额时"));
         assertTrue(sys.contains("只有用户明确询问“全省均值是多少/均值为多少”时"));
         assertTrue(sys.contains("“主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名"));
@@ -129,6 +134,8 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("DERIVED_ZB002_DIV_ZB001"));
         assertTrue(sys.contains("DERIVED_ZB011_DIV_ZB018"));
         assertTrue(sys.contains("对公和个人分别占比"));
+        assertTrue(sys.contains("贷款结构双分项"));
+        assertTrue(sys.contains("[\"ZB006\",\"ZB005\",\"ZB002\"]"));
         assertTrue(sys.contains("人均利润"));
         assertTrue(sys.contains("aggregationMode"));
         assertTrue(sys.contains("逾期贷款率"));
@@ -159,6 +166,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("分类标签与其右侧指标列表构成封闭映射"));
         assertTrue(sys.contains("必须按自然季度末解析"));
         assertTrue(sys.contains("明确日期与全省均值比较"));
+        assertTrue(sys.contains("不要因为指标通常按季度披露"));
         assertTrue(sys.contains("不得因为“各项指标”或维度名称擅自加入映射之外的目录指标"));
         assertTrue(sys.contains("封闭映射解析算法"));
         assertTrue(sys.contains("每个代码都可回指"));

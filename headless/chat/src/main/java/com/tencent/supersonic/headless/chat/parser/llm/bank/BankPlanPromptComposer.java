@@ -69,6 +69,16 @@ public final class BankPlanPromptComposer {
                     例如题目“各项存款低于全省均值多少”时，answerFactTypes 必须精确写成 ["VALUE","GAP_VALUE"]，
                     不得写入 PROVINCE_AVERAGE；只有题目出现“全省均值是多少/均值为多少”才允许写入 PROVINCE_AVERAGE。
                     除非用户要求“是否达标/是否满足”且可返回 meets_condition，否则不得选择 COMPARISON_VALUE。
+                    机构间普通比较与局部排名必须严格区分：
+                    - “机构A比机构B多多少/少多少/相差多少”表示两个明确机构在同一日期的数值差，
+                      REQUIREMENTS 和 PLAN 都必须使用 intent=COMPARISON、time.comparison=NONE、
+                      dimensions=["bank_organization"]、calculation.type=DIRECT，保留两个机构和一个指标；
+                      answerFactTypes 必须包含 VALUE、GAP_VALUE。不得把它退化为 POINT_QUERY 或 AGGREGATION，
+                      也不得使用 COMPARISON_VALUE；差额由结果事实 value_difference 支撑。
+                    - “机构A、机构B、机构C三家谁/哪家某指标最多/最少/最高/最低”表示所列机构集合内的局部排名，
+                      REQUIREMENTS 和 PLAN 都必须使用 intent=RANKING，保留题干列出的全部机构、单一指标、
+                      dimensions=["bank_organization"]，并只在题干明确要求名次时加入 RANK；只问“谁最多/最少”
+                      时至少填写 VALUE。不得把“谁最多”理解为 COMPARISON，也不得因为机构不是全省范围而澄清。
                     需求判定的执行边界：如果用户已经明确给出目录中的具体指标、合法日期或日期范围，
                     并且机构范围可以从题干直接确定（例如“全省”“各家银行”表示 organizationCodes=[]），
                     必须 action=EXECUTE；不要因为“全年”、跨年、相对当前日期、字母城市占位名或“哪家”而 action=CLARIFY。
@@ -295,21 +305,34 @@ public final class BankPlanPromptComposer {
                        limit 设为 N。排名过滤器只能用于 RANKING，不能用来代替机构或指标过滤。
                        “排最后一名/倒数第一”就是后1名：只填写 rank_from_bottom 过滤器，必须
                        operator=LTE、value="1"、values=[]，并令 limit=1；不得使用 GTE、EQ 或总机构数。
-                    10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
+                     10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                        聚合成一个值再比较。REQUIREMENTS 必须使用 intent=AGGREGATION、单一机构、单一指标、
                        granularity=DAY、comparison=NONE、answerFactTypes=["COUNT"]，并包含精确的
                        benchmark/COMPARE/PROVINCE_AVERAGE filter。PLAN 必须保留上述范围，使用
                        dimensions=["bank_organization"]、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
                        orderBy=[]、limit=null，output.columns 只写 ["bank_organization","ZB###"]；
-                       编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
-                       不得先对全年求和或平均后只比较一次，也不得用 COMPARISON_VALUE 代替逐日计数。
-                    11. “某机构某指标在明确日期与全省均值比较”属于已确定的 AGGREGATION 省均值合同：
+                        编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
+                        不得先对全年求和或平均后只比较一次，也不得用 COMPARISON_VALUE 代替逐日计数。
+                     10a. “某机构某指标全年/期间有多少天高于全省均值”是评测事实库中的日粒度计数：
+                         REQUIREMENTS 与 PLAN 必须 action=EXECUTE、intent=AGGREGATION，保留该机构、该指标和
+                         完整日期范围，filters 必须包含 benchmark/COMPARE/PROVINCE_AVERAGE，PLAN 的
+                         calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、dimensions=["bank_organization"]、
+                         answerFactTypes 至少包含 COUNT。不要因为指标通常按季度披露、题目年份晚于当前日期、
+                         或机构名称使用字母城市占位符而澄清；这些都是本权威评测目录中的有效槽位。
+                     11. “某机构某指标在明确日期与全省均值比较”属于已确定的 AGGREGATION 省均值合同：
                         使用 benchmark/COMPARE/PROVINCE_AVERAGE，保留单机构、单指标和日期；不得输出 CLARIFY。
                     12. “上季度末”是自然季度边界，不是固定回退三个月：2025-10-31→2025-09-30、
                         2025-07-31→2025-06-30、2025-04-30→2025-03-31、2025-01-31→2024-12-31。
-                    13. 题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，PLAN 必须原样保留
-                        startDate=endDate=该日期且 time.granularity=DAY；不得因为日期恰好是月末就改为 MONTH，
-                        也不得截断成 YYYY-MM。只有用户明确询问按月分组时才允许 MONTH。
+                     13. 题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，PLAN 必须原样保留
+                         startDate=endDate=该日期且 time.granularity=DAY；不得因为日期恰好是月末就改为 MONTH，
+                         也不得截断成 YYYY-MM。只有用户明确询问按月分组时才允许 MONTH。
+                     14. “某机构某日的个人贷款和对公贷款分别占各项贷款的比例/占比”是贷款结构双分项查询：
+                         REQUIREMENTS 必须 action=EXECUTE、intent=POINT_QUERY，metricCodes 严格按
+                         ["ZB006","ZB005","ZB002"]（个人贷款、对公贷款、各项贷款共同分母）填写，
+                         derivedMetrics=[]，answerFactTypes=["VALUE","RATIO_VALUE"]；PLAN 使用相同指标顺序、
+                         dimensions=["bank_organization"]、calculation.type=DIRECT、output.orderSensitive=true。
+                         结果事实层会分别计算两个分项相对 ZB002 的比例；不得退化为单一 RATIO，也不得因日期为
+                         2026 年或“分别”而返回 CLARIFY。
 
                     ════════════════════════════════
                     严格合同
@@ -353,7 +376,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{SEMANTIC_REGISTRY}}", BankSemanticRegistry.promptCatalog()).strip();
 
-    public static final String PREFIX_VERSION = "bank-plan-sys-v47-query-family-contracts";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v48-query-family-contracts";
 
     private BankPlanPromptComposer() {}
 
@@ -445,11 +468,18 @@ public final class BankPlanPromptComposer {
                 - 一家唯一目录机构、至少一个目录指标和明确的起止日期已经构成完整请求；季度末
                   （一/二/三/四季度末）分别是 03-31、06-30、09-30、12-31。不得因为“逐季变化”、
                   “各季度末数值”或“哪个季度最高”再要求用户补充数据范围或具体指标。
-                - 增幅排名前三表示 intent=CHANGE、comparison=PERIOD_OVER_PERIOD、requiredLimit=3，并包含 CHANGE_RATE 事实类型。
+                 - 增幅排名前三表示 intent=CHANGE、comparison=PERIOD_OVER_PERIOD、requiredLimit=3，并包含 CHANGE_RATE 事实类型。
+                 - “机构A、机构B、机构C三家谁某指标最多/最少”表示局部 RANKING，保留全部列出的机构；
+                   “机构A比机构B多多少/相差多少”表示 COMPARISON，保留两个机构并包含 GAP_VALUE，不能混用。
                 - 目录别名：各项存款余额/存款余额 -> ZB001；各项贷款余额/贷款余额 -> ZB002；净利润 -> ZB011。
                 - “某机构在YYYY-MM-DD的存贷比是多少”槽位已经完整：必须 action=EXECUTE，直接指标为
                   ZB002、ZB001，派生指标为 DERIVED_ZB002_DIV_ZB001，事实类型为 RATIO_VALUE；不得再次澄清。
-                - 某机构全年日均值、最高日、最低日表示该机构和指标的 AGGREGATION 查询，覆盖该年度完整日期范围。
+                 - 某机构全年日均值、最高日、最低日表示该机构和指标的 AGGREGATION 查询，覆盖该年度完整日期范围。
+                 - “某机构某指标全年有多少天高于全省均值”必须执行 AGGREGATION 的逐日计数合同：
+                   benchmark=COMPARE/PROVINCE_AVERAGE、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
+                   answerFactTypes 至少包含 COUNT；不能因为字母城市名、日频或未来年份而澄清。
+                 - “个人贷款和对公贷款分别占各项贷款的比例”必须执行 POINT_QUERY，metricCodes 按
+                   ["ZB006","ZB005","ZB002"]，answerFactTypes=["VALUE","RATIO_VALUE"]；不能退化为单一 RATIO。
                 - “某机构某指标在明确日期和全省均值比，是高还是低/差多少”已经具备完整槽位，必须输出
                   action=EXECUTE、intent=AGGREGATION、benchmark=COMPARE/PROVINCE_AVERAGE；不得再次要求
                   用户补充指标、日期或数据来源。

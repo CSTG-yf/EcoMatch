@@ -336,6 +336,15 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (containsAny(queryText, "全省排第几", "全省排名第几", "全省排名")) {
             validateRankingIntent(requirements);
         }
+        validateSelectedOrganizationRanking(queryText, requirements);
+        validateOrganizationComparison(queryText, requirements);
+        validateDaysAboveProvinceAverage(queryText, requirements);
+        if (queryText.contains("个人贷款") && queryText.contains("对公贷款")
+                && queryText.contains("各项贷款") && containsAny(queryText, "占比", "比例", "比重")) {
+            validateQueryFamily("loan_structure_share_mismatch", requirements,
+                    BankIntentType.POINT_QUERY, List.of("ZB006", "ZB005", "ZB002"), Set.of(),
+                    false);
+        }
         if (queryText.contains("全省均值")
                 && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
             validateProvinceAverageComparison(queryText, requirements);
@@ -366,6 +375,131 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             validateQueryFamily("risk_rate_pair_mismatch", requirements, BankIntentType.POINT_QUERY,
                     List.of("ZB013", "ZB017"), Set.of(), true);
         }
+    }
+
+    /**
+     * A selected set of explicitly named institutions is a local ranking, not a pairwise
+     * comparison. This is validation-only: the model still supplies the identifiers and complete
+     * contract; a mismatch is sent back as a repairable error instead of being rewritten here.
+     */
+    private void validateSelectedOrganizationRanking(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null
+                || !containsAny(queryText, "谁", "哪家", "哪个")
+                || !containsAny(queryText, "最多", "最少", "最高", "最低", "最大", "最小")
+                || queryText.contains("全省均值")) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getOrganizations().size() < 2 || evidence.getMetrics().size() != 1) {
+            return;
+        }
+        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
+        if (requirements.getIntent() == BankIntentType.RANKING
+                && actualOrganizations.equals(expectedOrganizations)
+                && actualMetrics.equals(expectedMetrics)) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "selected_organization_ranking_mismatch: questions asking which of the explicitly "
+                        + "named institutions has the highest/lowest value require intent=RANKING, "
+                        + "organizationCodes=" + expectedOrganizations + ", metricCodes="
+                        + expectedMetrics + "; model intent=" + requirements.getIntent()
+                        + ", organizationCodes=" + actualOrganizations + ", metricCodes="
+                        + actualMetrics + ". Regenerate the complete requirements JSON; do not "
+                        + "rewrite the model plan in the backend.");
+    }
+
+    /** Validates an explicit two-institution value difference without changing model output. */
+    private void validateOrganizationComparison(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null || queryText.contains("全省均值")
+                || containsAny(queryText, "同比", "环比", "较上月", "较去年", "较年初", "增幅", "变动")
+                || !containsAny(queryText, "相差", "差多少", "多多少", "少多少")
+                        && !(queryText.contains("比") && !queryText.contains("比例")
+                                && !queryText.contains("占比") && !queryText.contains("比重"))) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getOrganizations().size() != 2 || evidence.getMetrics().size() != 1) {
+            return;
+        }
+        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
+        boolean answerFactsOk = requirements.getAnswerFactTypes().contains(
+                BankRequestContract.AnswerFactType.VALUE)
+                && requirements.getAnswerFactTypes().contains(
+                        BankRequestContract.AnswerFactType.GAP_VALUE);
+        if (requirements.getIntent() == BankIntentType.COMPARISON
+                && actualOrganizations.equals(expectedOrganizations)
+                && actualMetrics.equals(expectedMetrics)
+                && answerFactsOk) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "organization_comparison_mismatch: explicit A versus B difference questions require "
+                        + "intent=COMPARISON, both organizations, one metric, and VALUE/GAP_VALUE; "
+                        + "expected organizations=" + expectedOrganizations + ", metrics="
+                        + expectedMetrics + "; model intent=" + requirements.getIntent()
+                        + ", organizations=" + actualOrganizations + ", metrics=" + actualMetrics
+                        + ", answerFactTypes=" + requirements.getAnswerFactTypes()
+                        + ". Regenerate the complete requirements JSON without changing the question.");
+    }
+
+    /** Ensures the daily count contract reaches the compiler as an executable aggregation plan. */
+    private void validateDaysAboveProvinceAverage(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null || !queryText.contains("全省均值")
+                || !queryText.contains("有多少天")) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getMetrics().size() != 1) {
+            return;
+        }
+        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
+        boolean benchmarkPresent = requirements.getFilters().stream().anyMatch(filter ->
+                "benchmark".equals(filter.getField()) && "COMPARE".equals(filter.getOperator())
+                        && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        boolean countRequested = requirements.getAnswerFactTypes().contains(
+                BankRequestContract.AnswerFactType.COUNT);
+        if (requirements.getIntent() == BankIntentType.AGGREGATION
+                && actualOrganizations.equals(expectedOrganizations)
+                && actualMetrics.equals(expectedMetrics) && benchmarkPresent && countRequested) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "days_above_province_average_mismatch: daily count questions require "
+                        + "intent=AGGREGATION, one organization, one metric, benchmark/COMPARE/"
+                        + "PROVINCE_AVERAGE, and COUNT; expected organizations="
+                        + expectedOrganizations + ", metrics=" + expectedMetrics + "; model intent="
+                        + requirements.getIntent() + ", organizations=" + actualOrganizations
+                        + ", metrics=" + actualMetrics + ", benchmarkPresent=" + benchmarkPresent
+                        + ", answerFactTypes=" + requirements.getAnswerFactTypes()
+                        + ". Regenerate the complete requirements JSON for the daily fact table.");
     }
 
     private boolean isStandalonePointRatioContext(String queryText,
