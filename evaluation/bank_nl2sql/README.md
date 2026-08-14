@@ -10,6 +10,20 @@
 - `manifest.json`：源工作簿哈希、切分数量和逐题调整记录；
 - `schema.json`：JSONL 字段契约。
 
+## Windows 环境准备
+
+首次在干净克隆中运行评测前，在仓库根目录执行：
+
+```powershell
+py -3 -m venv evaluation\.venv
+evaluation\.venv\Scripts\python.exe -m pip install --upgrade pip
+evaluation\.venv\Scripts\python.exe -m pip install -r evaluation\requirements.txt
+```
+
+后续所有数据校验、导入和 `Run-OfficialBankEvaluation.ps1` 均使用这个项目内虚拟环境。
+模型服务地址、管理员 Token 和目标环境生成的 Agent ID 属于本地部署配置，不提交到仓库；
+请按“导入正式数据库与初始化 Agent”章节执行并使用脚本输出的 Agent ID。
+
 ## 正式评估库 2.0.5
 
 `evaluation/bank_nl2sql/official/CURRENT.json` 当前指向
