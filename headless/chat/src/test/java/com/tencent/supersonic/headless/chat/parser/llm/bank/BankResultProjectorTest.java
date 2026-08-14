@@ -57,6 +57,28 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldKeepMomAndYoyIdentityInPublishedProjection() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MOM_YOY_CHANGE)
+                .organizationColumn("bank_organization")
+                .timeColumn("bank_data_date")
+                .selectedDates(List.of("2025-04-30", "2026-03-31", "2026-04-30"))
+                .organizationNames(Map.of("ORG001", "江苏省A市农商行"))
+                .selectedOrganizationCodes(List.of("ORG001"))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("current_value", new BigDecimal("41.70"),
+                        "mom_baseline_value", new BigDecimal("42.32"),
+                        "yoy_baseline_value", new BigDecimal("42.05"))));
+
+        assertEquals(List.of("comparison_type", "current_value", "baseline_value",
+                "absolute_change", "percent_change"), projection.getColumns());
+        assertEquals("MOM", projection.getRows().get(0).get("comparison_type"));
+        assertEquals("YOY", projection.getRows().get(1).get("comparison_type"));
+    }
+
+    @Test
     void shouldProjectWideCurrentAndBaselineRowsToMultiMetricChange() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)

@@ -38,6 +38,9 @@ _RESULT_VALUE_ALIASES: dict[str, tuple[str, ...]] = {
     "metric_value": ("aggregate_value", "current_value"),
     "aggregate_value": ("metric_value", "current_value"),
     "current_value": ("metric_value", "aggregate_value"),
+    "days_above_province_average": ("days_above_average",),
+    "observation_count": ("total_days",),
+    "above_ratio_percent": ("ratio_percent",),
     # The constrained runtime exposes the signed comparison as ``gap_value``
     # while the reviewed gold contract calls it ``value_difference``.  Keep
     # this alias directional and signed: ``absolute_gap`` is intentionally not

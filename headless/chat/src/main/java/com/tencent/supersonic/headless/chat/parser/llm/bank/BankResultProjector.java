@@ -563,14 +563,17 @@ public class BankResultProjector {
             return Projection.notApplied();
         }
         return Projection.applied(columns(contract),
-                List.of(changeRow(current.value(), currentValue, monthBaseline.value(), monthValue),
-                        changeRow(current.value(), currentValue, yearBaseline.value(), yearValue)));
+                List.of(changeRow("MOM", current.value(), currentValue, monthBaseline.value(),
+                        monthValue),
+                        changeRow("YOY", current.value(), currentValue, yearBaseline.value(),
+                                yearValue)));
     }
 
-    private Map<String, Object> changeRow(Object currentValue, BigDecimal currentNumeric,
-            Object baselineValue, BigDecimal baselineNumeric) {
+    private Map<String, Object> changeRow(String comparisonType, Object currentValue,
+            BigDecimal currentNumeric, Object baselineValue, BigDecimal baselineNumeric) {
         Map<String, Object> row = new LinkedHashMap<>();
         BigDecimal change = currentNumeric.subtract(baselineNumeric);
+        row.put("comparison_type", comparisonType);
         row.put("current_value", currentValue);
         row.put("baseline_value", baselineValue);
         row.put("absolute_change", change);
@@ -1389,7 +1392,8 @@ public class BankResultProjector {
             return List.of("data_date", "metric_value", "quarter_change");
         }
         if (contract.getType() == ProjectionType.MOM_YOY_CHANGE) {
-            return List.of("current_value", "baseline_value", "absolute_change", "percent_change");
+            return List.of("comparison_type", "current_value", "baseline_value",
+                    "absolute_change", "percent_change");
         }
         if (contract.getType() == ProjectionType.MULTI_METRIC_CHANGE) {
             return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",
