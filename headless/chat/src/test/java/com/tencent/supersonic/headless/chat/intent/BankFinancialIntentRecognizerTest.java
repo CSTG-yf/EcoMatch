@@ -303,6 +303,21 @@ class BankFinancialIntentRecognizerTest {
         assertEquals(Set.of("ZB002", "ZB001"), metricCodes(result));
     }
 
+    @Test
+    void shouldRecognizeNetProfitMarginAsAPublishedDerivedMetric() {
+        BankIntentResult result = recognizer.recognize(
+                "某农商行在某日的净利润率是多少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RATIO, result.getIntent());
+        assertEquals(1, result.getDerivedMetrics().size());
+        BankIntentResult.DerivedMetricCandidate derived = result.getDerivedMetrics().get(0);
+        assertEquals("DERIVED_ZB011_DIV_ZB009", derived.getCode());
+        assertEquals("净利润率", derived.getName());
+        assertEquals("ZB011", derived.getNumerator());
+        assertEquals("ZB009", derived.getDenominator());
+        assertEquals(Set.of("ZB011", "ZB009"), metricCodes(result));
+    }
+
     private Set<String> metricCodes(BankIntentResult result) {
         return result.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
                 .collect(Collectors.toSet());

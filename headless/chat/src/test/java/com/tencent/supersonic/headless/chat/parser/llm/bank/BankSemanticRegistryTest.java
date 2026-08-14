@@ -36,6 +36,8 @@ class BankSemanticRegistryTest {
         assertEquals(enumNames(BankQueryPlan.SortDirection.class),
                 BankSemanticRegistry.sortDirections());
         assertEquals(BankFinancialLexicon.metrics().keySet(), BankSemanticRegistry.metricCodes());
+        assertEquals(BankFinancialLexicon.derivedMetrics().keySet(),
+                BankSemanticRegistry.derivedMetricCodes());
         assertEquals(BankFinancialLexicon.organizations().keySet(),
                 BankSemanticRegistry.organizationCodes());
     }
@@ -85,6 +87,13 @@ class BankSemanticRegistryTest {
         assertEquals("万元", BankSemanticRegistry.metrics().get("ZB011").unit());
         assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("ZB011 净利润"));
         assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("unit=万元"));
+    }
+
+    @Test
+    void netProfitMarginIsPublishedToTheModelAsADerivedMetric() {
+        assertTrue(BankSemanticRegistry.derivedMetricCodes().contains("DERIVED_ZB011_DIV_ZB009"));
+        assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX
+                .contains("DERIVED_ZB011_DIV_ZB009 净利润率（formula=ZB011 / ZB009"));
     }
 
     private static <E extends Enum<E>> Set<String> enumNames(Class<E> enumType) {
