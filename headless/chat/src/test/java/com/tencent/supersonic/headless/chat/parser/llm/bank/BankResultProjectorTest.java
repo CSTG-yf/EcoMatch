@@ -559,6 +559,37 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldNormalizeSingleDayMultiMetricPivotToAggregateFacts() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.MULTI_METRIC_AGGREGATION)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG003", "江苏省C市农商行"))
+                .selectedOrganizationCodes(List.of("ORG003"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb007")
+                                .metricCode("ZB007").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb008")
+                                .metricCode("ZB008").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "江苏省C市农商行", "zb008",
+                        new BigDecimal("64.1"), "zb007", new BigDecimal("399.51"))));
+
+        assertEquals(List.of("org_code", "org_name", "metric_code", "aggregate_value",
+                "min_value", "max_value", "observation_count"), projection.getColumns());
+        assertEquals(List.of(
+                row("org_code", "ORG003", "org_name", "江苏省C市农商行", "metric_code", "ZB007",
+                        "aggregate_value", new BigDecimal("399.51"), "min_value",
+                        new BigDecimal("399.51"), "max_value", new BigDecimal("399.51"),
+                        "observation_count", 1),
+                row("org_code", "ORG003", "org_name", "江苏省C市农商行", "metric_code", "ZB008",
+                        "aggregate_value", new BigDecimal("64.1"), "min_value",
+                        new BigDecimal("64.1"), "max_value", new BigDecimal("64.1"),
+                        "observation_count", 1)), projection.getRows());
+    }
+
+    @Test
     void shouldProjectDualRatePairAsPlainMetricValue() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.LONG_FORM)

@@ -1667,6 +1667,36 @@ class ScoreFactContractV3Test(unittest.TestCase):
         self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
 
+    def test_aggregation_formula_binds_daily_average_alias(self) -> None:
+        record = _record(
+            "DAILY-AVERAGE-ALIASES-1",
+            question="2025年全年该机构的贷款日均是多少？",
+            answer_text="日均42.33万元",
+            columns=["org_code", "org_name", "metric_code", "aggregate_value", "observation_count"],
+            rows=[["ORG002", "江苏省B市农商行", "ZB002", 42.33, 365]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "daily_average",
+                        "observation_count",
+                    ],
+                    "resultRows": [["ORG002", "江苏省B市农商行", "ZB002", 42.33, 365]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
         record = _record(
             "DERIVE-IDENTITY-1",
