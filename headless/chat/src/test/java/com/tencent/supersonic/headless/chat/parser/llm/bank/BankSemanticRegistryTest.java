@@ -11,6 +11,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -167,6 +168,40 @@ class BankSemanticRegistryTest {
                 "filter contract must stay free of PLAN-only ordering rules");
         assertFalse(contract.contains("output.columns"),
                 "filter contract must stay free of PLAN-only output rules");
+    }
+
+    @Test
+    void nullableMetadataFieldsAcceptStringOrNullInSchemaAndPrompt() throws Exception {
+        String schema = BankQueryPlan.JSON_SCHEMA;
+        String prompt = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(schema.contains("\"alias\":{\"type\":[\"string\",\"null\"]}"));
+        assertTrue(schema.contains("\"bizName\":{\"type\":[\"string\",\"null\"]}"));
+        assertFalse(schema.contains("\"alias\":{\"type\":\"string\"}"),
+                "alias must not be restricted to a plain string type");
+        assertFalse(schema.contains("\"bizName\":{\"type\":\"string\"}"),
+                "bizName must not be restricted to a plain string type");
+
+        JsonNode root = new ObjectMapper().readTree(schema);
+        JsonNode aliasType = root.path("properties").path("metrics").path("items")
+                .path("properties").path("alias").path("type");
+        JsonNode bizNameType = root.path("properties").path("organizations").path("items")
+                .path("properties").path("bizName").path("type");
+        assertArrayEquals(new String[] {"string", "null"}, toStrings(aliasType));
+        assertArrayEquals(new String[] {"string", "null"}, toStrings(bizNameType));
+
+        assertTrue(prompt.contains("\"alias\":null"),
+                "canonical PLAN example must emit alias:null");
+        assertTrue(prompt.contains("\"bizName\":null"),
+                "canonical PLAN example must emit organization bizName:null");
+    }
+
+    private static String[] toStrings(JsonNode array) {
+        String[] values = new String[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            values[i] = array.get(i).asText();
+        }
+        return values;
     }
 
     private static <E extends Enum<E>> Set<String> enumNames(Class<E> enumType) {
