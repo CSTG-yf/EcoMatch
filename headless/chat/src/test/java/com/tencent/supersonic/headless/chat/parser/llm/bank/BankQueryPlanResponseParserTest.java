@@ -87,6 +87,37 @@ class BankQueryPlanResponseParserTest {
         assertEquals(BankQueryPlanParseException.Reason.VALIDATION_FAILED, exception.getReason());
     }
 
+    @Test
+    void shouldAcceptCanonicalPointQueryPlanWithNullAliasAndNullOrganizationBizName() {
+        BankQueryPlan plan = parser.parse(pointPlanJson(), pointHints());
+
+        assertEquals(BankIntentType.POINT_QUERY, plan.getIntent());
+        assertEquals(Set.of("ZB001"), Set.of(plan.getMetrics().get(0).getBizName()));
+        assertEquals(null, plan.getMetrics().get(0).getAlias());
+        assertEquals("ORG004", plan.getOrganizations().get(0).getCode());
+        assertEquals(null, plan.getOrganizations().get(0).getBizName());
+    }
+
+    @Test
+    void shouldRejectNonNullNonStringAliasInsteadOfCoercingIt() {
+        String output = pointPlanJson().replace("\"alias\": null", "\"alias\": []");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, pointHints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.MALFORMED_JSON, exception.getReason());
+    }
+
+    @Test
+    void shouldRejectNonNullNonStringOrganizationBizNameInsteadOfCoercingIt() {
+        String output = pointPlanJson().replace("\"bizName\": null", "\"bizName\": {\"x\": \"y\"}");
+
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(output, pointHints()));
+
+        assertEquals(BankQueryPlanParseException.Reason.MALFORMED_JSON, exception.getReason());
+    }
+
     private SemanticIntentHints hints() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.RANKING)
                 .allowedMetrics(Set.of("ZB001"))
@@ -94,6 +125,15 @@ class BankQueryPlanResponseParserTest {
                 .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
                 .requiredStartDate(LocalDate.of(2026, 3, 31))
                 .requiredEndDate(LocalDate.of(2026, 3, 31)).requiredLimit(3).maxLimit(100).build();
+    }
+
+    private SemanticIntentHints pointHints() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build();
     }
 
     private String validPlanJson() {
@@ -116,6 +156,33 @@ class BankQueryPlanResponseParserTest {
                   "orderBy": [{"field": "ZB001", "direction": "DESC"}],
                   "limit": 3,
                   "output": {"columns": ["bank_organization", "ZB001"], "orderSensitive": true}
+                }
+                """;
+    }
+
+    private String pointPlanJson() {
+        return """
+                {
+                  "version": "1.0",
+                  "action": "EXECUTE",
+                  "intent": "POINT_QUERY",
+                  "metrics": [{"bizName": "ZB001", "aggregation": "DEFAULT", "alias": null}],
+                  "derivedMetrics": [],
+                  "dimensions": [],
+                  "organizations": [{"code": "ORG004", "bizName": null}],
+                  "time": {
+                    "startDate": "2026-03-31",
+                    "endDate": "2026-03-31",
+                    "granularity": "DAY",
+                    "comparison": "NONE",
+                    "baselineStartDate": null,
+                    "baselineEndDate": null
+                  },
+                  "filters": [],
+                  "calculation": {"type": "DIRECT", "baseline": null},
+                  "orderBy": [],
+                  "limit": null,
+                  "output": {"columns": ["ZB001"], "orderSensitive": false, "aggregationMode": null}
                 }
                 """;
     }

@@ -45,6 +45,7 @@ public class BankResultProjector {
                     sourceRows);
             case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
             case AGGREGATION_SUMMARY -> projectAggregationSummary(contract, sourceRows);
+            case MULTI_METRIC_AGGREGATION -> projectMultiMetricAggregation(contract, sourceRows);
             case DAILY_EXTREMA_ORG -> projectDailyExtremaOrg(contract, sourceRows);
             case COUNT_DAYS_ABOVE_PROVINCE_AVERAGE -> projectDaysAboveProvinceAverage(contract,
                     sourceRows);
@@ -563,14 +564,17 @@ public class BankResultProjector {
             return Projection.notApplied();
         }
         return Projection.applied(columns(contract),
-                List.of(changeRow(current.value(), currentValue, monthBaseline.value(), monthValue),
-                        changeRow(current.value(), currentValue, yearBaseline.value(), yearValue)));
+                List.of(changeRow("MOM", current.value(), currentValue, monthBaseline.value(),
+                        monthValue),
+                        changeRow("YOY", current.value(), currentValue, yearBaseline.value(),
+                                yearValue)));
     }
 
-    private Map<String, Object> changeRow(Object currentValue, BigDecimal currentNumeric,
-            Object baselineValue, BigDecimal baselineNumeric) {
+    private Map<String, Object> changeRow(String comparisonType, Object currentValue,
+            BigDecimal currentNumeric, Object baselineValue, BigDecimal baselineNumeric) {
         Map<String, Object> row = new LinkedHashMap<>();
         BigDecimal change = currentNumeric.subtract(baselineNumeric);
+        row.put("comparison_type", comparisonType);
         row.put("current_value", currentValue);
         row.put("baseline_value", baselineValue);
         row.put("absolute_change", change);
@@ -1315,6 +1319,60 @@ public class BankResultProjector {
         return Projection.applied(columns(contract), rows);
     }
 
+    /**
+     * Normalizes a single-day multi-metric aggregate returned by the structured query renderer.
+     * QueryStructReq renders multiple selected metrics as a pivot (for example, {@code zb007} and
+     * {@code zb008}) even though the published bank contract is long-form.  The values are already
+     * database aggregates; this method only attaches the reviewed metric identity and the
+     * single-observation extrema/count fields required by the fact contract.
+     */
+    private Projection projectMultiMetricAggregation(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().size() < 2) {
+            return Projection.notApplied();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            if (StringUtils.isBlank(organizationCode)) {
+                return Projection.notApplied();
+            }
+            for (MetricBinding metric : contract.getMetrics()) {
+                ValueLookup aggregate = value(sourceRow, metric.getSemanticColumn());
+                if (!aggregate.found()) {
+                    aggregate = value(sourceRow, metric.getMetricCode());
+                }
+                if (!aggregate.found() || decimal(aggregate.value()) == null) {
+                    return Projection.notApplied();
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("org_code", organizationCode);
+                row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                        organizationCode));
+                row.put("metric_code", metric.getMetricCode());
+                row.put("aggregate_value", aggregate.value());
+                row.put("min_value", aggregate.value());
+                row.put("max_value", aggregate.value());
+                row.put("observation_count", 1);
+                rows.add(row);
+            }
+        }
+        rows.sort((left, right) -> {
+            int metricOrder = String.valueOf(left.get("metric_code"))
+                    .compareTo(String.valueOf(right.get("metric_code")));
+            if (metricOrder != 0) {
+                return metricOrder;
+            }
+            int aggregateOrder = decimal(right.get("aggregate_value"))
+                    .compareTo(decimal(left.get("aggregate_value")));
+            return aggregateOrder != 0 ? aggregateOrder
+                    : String.valueOf(left.get("org_code"))
+                            .compareTo(String.valueOf(right.get("org_code")));
+        });
+        return Projection.applied(pointAggregateColumns(), rows);
+    }
+
     private String resolveOrganizationCode(Contract contract, Map<String, Object> sourceRow) {
         ValueLookup value = value(sourceRow, contract.getOrganizationColumn());
         if (value.found() && value.value() != null) {
@@ -1389,7 +1447,8 @@ public class BankResultProjector {
             return List.of("data_date", "metric_value", "quarter_change");
         }
         if (contract.getType() == ProjectionType.MOM_YOY_CHANGE) {
-            return List.of("current_value", "baseline_value", "absolute_change", "percent_change");
+            return List.of("comparison_type", "current_value", "baseline_value",
+                    "absolute_change", "percent_change");
         }
         if (contract.getType() == ProjectionType.MULTI_METRIC_CHANGE) {
             return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",
@@ -1430,6 +1489,7 @@ public class BankResultProjector {
         MULTI_METRIC_PROVINCIAL_AVERAGE,
         ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,
+        MULTI_METRIC_AGGREGATION,
         DAILY_EXTREMA_ORG,
         COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
         TREND,

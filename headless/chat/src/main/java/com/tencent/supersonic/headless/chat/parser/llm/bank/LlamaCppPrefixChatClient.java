@@ -54,6 +54,14 @@ public class LlamaCppPrefixChatClient {
         }
 
         /**
+         * Safety bound for the maximum decoded output length. It only guards against runaway
+         * generation; the value must stay above the verified per-stage P99 output maxima.
+         */
+        public static ChatOptions safetyCap(int maxTokens) {
+            return new ChatOptions(false, Math.max(0, maxTokens));
+        }
+
+        /**
          * Options for warming a fixed prompt prefix. The warm-up response is discarded, so it
          * should consume the smallest possible completion while still exercising the chat template.
          */
@@ -213,7 +221,16 @@ public class LlamaCppPrefixChatClient {
         return config.getApiKey();
     }
 
-    private ChatResult parseResponse(String body, boolean thinkingEnabled) throws Exception {
+    /**
+     * Numeric timing keys that are safe to surface in logs and diagnostics. Anything else (e.g.
+     * server echo fields) is dropped so prompts, results or credentials never leak through timings.
+     */
+    private static final java.util.Set<String> WHITELISTED_TIMING_KEYS = java.util.Set.of(
+            "prompt_n", "cache_n", "predicted_n", "prompt_ms", "predicted_ms",
+            "prompt_per_second", "predicted_per_second", "prompt_per_token_ms",
+            "predicted_per_token_ms", "prompt_tokens", "completion_tokens");
+
+    ChatResult parseResponse(String body, boolean thinkingEnabled) throws Exception {
         JsonNode root = MAPPER.readTree(body);
         String content = null;
         String reasoning = null;
@@ -251,10 +268,8 @@ public class LlamaCppPrefixChatClient {
         if (timingsNode.isObject()) {
             timingsNode.fields().forEachRemaining(entry -> {
                 JsonNode value = entry.getValue();
-                if (value.isNumber()) {
+                if (WHITELISTED_TIMING_KEYS.contains(entry.getKey()) && value.isNumber()) {
                     timings.put(entry.getKey(), value.numberValue());
-                } else if (value.isTextual()) {
-                    timings.put(entry.getKey(), value.asText());
                 }
             });
         }

@@ -820,6 +820,176 @@ class FactContractV3Test(unittest.TestCase):
         self.assertEqual(difference.derivation, "ABS_DIFFERENCE")
         self.assertTrue(scored["items"][0]["resultFactsExact"])
 
+    def test_result_only_binds_signed_gap_value_to_value_difference(self) -> None:
+        record = _record(
+            "SIGNED-GAP-ALIAS-1",
+            question="D行存款与全省均值相差多少？",
+            answer_text="存款54.65亿元，低于全省均值18.11亿元",
+            columns=[
+                "org_code",
+                "org_name",
+                "metric_code",
+                "metric_value",
+                "provincial_average",
+                "value_difference",
+            ],
+            rows=[
+                [
+                    "ORG004",
+                    "D行",
+                    "ZB001",
+                    54.65,
+                    72.7584615,
+                    -18.1084615,
+                ]
+            ],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "current",
+                "value": 54.65,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "MEAN",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [
+                        {
+                            "column": "metric_value",
+                            "where": {"org_code": "ORG004", "metric_code": "ZB001"},
+                        }
+                    ],
+                },
+            },
+            {
+                "id": "difference",
+                "value": -18.11,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG004"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-07-31"],
+                    "comparisonType": "MEAN",
+                },
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": 2,
+                    "operands": [
+                        {
+                            "column": "value_difference",
+                            "where": {"org_code": "ORG004", "metric_code": "ZB001"},
+                        }
+                    ],
+                },
+            },
+        ]
+        record["expected"]["answerFactsAuthoritative"] = True
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "metric_value",
+                        "provincial_average",
+                        "gap_value",
+                        "absolute_gap",
+                    ],
+                    "resultRows": [
+                        ["ORG004", "D行", "ZB001", 54.65, 72.7584615, -18.1084615, 18.1084615]
+                    ],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
+    def test_result_only_binds_count_projection_aliases_for_typed_facts(self) -> None:
+        record = _record(
+            "COUNT-ALIASES-1",
+            question="全年有多少天高于均值？",
+            answer_text="11天，共365天，占比3%",
+            columns=[
+                "org_code",
+                "org_name",
+                "days_above_province_average",
+                "observation_count",
+                "above_ratio_percent",
+            ],
+            rows=[["ORG007", "G行", 11, 365, 3.0136986]],
+        )
+        binding = {
+            "organizationCodes": ["ORG007"],
+            "metricCodes": ["ZB012"],
+            "dates": ["2025-01-01", "2025-12-31"],
+            "comparisonType": "COUNT",
+        }
+        record["expected"]["answerFacts"] = [
+            {
+                "id": "days",
+                "value": 11.0,
+                "kind": "NUMBER",
+                "binding": binding,
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [{"column": "days_above_province_average", "where": {"org_code": "ORG007"}}],
+                },
+            },
+            {
+                "id": "total",
+                "value": 365.0,
+                "kind": "NUMBER",
+                "binding": binding,
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [{"column": "observation_count", "where": {"org_code": "ORG007"}}],
+                },
+            },
+            {
+                "id": "ratio",
+                "value": 3.0,
+                "kind": "PERCENT",
+                "binding": binding,
+                "formula": {
+                    "operation": "ROUND",
+                    "scale": 0,
+                    "operands": [{
+                        "formula": {
+                            "operation": "DIRECT",
+                            "operands": [{"column": "above_ratio_percent", "where": {"org_code": "ORG007"}}],
+                        }
+                    }],
+                },
+            },
+        ]
+        record["expected"]["answerFactsAuthoritative"] = True
+        report = {
+            "items": [{
+                "id": record["id"],
+                "resultColumns": [
+                    "org_code", "org_name", "metric_code", "days_above_average",
+                    "total_days", "ratio_percent",
+                ],
+                "resultRows": [["ORG007", "G行", "ZB012", 11, 365, 3.0136986]],
+                "textSummary": None,
+            }]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
+
     def test_result_only_rejects_cross_metric_arithmetic_coincidence(self) -> None:
         record = _record(
             "CROSS-METRIC-COINCIDENCE-1",
@@ -1496,6 +1666,36 @@ class ScoreFactContractV3Test(unittest.TestCase):
 
         self.assertFalse(scored["items"][0]["resultFactsExact"])
         self.assertFalse(scored["items"][0]["casePass"])
+
+    def test_aggregation_formula_binds_daily_average_alias(self) -> None:
+        record = _record(
+            "DAILY-AVERAGE-ALIASES-1",
+            question="2025年全年该机构的贷款日均是多少？",
+            answer_text="日均42.33万元",
+            columns=["org_code", "org_name", "metric_code", "aggregate_value", "observation_count"],
+            rows=[["ORG002", "江苏省B市农商行", "ZB002", 42.33, 365]],
+        )
+        report = {
+            "items": [
+                {
+                    "id": record["id"],
+                    "resultColumns": [
+                        "org_code",
+                        "org_name",
+                        "metric_code",
+                        "daily_average",
+                        "observation_count",
+                    ],
+                    "resultRows": [["ORG002", "江苏省B市农商行", "ZB002", 42.33, 365]],
+                    "textSummary": None,
+                }
+            ]
+        }
+
+        scored = score_fact_contract_report(report, [record], score_mode="result_only")
+
+        self.assertTrue(scored["items"][0]["resultFactsExact"])
+        self.assertTrue(scored["items"][0]["casePass"])
 
     def test_legacy_incomplete_result_still_requires_available_identity_binding(self) -> None:
         record = _record(

@@ -839,6 +839,37 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldAttachContractForSingleDayMultiMetricAggregation() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setIntent(BankIntentType.AGGREGATION);
+        plan.setOrganizations(List.of(organization("ORG004")));
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
+        plan.setDimensions(List.of("bank_data_date", "bank_organization"));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 4, 30))
+                .endDate(LocalDate.of(2026, 4, 30)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setOrderBy(List.of());
+        plan.setOutput(BankQueryPlan.Output.builder()
+                .columns(List.of("bank_data_date", "bank_organization", "ZB001", "ZB002"))
+                .orderSensitive(true).build());
+
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.AGGREGATION)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30)).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.STRUCT, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_AGGREGATION,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldAttachAndApplyStableContractForMultiOrganizationSingleMetricAggregation() {
         LLMReq.LLMSchema schema = schema();
         SchemaValueMap organizationA = new SchemaValueMap();

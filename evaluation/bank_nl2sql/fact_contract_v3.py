@@ -60,6 +60,8 @@ _RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "days_above_province_average": ("days_above_average",),
     "observation_count": ("total_days",),
     "above_ratio_percent": ("ratio_percent",),
+    "aggregate_value": ("metric_value", "current_value", "daily_average"),
+    "daily_average": ("aggregate_value", "metric_value", "current_value"),
 }
 
 _FACT_RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
@@ -68,7 +70,8 @@ _FACT_RESULT_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "data_date": ("bank_data_date",),
     "bank_data_date": ("data_date",),
     "metric_value": ("aggregate_value", "current_value"),
-    "aggregate_value": ("metric_value", "current_value"),
+    "aggregate_value": ("metric_value", "current_value", "daily_average"),
+    "daily_average": ("aggregate_value", "metric_value", "current_value"),
     "value_difference": ("absolute_gap", "gap_value", "absolute_change"),
 }
 _FACT_IDENTITY_COLUMNS = {

@@ -183,10 +183,10 @@ public final class BankSemanticRegistry {
                 "action":{"enum":%s},"intent":{"enum":%s},"metrics":{"type":"array",
                 "items":{"type":"object","additionalProperties":false,"required":["bizName",
                 "aggregation"],"properties":{"bizName":{"enum":%s},"aggregation":{"enum":%s},
-                "alias":{"type":"string"}}}},"dimensions":{"type":"array","items":{"enum":%s}},
-                "organizations":{"type":"array","items":{"type":"object",
+                "alias":{"type":["string","null"]}}}},"dimensions":{"type":"array",
+                "items":{"enum":%s}},"organizations":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["code"],"properties":{"code":{"enum":%s},
-                "bizName":{"type":"string"}}}},"time":{"type":"object",
+                "bizName":{"type":["string","null"]}}}},"time":{"type":"object",
                 "additionalProperties":false,"required":["startDate","endDate","granularity",
                 "comparison"],"properties":{"startDate":{"type":"string","format":"date"},
                 "endDate":{"type":"string","format":"date"},"granularity":{"enum":%s},
@@ -219,15 +219,12 @@ public final class BankSemanticRegistry {
                 .strip();
     }
 
-    /** Compact, cache-stable catalog used as the authoritative section of the system prompt. */
-    public static String promptCatalog() {
-        String planFieldLines = PLAN_FIELDS.entrySet().stream().map(entry -> {
-            PlanFieldDefinition field = entry.getValue();
-            return "%s: type=%s, required=%s, default=%s, allowed=%s, example=%s".formatted(
-                    entry.getKey(), field.type(), field.required(),
-                    field.defaultValue() == null ? "none" : field.defaultValue(),
-                    field.allowedValues(), field.exampleShape());
-        }).collect(Collectors.joining("\n"));
+    /**
+     * Compact, cache-stable facts shared by both prompt stages. This is the single source of
+     * truth for every metric, derived metric and organization line rendered into any stage
+     * prefix; the composer never re-types catalog rows.
+     */
+    public static String sharedCatalog() {
         String metricLines = METRICS.values().stream()
                 .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s）".formatted(
                         metric.code(), metric.name(), metric.aliases(), metric.unit(),
@@ -242,30 +239,14 @@ public final class BankSemanticRegistry {
                         .values().stream().map(org -> "%s %s（aliases=%s, scope=%s）"
                                 .formatted(org.code(), org.name(), org.aliases(), org.scope()))
                         .collect(Collectors.joining("\n"));
-        String factLines =
-                OUTPUT_FACTS.entrySet().stream()
-                        .map(entry -> entry.getKey() + " -> " + entry.getValue().outputColumn()
-                                + "（" + entry.getValue().description() + "）")
-                        .collect(Collectors.joining("\n"));
         return """
                 ════════════════════════════════
                 权威语义目录（%s；以下值同时驱动 JSON Schema 与 Validator）
                 ════════════════════════════════
-                plan fields（类型/必填/默认值/允许值/示例）：
-                %s
-
                 action: %s
                 intent: %s
-                aggregation: %s
-                dimensions: %s
                 time granularity: %s
                 time comparison: %s
-                calculation type: %s
-                sort direction: %s
-                filter field/operator/value contract:
-                  fields=%s
-                  operators=%s
-                  benchmark + COMPARE 仅允许 value=PROVINCE_AVERAGE
 
                 指标代码、单位与方向：
                 %s
@@ -275,13 +256,67 @@ public final class BankSemanticRegistry {
 
                 机构代码与范围（organizations=[] 表示全省/各家范围）：
                 %s
+                """.formatted(VERSION, PLAN_ACTIONS, INTENTS, TIME_GRANULARITIES,
+                TIME_COMPARISONS, metricLines, derivedMetricLines, organizationLines).strip();
+    }
+
+    /** PLAN-only enums and compiler output facts; rendered only into the PLAN stage prefix. */
+    public static String planCapabilityCatalog() {
+        String planFieldLines = PLAN_FIELDS.entrySet().stream().map(entry -> {
+            PlanFieldDefinition field = entry.getValue();
+            return "%s: type=%s, required=%s, default=%s, allowed=%s, example=%s".formatted(
+                    entry.getKey(), field.type(), field.required(),
+                    field.defaultValue() == null ? "none" : field.defaultValue(),
+                    field.allowedValues(), field.exampleShape());
+        }).collect(Collectors.joining("\n"));
+        String factLines =
+                OUTPUT_FACTS.entrySet().stream()
+                        .map(entry -> entry.getKey() + " -> " + entry.getValue().outputColumn()
+                                + "（" + entry.getValue().description() + "）")
+                        .collect(Collectors.joining("\n"));
+        return """
+                plan fields（类型/必填/默认值/允许值/示例）：
+                %s
+
+                aggregation: %s
+                dimensions: %s
+                calculation type: %s
+                sort direction: %s
+                filter field/operator/value contract:
+                  fields=%s
+                  operators=%s
+                  benchmark + COMPARE 仅允许 value=PROVINCE_AVERAGE
 
                 编译结果可产生的输出事实（output.columns 仍只声明所选维度和指标）：
                 %s
-                """.formatted(VERSION, planFieldLines, PLAN_ACTIONS, INTENTS, AGGREGATIONS,
-                DIMENSIONS, TIME_GRANULARITIES, TIME_COMPARISONS, CALCULATION_TYPES,
-                SORT_DIRECTIONS, filterFields(), FILTER_OPERATORS, metricLines, derivedMetricLines,
-                organizationLines, factLines).strip();
+                """.formatted(planFieldLines, AGGREGATIONS, DIMENSIONS, CALCULATION_TYPES,
+                SORT_DIRECTIONS, filterFields(), FILTER_OPERATORS, factLines).strip();
+    }
+
+    /**
+     * Compact, cache-stable filter contract owned by {@link BankRequestContract} and shared with
+     * {@link BankQueryPlan}. Rendered from registry constants so the REQUIREMENTS stage prefix and
+     * the validators never drift on allowed field categories, operators or value shape.
+     */
+    public static String filterContract() {
+        return """
+                filter field/operator/value contract（字段类别与运算符由注册表统一提供）：
+                field categories: %s
+                operators: %s
+                value 语义：
+                - EQ/NE/GT/GTE/LT/LTE：value 填单个比较值（数字或百分数字符串），values=[]
+                - IN/NOT_IN：values 填完整取值列表，value=null
+                - CONTAINS：value 填包含文本
+                - COMPARE 仅与 benchmark 搭配：value=PROVINCE_AVERAGE、values=[]
+                - metric_value 与 GT/GTE/LT/LTE 且 value=PROVINCE_AVERAGE 表示高于/低于全省均值的方向，
+                  需同时声明上面的 benchmark 过滤项
+                """.formatted(filterFields(), FILTER_OPERATORS).strip();
+    }
+
+    /** Legacy combined catalog; superseded by {@link #sharedCatalog()} plus
+     * {@link #planCapabilityCatalog()} in the split stage prefixes. */
+    public static String promptCatalog() {
+        return sharedCatalog() + "\n\n" + planCapabilityCatalog();
     }
 
     private static Map<String, PlanFieldDefinition> buildPlanFields() {

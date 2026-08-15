@@ -605,10 +605,16 @@ public class BankQueryPlanCompiler {
                         && plan.getOrganizations().size() > 1 && metrics.size() == 1
                         && dimensions.stream().map(ResolvedDimension::identifier)
                                 .anyMatch(ORGANIZATION_DIMENSION::equals);
+        boolean multiMetricPointAggregation =
+                plan.getIntent() == BankIntentType.AGGREGATION
+                        && plan.getOrganizations().size() == 1 && metrics.size() > 1
+                        && plan.getTime().getStartDate().equals(plan.getTime().getEndDate())
+                        && dimensions.stream().map(ResolvedDimension::identifier)
+                                .anyMatch(ORGANIZATION_DIMENSION::equals);
         if (plan.getIntent() != BankIntentType.POINT_QUERY
                 && plan.getIntent() != BankIntentType.RANKING
                 && plan.getIntent() != BankIntentType.COMPARISON
-                && !multiOrganizationSingleMetricAggregation) {
+                && !multiOrganizationSingleMetricAggregation && !multiMetricPointAggregation) {
             return null;
         }
         SchemaElement organization = dimensions.stream().map(ResolvedDimension::schemaElement)
@@ -643,11 +649,13 @@ public class BankQueryPlanCompiler {
         boolean structureShare = plan.getOutput() != null && plan.getOutput().isOrderSensitive()
                 && isDepositStructureShareMetrics(metricBindings);
         return BankResultProjector.Contract.builder()
-                .type(plan.getIntent() == BankIntentType.RANKING
-                        ? BankResultProjector.ProjectionType.RANKED_LONG_FORM
-                        : plan.getIntent() == BankIntentType.COMPARISON
-                                ? BankResultProjector.ProjectionType.COMPARISON
-                                : BankResultProjector.ProjectionType.LONG_FORM)
+                .type(multiMetricPointAggregation
+                        ? BankResultProjector.ProjectionType.MULTI_METRIC_AGGREGATION
+                        : plan.getIntent() == BankIntentType.RANKING
+                                ? BankResultProjector.ProjectionType.RANKED_LONG_FORM
+                                : plan.getIntent() == BankIntentType.COMPARISON
+                                        ? BankResultProjector.ProjectionType.COMPARISON
+                                        : BankResultProjector.ProjectionType.LONG_FORM)
                 .organizationColumn(identifier(organization)).organizationNames(organizationNames)
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
