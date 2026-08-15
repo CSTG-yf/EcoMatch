@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -206,9 +207,12 @@ public class FixedSystemPrefixLlmCache {
 
     /**
      * Resolves the llama.cpp chat options for one call: an explicit request (warm-up or thinking)
-     * wins; otherwise a safety cap bounds the decode when configured.
+     * wins; otherwise thinking wins when enabled; otherwise a safety cap bounds the decode, but
+     * only for local llama.cpp endpoints. Remote OpenAI-compatible endpoints (e.g. the remote
+     * DeepSeek reasoning endpoint) must not receive the implicit local safety cap, which would be
+     * consumed by {@code reasoning_content} and truncate the returned JSON.
      */
-    LlamaCppPrefixChatClient.ChatOptions resolveOptions(
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(String baseUrl,
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         if (requestedOptions != null) {
             return requestedOptions;
@@ -216,8 +220,62 @@ public class FixedSystemPrefixLlmCache {
         if (enableThinking) {
             return LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens);
         }
-        return safetyMaxTokens > 0 ? LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens)
-                : LlamaCppPrefixChatClient.ChatOptions.defaults();
+        if (safetyMaxTokens > 0 && isLocalLlamaCppEndpoint(baseUrl)) {
+            return LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens);
+        }
+        return LlamaCppPrefixChatClient.ChatOptions.defaults();
+    }
+
+    /** Legacy single-arg overload; resolves against the configured safety cap for local endpoints. */
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(
+            LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
+        return resolveOptions(null, requestedOptions);
+    }
+
+    /**
+     * The implicit safety cap is a llama.cpp-local guard: it applies to loopback and RFC1918
+     * private endpoints only. A remote OpenAI-compatible baseUrl (https/https on a public host)
+     * gets no implicit cap; explicit requested options always win and are decided elsewhere.
+     */
+    private static boolean isLocalLlamaCppEndpoint(String baseUrl) {
+        if (StringUtils.isBlank(baseUrl)) {
+            return true;
+        }
+        String host = hostOf(baseUrl);
+        if (StringUtils.isBlank(host)) {
+            return false;
+        }
+        String normalized = host.toLowerCase(java.util.Locale.ROOT);
+        if ("localhost".equals(normalized) || "::1".equals(normalized)) {
+            return true;
+        }
+        if (!IPV4_HOST.matcher(normalized).matches()) {
+            return false;
+        }
+        String[] octets = normalized.split("\\.");
+        int first = Integer.parseInt(octets[0]);
+        int second = Integer.parseInt(octets[1]);
+        if (first == 127) {
+            return true;
+        }
+        if (first == 10) {
+            return true;
+        }
+        if (first == 172 && second >= 16 && second <= 31) {
+            return true;
+        }
+        return first == 192 && second == 168;
+    }
+
+    private static final java.util.regex.Pattern IPV4_HOST =
+            java.util.regex.Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
+
+    private static String hostOf(String baseUrl) {
+        try {
+            return URI.create(baseUrl.trim()).getHost();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private String callModel(ChatLanguageModel model, ChatModelConfig config,
@@ -231,7 +289,7 @@ public class FixedSystemPrefixLlmCache {
             try {
                 LlamaCppPrefixChatClient.ChatResult result =
                         llamaCppClient.chat(config, systemPrefix, dynamicUserContent,
-                                resolveOptions(requestedOptions));
+                                resolveOptions(config.getBaseUrl(), requestedOptions));
                 llamaCppCalls.incrementAndGet();
                 recordLlamaCppTimings(result);
                 return result.content();
