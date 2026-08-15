@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Imports the frozen official Bank NL2SQL v2.0.5 benchmark tables/views into a
+    Imports the frozen official Bank NL2SQL v2.0.6 benchmark tables/views into a
     local H2 database (companion import package, NOT a runtime semantic.mv.db).
 
 .DESCRIPTION
@@ -48,7 +48,7 @@ param(
     [string]$TargetDatabase,
     [string]$JavaPath,
     [string]$H2JarPath,
-    [string]$ReleaseVersion = "2.0.5"
+    [string]$ReleaseVersion = "2.0.6"
 )
 
 $ErrorActionPreference = "Stop"

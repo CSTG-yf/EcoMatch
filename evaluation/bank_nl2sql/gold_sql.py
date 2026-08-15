@@ -236,7 +236,52 @@ def _status_metrics() -> list[str]:
     return ["ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"]
 
 
+def _daily_mean_query(record: dict[str, Any]) -> GoldSqlSpec:
+    metric_codes = _metric_codes(record)
+    organizations = _organization_codes(record)
+    if len(metric_codes) != 1 or len(organizations) != 1:
+        raise GoldSqlError(f"Daily mean requires one metric and one organization for {record.get('id')}")
+    start_date, end_date = _date_range(record)
+    metric_code, org_code = metric_codes[0], organizations[0]
+    sql = f"""SELECT o.org_code, o.org_name, d.metric_code,
+       AVG(d.metric_value) AS aggregate_value,
+       MIN(d.metric_value) AS min_value,
+       MAX(d.metric_value) AS max_value,
+       COUNT(*) AS observation_count
+FROM bank_metric_daily d
+JOIN bank_organization o ON o.org_code = d.org_code
+WHERE d.data_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}
+  AND d.metric_code = {_sql_literal(metric_code)}
+  AND d.org_code = {_sql_literal(org_code)}
+GROUP BY o.org_code, o.org_name, d.metric_code"""
+    return GoldSqlSpec(sql, sql, ["AGGREGATION", "DATE_RANGE", "AVERAGE"])
+
+
+def _per_capita_profit_query(record: dict[str, Any]) -> GoldSqlSpec:
+    organizations = _organization_codes(record)
+    if len(organizations) != 1:
+        raise GoldSqlError(f"Per-capita profit requires one organization for {record.get('id')}")
+    date_value, org_code = _date_from_record(record), organizations[0]
+    sql = f"""SELECT o.org_code, o.org_name,
+       MAX(CASE WHEN d.metric_code = 'ZB011' THEN d.metric_value END) AS profit_value,
+       MAX(CASE WHEN d.metric_code = 'ZB018' THEN d.metric_value END) AS employee_count,
+       MAX(CASE WHEN d.metric_code = 'ZB011' THEN d.metric_value END) /
+       NULLIF(MAX(CASE WHEN d.metric_code = 'ZB018' THEN d.metric_value END), 0) AS per_capita_profit
+FROM bank_metric_daily d
+JOIN bank_organization o ON o.org_code = d.org_code
+WHERE d.data_date = {_sql_literal(date_value)}
+  AND d.metric_code IN ('ZB011', 'ZB018')
+  AND d.org_code = {_sql_literal(org_code)}
+GROUP BY o.org_code, o.org_name"""
+    return GoldSqlSpec(sql, sql, ["RATIO", "DERIVED_METRIC", "PER_CAPITA"])
+
+
 def _point_query(record: dict[str, Any]) -> GoldSqlSpec:
+    question = str(record.get("question", ""))
+    if "人均利润" in question:
+        return _per_capita_profit_query(record)
+    if "日均" in question:
+        return _daily_mean_query(record)
     metric_codes = _metric_codes(record)
     where_terms = [f"d.data_date = {_sql_literal(_date_from_record(record))}", _metric_filter(metric_codes)]
     organizations = _organization_codes(record)
@@ -588,15 +633,15 @@ def _mom_yoy_change_query(record: dict[str, Any], current_date: str) -> GoldSqlS
   FROM values_at_dates
   WHERE data_date = {_sql_literal(current_date)}
 ), comparisons AS (
-  SELECT 1 AS comparison_order, current_value,
+  SELECT 'MOM' AS comparison_type, 1 AS comparison_order, current_value,
          (SELECT metric_value FROM values_at_dates WHERE data_date = {_sql_literal(month_baseline)}) AS baseline_value
   FROM current_row
   UNION ALL
-  SELECT 2 AS comparison_order, current_value,
+  SELECT 'YOY' AS comparison_type, 2 AS comparison_order, current_value,
          (SELECT metric_value FROM values_at_dates WHERE data_date = {_sql_literal(year_baseline)}) AS baseline_value
   FROM current_row
 )
-SELECT current_value, baseline_value,
+SELECT comparison_type, current_value, baseline_value,
        current_value - baseline_value AS absolute_change,
        CASE WHEN baseline_value = 0 THEN NULL
             ELSE (current_value - baseline_value) * 100.0 / baseline_value END AS percent_change
@@ -605,11 +650,47 @@ ORDER BY comparison_order"""
     return GoldSqlSpec(sql, sql, ["CHANGE", "BASELINE_COMPARISON", "MOM_YOY"])
 
 
+def _rank_change_query(record: dict[str, Any]) -> GoldSqlSpec:
+    metric_codes = _metric_codes(record)
+    organizations = _organization_codes(record)
+    if not metric_codes or len(organizations) != 1:
+        raise GoldSqlError(f"Rank change requires metrics and one organization for {record.get('id')}")
+    current_date = _latest_date_from_record(record)
+    baseline_date = _baseline_date(record, current_date)
+    org_code = organizations[0]
+    queries: list[str] = []
+    for metric_code in metric_codes:
+        direction = "ASC" if metric_code in LOWER_IS_BETTER else "DESC"
+        queries.append(
+            f"""SELECT org_code, org_name, metric_code,
+       MAX(CASE WHEN data_date = {_sql_literal(current_date)} THEN rank_position END) AS current_rank,
+       MAX(CASE WHEN data_date = {_sql_literal(baseline_date)} THEN rank_position END) AS baseline_rank,
+       ABS(MAX(CASE WHEN data_date = {_sql_literal(current_date)} THEN rank_position END) -
+           MAX(CASE WHEN data_date = {_sql_literal(baseline_date)} THEN rank_position END)) AS rank_change
+FROM (
+  SELECT d.data_date, o.org_code, o.org_name, d.metric_code,
+         RANK() OVER (PARTITION BY d.data_date ORDER BY d.metric_value {direction}) AS rank_position
+  FROM bank_metric_daily d
+  JOIN bank_organization o ON o.org_code = d.org_code
+  WHERE d.data_date IN ({_sql_literal(current_date)}, {_sql_literal(baseline_date)})
+    AND d.metric_code = {_sql_literal(metric_code)}
+) ranked
+WHERE org_code = {_sql_literal(org_code)}
+GROUP BY org_code, org_name, metric_code"""
+        )
+    sql = "\nUNION ALL\n".join(queries) + "\nORDER BY metric_code, org_code"
+    return GoldSqlSpec(sql, sql, ["RANKING", "WINDOW_RANK", "RANK_CHANGE", "MULTI_METRIC"])
+
+
 def _change_query(record: dict[str, Any]) -> GoldSqlSpec:
     question = str(record.get("question", ""))
+    if "排名分别变化" in question or "排名变化" in question:
+        return _rank_change_query(record)
     if "逐季" in question or re.search(r"20\d{2}\s*(?:年)?\s*Q1", question, flags=re.IGNORECASE):
         return _trend_query(record)
     metric_codes = _metric_codes(record)
+    if "盈利能力" in question:
+        metric_codes = ["ZB007", "ZB008", "ZB011", "ZB012"]
     current_date = _latest_date_from_record(record)
     if "到年末" in question or "到年底" in question:
         year_match = re.search(r"(20\d{2})年", question)
@@ -698,6 +779,38 @@ def _ratio_operands(record: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _ratio_query(record: dict[str, Any]) -> GoldSqlSpec:
+    question = str(record.get("question", ""))
+    if "对公" in question and "个人" in question and "分别" in question:
+        if "存款" in question:
+            numerators, denominator = ("ZB003", "ZB004"), "ZB001"
+        elif "贷款" in question:
+            numerators, denominator = ("ZB005", "ZB006"), "ZB002"
+        else:
+            raise GoldSqlError(f"Cannot determine dual-ratio family for {record.get('id')}")
+        organizations = _organization_codes(record)
+        if len(organizations) != 1:
+            raise GoldSqlError(f"Dual ratio requires one organization for {record.get('id')}")
+        date_value, org_code = _date_from_record(record), organizations[0]
+        numerator_filter = ", ".join(_sql_literal(code) for code in numerators)
+        sql = f"""WITH values_at_date AS (
+  SELECT metric_code, metric_value
+  FROM bank_metric_daily
+  WHERE data_date = {_sql_literal(date_value)}
+    AND org_code = {_sql_literal(org_code)}
+    AND metric_code IN ({numerator_filter}, {_sql_literal(denominator)})
+), denominator AS (
+  SELECT metric_value AS denominator_value
+  FROM values_at_date
+  WHERE metric_code = {_sql_literal(denominator)}
+)
+SELECT o.org_code, o.org_name, v.metric_code,
+       v.metric_value AS numerator_value, d.denominator_value,
+       v.metric_value * 100.0 / NULLIF(d.denominator_value, 0) AS ratio_percent
+FROM values_at_date v CROSS JOIN denominator d
+JOIN bank_organization o ON o.org_code = {_sql_literal(org_code)}
+WHERE v.metric_code IN ({numerator_filter})
+ORDER BY v.metric_code"""
+        return GoldSqlSpec(sql, sql, ["RATIO", "DERIVED_METRIC", "DUAL_RATIO"])
     operands = _ratio_operands(record)
     metric_codes = _metric_codes(record)
     if operands is None:
@@ -761,7 +874,7 @@ def _date_range(record: dict[str, Any]) -> tuple[str, str]:
     quarter = re.search(r"(20\d{2})年([一二三四])季度", text)
     if quarter:
         month = {"一": 3, "二": 6, "三": 9, "四": 12}[quarter.group(2)]
-        start = date(int(quarter.group(1)), month - 2, 1)
+        start = _month_end(int(quarter.group(1)), month - 2)
         return start.isoformat(), _month_end(int(quarter.group(1)), month).isoformat()
     value = _date_from_record(record)
     return value, value
@@ -776,6 +889,47 @@ def _aggregation_query(record: dict[str, Any]) -> GoldSqlSpec:
     org_filter = ""
     if organizations:
         org_filter = " AND d.org_code IN (" + ", ".join(_sql_literal(code) for code in organizations) + ")"
+    if ("全省均值" in question or "省均值" in question or "全省平均" in question):
+        if not metric_codes or len(organizations) != 1:
+            raise GoldSqlError(f"Provincial comparison requires metrics and one organization for {record.get('id')}")
+        org_code = organizations[0]
+        date_value = _date_from_record(record)
+        sql = f"""WITH values_at_date AS (
+  SELECT o.org_code, o.org_name, d.metric_code, d.metric_value
+  FROM bank_metric_daily d
+  JOIN bank_organization o ON o.org_code = d.org_code
+  WHERE d.data_date = {_sql_literal(date_value)}
+    AND d.metric_code IN ({metric_filter})
+), provincial AS (
+  SELECT metric_code, AVG(metric_value) AS provincial_average
+  FROM values_at_date
+  GROUP BY metric_code
+)
+SELECT v.org_code, v.org_name, v.metric_code,
+       v.metric_value, p.provincial_average,
+       v.metric_value - p.provincial_average AS value_difference
+FROM values_at_date v
+JOIN provincial p ON p.metric_code = v.metric_code
+WHERE v.org_code = {_sql_literal(org_code)}
+ORDER BY v.metric_code"""
+        return GoldSqlSpec(sql, sql, ["COMPARISON", "PROVINCIAL_AVERAGE"])
+    if "不良" in question and "逾期" in question and ("合计" in question or "加起来" in question):
+        if len(organizations) != 1:
+            raise GoldSqlError(f"Ratio sum requires one organization for {record.get('id')}")
+        org_code = organizations[0]
+        date_value = _date_from_record(record)
+        sql = f"""SELECT o.org_code, o.org_name,
+       MAX(CASE WHEN d.metric_code = 'ZB013' THEN d.metric_value END) AS nonperforming_rate,
+       MAX(CASE WHEN d.metric_code = 'ZB017' THEN d.metric_value END) AS overdue_rate,
+       MAX(CASE WHEN d.metric_code = 'ZB013' THEN d.metric_value END) +
+       MAX(CASE WHEN d.metric_code = 'ZB017' THEN d.metric_value END) AS combined_rate
+FROM bank_metric_daily d
+JOIN bank_organization o ON o.org_code = d.org_code
+WHERE d.data_date = {_sql_literal(date_value)}
+  AND d.metric_code IN ('ZB013', 'ZB017')
+  AND d.org_code = {_sql_literal(org_code)}
+GROUP BY o.org_code, o.org_name"""
+        return GoldSqlSpec(sql, sql, ["AGGREGATION", "SUM", "MULTI_METRIC"])
     if "网点平均存款" in question:
         metric_codes = ["ZB001", "ZB019"]
         metric_filter = ", ".join(_sql_literal(code) for code in metric_codes)

@@ -26,7 +26,7 @@ JVM 覆盖应与 H2 系统参数保持一致：
 
 ## 一键对齐 H2 参数
 
-服务**停机**后执行（只写本地 metadata H2，不改 v2.0.2 数据）：
+服务**停机**后执行（只写本地 metadata H2，不改正式 v2.0.6 数据包）：
 
 ```powershell
 # 仓库根目录
@@ -37,7 +37,7 @@ JVM 覆盖应与 H2 系统参数保持一致：
 
 ## 验收
 
-1. 用 v2.0.2 数据导入包和 `bootstrap_bank_agent.py` 重新生成当前 Agent 的启动回执。
+1. 用 v2.0.6 数据导入包和 `bootstrap_bank_agent.py` 重新生成当前 Agent 的启动回执。
 2. 在干净工作树中只运行固定 Fact v3 smoke；未全绿不得进行完整集合评测。
 3. smoke 全绿后，使用同一 `RunId` 顺序运行 train、dev；最终 test 还必须显式确认并记录。
 

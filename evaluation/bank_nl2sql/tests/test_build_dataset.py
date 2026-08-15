@@ -438,6 +438,53 @@ class OfficialManifestTest(BuildDatasetTest):
                 "array",
             )
 
+    def test_full_official_answer_fact_contract_projects_all_splits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            workbook_path, intent_root = self.create_workbook_and_intents(temp_path)
+            manifest_path = temp_path / "official-manifest.json"
+            manifest = self.official_manifest(workbook_path, ["TRAIN-S-02"])
+            self.write_ledger(temp_path, manifest, removed_ids=["TRAIN-S-02"])
+            answer_facts = [{
+                "id": "value",
+                "value": 1.0,
+                "kind": "NUMBER",
+                "binding": {
+                    "organizationCodes": ["ORG001"],
+                    "metricCodes": ["ZB001"],
+                    "dates": ["2025-12-31"],
+                    "comparisonType": "POINT",
+                },
+                "formula": {"operation": "DIRECT", "operands": [{"column": "metric_value"}]},
+            }]
+            ledger_path = self.write_answer_fact_ledger(
+                temp_path,
+                manifest,
+                [
+                    {"id": sample_id, "split": split, "reason": "full contract", "answerFacts": answer_facts}
+                    for sample_id, split in (
+                        ("TRAIN-S-01", "train"),
+                        ("VAL-S-01", "dev"),
+                        ("TEST-S-01", "test"),
+                    )
+                ],
+            )
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger["coverageMode"] = "FULL_OFFICIAL"
+            ledger_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            manifest["releaseMode"] = "FULL_OFFICIAL_ANSWER_FACT_CONTRACT"
+            manifest["answerFactCoverageMode"] = "FULL_OFFICIAL"
+            manifest["artifactSha256"]["answerFactLedger"] = hashlib.sha256(ledger_path.read_bytes()).hexdigest().upper()
+            self.write_manifest(manifest_path, manifest)
+
+            output = temp_path / "output"
+            build_dataset(workbook_path, intent_root, output, official_manifest_path=manifest_path)
+
+            for split in ("train", "dev", "test"):
+                item = json.loads((output / f"{split}.jsonl").read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(item["expected"]["answerFacts"], answer_facts)
+                self.assertIs(item["expected"]["answerFactsAuthoritative"], True)
+
     def create_clarification_fixture(self, temp_path: Path) -> tuple[Path, Path]:
         """Workbook + intents with one clarify-style RANKING question.
 

@@ -17,6 +17,7 @@ from fact_contract_v3 import (  # noqa: E402
     build_fact_contract,
     build_fact_contract_report,
     score_fact_contract_report,
+    validate_typed_facts_against_answer,
 )
 from build_fact_contract_v3 import main as build_main  # noqa: E402
 from score_fact_contract_v3 import main as score_main  # noqa: E402
@@ -45,6 +46,68 @@ def _record(
 
 
 class FactContractV3Test(unittest.TestCase):
+    def test_workbook_alignment_accepts_signed_result_for_directional_magnitude(self) -> None:
+        facts = [{"value": -0.4, "kind": "PERCENT"}]
+
+        self.assertEqual(
+            validate_typed_facts_against_answer(
+                "同比变化多少？", "同比下降0.4%。", facts
+            ),
+            [],
+        )
+
+    def test_workbook_alignment_rejects_sign_flip_without_direction_word(self) -> None:
+        facts = [{"value": -0.4, "kind": "PERCENT"}]
+
+        self.assertTrue(
+            validate_typed_facts_against_answer(
+                "同比变化多少？", "同比增长0.4%。", facts
+            )
+        )
+
+    def test_workbook_alignment_requires_distinct_nearby_source_values(self) -> None:
+        facts = [{"value": 0.44, "kind": "PERCENT"}]
+
+        errors = validate_typed_facts_against_answer(
+            "环比和同比变化多少？", "环比增长0.44%，同比增长0.45%。", facts
+        )
+
+        self.assertIn("WORKBOOK_ANSWER_FACT_1_NOT_TYPED", errors)
+
+    def test_valid_typed_contract_is_authoritative_over_legacy_text_slots(self) -> None:
+        record = _record(
+            "SYN-TYPED-01",
+            question="2025年末排名变化是多少？",
+            answer_text="变化1名",
+            columns=["metric_code", "rank_change"],
+            rows=[["ZB001", 1.0], ["ZB002", 1.0]],
+        )
+        record["expected"]["answerFacts"] = [
+            {
+                "id": code,
+                "value": 1.0,
+                "kind": "RANK",
+                "binding": {
+                    "organizationCodes": ["ORG001"],
+                    "metricCodes": [code],
+                    "dates": ["2025-12-31"],
+                    "comparisonType": "CHANGE",
+                },
+                "formula": {
+                    "operation": "DIRECT",
+                    "operands": [{"column": "rank_change", "where": {"metric_code": code}}],
+                },
+            }
+            for code in ("ZB001", "ZB002")
+        ]
+        record["expected"]["answerFactsAuthoritative"] = True
+
+        contract = build_fact_contract(record)
+
+        self.assertEqual(contract.status, "READY")
+        self.assertEqual(len(contract.facts), 2)
+        self.assertTrue(all(fact.support == "TYPED_RESULT" for fact in contract.facts))
+
     def test_question_threshold_is_context_not_required_result_fact(self) -> None:
         record = _record(
             "TRAIN-S-13",

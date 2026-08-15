@@ -1,14 +1,13 @@
 {
-  "answerAmendmentLedgerSha256": "67B074D3EE6FF54D1975EFCD5A1FDEC0E83361ED9D030842C4BA19BCB3638D28",
-  "answerFactLedgerSha256": "2DA825F23D9B199617AB8C2BDFF867A98AF2F0F2081417944CBF9BAA1A31A1EB",
-  "databaseSha256": "639fe7183a9620c8d44561c3c4fa0f174751c7396d2fa28a23fc4e0d139207c4",
+  "answerFactLedgerSha256": "EE23610ABBBEC5CDEBABCCF369F99759DD9057AA2E158047D02937AB67949D72",
+  "databaseSha256": "868ee86db7a84ada9c11c3a1d38c9f5a8709940d11c90806094073de3cb613e4",
   "officialCount": 199,
-  "parentVersion": "2.0.4",
+  "parentVersion": "2.0.5",
   "splitCounts": {
     "dev": 40,
     "test": 40,
     "train": 119
   },
   "sqlExecution": "PASS",
-  "version": "2.0.5"
+  "version": "2.0.6"
 }

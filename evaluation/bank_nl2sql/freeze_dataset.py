@@ -69,6 +69,9 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
     # separate release-integrity gate proving that every generated SQL query
     # reproduces its structured rows against the packaged database.
     gold_report = validate_gold_dataset(dataset_path, database_path)
+    # Execution timing is diagnostic noise, not immutable release identity.
+    # Excluding it makes a byte-identical dataset rebuild deterministic.
+    gold_validation = {key: value for key, value in gold_report.items() if key != "timingMs"}
     content_hashes = {filename: _sha256(dataset_path / filename) for filename in RELEASE_FILES}
     release = {
         "version": source_manifest.get("version", "0.1.0"),
@@ -77,7 +80,7 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
         "augmentationCount": dataset_report["augmentationCount"],
         "sourceSplitCounts": dataset_report["sourceSplitCounts"],
         "evaluationSplitCounts": dataset_report["evaluationSplitCounts"],
-        "goldValidation": gold_report,
+        "goldValidation": gold_validation,
         "contentSha256": content_hashes,
         "accessPolicy": {
             "training": ["train.jsonl", "dev.jsonl"],
@@ -87,9 +90,11 @@ def freeze_dataset(dataset_path: Path | str, database_path: Path | str) -> dict[
     }
     if answer_contract_validation is not None:
         release["answerContractValidation"] = answer_contract_validation
-    (dataset_path / "release_manifest.json").write_text(
-        json.dumps(release, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    # The manifest signs raw release-file bytes.  Force LF output so Windows
+    # generation produces the same Git blob bytes that runtime verification
+    # hashes in a fresh checkout.
+    with (dataset_path / "release_manifest.json").open("w", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(release, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return release
 
 

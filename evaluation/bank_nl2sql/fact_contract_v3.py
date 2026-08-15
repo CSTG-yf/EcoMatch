@@ -317,6 +317,119 @@ def _typed_answer_facts(
     return [FactDraft(**fact) for fact in validated], errors
 
 
+def validate_typed_facts_against_answer(
+    question: str, answer_text: str, raw_facts: Any
+) -> list[str]:
+    """Prove that a typed scoring contract preserves the workbook answer facts."""
+
+    source = build_fact_contract(
+        {
+            "id": "ANSWER-FACT-SOURCE-CHECK",
+            "question": question,
+            "expected": {
+                "answerText": answer_text,
+                "columns": [],
+                "rows": [],
+                "numericTolerance": DEFAULT_ABS_TOL,
+                "orderSensitive": False,
+                "unit": None,
+            },
+        }
+    )
+    required: list[FactDraft] = []
+    for fact in (item for item in source.facts if item.required):
+        if any(
+            existing.kind == fact.kind
+            and math.isclose(
+                existing.value,
+                fact.value,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
+            for existing in required
+        ):
+            continue
+        required.append(fact)
+    typed = raw_facts if isinstance(raw_facts, list) else []
+
+    def matches(source_fact: FactDraft, typed_fact: dict[str, Any]) -> bool:
+        typed_kind = typed_fact.get("kind")
+        compatible_kind = typed_kind == source_fact.kind or {
+            str(typed_kind), source_fact.kind
+        } == {"NUMBER", "TOTAL_COUNT"}
+        value = typed_fact.get("value")
+        fact_tolerance = (
+            max(DEFAULT_ABS_TOL, 0.02)
+            if source_fact.kind in {"PERCENT", "NUMBER"}
+            else DEFAULT_ABS_TOL
+        )
+        value_matches = (
+            isinstance(value, numbers.Real)
+            and not isinstance(value, bool)
+            and math.isclose(
+                source_fact.value,
+                float(value),
+                rel_tol=DEFAULT_REL_TOL,
+                abs_tol=fact_tolerance,
+            )
+        )
+        if (
+            not value_matches
+            and isinstance(value, numbers.Real)
+            and not isinstance(value, bool)
+            and float(value) < 0 <= source_fact.value
+            and (
+                re.search(r"(?:下降|减少|降低|下滑|降幅|负增长)", question)
+                or re.search(
+                    rf"(?:下降|减少|降低|下滑|低于|降幅|负增长)[^，。；]{{0,12}}{re.escape(source_fact.raw)}",
+                    answer_text,
+                )
+            )
+        ):
+            # Chinese answers normally write the magnitude after a directional
+            # word ("下降0.4%"), while executable result columns correctly carry
+            # the signed value (-0.4).  The direction word is therefore part of
+            # the source fact and must be present before sign normalization.
+            value_matches = math.isclose(
+                source_fact.value,
+                abs(float(value)),
+                rel_tol=DEFAULT_REL_TOL,
+                abs_tol=fact_tolerance,
+            )
+        return (
+            compatible_kind
+            and value_matches
+        )
+
+    errors: list[str] = []
+    for index, typed_fact in enumerate(typed):
+        if not isinstance(typed_fact, dict) or not any(
+            matches(source_fact, typed_fact) for source_fact in required
+        ):
+            errors.append(f"ANSWER_FACT_{index}_NOT_IN_WORKBOOK_ANSWER")
+    assigned_source_by_typed: dict[int, int] = {}
+
+    def assign(source_index: int, seen_typed: set[int]) -> bool:
+        for typed_index, typed_fact in enumerate(typed):
+            if (
+                typed_index in seen_typed
+                or not isinstance(typed_fact, dict)
+                or not matches(required[source_index], typed_fact)
+            ):
+                continue
+            seen_typed.add(typed_index)
+            previous_source = assigned_source_by_typed.get(typed_index)
+            if previous_source is None or assign(previous_source, seen_typed):
+                assigned_source_by_typed[typed_index] = source_index
+                return True
+        return False
+
+    for index in range(len(required)):
+        if not assign(index, set()):
+            errors.append(f"WORKBOOK_ANSWER_FACT_{index}_NOT_TYPED")
+    return errors
+
+
 def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
     sample_id = str(record.get("id") or "")
     question = str(record.get("question") or "")
@@ -412,32 +525,48 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
 
     typed_errors: list[str] = []
     typed_facts = expected.get("answerFacts")
+    typed_authoritative = expected.get("answerFactsAuthoritative") is True
     if typed_facts is not None:
         typed_drafts, typed_errors = _typed_answer_facts(typed_facts, expected)
-        legacy_facts = list(facts)
-        typed_targets: set[int] = set()
-        for typed in typed_drafts:
-            target = next(
-                (
-                    index for index, fact in enumerate(legacy_facts)
-                    if fact.required
-                    and fact.support in {"MISSING", "DIRECT_RESULT"}
-                    and fact.kind == typed.kind
-                    and _close(fact.value, typed.value, kind=fact.kind, tolerance=tolerance)
-                ),
-                None,
-            )
-            if target is None:
-                typed_errors.append("TYPED_ANSWER_FACT_NOT_BOUND_TO_ANSWER_FACT")
-            elif target in typed_targets:
-                # Legacy extraction intentionally de-duplicates equal numeric
-                # tokens, while typed facts carry distinct metric identities.
-                # Preserve every proven typed fact instead of collapsing tied
-                # ranks or equal values back into a single anonymous number.
-                facts.append(typed)
-            else:
-                typed_targets.add(target)
-                facts[target] = typed
+        if typed_authoritative and not typed_errors and typed_drafts:
+            # A validated typed contract is the authoritative result-scoring
+            # surface.  Legacy prose extraction remains useful while creating
+            # the contract, but must not make an identity-bound fact fail merely
+            # because the same number cannot be mapped back to an anonymous text
+            # slot (for example tied ranks or a reviewed derived projection).
+            facts = typed_drafts
+        elif not typed_authoritative:
+            # Incremental contracts are annotations over the legacy answer
+            # extraction.  They may add identity/formulas, but cannot silently
+            # redefine which numeric facts the workbook answer requires.
+            legacy_facts = list(facts)
+            typed_targets: set[int] = set()
+            for typed in typed_drafts:
+                target = next(
+                    (
+                        index
+                        for index, fact in enumerate(legacy_facts)
+                        if fact.required
+                        and fact.support in {"MISSING", "DIRECT_RESULT"}
+                        and fact.kind == typed.kind
+                        and _close(
+                            fact.value,
+                            typed.value,
+                            kind=fact.kind,
+                            tolerance=tolerance,
+                        )
+                    ),
+                    None,
+                )
+                if target is None:
+                    typed_errors.append("TYPED_ANSWER_FACT_NOT_BOUND_TO_ANSWER_FACT")
+                elif target in typed_targets:
+                    # Legacy extraction de-duplicates equal tokens, while a
+                    # typed contract can bind tied values to distinct metrics.
+                    facts.append(typed)
+                else:
+                    typed_targets.add(target)
+                    facts[target] = typed
 
     risks = _source_risks(question, answer_text)
     warnings: list[str] = []
@@ -450,7 +579,9 @@ def build_fact_contract(record: dict[str, Any]) -> RecordFactContract:
         warnings.append("SEMANTIC_BINDING_DIAGNOSTIC")
 
     reasons: list[str] = []
-    if risks:
+    if risks and not (
+        typed_authoritative and typed_facts is not None and not typed_errors and typed_drafts
+    ):
         reasons.append("SOURCE_SEMANTIC_RISK")
     if missing_required_support:
         reasons.append("MISSING_RESULT_SUPPORT")

@@ -77,6 +77,7 @@ SCHEMA: dict[str, Any] = {
             "required": ["answerText", "columns", "rows", "unit", "numericTolerance", "orderSensitive"],
             "properties": {
                 "answerFacts": {"type": "array", "minItems": 1},
+                "answerFactsAuthoritative": {"type": "boolean"},
             },
         },
     },
@@ -153,7 +154,10 @@ def _load_official_manifest(path: Path) -> dict[str, Any]:
         raise DatasetBuildError("官方 manifest artifactSha256.changeLedger 非法")
     if manifest.get("releaseMode") == "INCREMENTAL_ANSWER_AMENDMENT":
         _validate_incremental_answer_amendment(manifest, path.parent)
-    elif manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT":
+    elif manifest.get("releaseMode") in {
+        "INCREMENTAL_ANSWER_FACT_CONTRACT",
+        "FULL_OFFICIAL_ANSWER_FACT_CONTRACT",
+    }:
         _load_answer_fact_contracts(manifest, path.parent)
     return manifest
 
@@ -268,6 +272,11 @@ def _load_answer_fact_contracts(
         or len(parent["officialManifestSha256"]) != 64
     ):
         raise DatasetBuildError("答案事实官方 manifest parent 非法")
+    release_mode = manifest.get("releaseMode")
+    full_official = release_mode == "FULL_OFFICIAL_ANSWER_FACT_CONTRACT"
+    coverage_mode = manifest.get("answerFactCoverageMode", "INCREMENTAL")
+    if full_official != (coverage_mode == "FULL_OFFICIAL"):
+        raise DatasetBuildError("答案事实官方 manifest releaseMode/coverageMode 不一致")
     ledger_name = manifest.get("answerFactLedger")
     ledger_rel = Path(ledger_name) if isinstance(ledger_name, str) and ledger_name else None
     if ledger_rel is None or ledger_rel.is_absolute() or ".." in ledger_rel.parts:
@@ -309,6 +318,8 @@ def _load_answer_fact_contracts(
         raise DatasetBuildError("answerFactLedger parentOfficialManifestSha256 不匹配")
     if ledger.get("generator") != generator:
         raise DatasetBuildError("answerFactLedger generator 不匹配")
+    if ledger.get("coverageMode", "INCREMENTAL") != coverage_mode:
+        raise DatasetBuildError("answerFactLedger coverageMode 不匹配")
     entries = ledger.get("entries")
     if not isinstance(entries, list) or ledger.get("count") != len(entries) or len(entries) != fact_count:
         raise DatasetBuildError("answerFactLedger count/entries 非法")
@@ -319,8 +330,9 @@ def _load_answer_fact_contracts(
         sample_id = entry.get("id")
         if not isinstance(sample_id, str) or not sample_id or sample_id in contracts:
             raise DatasetBuildError("answerFactLedger ID 非法或重复")
-        if entry.get("split") not in {"train", "dev"}:
-            raise DatasetBuildError(f"answerFactLedger 禁止非 train/dev: {sample_id}")
+        allowed_splits = {"train", "dev", "test"} if full_official else {"train", "dev"}
+        if entry.get("split") not in allowed_splits:
+            raise DatasetBuildError(f"answerFactLedger split 超出发布范围: {sample_id}")
         answer_facts = entry.get("answerFacts")
         _, errors = validate_answer_facts(
             answer_facts,
@@ -673,7 +685,8 @@ def _augmentation_record(intent: dict[str, Any]) -> dict[str, Any]:
 
 def _write_jsonl(path: Path, records: Iterable[dict[str, Any]]) -> None:
     payload = "".join(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n" for record in records)
-    path.write_text(payload, encoding="utf-8")
+    with path.open("w", encoding="utf-8", newline="\n") as output:
+        output.write(payload)
 
 
 def _template_overlap(records_by_split: dict[str, list[dict[str, Any]]]) -> dict[str, list[str]]:
@@ -751,7 +764,10 @@ def build_dataset(
         clarification_contracts = _load_change_ledger(
             official_manifest, official_manifest_path.parent
         )
-        if official_manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT":
+        if official_manifest.get("releaseMode") in {
+            "INCREMENTAL_ANSWER_FACT_CONTRACT",
+            "FULL_OFFICIAL_ANSWER_FACT_CONTRACT",
+        }:
             answer_fact_contracts = _load_answer_fact_contracts(
                 official_manifest, official_manifest_path.parent
             )
@@ -765,6 +781,11 @@ def build_dataset(
             raise DatasetBuildError(
                 f"Ledger answer-fact IDs absent from workbook: {sorted(missing_answer_facts)}"
             )
+        if (
+            official_manifest.get("releaseMode") == "FULL_OFFICIAL_ANSWER_FACT_CONTRACT"
+            and set(answer_fact_contracts) != question_ids
+        ):
+            raise DatasetBuildError("FULL_OFFICIAL answer-fact ledger 未完整覆盖工作簿")
     unknown_intents = sorted(set(official_intents) - question_ids - removed_ids)
     missing_intents = sorted(question_ids - set(official_intents))
     if unknown_intents:
@@ -781,6 +802,10 @@ def build_dataset(
         answer_fact_contract = answer_fact_contracts.get(question["id"])
         if answer_fact_contract is not None:
             record["expected"]["answerFacts"] = answer_fact_contract["answerFacts"]
+            if official_manifest is not None and official_manifest.get(
+                "releaseMode"
+            ) == "FULL_OFFICIAL_ANSWER_FACT_CONTRACT":
+                record["expected"]["answerFactsAuthoritative"] = True
             if "goldSql" in answer_fact_contract:
                 record["goldSqlOverride"] = answer_fact_contract["goldSql"]
                 record["goldSqlFeatures"] = answer_fact_contract["sqlFeatures"]
@@ -819,11 +844,15 @@ def build_dataset(
     elif (
         official_manifest is not None
         and official_manifest_path is not None
-        and official_manifest.get("releaseMode") == "INCREMENTAL_ANSWER_FACT_CONTRACT"
+        and official_manifest.get("releaseMode") in {
+            "INCREMENTAL_ANSWER_FACT_CONTRACT",
+            "FULL_OFFICIAL_ANSWER_FACT_CONTRACT",
+        }
     ):
         manifest["parentVersion"] = official_manifest["parent"]["datasetVersion"]
         manifest["answerFactContract"] = {
             "count": official_manifest["answerFactCount"],
+            "coverageMode": official_manifest.get("answerFactCoverageMode", "INCREMENTAL"),
             "officialManifestSha256": _sha256(official_manifest_path).upper(),
             "ledgerSha256": official_manifest["artifactSha256"]["answerFactLedger"].upper(),
             "canonicalWorkbook": official_manifest["groundTruthWorkbook"],
@@ -834,12 +863,9 @@ def build_dataset(
     for split in EVALUATION_SPLITS:
         _write_jsonl(output_path / f"{split}.jsonl", records_by_split[split])
     _write_jsonl(output_path / "augmentation.jsonl", augmentations)
-    (output_path / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    (output_path / "schema.json").write_text(
-        json.dumps(SCHEMA, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    for filename, payload in (("manifest.json", manifest), ("schema.json", SCHEMA)):
+        with (output_path / filename).open("w", encoding="utf-8", newline="\n") as output:
+            output.write(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     return manifest
 
 
