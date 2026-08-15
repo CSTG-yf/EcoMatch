@@ -41,8 +41,14 @@ public class FixedSystemPrefixLlmCache {
     private final AtomicLong llamaCppCalls = new AtomicLong();
     private final AtomicLong llamaCppCacheHits = new AtomicLong();
     private final AtomicLong llamaCppCacheTokens = new AtomicLong();
+    private final AtomicLong llamaCppPromptTokens = new AtomicLong();
+    private final AtomicLong llamaCppCompletionTokens = new AtomicLong();
+    private final AtomicLong llamaCppPromptMs = new AtomicLong();
+    private final AtomicLong llamaCppDecodeMs = new AtomicLong();
     private final boolean enableThinking;
     private final int thinkingMaxTokens;
+    private final String stageLabel;
+    private final int safetyMaxTokens;
     private final Map<String, String> completionMemo;
     private final LlamaCppPrefixChatClient llamaCppClient = new LlamaCppPrefixChatClient();
 
@@ -63,6 +69,13 @@ public class FixedSystemPrefixLlmCache {
 
     public FixedSystemPrefixLlmCache(String systemPrefix, String prefixVersion, int memoCapacity,
             boolean autoWarm, String warmUserProbe, boolean enableThinking, int thinkingMaxTokens) {
+        this(systemPrefix, prefixVersion, memoCapacity, autoWarm, warmUserProbe, enableThinking,
+                thinkingMaxTokens, "default", 0);
+    }
+
+    public FixedSystemPrefixLlmCache(String systemPrefix, String prefixVersion, int memoCapacity,
+            boolean autoWarm, String warmUserProbe, boolean enableThinking, int thinkingMaxTokens,
+            String stageLabel, int safetyMaxTokens) {
         this.systemPrefix = Objects.requireNonNull(systemPrefix, "systemPrefix");
         if (systemPrefix.isBlank()) {
             throw new IllegalArgumentException("systemPrefix must not be blank");
@@ -72,6 +85,8 @@ public class FixedSystemPrefixLlmCache {
         this.warmUserProbe = StringUtils.defaultIfBlank(warmUserProbe, defaultWarmProbe());
         this.enableThinking = enableThinking;
         this.thinkingMaxTokens = thinkingMaxTokens;
+        this.stageLabel = StringUtils.defaultIfBlank(stageLabel, "default");
+        this.safetyMaxTokens = Math.max(0, safetyMaxTokens);
         int capacity = Math.max(16, memoCapacity);
         this.completionMemo =
                 java.util.Collections.synchronizedMap(new LinkedHashMap<>(capacity, 0.75f, true) {
@@ -159,6 +174,7 @@ public class FixedSystemPrefixLlmCache {
 
     public Map<String, Object> stats() {
         Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("stage", stageLabel);
         stats.put("prefixVersion", prefixVersion);
         stats.put("prefixWarmed", prefixWarmed.get());
         stats.put("autoWarm", autoWarm);
@@ -169,6 +185,11 @@ public class FixedSystemPrefixLlmCache {
         stats.put("llamaCppCalls", llamaCppCalls.get());
         stats.put("llamaCppCacheHits", llamaCppCacheHits.get());
         stats.put("llamaCppCacheTokens", llamaCppCacheTokens.get());
+        stats.put("llamaCppPromptTokens", llamaCppPromptTokens.get());
+        stats.put("llamaCppCompletionTokens", llamaCppCompletionTokens.get());
+        stats.put("llamaCppPromptMs", llamaCppPromptMs.get());
+        stats.put("llamaCppDecodeMs", llamaCppDecodeMs.get());
+        stats.put("safetyMaxTokens", safetyMaxTokens);
         stats.put("enableThinking", enableThinking);
         stats.put("thinkingMaxTokens", thinkingMaxTokens);
         stats.put("memoSize", completionMemo.size());
@@ -183,6 +204,22 @@ public class FixedSystemPrefixLlmCache {
         return prefixVersion + ":" + sha256(dynamicUserContent);
     }
 
+    /**
+     * Resolves the llama.cpp chat options for one call: an explicit request (warm-up or thinking)
+     * wins; otherwise a safety cap bounds the decode when configured.
+     */
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(
+            LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
+        if (requestedOptions != null) {
+            return requestedOptions;
+        }
+        if (enableThinking) {
+            return LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens);
+        }
+        return safetyMaxTokens > 0 ? LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens)
+                : LlamaCppPrefixChatClient.ChatOptions.defaults();
+    }
+
     private String callModel(ChatLanguageModel model, ChatModelConfig config,
             String dynamicUserContent) {
         return callModel(model, config, dynamicUserContent, null);
@@ -192,28 +229,16 @@ public class FixedSystemPrefixLlmCache {
             String dynamicUserContent, LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         if (config != null && StringUtils.isNotBlank(config.getBaseUrl())) {
             try {
-                LlamaCppPrefixChatClient.ChatOptions options = requestedOptions != null
-                        ? requestedOptions
-                        : enableThinking
-                                ? LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens)
-                                : LlamaCppPrefixChatClient.ChatOptions.defaults();
                 LlamaCppPrefixChatClient.ChatResult result =
-                        llamaCppClient.chat(config, systemPrefix, dynamicUserContent, options);
+                        llamaCppClient.chat(config, systemPrefix, dynamicUserContent,
+                                resolveOptions(requestedOptions));
                 llamaCppCalls.incrementAndGet();
-                int cacheN = 0;
-                Object cacheObj = result.timings().get("cache_n");
-                if (cacheObj instanceof Number number) {
-                    cacheN = number.intValue();
-                }
-                if (cacheN > 0) {
-                    llamaCppCacheHits.incrementAndGet();
-                    llamaCppCacheTokens.addAndGet(cacheN);
-                }
+                recordLlamaCppTimings(result);
                 return result.content();
             } catch (RuntimeException ex) {
                 LOG.warn(
-                        "llama.cpp prefix chat failed, falling back to langchain4j: version={} type={}, error=[{}]",
-                        prefixVersion, ex.getClass().getSimpleName(),
+                        "llama.cpp prefix chat failed, falling back to langchain4j: version={} stage={} type={}, error=[{}]",
+                        prefixVersion, stageLabel, ex.getClass().getSimpleName(),
                         ex.getMessage() == null ? ""
                                 : ex.getMessage().substring(0,
                                         Math.min(160, ex.getMessage().length())));
@@ -226,6 +251,43 @@ public class FixedSystemPrefixLlmCache {
             throw new IllegalStateException("no chat model available after llama.cpp failure");
         }
         return model.generate(composeFullPrompt(dynamicUserContent));
+    }
+
+    /**
+     * Accumulates per-call llama.cpp timing facts into counters. Only numeric whitelisted keys are
+     * read; the raw timings map is never logged here.
+     */
+    private void recordLlamaCppTimings(LlamaCppPrefixChatClient.ChatResult result) {
+        Map<String, Object> timings = result.timings();
+        int cacheN = numberAsInt(timings.get("cache_n"));
+        if (cacheN > 0) {
+            llamaCppCacheHits.incrementAndGet();
+            llamaCppCacheTokens.addAndGet(cacheN);
+        }
+        add(timings, "prompt_tokens", llamaCppPromptTokens);
+        add(timings, "completion_tokens", llamaCppCompletionTokens);
+        add(timings, "prompt_ms", llamaCppPromptMs);
+        add(timings, "predicted_ms", llamaCppDecodeMs);
+        int promptN = numberAsInt(timings.get("prompt_n"));
+        KEY_PIPELINE.info(
+                "FixedSystemPrefixLlmCache llama.cpp call stage={} version={} cacheN={} promptN={} promptTokens={} completionTokens={} promptMs={} decodeMs={}",
+                stageLabel, prefixVersion, cacheN, promptN,
+                timings.get("prompt_tokens"), timings.get("completion_tokens"),
+                timings.get("prompt_ms"), timings.get("predicted_ms"));
+    }
+
+    private static void add(Map<String, Object> timings, String key, AtomicLong counter) {
+        int value = numberAsInt(timings.get(key));
+        if (value > 0) {
+            counter.addAndGet(value);
+        }
+    }
+
+    private static int numberAsInt(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return 0;
     }
 
     private static String shortKey(String key) {

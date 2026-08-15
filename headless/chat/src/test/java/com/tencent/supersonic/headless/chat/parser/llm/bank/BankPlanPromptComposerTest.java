@@ -242,4 +242,124 @@ class BankPlanPromptComposerTest {
         assertTrue(content.contains("不得加入清单之外的任何 ZB###"));
         assertTrue(content.contains("禁止 MONTH"));
     }
+
+    @Test
+    void requirementsSystemPrefixExcludesPlanOnlyRules() {
+        String sys = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        assertTrue(sys.startsWith(BankPlanPromptComposer.COMMON_FACT_PREFIX));
+        assertFalse(sys.contains("\"orderBy\""), "orderBy is a BankQueryPlan field");
+        assertFalse(sys.contains("\"calculation\""), "calculation is a BankQueryPlan field");
+        assertFalse(sys.contains("\"output\""), "output is a BankQueryPlan field");
+        assertFalse(sys.contains("aggregationMode"), "aggregationMode is PLAN-only");
+        assertFalse(sys.contains("COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"));
+        assertFalse(sys.contains("\"dimensions\""), "dimensions capability rules are PLAN-only");
+        assertFalse(sys.contains("\"metrics\""));
+        assertFalse(sys.contains("\"limit\""));
+        assertFalse(sys.contains("\"aggregation\""));
+    }
+
+    @Test
+    void requirementsSystemPrefixCarriesTheCompleteFilterContract() {
+        String sys = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+        String contract = BankSemanticRegistry.filterContract();
+
+        assertTrue(sys.contains(contract),
+                "REQUIREMENTS must render the registry filter contract");
+        BankSemanticRegistry.filterOperators().forEach(operator -> assertTrue(sys.contains(operator),
+                "REQUIREMENTS lost filter operator " + operator));
+        BankSemanticRegistry.filterFields().forEach(field -> assertTrue(sys.contains(field),
+                "REQUIREMENTS lost filter field category " + field));
+        assertFalse(sys.contains("\"orderBy\""), "filter contract must not leak PLAN ordering");
+        assertFalse(sys.contains("\"calculation\""), "filter contract must not leak PLAN calculation");
+        assertFalse(sys.contains("\"output\""), "filter contract must not leak PLAN output");
+    }
+
+    @Test
+    void planSystemPrefixExcludesRequirementsOnlyRules() {
+        String sys = BankPlanPromptComposer.PLAN_SYSTEM_PREFIX;
+
+        assertTrue(sys.startsWith(BankPlanPromptComposer.COMMON_FACT_PREFIX));
+        // The action enum value itself (allowed=[EXECUTE, CLARIFY]) is shared data, but no CLARIFY
+        // rule, trigger condition or instruction may leak into the PLAN stage.
+        assertFalse(sys.contains("action=CLARIFY"));
+        assertFalse(sys.contains("CLARIFY 时"));
+        assertFalse(sys.contains("action=CLARIFY；"));
+        assertFalse(sys.contains("返回 CLARIFY"));
+        assertFalse(sys.contains("CLARIFY 的理由"));
+        assertFalse(sys.contains("action=CLARIFY，"));
+        assertFalse(sys.contains("answerFactTypes"));
+        assertFalse(sys.contains("待评价指标集合"));
+        assertFalse(sys.contains("封闭指标清单"));
+        assertFalse(sys.contains("封闭映射"));
+        assertFalse(sys.contains("澄清"), "PLAN must not carry CLARIFY guidance");
+        assertTrue(sys.contains("requirements_contract"), "PLAN reads the validated contract");
+    }
+
+    @Test
+    void bothStagePrefixesShareTheSameRegistryGeneratedFacts() {
+        String shared = BankSemanticRegistry.sharedCatalog();
+        String planCapabilities = BankSemanticRegistry.planCapabilityCatalog();
+
+        assertTrue(BankPlanPromptComposer.COMMON_FACT_PREFIX.contains(shared));
+        assertTrue(BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX.contains(shared));
+        assertTrue(BankPlanPromptComposer.PLAN_SYSTEM_PREFIX.contains(shared));
+        assertTrue(BankPlanPromptComposer.PLAN_SYSTEM_PREFIX.contains(planCapabilities));
+        assertFalse(BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX.contains(planCapabilities));
+    }
+
+    @Test
+    void stagePrefixesKeepJsonFieldContractsCompatible() {
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+        String plan = BankPlanPromptComposer.PLAN_SYSTEM_PREFIX;
+
+        assertTrue(requirements.contains("\"metricCodes\""));
+        assertTrue(requirements.contains("\"answerFactTypes\""));
+        assertTrue(requirements.contains("\"requiredLimit\""));
+        assertTrue(requirements.contains("\"clarification\""));
+        assertTrue(requirements.contains("\"action\":\"CLARIFY\""));
+        assertTrue(requirements.contains("\"action\":\"EXECUTE\""));
+        assertTrue(requirements.contains("BankRequestContract"));
+
+        assertTrue(plan.contains("\"calculation\""));
+        assertTrue(plan.contains("\"orderBy\""));
+        assertTrue(plan.contains("\"output\""));
+        assertTrue(plan.contains("\"limit\""));
+        assertTrue(plan.contains("\"dimensions\""));
+        assertTrue(plan.contains("\"metrics\""));
+        assertTrue(plan.contains("\"action\":\"EXECUTE\""));
+        assertTrue(plan.contains("BankQueryPlan"));
+    }
+
+    @Test
+    void repairUserContentStaysScopedToTheCurrentStage() {
+        String requirementsRepair = BankPlanPromptComposer.buildRequirementsRepairUserContent(
+                "存款是多少？", "{\"action\":\"CLARIFY\"}", "model selected CLARIFY");
+        assertTrue(requirementsRepair.contains("<stage>REQUIREMENTS</stage>"));
+        assertTrue(requirementsRepair.contains("<repair>"));
+        assertTrue(requirementsRepair.contains("<previous_candidate>"));
+        assertFalse(requirementsRepair.contains("\"orderBy\""));
+        assertFalse(requirementsRepair.contains("\"calculation\""));
+
+        String planRepair = BankPlanPromptComposer.buildPlanRepairUserContent("存款是多少？",
+                "{\"version\":\"1.0\",\"action\":\"EXECUTE\"}", "{\"intent\":\"POINT_QUERY\"}",
+                "required_metrics_missing: ZB001");
+        assertTrue(planRepair.contains("<stage>PLAN</stage>"));
+        assertTrue(planRepair.contains("<requirements_contract>"));
+        assertTrue(planRepair.contains("required_metrics_missing"));
+        assertFalse(planRepair.contains("answerFactTypes 的精确含义"));
+        assertFalse(planRepair.contains("封闭指标清单"));
+    }
+
+    @Test
+    void legacyCombinedPrefixStillExposesEveryStageContract() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("第一阶段：REQUIREMENTS 的精确输出格式"));
+        assertTrue(sys.contains("第二阶段：PLAN 的精确输出格式"));
+        assertTrue(sys.contains(BankSemanticRegistry.sharedCatalog()));
+        assertTrue(sys.contains(BankSemanticRegistry.planCapabilityCatalog()));
+        assertTrue(sys.contains("BankRequestContract"));
+        assertTrue(sys.contains("BankQueryPlan"));
+    }
 }

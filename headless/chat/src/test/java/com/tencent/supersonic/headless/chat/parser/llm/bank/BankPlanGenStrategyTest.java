@@ -593,6 +593,72 @@ class BankPlanGenStrategyTest {
                 error.toParserErrorMessage().replace("[BANK_CONSTRAINED_PLAN]", ""));
     }
 
+    @Test
+    void repairDiagnosticsCarryStableErrorCodesForBothStages() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"ZB001\",\"ZB002\",\"ZB003\""),
+                requirementsJson(), validPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("请比较江苏省D市农商行在2025-07-31的指标。" + "待评价指标集合：\n各项存款余额、各项贷款余额。");
+        request.setSemanticIntentHints(
+                SemanticIntentHints.builder().expectedIntent(BankIntentType.UNKNOWN)
+                        .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))
+                        .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        assertEquals(List.of("explicit_closed_metric_list_mismatch"),
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsRepairCodes"));
+        assertEquals(List.of(), response.getBankCandidateDiagnostics()
+                .get("bank.nl2sql.planRepairCodes"));
+    }
+
+    @Test
+    void planRepairDiagnosticsCarryStableErrorCodes() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(dailyAverageRequirementsJson(),
+                dailyAveragePlanJson(null), dailyAveragePlanJson("AVERAGE_ONLY"));
+
+        LLMReq request = request();
+        request.setQueryText("请给出江苏省I市农商行2026全年的日均各项贷款余额。");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankQueryPlan.AggregationResultMode.AVERAGE_ONLY,
+                response.getBankQueryPlan().getOutput().getAggregationMode());
+        assertEquals(List.of(), response.getBankCandidateDiagnostics()
+                .get("bank.nl2sql.requirementsRepairCodes"));
+        assertEquals(List.of("daily_average_output_mode_mismatch"),
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.planRepairCodes"));
+    }
+
+    @Test
+    void stageDiagnosticsExposePerStageCacheCounters() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> prefixCache = (Map<String, Object>) response
+                .getBankCandidateDiagnostics().get("bankPlanPrefixCache");
+        assertNotNull(prefixCache);
+        assertTrue(prefixCache.containsKey("requirements"));
+        assertTrue(prefixCache.containsKey("plan"));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> requirementsStats = (Map<String, Object>) prefixCache.get("requirements");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> planStats = (Map<String, Object>) prefixCache.get("plan");
+        assertEquals(1L, requirementsStats.get("modelCalls"));
+        assertEquals(1L, planStats.get("modelCalls"));
+    }
+
     private LLMReq request() {
         LLMReq request = new LLMReq();
         request.setQueryText("2025年7月末，江苏省D市农商行的各项存款余额和各项贷款余额与全省均值相比如何？");

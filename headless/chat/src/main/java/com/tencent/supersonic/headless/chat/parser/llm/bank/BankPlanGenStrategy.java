@@ -88,6 +88,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         RequirementsAttempt requirementsAttempt =
                 obtainRequirements(llmReq, model, modelConfig, admissionHints);
         BankRequestContract requirements = requirementsAttempt.contract();
+        List<String> requirementsRepairCodes = requirementsAttempt.repairCodes();
         llmReq.setBankRequirementsAttempts(requirementsAttempt.attempts());
         llmReq.setBankRequirementsRepairReasons(requirementsAttempt.repairReasons());
         if (requirements.getAction() == BankRequestContract.Action.CLARIFY) {
@@ -110,25 +111,28 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 toolRepair ? 1 : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
 
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
+        List<String> planRepairCodes = new ArrayList<>();
         BankQueryPlanParseException lastPlanError = null;
         String lastCandidate = null;
         RuntimeException lastModelFailure = null;
         for (int candidateIndex = 0; candidateIndex < candidateLimit; candidateIndex++) {
             String candidate = null;
             try {
-                candidate =
-                        prefixCache.generate(model, modelConfig, dynamicUser, candidateLimit == 1);
+                candidate = prefixCache.generate(model, modelConfig,
+                        BankPlanLlmPrefixCache.Stage.PLAN, dynamicUser, candidateLimit == 1);
                 lastCandidate = candidate;
                 candidates.add(candidateRanker.evaluate(
                         parseAndValidatePlan(llmReq.getQueryText(), candidate, planHints),
                         planHints));
             } catch (BankQueryPlanParseException exception) {
                 lastPlanError = exception;
+                planRepairCodes.add(repairErrorCode(exception));
                 candidates.add(BankPlanCandidateRanker.Candidate
                         .rejected("rejected-plan-" + candidateIndex, exception.getReason().name()));
                 PlanRepairAttempt repaired = repairPlan(llmReq, requirementsJson, candidate,
                         exception, model, modelConfig, planHints, candidateIndex);
                 candidates.addAll(repaired.candidates());
+                planRepairCodes.addAll(repaired.repairCodes());
                 lastCandidate = repaired.lastCandidate();
                 lastPlanError = repaired.lastError() == null ? lastPlanError : repaired.lastError();
                 lastModelFailure = repaired.modelFailure();
@@ -153,10 +157,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     llmReq.getBankRequirementsAttempts());
             diagnostics.put("bank.nl2sql.requirementsRepairReasons",
                     llmReq.getBankRequirementsRepairReasons());
+            diagnostics.put("bank.nl2sql.requirementsRepairCodes",
+                    List.copyOf(requirementsRepairCodes));
+            diagnostics.put("bank.nl2sql.planRepairCodes", List.copyOf(planRepairCodes));
             diagnostics.put("bankPlanPrefixCache", prefixCache.stats());
             KEY_PIPELINE_LOG.info(
-                    "BankPlanGenStrategy selected {} unique model plan candidate(s), rejected={}",
-                    selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount());
+                    "BankPlanGenStrategy selected {} unique model plan candidate(s), rejected={}, planRepairCodes={}",
+                    selection.getUniqueCandidateCount(), selection.getRejectedCandidateCount(),
+                    planRepairCodes);
             return planResponse(llmReq, requirements, selection.getSelected().getPlan(),
                     diagnostics);
         } catch (IllegalArgumentException noCandidate) {
@@ -197,11 +205,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private RequirementsAttempt obtainRequirements(LLMReq llmReq, ChatLanguageModel model,
             ChatModelConfig config, SemanticIntentHints admissionHints) {
         if (llmReq.getBankRequestContract() != null) {
-            return new RequirementsAttempt(llmReq.getBankRequestContract(), 0, List.of());
+            return new RequirementsAttempt(llmReq.getBankRequestContract(), 0, List.of(),
+                    List.of());
         }
         String candidate = null;
         BankQueryPlanParseException lastError = null;
         List<String> repairReasons = new ArrayList<>();
+        List<String> repairCodes = new ArrayList<>();
         int clarificationRechecks = 0;
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
@@ -211,7 +221,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                             lastError == null ? "requirements JSON is invalid"
                                     : lastError.getMessage());
             try {
-                candidate = prefixCache.generate(model, config, user, attempt == 0);
+                candidate = prefixCache.generate(model, config,
+                        BankPlanLlmPrefixCache.Stage.REQUIREMENTS, user, attempt == 0);
                 BankRequestContract parsed = requestContractParser.parse(candidate, admissionHints);
                 validateExplicitClosedMetricList(llmReq.getQueryText(), parsed);
                 validateHighConfidenceQueryFamily(llmReq.getQueryText(), parsed);
@@ -222,12 +233,17 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                             BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                             clarificationRecheckMessage(llmReq.getQueryText()));
                     repairReasons.add("CLARIFICATION_RECHECK");
+                    repairCodes.add("CLARIFICATION_RECHECK");
+                    logRepair("REQUIREMENTS", attempt + 1, "CLARIFICATION_RECHECK", lastError);
                     continue;
                 }
-                return new RequirementsAttempt(parsed, attempt + 1, List.copyOf(repairReasons));
+                return new RequirementsAttempt(parsed, attempt + 1, List.copyOf(repairReasons),
+                        List.copyOf(repairCodes));
             } catch (BankQueryPlanParseException exception) {
                 lastError = exception;
                 repairReasons.add(exception.getReason().name());
+                repairCodes.add(repairErrorCode(exception));
+                logRepair("REQUIREMENTS", attempt + 1, repairErrorCode(exception), exception);
             } catch (RuntimeException exception) {
                 throw BankNl2SqlError.modelFailure(exception);
             }
@@ -238,6 +254,38 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                 BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                                 "model did not return an executable requirements contract")
                         : lastError);
+    }
+
+    /**
+     * Extracts the stable error code that prefixes validator messages ({@code snake_case: ...}).
+     * Structured repair diagnostics must never collapse into a bare {@code VALIDATION_FAILED}.
+     */
+    static String repairErrorCode(BankQueryPlanParseException exception) {
+        if (exception == null) {
+            return "UNKNOWN";
+        }
+        String message = exception.getMessage();
+        if (message != null) {
+            int colon = message.indexOf(':');
+            if (colon > 0) {
+                String candidate = message.substring(0, colon).trim();
+                if (candidate.matches("[a-z][a-z0-9_]{2,63}")) {
+                    return candidate;
+                }
+            }
+        }
+        return exception.getReason().name();
+    }
+
+    private void logRepair(String stage, int attempt, String code,
+            BankQueryPlanParseException exception) {
+        String message = exception == null || exception.getMessage() == null ? ""
+                : exception.getMessage();
+        KEY_PIPELINE_LOG.info(
+                "BankPlanGenStrategy repair stage={} attempt={} code={} reason={} detail=[{}]",
+                stage, attempt, code,
+                exception == null ? "NONE" : exception.getReason().name(),
+                message.length() > 160 ? message.substring(0, 160) : message);
     }
 
     /**
@@ -680,11 +728,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             String firstCandidate, BankQueryPlanParseException firstError, ChatLanguageModel model,
             ChatModelConfig config, SemanticIntentHints planHints, int candidateIndex) {
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
+        List<String> repairCodes = new ArrayList<>();
         String previous = firstCandidate;
         BankQueryPlanParseException lastError = firstError;
         for (int repair = 1; repair <= 2; repair++) {
             try {
                 String repaired = prefixCache.generate(model, config,
+                        BankPlanLlmPrefixCache.Stage.PLAN,
                         BankPlanPromptComposer.buildPlanRepairUserContent(llmReq.getQueryText(),
                                 requirementsJson, previous, lastError.getMessage()),
                         false);
@@ -692,17 +742,21 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 candidates.add(candidateRanker.evaluate(
                         parseAndValidatePlan(llmReq.getQueryText(), repaired, planHints),
                         planHints));
-                return new PlanRepairAttempt(candidates, previous, lastError, null);
+                return new PlanRepairAttempt(candidates, previous, lastError, null, repairCodes);
             } catch (BankQueryPlanParseException exception) {
                 lastError = exception;
+                repairCodes.add(repairErrorCode(exception));
+                logRepair("PLAN", candidateIndex * 2 + repair, repairErrorCode(exception),
+                        exception);
                 candidates.add(BankPlanCandidateRanker.Candidate.rejected(
                         "rejected-repair-" + candidateIndex + "-" + repair,
                         exception.getReason().name()));
             } catch (RuntimeException exception) {
-                return new PlanRepairAttempt(candidates, previous, lastError, exception);
+                return new PlanRepairAttempt(candidates, previous, lastError, exception,
+                        repairCodes);
             }
         }
-        return new PlanRepairAttempt(candidates, previous, lastError, null);
+        return new PlanRepairAttempt(candidates, previous, lastError, null, repairCodes);
     }
 
     private BankQueryPlan parseAndValidatePlan(String queryText, String candidate,
@@ -791,8 +845,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private record PlanRepairAttempt(List<BankPlanCandidateRanker.Candidate> candidates,
             String lastCandidate, BankQueryPlanParseException lastError,
-            RuntimeException modelFailure) {}
+            RuntimeException modelFailure, List<String> repairCodes) {}
 
     private record RequirementsAttempt(BankRequestContract contract, int attempts,
-            List<String> repairReasons) {}
+            List<String> repairReasons, List<String> repairCodes) {}
 }

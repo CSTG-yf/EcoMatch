@@ -4,6 +4,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -45,5 +46,49 @@ class FixedSystemPrefixLlmCacheTest {
         assertEquals(cache.generate(model, user, true), cache.generate(model, user, true));
         verify(model, times(1)).generate(anyString());
         assertEquals(1L, cache.stats().get("completionHits"));
+    }
+
+    @Test
+    void stageLabelAndSafetyCapAreExposedInStatsAndOptions() {
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
+                false, "预热", false, 0, "REQUIREMENTS", 768);
+
+        assertEquals("REQUIREMENTS", cache.stats().get("stage"));
+        assertEquals(768, cache.stats().get("safetyMaxTokens"));
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 768),
+                cache.resolveOptions(null));
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
+                cache.resolveOptions(LlamaCppPrefixChatClient.ChatOptions.warmup(false)),
+                "explicit requests (warm-up) must win over the safety cap");
+    }
+
+    @Test
+    void perCallTokenAndTimingCountersAreExposedEvenWithoutLlamaCpp() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn("{}");
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
+                false, "预热", false, 0, "PLAN", 0);
+
+        cache.generate(model, "问题", false);
+
+        assertTrue(cache.stats().containsKey("llamaCppPromptTokens"));
+        assertTrue(cache.stats().containsKey("llamaCppCompletionTokens"));
+        assertTrue(cache.stats().containsKey("llamaCppPromptMs"));
+        assertTrue(cache.stats().containsKey("llamaCppDecodeMs"));
+        assertEquals(0L, cache.stats().get("llamaCppPromptTokens"));
+    }
+
+    @Test
+    void memoKeyBindsPrefixVersionToDynamicContent() {
+        FixedSystemPrefixLlmCache cache =
+                new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32, false);
+
+        String key = cache.memoKey("同一动态内容");
+
+        assertTrue(key.startsWith("v-test:"));
+        assertEquals(64, key.substring(key.lastIndexOf(':') + 1).length(),
+                "dynamic part must be a sha-256 hex digest");
+        assertFalse(key.contains("同一动态内容"),
+                "memo keys must never embed raw user content");
     }
 }
