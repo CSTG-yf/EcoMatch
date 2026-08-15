@@ -157,6 +157,12 @@ public class LlamaCppPrefixChatClient {
         templateKwargs.put("enable_thinking", opts.enableThinking());
         // Some llama.cpp builds only inspect the top-level flag.
         body.put("enable_thinking", opts.enableThinking());
+        // OpenAI-compatible gateways (e.g. OpenCode Zen/Go) ignore chat_template_kwargs;
+        // reasoning_effort is the switch they honor.  Thinking off => no reasoning at all,
+        // which cuts answer latency from minutes to seconds on reasoning models.
+        if (!opts.enableThinking()) {
+            body.put("reasoning_effort", "none");
+        }
         if (!opts.enableThinking() && Boolean.TRUE.equals(config.getJsonFormat())) {
             ObjectNode responseFormat = body.putObject("response_format");
             String type = StringUtils.defaultIfBlank(config.getJsonFormatType(), "json_object");

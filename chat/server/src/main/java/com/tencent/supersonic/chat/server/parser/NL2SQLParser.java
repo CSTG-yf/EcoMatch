@@ -35,6 +35,7 @@ import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.provider.ModelProvider;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.tencent.supersonic.headless.chat.parser.ParserConfig.PARSER_EXEMPLAR_RECALL_NUMBER;
@@ -219,6 +221,36 @@ public class NL2SQLParser implements ChatQueryParser {
         resp.setBankRoutingAttemptTelemetry(parseResp.getBankRoutingAttemptTelemetry());
     }
 
+    private static final java.util.regex.Pattern DATE_PATTERN = java.util.regex.Pattern
+            .compile("\\d{4}|\\d+\\s*月|[0-9Q一二三四季度]+|年初|年末|月末|月底|季度|全年|上半年|下半年");
+    private static final java.util.regex.Pattern PROVINCE_WIDE_PATTERN = java.util.regex.Pattern
+            .compile("全省|排名|均值|平均|前\\s*\\d+\\s*名|后\\s*\\d+\\s*名|哪些|谁家|几家|多少家");
+
+    private boolean isSelfContained(String question, MapResp mapResult) {
+        if (StringUtils.isBlank(question) || mapResult == null || mapResult.getMapInfo() == null) {
+            return false;
+        }
+        boolean hasMetric = mapResult.getMapInfo().getDataSetElementMatches().values().stream()
+                .flatMap(List::stream)
+                .filter(match -> Objects.nonNull(match.getElement()))
+                .anyMatch(match -> SchemaElementType.METRIC.equals(match.getElement().getType()));
+        if (!hasMetric) {
+            return false;
+        }
+        boolean hasDate = DATE_PATTERN.matcher(question).find();
+        if (!hasDate) {
+            return false;
+        }
+        boolean hasOrg = mapResult.getMapInfo().getDataSetElementMatches().values().stream()
+                .flatMap(List::stream)
+                .filter(match -> Objects.nonNull(match.getElement()))
+                .filter(match -> SchemaElementType.VALUE.equals(match.getElement().getType())
+                        || SchemaElementType.ID.equals(match.getElement().getType()))
+                .map(match -> match.getElement().getBizName())
+                .anyMatch(bizName -> "bank_organization".equalsIgnoreCase(bizName));
+        return hasOrg || PROVINCE_WIDE_PATTERN.matcher(question).find();
+    }
+
     private void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {
         ChatApp chatApp = parseContext.getAgent().getChatAppConfig().get(APP_KEY_MULTI_TURN);
         if (Objects.isNull(chatApp) || !chatApp.isEnable()) {
@@ -240,6 +272,17 @@ public class NL2SQLParser implements ChatQueryParser {
         ChatLayerService chatLayerService = ContextUtils.getBean(ChatLayerService.class);
         MapResp currentMapResult = chatLayerService.map(queryNLReq);
 
+        // Deterministic short-circuit: when the current question already carries a
+        // complete slot set (metric + date + org, or a province-wide ranking pattern
+        // with metric + date), skip the LLM rewrite entirely.  A generative rewrite of
+        // an already-complete question can only add variance (over-inheritance,
+        // paraphrase drift); rules are identity.
+        if (isSelfContained(queryNLReq.getQueryText(), currentMapResult)) {
+            log.info("Multi-turn rewrite skipped by self-contained rule: question=[{}]",
+                    SensitiveLogUtils.summarize(queryNLReq.getQueryText()));
+            return;
+        }
+
         String currentMapStr = currentMapResult.getMapInfo().getDataSetElementMatches().values()
                 .stream().flatMap(List::stream).collect(Collectors
                         .collectingAndThen(Collectors.toList(), this::generateSchemaPrompt));
@@ -253,10 +296,27 @@ public class NL2SQLParser implements ChatQueryParser {
         Prompt prompt = PromptTemplate.from(chatApp.getPrompt()).apply(variables);
         ChatLanguageModel chatLanguageModel =
                 ModelProvider.getChatModel(ModelConfigHelper.getChatModelConfig(chatApp));
-        Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
-        String rewrittenQuery = response.content().text();
+        String rewrittenQuery;
+        try {
+            Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
+            rewrittenQuery = response.content().text() == null ? "" : response.content().text().trim();
+        } catch (Exception e) {
+            // Rewrite is an optional optimization: on failure keep the original
+            // question rather than failing the whole parse.
+            log.warn("Multi-turn rewrite failed, keep original query: type={}",
+                    e.getClass().getSimpleName());
+            return;
+        }
         keyPipelineLog.info("QueryRewrite modelReq=[{}], modelResp=[{}]",
-                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(response));
+                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(rewrittenQuery));
+        // The model declares the current question self-contained (or returned
+        // nothing usable): keep the original question byte-identical instead of
+        // adopting a generative paraphrase.
+        if (rewrittenQuery.isEmpty() || "SAME".equalsIgnoreCase(rewrittenQuery)) {
+            log.info("Context rounds: {}, currentQuery unchanged (self-contained)",
+                    context.getUsedRounds());
+            return;
+        }
         parseContext.getRequest().setQueryText(rewrittenQuery);
         queryNLReq.setQueryText(rewrittenQuery);
         context.setRewrittenQuery(rewrittenQuery);

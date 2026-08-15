@@ -4,12 +4,10 @@ import com.tencent.supersonic.chat.api.pojo.response.MultiTurnContextResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.common.pojo.DateConf;
-import com.tencent.supersonic.common.pojo.Order;
-import com.tencent.supersonic.common.pojo.enums.QueryType;
+import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
-import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +16,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,10 +40,9 @@ public class MultiTurnContextEngineTest {
         assertEquals(10, context.getUsedRounds());
         assertEquals(Long.valueOf(3), context.getSourceQueryIds().get(0));
         assertEquals(Long.valueOf(12), context.getSourceQueryIds().get(9));
-        assertEquals("loan_balance", context.getTurns().get(0).getMetrics().get(0));
-        assertEquals("bank_organization", context.getTurns().get(0).getDimensions().get(0));
-        assertTrue(context.getTurns().get(0).getFilters().get(0).contains("ORG003"));
-        assertEquals("AGGREGATE", context.getTurns().get(0).getGranularity());
+        assertEquals("第3轮查询", context.getTurns().get(0).getQuestion());
+        assertTrue(context.getTurns().get(0).getResultTable().contains("42.5"));
+        assertTrue(context.getTurns().get(0).getTextSummary().contains("总结"));
         assertEquals("APPEND", context.getOperation());
     }
 
@@ -104,6 +102,32 @@ public class MultiTurnContextEngineTest {
         assertEquals(List.of(1L), context.getSourceQueryIds());
     }
 
+    @Test
+    public void shouldKeepFailedTurnsMarkedAsFailed() {
+        Instant now = Instant.parse("2026-07-23T08:00:00Z");
+        QueryResp ok = successfulQuery(1, now.minusSeconds(2), "成功的问题");
+        QueryResp failed = new QueryResp();
+        failed.setQuestionId(2L);
+        failed.setChatId(100L);
+        failed.setCreateTime(Date.from(now.minusSeconds(1)));
+        failed.setQueryText("信息不足的问题");
+        QueryResult failedResult = new QueryResult();
+        failedResult.setQueryState(QueryState.INVALID);
+        failedResult.setErrorMsg("未能可靠识别该银行指标查询，请明确机构、指标和时间范围后重试。");
+        failed.setQueryResult(failedResult);
+
+        MultiTurnContextResp context =
+                engine.build(List.of(ok, failed), 100L, "补充：江苏省A市农商行", now);
+
+        assertEquals(2, context.getUsedRounds());
+        MultiTurnContextResp.Turn failedTurn = context.getTurns().get(1);
+        assertEquals("FAILED", failedTurn.getState());
+        assertTrue(failedTurn.getErrorNote().contains("未能可靠识别"));
+        assertEquals("信息不足的问题", failedTurn.getQuestion());
+        assertEquals(null, failedTurn.getResultTable());
+        assertEquals("SUCCESS", context.getTurns().get(0).getState());
+    }
+
     private QueryResp successfulQuery(long id, Instant createTime, String question) {
         QueryResp query = new QueryResp();
         query.setQuestionId(id);
@@ -113,24 +137,21 @@ public class MultiTurnContextEngineTest {
 
         QueryResult result = new QueryResult();
         result.setQueryState(QueryState.SUCCESS);
+        QueryColumn column = new QueryColumn("loan_balance", "DECIMAL", "loan_balance");
+        result.setQueryColumns(List.of(column));
+        result.setQueryResults(List.of(Map.of("loan_balance", 42.5)));
+        result.setTextSummary("第" + id + "轮总结");
         query.setQueryResult(result);
 
         SemanticParseInfo parseInfo = new SemanticParseInfo();
-        parseInfo.setQueryType(QueryType.AGGREGATE);
         parseInfo.getMetrics()
                 .add(element(id, "贷款余额", "loan_balance", SchemaElementType.METRIC, 1));
         parseInfo.getDimensions()
                 .add(element(id + 100, "机构", "bank_organization", SchemaElementType.DIMENSION, 2));
-        QueryFilter filter = new QueryFilter();
-        filter.setBizName("bank_organization");
-        filter.setValue(String.format("ORG%03d", id));
-        parseInfo.getDimensionFilters().add(filter);
         DateConf dateConf = new DateConf();
         dateConf.setStartDate("2026-01-01");
         dateConf.setEndDate("2026-06-30");
         parseInfo.setDateInfo(dateConf);
-        parseInfo.getOrders().add(new Order("loan_balance", "DESC"));
-        parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT loan_balance FROM bank_data");
         query.setParseInfos(List.of(parseInfo));
         return query;
     }

@@ -23,12 +23,9 @@ public class MultiTurnContextResp {
     public static class Turn {
         private Long queryId;
         private String question;
-        private String s2sql;
-        private List<String> metrics;
-        private List<String> dimensions;
-        private List<String> filters;
-        private String dateInfo;
-        private List<String> orders;
-        private String granularity;
+        private String state;
+        private String resultTable;
+        private String textSummary;
+        private String errorNote;
     }
 }

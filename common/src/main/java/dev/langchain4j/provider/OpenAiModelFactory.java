@@ -23,6 +23,10 @@ public class OpenAiModelFactory implements ModelFactory, InitializingBean {
 
     @Override
     public ChatLanguageModel createChatModel(ChatModelConfig modelConfig) {
+        String reasoningEffort = System.getProperty("s2.llm.openai.reasoning-effort", "");
+        if (!reasoningEffort.isBlank()) {
+            return new ReasoningEffortChatModel(modelConfig, reasoningEffort);
+        }
         OpenAiChatModel.OpenAiChatModelBuilder openAiChatModelBuilder = OpenAiChatModel.builder()
                 .baseUrl(modelConfig.getBaseUrl()).modelName(modelConfig.getModelName())
                 .apiKey(modelConfig.keyDecrypt()).apiVersion(modelConfig.getApiVersion())

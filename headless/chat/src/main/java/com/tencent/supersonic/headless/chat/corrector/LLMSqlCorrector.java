@@ -60,7 +60,8 @@ public class LLMSqlCorrector extends BaseSemanticCorrector {
 
     @Override
     public void doCorrect(ChatQueryContext chatQueryContext, SemanticParseInfo semanticParseInfo) {
-        ChatApp chatApp = chatQueryContext.getRequest().getChatAppConfig().get(APP_KEY);
+        Map<String, ChatApp> chatAppConfig = chatQueryContext.getRequest().getChatAppConfig();
+        ChatApp chatApp = chatAppConfig == null ? null : chatAppConfig.get(APP_KEY);
         if (!chatQueryContext.getRequest().getText2SQLType().enableLLM() || Objects.isNull(chatApp)
                 || !chatApp.isEnable()) {
             return;

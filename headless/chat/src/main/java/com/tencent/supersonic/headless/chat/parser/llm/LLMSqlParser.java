@@ -168,6 +168,14 @@ public class LLMSqlParser implements SemanticParser {
             try {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
+                    if (bankConstrainedPlan && llmResp.getBankQueryPlan() == null
+                            && llmResp.getSqlOutput() != null) {
+                        // Fail-closed: in constrained-plan mode a free-SQL output without an
+                        // approved plan is never a valid fallback.  Drop it so the retry loop
+                        // treats this round as no-candidate instead of executing model-written SQL.
+                        log.info("bank constrained plan mode: drop free-SQL output without plan");
+                        llmResp.setSqlOutput(null);
+                    }
                     if (bankConstrainedPlan && llmResp.getBankQueryPlan() != null) {
                         previousBankPlanJson = JsonUtil.toString(llmResp.getBankQueryPlan());
                     }
