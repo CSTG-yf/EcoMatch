@@ -107,6 +107,22 @@ public class LLMSqlParser implements SemanticParser {
                 + "output 的组合后再输出完整 BankQueryPlan。");
     }
 
+    /**
+     * Fail-closed for BANK_CONSTRAINED_PLAN: a model response without an approved BankQueryPlan
+     * must never contribute free-SQL candidates to dedup/execution. Drop both sqlOutput and
+     * sqlRespMap so the retry loop treats this round as no-candidate instead of running model
+     * written SQL. Legitimate plans (even when carrying sqlOutput) are left untouched and follow
+     * the coordinator compilation path.
+     */
+    static void dropUnconstrainedSqlWhenPlanMissing(LLMResp llmResp, boolean bankConstrainedPlan) {
+        if (bankConstrainedPlan && llmResp != null && llmResp.getBankQueryPlan() == null
+                && (llmResp.getSqlOutput() != null || llmResp.getSqlRespMap() != null)) {
+            log.info("bank constrained plan mode: drop free-SQL output without plan");
+            llmResp.setSqlOutput(null);
+            llmResp.setSqlRespMap(null);
+        }
+    }
+
     private static boolean isDirectTimeComparisonPlan(String previousPlanJson) {
         if (previousPlanJson == null || previousPlanJson.isBlank()) {
             return false;
@@ -168,6 +184,7 @@ public class LLMSqlParser implements SemanticParser {
             try {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
+                    dropUnconstrainedSqlWhenPlanMissing(llmResp, bankConstrainedPlan);
                     if (bankConstrainedPlan && llmResp.getBankQueryPlan() != null) {
                         previousBankPlanJson = JsonUtil.toString(llmResp.getBankQueryPlan());
                     }

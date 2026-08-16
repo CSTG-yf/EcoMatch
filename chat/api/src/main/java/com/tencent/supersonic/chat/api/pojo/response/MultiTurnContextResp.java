@@ -30,5 +30,9 @@ public class MultiTurnContextResp {
         private String dateInfo;
         private List<String> orders;
         private String granularity;
+        private String state;
+        private String resultTable;
+        private String textSummary;
+        private String errorNote;
     }
 }

@@ -219,7 +219,7 @@ public class NL2SQLParser implements ChatQueryParser {
         resp.setBankRoutingAttemptTelemetry(parseResp.getBankRoutingAttemptTelemetry());
     }
 
-    private void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {
+    void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {
         ChatApp chatApp = parseContext.getAgent().getChatAppConfig().get(APP_KEY_MULTI_TURN);
         if (Objects.isNull(chatApp) || !chatApp.isEnable()) {
             return;
@@ -253,10 +253,30 @@ public class NL2SQLParser implements ChatQueryParser {
         Prompt prompt = PromptTemplate.from(chatApp.getPrompt()).apply(variables);
         ChatLanguageModel chatLanguageModel =
                 ModelProvider.getChatModel(ModelConfigHelper.getChatModelConfig(chatApp));
-        Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
-        String rewrittenQuery = response.content().text();
+        String rewrittenQuery;
+        try {
+            Response<AiMessage> response = chatLanguageModel.generate(prompt.toUserMessage());
+            rewrittenQuery =
+                    response.content().text() == null ? "" : response.content().text().trim();
+        } catch (RuntimeException e) {
+            // Rewrite is an optional optimization: on failure keep the original question
+            // instead of failing the whole parse; log only the exception type, never the
+            // exception message or payload.
+            log.warn("Multi-turn rewrite failed, keep original query: type={}",
+                    e.getClass().getSimpleName());
+            return;
+        }
         keyPipelineLog.info("QueryRewrite modelReq=[{}], modelResp=[{}]",
-                SensitiveLogUtils.summarize(prompt.text()), SensitiveLogUtils.summarize(response));
+                SensitiveLogUtils.summarize(prompt.text()),
+                SensitiveLogUtils.summarize(rewrittenQuery));
+        // The model declared the current question unchanged (SAME) or returned nothing
+        // usable: keep the original question byte-identical instead of adopting a
+        // generative paraphrase.
+        if (rewrittenQuery.isEmpty() || "SAME".equalsIgnoreCase(rewrittenQuery)) {
+            log.info("Context rounds: {}, currentQuery unchanged (SAME or blank rewrite)",
+                    context.getUsedRounds());
+            return;
+        }
         parseContext.getRequest().setQueryText(rewrittenQuery);
         queryNLReq.setQueryText(rewrittenQuery);
         context.setRewrittenQuery(rewrittenQuery);
