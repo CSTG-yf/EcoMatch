@@ -1,0 +1,70 @@
+{
+  "artifacts": {
+    "../schema.json": {
+      "bytes": 1652,
+      "sha256": "ada68969ad4f6357cedbfbefed6d5d0b2403ee4ceaeb057d24e3e70f748ee6ba"
+    },
+    "metrics.jsonl": {
+      "bytes": 394493,
+      "sha256": "6e7083ae2bd182000f3f15f27d11e31d39d77505228b09de40d36aa4438e846e"
+    },
+    "review.csv": {
+      "bytes": 220266,
+      "sha256": "777c3929f40892ceb9b285d795f10c981018d161df87f2a1694c3dd3a81a7f0a"
+    },
+    "sources.json": {
+      "bytes": 7046,
+      "sha256": "472a9794d681fd31c7bf2a03cbd5c57ab59193ef064377d65deca79ad4c3beed"
+    }
+  },
+  "domainCounts": {
+    "acquisition_activation_retention": 20,
+    "assets_liabilities_deposits_loans": 45,
+    "capital_solvency": 25,
+    "complaint_satisfaction_service_quality": 10,
+    "concentration_operational_compliance": 15,
+    "credit_asset_quality": 35,
+    "customer_base_structure": 20,
+    "digital_channel_service_usage": 20,
+    "income_profit_cost_efficiency": 35,
+    "liquidity_alm": 25,
+    "market_interest_fx_risk": 20,
+    "payments_accounts_transactions": 35,
+    "penetration_cross_sell_aum": 20,
+    "product_channel_operations": 35
+  },
+  "expectedDomainQuotas": {
+    "acquisition_activation_retention": 20,
+    "assets_liabilities_deposits_loans": 45,
+    "capital_solvency": 25,
+    "complaint_satisfaction_service_quality": 10,
+    "concentration_operational_compliance": 15,
+    "credit_asset_quality": 35,
+    "customer_base_structure": 20,
+    "digital_channel_service_usage": 20,
+    "income_profit_cost_efficiency": 35,
+    "liquidity_alm": 25,
+    "market_interest_fx_risk": 20,
+    "payments_accounts_transactions": 35,
+    "penetration_cross_sell_aum": 20,
+    "product_channel_operations": 35
+  },
+  "expectedSceneQuotas": {
+    "CUSTOMER_MARKETING": 90,
+    "OPERATIONS": 150,
+    "RISK": 120
+  },
+  "factDataIncluded": false,
+  "metricCount": 360,
+  "official21MetricEvaluationModified": false,
+  "reviewStatus": "CANDIDATE",
+  "sceneCounts": {
+    "CUSTOMER_MARKETING": 90,
+    "OPERATIONS": 150,
+    "RISK": 120
+  },
+  "schemaVersion": "1.0.0",
+  "sourceCount": 12,
+  "status": "CANDIDATE",
+  "version": "0.1.0-candidate"
+}

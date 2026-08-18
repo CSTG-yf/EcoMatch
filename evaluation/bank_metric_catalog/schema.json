@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CSTG-yf/EcoMatch/evaluation/bank_metric_catalog/schema.json",
+  "title": "EcoMatch Chinese Banking Metric Candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code", "name", "aliases", "semanticKey", "scene", "domain", "metricType",
+    "valueType", "unit", "aggregation", "direction", "definition", "dimensions",
+    "formula", "sourceRefs", "provenanceLevel", "reviewStatus", "valuePolicy"
+  ],
+  "properties": {
+    "code": {"type": "string", "pattern": "^CNB[0-9]{3}$"},
+    "name": {"type": "string", "minLength": 1},
+    "aliases": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "semanticKey": {"type": "string", "minLength": 1},
+    "scene": {"enum": ["OPERATIONS", "RISK", "CUSTOMER_MARKETING"]},
+    "domain": {"type": "string", "minLength": 1},
+    "metricType": {"enum": ["BASE", "DERIVED"]},
+    "valueType": {"enum": ["INTEGER", "DECIMAL"]},
+    "unit": {"type": "string", "minLength": 1},
+    "aggregation": {"enum": ["SNAPSHOT", "SUM", "COUNT", "AVG", "RATIO"]},
+    "direction": {"enum": ["HIGHER_IS_BETTER", "LOWER_IS_BETTER", "CONTEXT_DEPENDENT"]},
+    "definition": {"type": "string", "minLength": 20},
+    "dimensions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "formula": {"type": ["object", "null"]},
+    "sourceRefs": {"type": "array", "minItems": 1},
+    "provenanceLevel": {"const": "NEEDS_HUMAN_VERIFICATION"},
+    "reviewStatus": {"const": "CANDIDATE"},
+    "valuePolicy": {"const": "SYNTHETIC_OR_DESENSITIZED_ONLY"}
+  }
+}
