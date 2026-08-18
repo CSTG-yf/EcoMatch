@@ -34,9 +34,15 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
             report["sceneCounts"],
         )
         self.assertGreaterEqual(report["derivedMetricCount"], 10)
+        self.assertEqual(21, report["legacyMetricCount"])
         self.assertTrue(all(m["reviewStatus"] == "CANDIDATE" for m in self.metrics))
         self.assertTrue(
             all(m["valuePolicy"] == "SYNTHETIC_OR_DESENSITIZED_ONLY" for m in self.metrics)
+        )
+        self.assertTrue(all(len(m["aliases"]) >= 2 for m in self.metrics))
+        self.assertEqual(
+            {f"ZB{index:03d}" for index in range(1, 22)},
+            {code for metric in self.metrics for code in metric["legacyCodes"]},
         )
 
     def test_quota_drift_is_rejected(self) -> None:
@@ -54,6 +60,39 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
         metrics = copy.deepcopy(self.metrics)
         metrics[1]["aliases"][0] = metrics[0]["aliases"][0]
         with self.assertRaisesRegex(CatalogValidationError, "alias"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        metrics[0]["aliases"] = [metrics[0]["name"] + "口径"]
+        with self.assertRaisesRegex(CatalogValidationError, "at least two aliases"):
+            validate_records(metrics, self.sources)
+
+    def test_invalid_percentage_aggregation_is_rejected(self) -> None:
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["name"] == "净息差")
+        target["aggregation"] = "SUM"
+        with self.assertRaisesRegex(CatalogValidationError, "percentage metric cannot use SUM"):
+            validate_records(metrics, self.sources)
+
+    def test_legacy_code_coverage_and_target_are_fail_closed(self) -> None:
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if "ZB001" in metric["legacyCodes"])
+        target["legacyCodes"] = []
+        with self.assertRaisesRegex(CatalogValidationError, "legacy metric codes"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        deposit = next(metric for metric in metrics if "ZB001" in metric["legacyCodes"])
+        loan = next(metric for metric in metrics if "ZB002" in metric["legacyCodes"])
+        loan["legacyCodes"] = ["ZB001"]
+        with self.assertRaisesRegex(CatalogValidationError, "duplicate legacy code"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        deposit = next(metric for metric in metrics if "ZB001" in metric["legacyCodes"])
+        loan = next(metric for metric in metrics if "ZB002" in metric["legacyCodes"])
+        deposit["legacyCodes"], loan["legacyCodes"] = loan["legacyCodes"], deposit["legacyCodes"]
+        with self.assertRaisesRegex(CatalogValidationError, "legacy target mismatch"):
             validate_records(metrics, self.sources)
 
     def test_unknown_source_is_rejected(self) -> None:
@@ -93,7 +132,15 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
     def test_manifest_is_machine_readable(self) -> None:
         manifest = json.loads((self.release_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual("0.1.0-candidate", manifest["version"])
+        self.assertEqual("1.1.0", manifest["schemaVersion"])
         self.assertEqual(360, manifest["metricCount"])
+        self.assertEqual(21, manifest["legacyMetricCount"])
+
+    def test_schema_required_fields_match_generated_records(self) -> None:
+        schema_path = Path(__file__).resolve().parents[1] / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), set(self.metrics[0]))
 
     def test_reviewed_unit_and_direction_examples_are_preserved(self) -> None:
         by_name = {metric["name"]: metric for metric in self.metrics}
@@ -104,11 +151,19 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
         self.assertEqual("HIGHER_IS_BETTER", by_name["人工成本利润率"]["direction"])
         self.assertEqual("HIGHER_IS_BETTER", by_name["投诉办结率"]["direction"])
         self.assertEqual("LOWER_IS_BETTER", by_name["外汇风险限额使用率"]["direction"])
+        self.assertEqual(
+            ["organization", "date", "employee_type"],
+            by_name["员工人数"]["dimensions"],
+        )
 
     def test_review_csv_has_one_blank_review_row_per_metric(self) -> None:
         with (self.release_dir / "review.csv").open(encoding="utf-8-sig", newline="") as stream:
             rows = list(csv.DictReader(stream))
         self.assertEqual([metric["code"] for metric in self.metrics], [row["code"] for row in rows])
+        self.assertEqual(
+            ["|".join(metric["legacyCodes"]) for metric in self.metrics],
+            [row["legacyCodes"] for row in rows],
+        )
         self.assertTrue(all(not row["reviewDecision"] and not row["reviewComment"] for row in rows))
 
 

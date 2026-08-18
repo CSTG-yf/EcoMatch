@@ -1,16 +1,16 @@
 {
   "artifacts": {
     "../schema.json": {
-      "bytes": 1652,
-      "sha256": "ada68969ad4f6357cedbfbefed6d5d0b2403ee4ceaeb057d24e3e70f748ee6ba"
+      "bytes": 1803,
+      "sha256": "8be21d1c6f7aff332ae33fdf6dc611fac905ca0dbbac271581df380557df9fe8"
     },
     "metrics.jsonl": {
-      "bytes": 394493,
-      "sha256": "6e7083ae2bd182000f3f15f27d11e31d39d77505228b09de40d36aa4438e846e"
+      "bytes": 427352,
+      "sha256": "6043c9d42a37cc866f2baab5f8a5a6caa6c4fe9278432967971b36f0bf61fb73"
     },
     "review.csv": {
-      "bytes": 220266,
-      "sha256": "777c3929f40892ceb9b285d795f10c981018d161df87f2a1694c3dd3a81a7f0a"
+      "bytes": 220751,
+      "sha256": "ff0159ea4b23c4c7459d37793a9e0fd7f21f4f3d5b71c2717dd88a75a313c7a7"
     },
     "sources.json": {
       "bytes": 7046,
@@ -55,6 +55,7 @@
     "RISK": 120
   },
   "factDataIncluded": false,
+  "legacyMetricCount": 21,
   "metricCount": 360,
   "official21MetricEvaluationModified": false,
   "reviewStatus": "CANDIDATE",
@@ -63,7 +64,7 @@
     "OPERATIONS": 150,
     "RISK": 120
   },
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "sourceCount": 12,
   "status": "CANDIDATE",
   "version": "0.1.0-candidate"

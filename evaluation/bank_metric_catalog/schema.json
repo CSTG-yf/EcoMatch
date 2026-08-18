@@ -5,14 +5,15 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "code", "name", "aliases", "semanticKey", "scene", "domain", "metricType",
+    "code", "name", "aliases", "legacyCodes", "semanticKey", "scene", "domain", "metricType",
     "valueType", "unit", "aggregation", "direction", "definition", "dimensions",
     "formula", "sourceRefs", "provenanceLevel", "reviewStatus", "valuePolicy"
   ],
   "properties": {
     "code": {"type": "string", "pattern": "^CNB[0-9]{3}$"},
     "name": {"type": "string", "minLength": 1},
-    "aliases": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "aliases": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "legacyCodes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^ZB[0-9]{3}$"}},
     "semanticKey": {"type": "string", "minLength": 1},
     "scene": {"enum": ["OPERATIONS", "RISK", "CUSTOMER_MARKETING"]},
     "domain": {"type": "string", "minLength": 1},

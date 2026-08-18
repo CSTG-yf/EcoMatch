@@ -7,6 +7,7 @@ Every record remains CANDIDATE until a human verifies its precise locator.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -258,7 +259,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
             投资收益
             公允价值变动收益
             汇兑收益
-            其他业务收入
+            中间业务收入
             营业支出
             业务及管理费
             人员费用
@@ -351,7 +352,7 @@ GROUPS: tuple[dict[str, Any], ...] = (
             产品到期兑付额
             产品销售完成率
             网点数量
-            综合网点数量
+            员工人数
             社区支行数量
             自助银行数量
             ATM设备数量
@@ -799,6 +800,120 @@ DIRECTION_OVERRIDES = {
 }
 
 
+AGGREGATION_OVERRIDES = {
+    "净息差": "RATIO",
+    "净利差": "RATIO",
+    "资本缓冲要求": "RATIO",
+    "储备资本要求": "RATIO",
+    "逆周期资本要求": "RATIO",
+    "系统重要性银行附加资本要求": "RATIO",
+    "客户满意度": "RATIO",
+}
+
+
+LEGACY_TARGET_NAMES = {
+    "ZB001": "各项存款余额",
+    "ZB002": "各项贷款余额",
+    "ZB003": "对公存款余额",
+    "ZB004": "个人存款余额",
+    "ZB005": "对公贷款余额",
+    "ZB006": "个人贷款余额",
+    "ZB007": "中间业务收入",
+    "ZB008": "利息净收入",
+    "ZB009": "营业收入",
+    "ZB010": "营业支出",
+    "ZB011": "净利润",
+    "ZB012": "成本收入比",
+    "ZB013": "不良贷款率",
+    "ZB014": "不良贷款余额",
+    "ZB015": "拨备覆盖率",
+    "ZB016": "资本充足率",
+    "ZB017": "逾期贷款率",
+    "ZB018": "员工人数",
+    "ZB019": "网点数量",
+    "ZB020": "个人客户总数",
+    "ZB021": "对公客户总数",
+}
+
+
+COMMON_ALIAS_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "各项存款余额": ("存款余额", "存款规模", "存款总额"),
+    "各项贷款余额": ("贷款余额", "贷款规模", "贷款总额"),
+    "对公存款余额": ("对公存款", "公司存款"),
+    "个人存款余额": ("个人存款", "零售存款"),
+    "对公贷款余额": ("对公贷款", "公司贷款"),
+    "个人贷款余额": ("个人贷款", "零售贷款"),
+    "中间业务收入": ("中收", "非利息业务收入"),
+    "利息净收入": ("净利息收入", "净利息收益"),
+    "营业收入": ("营收", "营业总收入"),
+    "营业支出": ("营业支出额", "营业总支出"),
+    "净利润": ("净利", "税后利润"),
+    "成本收入比": ("成本收入比例", "成本收益比"),
+    "不良贷款率": ("不良率", "贷款不良率"),
+    "不良贷款余额": ("不良余额", "不良贷款规模"),
+    "拨备覆盖率": ("拨备覆盖比例", "不良贷款拨备覆盖率"),
+    "资本充足率": ("资本充足比例", "总资本充足率"),
+    "逾期贷款率": ("逾期率", "贷款逾期率"),
+    "员工人数": ("员工数", "在岗员工数"),
+    "网点数量": ("网点数", "营业网点数", "网点"),
+    "个人客户总数": ("个人客户数", "零售客户数"),
+    "对公客户总数": ("对公客户数", "公司客户数"),
+}
+
+
+DIMENSION_OVERRIDES = {
+    "员工人数": ["organization", "date", "employee_type"],
+    "网点数量": ["organization", "date", "channel"],
+}
+
+
+def _normalize_alias(value: str) -> str:
+    return re.sub(r"[\s（）()_\-/]+", "", value).casefold()
+
+
+def _alias_candidates(name: str) -> list[str]:
+    candidates = list(COMMON_ALIAS_OVERRIDES.get(name, ()))
+    if name.startswith("各项"):
+        candidates.append(name[2:])
+    replacements = (
+        ("余额", ("", "规模")),
+        ("数量", ("数",)),
+        ("总数", ("数",)),
+        ("笔数", ("业务量",)),
+        ("平均时长", ("平均耗时",)),
+        ("占比", ("比例",)),
+        ("比率", ("比例",)),
+        ("率", ("比例",)),
+    )
+    for suffix, alternatives in replacements:
+        if name.endswith(suffix):
+            stem = name[: -len(suffix)]
+            candidates.extend(stem + alternative for alternative in alternatives)
+            break
+    if "日均" in name:
+        candidates.append(name.replace("日均", "每日平均"))
+    candidates.extend((f"{name}指标", f"{name}口径", f"{name}统计"))
+    return candidates
+
+
+def _build_aliases(names: list[str]) -> dict[str, list[str]]:
+    canonical = {_normalize_alias(name) for name in names}
+    claimed: set[str] = set()
+    aliases_by_name: dict[str, list[str]] = {}
+    for name in names:
+        aliases: list[str] = []
+        for alias in _alias_candidates(name):
+            normalized = _normalize_alias(alias)
+            if not normalized or normalized in canonical or normalized in claimed:
+                continue
+            aliases.append(alias)
+            claimed.add(normalized)
+        if len(aliases) < 2:
+            raise AssertionError(f"expected at least two unique aliases for {name}")
+        aliases_by_name[name] = aliases
+    return aliases_by_name
+
+
 def infer_unit(name: str) -> str:
     if name in UNIT_OVERRIDES:
         return UNIT_OVERRIDES[name]
@@ -831,6 +946,8 @@ def infer_unit(name: str) -> str:
 
 
 def infer_aggregation(name: str, metric_type: str) -> str:
+    if name in AGGREGATION_OVERRIDES:
+        return AGGREGATION_OVERRIDES[name]
     if metric_type == "DERIVED" or any(token in name for token in ("率", "占比", "比例", "敏感度", "集中度", "依存度")):
         return "RATIO"
     if any(token in name for token in ("余额", "净额", "总资产", "总负债", "规模", "头寸", "暴露")):
@@ -887,6 +1004,12 @@ def build_metric_records() -> list[dict[str, Any]]:
         raise AssertionError("metric seed names must be globally unique")
 
     code_by_name = {name: f"CNB{index:03d}" for index, name in enumerate(names, start=1)}
+    aliases_by_name = _build_aliases(names)
+    legacy_codes_by_name: dict[str, list[str]] = {}
+    for legacy_code, target_name in LEGACY_TARGET_NAMES.items():
+        if target_name not in code_by_name:
+            raise AssertionError(f"missing legacy target metric: {legacy_code} -> {target_name}")
+        legacy_codes_by_name.setdefault(target_name, []).append(legacy_code)
     records: list[dict[str, Any]] = []
     for index, (group, name) in enumerate(seeds, start=1):
         source_formula = DERIVED_FORMULAS.get(name)
@@ -903,7 +1026,8 @@ def build_metric_records() -> list[dict[str, Any]]:
             {
                 "code": f"CNB{index:03d}",
                 "name": name,
-                "aliases": [f"{name}口径"],
+                "aliases": aliases_by_name[name],
+                "legacyCodes": legacy_codes_by_name.get(name, []),
                 "semanticKey": f"{group['domain']}/{name}",
                 "scene": group["scene"],
                 "domain": group["domain"],
@@ -913,7 +1037,7 @@ def build_metric_records() -> list[dict[str, Any]]:
                 "aggregation": infer_aggregation(name, metric_type),
                 "direction": infer_direction(name),
                 "definition": definition_for(name, unit, group["purpose"], source_formula),
-                "dimensions": list(group["dimensions"]),
+                "dimensions": list(DIMENSION_OVERRIDES.get(name, group["dimensions"])),
                 "formula": formula,
                 "sourceRefs": [
                     {"sourceId": source_id, "locator": group["locator"]}

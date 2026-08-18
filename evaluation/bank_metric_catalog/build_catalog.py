@@ -50,6 +50,7 @@ def _review_csv_bytes(metrics: list[dict[str, Any]]) -> bytes:
     columns = [
         "code",
         "name",
+        "legacyCodes",
         "scene",
         "domain",
         "metricType",
@@ -73,6 +74,7 @@ def _review_csv_bytes(metrics: list[dict[str, Any]]) -> bytes:
             {
                 "code": metric["code"],
                 "name": metric["name"],
+                "legacyCodes": "|".join(metric["legacyCodes"]),
                 "scene": metric["scene"],
                 "domain": metric["domain"],
                 "metricType": metric["metricType"],
@@ -108,8 +110,9 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     manifest = {
         "version": VERSION,
         "status": "CANDIDATE",
-        "schemaVersion": "1.0.0",
+        "schemaVersion": "1.1.0",
         "metricCount": len(metrics),
+        "legacyMetricCount": sum(len(item["legacyCodes"]) for item in metrics),
         "sourceCount": len(sources),
         "sceneCounts": dict(sorted(Counter(item["scene"] for item in metrics).items())),
         "domainCounts": dict(sorted(Counter(item["domain"] for item in metrics).items())),

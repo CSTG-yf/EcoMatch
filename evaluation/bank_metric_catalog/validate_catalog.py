@@ -16,11 +16,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 try:
-    from .catalog_source import DOMAIN_QUOTAS, SCENE_QUOTAS
+    from .catalog_source import DOMAIN_QUOTAS, LEGACY_TARGET_NAMES, SCENE_QUOTAS
 except ImportError:  # direct script execution from repository root
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from evaluation.bank_metric_catalog.catalog_source import (  # type: ignore[no-redef]
         DOMAIN_QUOTAS,
+        LEGACY_TARGET_NAMES,
         SCENE_QUOTAS,
     )
 
@@ -33,6 +34,7 @@ REQUIRED_METRIC_FIELDS = {
     "code",
     "name",
     "aliases",
+    "legacyCodes",
     "semanticKey",
     "scene",
     "domain",
@@ -63,6 +65,7 @@ ALLOWED_HOSTS = {
 ALLOWED_AGGREGATIONS = {"SNAPSHOT", "SUM", "COUNT", "AVG", "RATIO"}
 ALLOWED_DIRECTIONS = {"HIGHER_IS_BETTER", "LOWER_IS_BETTER", "CONTEXT_DEPENDENT"}
 ALLOWED_VALUE_TYPES = {"INTEGER", "DECIMAL"}
+LEGACY_CODE_PATTERN = re.compile(r"^ZB\d{3}$")
 
 
 def _fail(message: str) -> None:
@@ -164,6 +167,7 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
     names: dict[str, str] = {}
     semantic_keys: set[str] = set()
     aliases: dict[str, str] = {}
+    legacy_codes: dict[str, str] = {}
     expected_codes = {f"CNB{index:03d}" for index in range(1, 361)}
 
     for metric in metrics:
@@ -188,8 +192,8 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
         if not isinstance(semantic_key, str) or not semantic_key.strip() or semantic_key in semantic_keys:
             _fail(f"duplicate or invalid semanticKey: {semantic_key}")
         semantic_keys.add(semantic_key)
-        if not isinstance(metric["aliases"], list) or not metric["aliases"]:
-            _fail(f"aliases must be non-empty: {code}")
+        if not isinstance(metric["aliases"], list) or len(metric["aliases"]) < 2:
+            _fail(f"at least two aliases are required: {code}")
         for alias in metric["aliases"]:
             if not isinstance(alias, str) or not alias.strip():
                 _fail(f"empty alias: {code}")
@@ -197,6 +201,15 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
             if normalized_alias in aliases:
                 _fail(f"duplicate alias: {alias}")
             aliases[normalized_alias] = code
+        metric_legacy_codes = metric["legacyCodes"]
+        if not isinstance(metric_legacy_codes, list):
+            _fail(f"legacyCodes must be a list: {code}")
+        for legacy_code in metric_legacy_codes:
+            if not isinstance(legacy_code, str) or not LEGACY_CODE_PATTERN.fullmatch(legacy_code):
+                _fail(f"invalid legacy code: {code} -> {legacy_code}")
+            if legacy_code in legacy_codes:
+                _fail(f"duplicate legacy code: {legacy_code}")
+            legacy_codes[legacy_code] = name
         if metric["scene"] not in SCENE_QUOTAS or metric["domain"] not in DOMAIN_QUOTAS:
             _fail(f"invalid scene/domain: {code}")
         if metric["metricType"] not in {"BASE", "DERIVED"}:
@@ -209,6 +222,8 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
             _fail(f"invalid direction: {code}")
         if not isinstance(metric["unit"], str) or not metric["unit"].strip():
             _fail(f"empty unit: {code}")
+        if metric["unit"] == "%" and metric["aggregation"] == "SUM":
+            _fail(f"percentage metric cannot use SUM: {code}")
         if not isinstance(metric["definition"], str) or len(metric["definition"].strip()) < 20:
             _fail(f"definition is too short: {code}")
         if not isinstance(metric["dimensions"], list) or not metric["dimensions"]:
@@ -232,6 +247,14 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
 
     if codes != expected_codes:
         _fail("metric codes must be the complete CNB001..CNB360 range")
+    if set(legacy_codes) != set(LEGACY_TARGET_NAMES):
+        _fail("legacy metric codes must be exactly ZB001..ZB021")
+    for legacy_code, expected_name in LEGACY_TARGET_NAMES.items():
+        if legacy_codes[legacy_code] != expected_name:
+            _fail(
+                f"legacy target mismatch: {legacy_code} -> {legacy_codes[legacy_code]}, "
+                f"expected {expected_name}"
+            )
     for normalized_alias, code in aliases.items():
         if normalized_alias in names and names[normalized_alias] != next(m["name"] for m in metrics if m["code"] == code):
             _fail(f"alias collides with canonical name: {code}")
@@ -267,6 +290,7 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
         "metricCount": len(metrics),
         "sourceCount": len(sources),
         "derivedMetricCount": sum(metric["metricType"] == "DERIVED" for metric in metrics),
+        "legacyMetricCount": len(legacy_codes),
         "sceneCounts": scene_counts,
         "domainCounts": domain_counts,
     }
@@ -277,8 +301,12 @@ def validate_release(release_dir: Path) -> dict[str, Any]:
     report = validate_records(metrics, sources)
     if manifest.get("version") != "0.1.0-candidate" or manifest.get("status") != "CANDIDATE":
         _fail("manifest version/status mismatch")
+    if manifest.get("schemaVersion") != "1.1.0":
+        _fail("manifest schema version mismatch")
     if manifest.get("metricCount") != 360 or manifest.get("factDataIncluded") is not False:
         _fail("manifest metric/fact contract mismatch")
+    if manifest.get("legacyMetricCount") != report["legacyMetricCount"]:
+        _fail("manifest legacy metric count mismatch")
     if manifest.get("official21MetricEvaluationModified") is not False:
         _fail("manifest must preserve the official 21-metric evaluation")
     artifacts = manifest.get("artifacts")
@@ -301,6 +329,10 @@ def validate_release(release_dir: Path) -> dict[str, Any]:
     review_rows = list(csv.DictReader(io.StringIO((release_dir / "review.csv").read_text(encoding="utf-8-sig"))))
     if [row.get("code") for row in review_rows] != [metric["code"] for metric in metrics]:
         _fail("review.csv must contain the same 360 metrics in code order")
+    if [row.get("legacyCodes") for row in review_rows] != [
+        "|".join(metric["legacyCodes"]) for metric in metrics
+    ]:
+        _fail("review.csv legacy code mapping mismatch")
     if any(row.get("reviewDecision") or row.get("reviewComment") for row in review_rows):
         _fail("generated review.csv decisions/comments must remain empty")
     return report
