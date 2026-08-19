@@ -34,6 +34,7 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
             report["sceneCounts"],
         )
         self.assertGreaterEqual(report["derivedMetricCount"], 10)
+        self.assertEqual(24, report["derivedMetricCount"])
         self.assertEqual(21, report["legacyMetricCount"])
         self.assertTrue(all(m["reviewStatus"] == "CANDIDATE" for m in self.metrics))
         self.assertTrue(
@@ -198,6 +199,27 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
             ["organization", "date", "employee_type"],
             by_name["员工人数"]["dimensions"],
         )
+
+    def test_metadata_override_fixes_are_exact(self) -> None:
+        by_code = {metric["code"]: metric for metric in self.metrics}
+        expected_aggregation = {
+            "CNB150": "AVG",
+            "CNB295": "AVG",
+            "CNB350": "SUM",
+        }
+        expected_direction = {
+            "CNB165": "CONTEXT_DEPENDENT",
+            "CNB167": "CONTEXT_DEPENDENT",
+            "CNB240": "CONTEXT_DEPENDENT",
+            "CNB352": "CONTEXT_DEPENDENT",
+            "CNB354": "CONTEXT_DEPENDENT",
+        }
+        for code, aggregation in expected_aggregation.items():
+            with self.subTest(code=code, field="aggregation"):
+                self.assertEqual(aggregation, by_code[code]["aggregation"])
+        for code, direction in expected_direction.items():
+            with self.subTest(code=code, field="direction"):
+                self.assertEqual(direction, by_code[code]["direction"])
 
     def test_review_csv_has_one_blank_review_row_per_metric(self) -> None:
         with (self.release_dir / "review.csv").open(encoding="utf-8-sig", newline="") as stream:
