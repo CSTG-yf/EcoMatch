@@ -1,8 +1,8 @@
 {
   "artifacts": {
     "../schema.json": {
-      "bytes": 1836,
-      "sha256": "f1f955d8cba1b853ecffebc304544d31642cdcbf3d8f9924f0b7043d54f0eaa9"
+      "bytes": 1803,
+      "sha256": "8be21d1c6f7aff332ae33fdf6dc611fac905ca0dbbac271581df380557df9fe8"
     },
     "metrics.jsonl": {
       "bytes": 427386,

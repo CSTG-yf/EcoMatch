@@ -45,6 +45,12 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
             {code for metric in self.metrics for code in metric["legacyCodes"]},
         )
 
+    def test_checked_in_candidate_release_is_valid(self) -> None:
+        release_dir = Path(__file__).resolve().parents[1] / "releases" / "0.1.0-candidate"
+        report = validate_release(release_dir)
+        self.assertEqual(360, report["metricCount"])
+        self.assertEqual(21, report["legacyMetricCount"])
+
     def test_quota_drift_is_rejected(self) -> None:
         metrics = copy.deepcopy(self.metrics)
         metrics[0]["scene"] = "RISK"
