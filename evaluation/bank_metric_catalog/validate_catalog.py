@@ -224,6 +224,12 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
             _fail(f"empty unit: {code}")
         if metric["unit"] == "%" and metric["aggregation"] == "SUM":
             _fail(f"percentage metric cannot use SUM: {code}")
+        if metric["unit"] == "万元" and metric["aggregation"] == "COUNT":
+            _fail(f"currency metric cannot use COUNT aggregation: {code}")
+        if metric["aggregation"] == "RATIO" and metric["unit"] != "%":
+            _fail(f"RATIO metric must use percent unit: {code}")
+        if name.endswith("额") and metric["unit"] in {"户", "笔", "件", "次", "个"}:
+            _fail(f"amount metric cannot use count unit: {code}")
         if not isinstance(metric["definition"], str) or len(metric["definition"].strip()) < 20:
             _fail(f"definition is too short: {code}")
         if not isinstance(metric["dimensions"], list) or not metric["dimensions"]:

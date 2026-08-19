@@ -45,6 +45,12 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
             {code for metric in self.metrics for code in metric["legacyCodes"]},
         )
 
+    def test_checked_in_candidate_release_is_valid(self) -> None:
+        release_dir = Path(__file__).resolve().parents[1] / "releases" / "0.1.0-candidate"
+        report = validate_release(release_dir)
+        self.assertEqual(360, report["metricCount"])
+        self.assertEqual(21, report["legacyMetricCount"])
+
     def test_quota_drift_is_rejected(self) -> None:
         metrics = copy.deepcopy(self.metrics)
         metrics[0]["scene"] = "RISK"
@@ -72,6 +78,43 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
         target = next(metric for metric in metrics if metric["name"] == "净息差")
         target["aggregation"] = "SUM"
         with self.assertRaisesRegex(CatalogValidationError, "percentage metric cannot use SUM"):
+            validate_records(metrics, self.sources)
+
+    def test_known_amount_formats_are_preserved(self) -> None:
+        by_name = {metric["name"]: metric for metric in self.metrics}
+        expected = {
+            "新生成不良贷款额": ("万元", "SUM"),
+            "线上贷款放款额": ("万元", "SUM"),
+            "未来30日现金净流出量": ("万元", "SNAPSHOT"),
+            "数字渠道交易金额": ("万元", "SUM"),
+            "杠杆率暴露总额": ("万元", "SNAPSHOT"),
+            "利率敏感性缺口": ("万元", "SNAPSHOT"),
+            "累计利率敏感性缺口": ("万元", "SNAPSHOT"),
+            "交易账簿利率风险资本": ("万元", "SNAPSHOT"),
+            "汇率风险资本": ("万元", "SNAPSHOT"),
+        }
+        for name, (unit, aggregation) in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(unit, by_name[name]["unit"])
+                self.assertEqual(aggregation, by_name[name]["aggregation"])
+
+    def test_invalid_amount_formats_are_rejected(self) -> None:
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["unit"] == "万元")
+        target["aggregation"] = "COUNT"
+        with self.assertRaisesRegex(CatalogValidationError, "currency metric cannot use COUNT"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["unit"] == "万元")
+        target["aggregation"] = "RATIO"
+        with self.assertRaisesRegex(CatalogValidationError, "RATIO metric must use percent unit"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["name"] == "新生成不良贷款额")
+        target["unit"] = "个"
+        with self.assertRaisesRegex(CatalogValidationError, "amount metric cannot use count unit"):
             validate_records(metrics, self.sources)
 
     def test_legacy_code_coverage_and_target_are_fail_closed(self) -> None:

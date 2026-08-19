@@ -750,8 +750,10 @@ UNIT_OVERRIDES = {
     "户均AUM": "万元/户",
     "单位运营成本": "元/笔",
     "线上贷款申请数": "笔",
+    "线上贷款放款额": "万元",
     "线上开户数": "户",
     "线上客户服务量": "次",
+    "新生成不良贷款额": "万元",
 }
 
 DIRECTION_OVERRIDES = {
@@ -803,10 +805,17 @@ DIRECTION_OVERRIDES = {
 AGGREGATION_OVERRIDES = {
     "净息差": "RATIO",
     "净利差": "RATIO",
+    "杠杆率暴露总额": "SNAPSHOT",
     "资本缓冲要求": "RATIO",
     "储备资本要求": "RATIO",
     "逆周期资本要求": "RATIO",
     "系统重要性银行附加资本要求": "RATIO",
+    "未来30日现金净流出量": "SNAPSHOT",
+    "利率敏感性缺口": "SNAPSHOT",
+    "累计利率敏感性缺口": "SNAPSHOT",
+    "交易账簿利率风险资本": "SNAPSHOT",
+    "汇率风险资本": "SNAPSHOT",
+    "数字渠道交易金额": "SUM",
     "客户满意度": "RATIO",
 }
 
