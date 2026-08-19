@@ -1,0 +1,71 @@
+{
+  "artifacts": {
+    "../schema.json": {
+      "bytes": 1803,
+      "sha256": "8be21d1c6f7aff332ae33fdf6dc611fac905ca0dbbac271581df380557df9fe8"
+    },
+    "metrics.jsonl": {
+      "bytes": 427386,
+      "sha256": "6d2c024784a15d0e94d7afafdb785fb3ffbf31a7762795b0aa36fbace76aa892"
+    },
+    "review.csv": {
+      "bytes": 220785,
+      "sha256": "99ca8747827a53f566f8ab712c2ffbdbba66bb7e9d82820732270e6e2ae9b31b"
+    },
+    "sources.json": {
+      "bytes": 7046,
+      "sha256": "472a9794d681fd31c7bf2a03cbd5c57ab59193ef064377d65deca79ad4c3beed"
+    }
+  },
+  "domainCounts": {
+    "acquisition_activation_retention": 20,
+    "assets_liabilities_deposits_loans": 45,
+    "capital_solvency": 25,
+    "complaint_satisfaction_service_quality": 10,
+    "concentration_operational_compliance": 15,
+    "credit_asset_quality": 35,
+    "customer_base_structure": 20,
+    "digital_channel_service_usage": 20,
+    "income_profit_cost_efficiency": 35,
+    "liquidity_alm": 25,
+    "market_interest_fx_risk": 20,
+    "payments_accounts_transactions": 35,
+    "penetration_cross_sell_aum": 20,
+    "product_channel_operations": 35
+  },
+  "expectedDomainQuotas": {
+    "acquisition_activation_retention": 20,
+    "assets_liabilities_deposits_loans": 45,
+    "capital_solvency": 25,
+    "complaint_satisfaction_service_quality": 10,
+    "concentration_operational_compliance": 15,
+    "credit_asset_quality": 35,
+    "customer_base_structure": 20,
+    "digital_channel_service_usage": 20,
+    "income_profit_cost_efficiency": 35,
+    "liquidity_alm": 25,
+    "market_interest_fx_risk": 20,
+    "payments_accounts_transactions": 35,
+    "penetration_cross_sell_aum": 20,
+    "product_channel_operations": 35
+  },
+  "expectedSceneQuotas": {
+    "CUSTOMER_MARKETING": 90,
+    "OPERATIONS": 150,
+    "RISK": 120
+  },
+  "factDataIncluded": false,
+  "legacyMetricCount": 21,
+  "metricCount": 360,
+  "official21MetricEvaluationModified": false,
+  "reviewStatus": "CANDIDATE",
+  "sceneCounts": {
+    "CUSTOMER_MARKETING": 90,
+    "OPERATIONS": 150,
+    "RISK": 120
+  },
+  "schemaVersion": "1.1.0",
+  "sourceCount": 12,
+  "status": "CANDIDATE",
+  "version": "0.1.0-candidate"
+}

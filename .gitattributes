@@ -7,3 +7,4 @@ evaluation/bank_nl2sql/train.jsonl -text
 evaluation/bank_nl2sql/dev.jsonl -text
 evaluation/bank_nl2sql/test.jsonl -text
 evaluation/bank_nl2sql/augmentation.jsonl -text
+evaluation/bank_metric_catalog/** -text
