@@ -5,7 +5,12 @@ import com.google.common.collect.Sets;
 import com.tencent.supersonic.common.pojo.Constants;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.auth.api.authorization.context.AuthorizationContext;
+import com.tencent.supersonic.auth.api.authorization.request.QueryAuthResReq;
+import com.tencent.supersonic.auth.api.authorization.response.AuthorizedResourceResp;
+import com.tencent.supersonic.auth.api.authorization.service.AuthService;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
+import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
@@ -73,6 +78,10 @@ public class S2SemanticLayerService implements SemanticLayerService {
     private final AuditEventPublisher auditEventPublisher;
     private final QueryCache queryCache;
     private final List<QueryExecutor> queryExecutors;
+
+    /** Used for dictionary-backed dimension-value responses, which do not enter the query aspect. */
+    @Autowired
+    private AuthService authService;
 
     @Autowired
     public S2SemanticLayerService(StatUtils statUtils, QueryUtils queryUtils,
@@ -229,7 +238,10 @@ public class S2SemanticLayerService implements SemanticLayerService {
         SchemaFilterReq filter = new SchemaFilterReq();
         filter.setModelIds(queryReq.getModelIds());
         filter.setDataSetId(queryReq.getDataSetId());
-        dataMaskingService.mask(queryResp, schemaService.fetchSemanticSchema(filter), user);
+        AuthorizationContext.Snapshot snapshot = AuthorizationContext.current();
+        dataMaskingService.mask(queryResp, schemaService.fetchSemanticSchema(filter), user,
+                snapshot == null ? List.of() : snapshot.resourcePermissions());
+        queryResp.setMaskingPolicyVersion(snapshot == null ? 0L : snapshot.policyVersion());
     }
 
     private void publishQueryStarted(SemanticQueryReq queryReq, User user, String rawSql) {
@@ -290,6 +302,8 @@ public class S2SemanticLayerService implements SemanticLayerService {
         metadata.put("dataSetId", queryReq == null ? null : queryReq.getDataSetId());
         metadata.put("needAuth", queryReq != null && queryReq.isNeedAuth());
         metadata.put("cacheHit", cacheHit);
+        AuthorizationContext.Snapshot authorization = AuthorizationContext.current();
+        metadata.put("policyVersion", authorization == null ? 0L : authorization.policyVersion());
         if (queryResp != null) {
             metadata.put("rowCount", safeSize(queryResp.getResultList()));
             metadata.put("columnCount", safeSize(queryResp.getColumns()));
@@ -373,7 +387,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
 
         semanticQueryResp.setColumns(columns);
         semanticQueryResp.setResultList(resultList);
-        return semanticQueryResp;
+        return secureDimensionValueResponse(dimensionValueReq, semanticQueryResp, user);
     }
 
     private List<String> getDimensionValuesFromDict(DimensionValueReq dimensionValueReq,
@@ -427,6 +441,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
     private List<QueryColumn> createQueryColumns(DimensionValueReq dimensionValueReq) {
         QueryColumn queryColumn = new QueryColumn();
         queryColumn.setBizName(dimensionValueReq.getBizName());
+        queryColumn.setModelId(dimensionValueReq.getModelId());
         queryColumn.setShowType(SemanticType.CATEGORY.name());
         queryColumn.setAuthorized(true);
         queryColumn.setType("CHAR");
@@ -434,6 +449,30 @@ public class S2SemanticLayerService implements SemanticLayerService {
         List<QueryColumn> columns = new ArrayList<>();
         columns.add(queryColumn);
         return columns;
+    }
+
+    private SemanticQueryResp secureDimensionValueResponse(DimensionValueReq request,
+            SemanticQueryResp response, User user) {
+        if (user == null || user.getName() == null || request.getModelId() == null) {
+            throw new InvalidPermissionException("Dimension value authorization context is missing");
+        }
+        if (authService == null) {
+            throw new IllegalStateException("Authorization service is unavailable");
+        }
+        QueryAuthResReq authRequest = new QueryAuthResReq();
+        authRequest.setModelIds(List.of(request.getModelId()));
+        AuthorizedResourceResp decision = authService.queryAuthorizedResources(authRequest, user);
+        AuthorizationContext.install(decision.getResourcePermissions(), decision.getPolicyVersion());
+        try {
+            SchemaFilterReq filter = new SchemaFilterReq();
+            filter.setModelIds(List.of(request.getModelId()));
+            dataMaskingService.mask(response, schemaService.fetchSemanticSchema(filter), user,
+                    decision.getResourcePermissions());
+            response.setMaskingPolicyVersion(decision.getPolicyVersion());
+            return response;
+        } finally {
+            AuthorizationContext.clear();
+        }
     }
 
     private List<Map<String, Object>> createResultList(DimensionValueReq dimensionValueReq,

@@ -15,6 +15,7 @@ import com.tencent.supersonic.headless.server.security.audit.model.PageResult;
 import com.tencent.supersonic.headless.server.security.audit.model.SecurityAlertQuery;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +45,7 @@ public class SecurityAlertService {
     private final AuditProperties properties;
     private final AuditSanitizer sanitizer;
     private final SecurityAlertMutationService mutationService;
+    private List<SecurityAlertNotifier> notifiers = List.of();
 
     public SecurityAlertService(SecurityAlertMapper securityAlertMapper,
             AlertActionMapper alertActionMapper, AuditEventService auditEventService,
@@ -55,6 +57,11 @@ public class SecurityAlertService {
         this.properties = properties;
         this.sanitizer = sanitizer;
         this.mutationService = mutationService;
+    }
+
+    @Autowired
+    public void setNotifiers(List<SecurityAlertNotifier> notifiers) {
+        this.notifiers = notifiers == null ? List.of() : List.copyOf(notifiers);
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -90,6 +97,7 @@ public class SecurityAlertService {
         alert.setUpdatedBy("system");
         try {
             mutationService.insert(alert);
+            notifyAlert(alert);
             return alert;
         } catch (DuplicateKeyException concurrentInsert) {
             existing = findByFingerprint(fingerprint);
@@ -191,7 +199,9 @@ public class SecurityAlertService {
                     event.getEventTime() == null ? now : event.getEventTime(), evidence,
                     event.getTraceId(), now);
             if (updated == 1) {
-                return requireAlert(existing.getAlertId());
+                SecurityAlertDO refreshed = requireAlert(existing.getAlertId());
+                notifyAlert(refreshed);
+                return refreshed;
             }
             existing = findByFingerprint(existing.getFingerprint());
             if (existing == null) {
@@ -199,6 +209,16 @@ public class SecurityAlertService {
             }
         }
         throw new IllegalStateException("Security alert was modified too frequently");
+    }
+
+    private void notifyAlert(SecurityAlertDO alert) {
+        for (SecurityAlertNotifier notifier : notifiers) {
+            try {
+                notifier.notify(alert);
+            } catch (RuntimeException e) {
+                // Notification is an extension point; station alert persistence is authoritative.
+            }
+        }
     }
 
     private long saturatedIncrement(long value) {

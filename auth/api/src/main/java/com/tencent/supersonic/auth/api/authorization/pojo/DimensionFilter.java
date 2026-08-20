@@ -11,4 +11,7 @@ public class DimensionFilter {
     private Long modelId;
     private List<String> expressions = new ArrayList<>();
     private String description;
+
+    /** ALLOW is the legacy/default value; DENY is supported by policy V2. */
+    private PolicyEffect effect = PolicyEffect.ALLOW;
 }
