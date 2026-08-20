@@ -118,8 +118,12 @@ public class DefaultQueryCache implements QueryCache {
                 .entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining(","));
+        AuthorizationContext.Snapshot snapshot = AuthorizationContext.current();
+        String organizations = snapshot == null || snapshot.userContext() == null ? ""
+                : snapshot.userContext().effectiveOrganizationIds().stream().sorted()
+                        .collect(Collectors.joining(","));
         return DigestUtils.sha256Hex(String.join("|", user.getName(),
-                String.valueOf(user.isSuperAdmin()), roles, attributes));
+                String.valueOf(user.isSuperAdmin()), roles, attributes, organizations));
     }
 
     String commandScope(SemanticQueryReq request) {

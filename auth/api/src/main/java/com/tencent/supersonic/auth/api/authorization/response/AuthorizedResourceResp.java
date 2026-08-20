@@ -22,4 +22,6 @@ public class AuthorizedResourceResp {
     private Set<Integer> matchedGroupIds = new LinkedHashSet<>();
 
     private long policyVersion;
+
+    private Set<String> effectiveOrganizationIds = new LinkedHashSet<>();
 }

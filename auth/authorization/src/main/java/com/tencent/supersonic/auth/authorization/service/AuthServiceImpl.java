@@ -182,6 +182,7 @@ public class AuthServiceImpl implements AuthService {
                     "Matched authorization group count exceeds maximum: " + MAX_MATCHED_GROUPS);
         }
         AuthorizedResourceResp resource = new AuthorizedResourceResp();
+        resource.setEffectiveOrganizationIds(new LinkedHashSet<>(userOrgIds));
         Map<Long, List<AuthGroup>> authGroupsByModelId =
                 groups.stream().sorted((left, right) -> Integer.compare(
                         right.getPriority() == null ? 0 : right.getPriority(),
@@ -245,6 +246,7 @@ public class AuthServiceImpl implements AuthService {
                     structured.setModelId(authGroup.getModelId());
                     structured.setDescription(authGroup.getDimensionFilterDescription());
                     structured.setEffect(effectiveEffect(authGroup));
+                    structured.setStructured(true);
                     structured.setExpressions(List.of(compileRowRule(rule, user, userOrgIds)));
                     resource.getFilters().add(structured);
                 }

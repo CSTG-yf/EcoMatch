@@ -14,4 +14,7 @@ public class DimensionFilter {
 
     /** ALLOW is the legacy/default value; DENY is supported by policy V2. */
     private PolicyEffect effect = PolicyEffect.ALLOW;
+
+    /** Structured V2 rule; structured fields are validated against the semantic schema. */
+    private boolean structured;
 }

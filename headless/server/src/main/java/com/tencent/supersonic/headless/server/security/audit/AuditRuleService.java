@@ -99,6 +99,12 @@ public class AuditRuleService {
                 AlertRuleType.REPEATED_AUTH_DENIAL, 3L, 300L, null, null, AlertSeverity.HIGH, null);
         createDefault("OFF_HOURS_ACCESS", "Off-hours access", AlertRuleType.OFF_HOURS_ACCESS, 1L,
                 0L, "07:00", "22:00", AlertSeverity.MEDIUM, null);
+        createDefault("CROSS_ORGANIZATION_ACCESS", "Cross-organization access",
+                AlertRuleType.CROSS_ORGANIZATION_ACCESS, 2L, 300L, null, null,
+                AlertSeverity.HIGH, null);
+        createDefault("POLICY_CHANGE_SPIKE", "Authorization policy change spike",
+                AlertRuleType.POLICY_CHANGE_SPIKE, 5L, 300L, null, null, AlertSeverity.HIGH,
+                null);
     }
 
     private void createDefault(String code, String name, AlertRuleType type, Long threshold,

@@ -168,7 +168,7 @@ public class S2DataPermissionAspect {
             }
             // 6. check row permission
             denialReasonCode = "AUTH_ROW_POLICY_DENIED";
-            checkRowPermission(queryReq, authorizedResource, modelIds);
+            checkRowPermission(queryReq, authorizedResource, modelIds, semanticSchemaResp);
 
             authorizationDecisionFinalized = true;
             publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_POLICY_ALLOWED",
@@ -200,7 +200,9 @@ public class S2DataPermissionAspect {
             User user, AuthorizedResourceResp authorizedResource) throws Throwable {
         AuthorizationContext.install(
                 authorizedResource == null ? List.of() : authorizedResource.getResourcePermissions(),
-                authorizedResource == null ? 0L : authorizedResource.getPolicyVersion());
+                authorizedResource == null ? 0L : authorizedResource.getPolicyVersion(), user,
+                authorizedResource == null ? Set.of()
+                        : authorizedResource.getEffectiveOrganizationIds());
         try {
             Object result = joinPoint.proceed();
             if (result instanceof SemanticQueryResp) {
@@ -332,12 +334,13 @@ public class S2DataPermissionAspect {
     }
 
     private void checkRowPermission(SemanticQueryReq queryReq,
-            AuthorizedResourceResp authorizedResource, Set<Long> modelIds) {
+            AuthorizedResourceResp authorizedResource, Set<Long> modelIds,
+            SemanticSchemaResp semanticSchemaResp) {
         if (queryReq instanceof QuerySqlReq) {
-            doRowPermission((QuerySqlReq) queryReq, authorizedResource, modelIds);
+            doRowPermission((QuerySqlReq) queryReq, authorizedResource, modelIds, semanticSchemaResp);
         }
         if (queryReq instanceof QueryStructReq) {
-            doRowPermission((QueryStructReq) queryReq, authorizedResource, modelIds);
+            doRowPermission((QueryStructReq) queryReq, authorizedResource, modelIds, semanticSchemaResp);
         }
     }
 
@@ -360,10 +363,11 @@ public class S2DataPermissionAspect {
     }
 
     private void doRowPermission(QuerySqlReq querySqlReq, AuthorizedResourceResp authorizedResource,
-            Set<Long> modelIds) {
+            Set<Long> modelIds, SemanticSchemaResp semanticSchemaResp) {
         log.debug("Start doRowPermission logic");
 
-        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds);
+        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds,
+                semanticSchemaResp);
         if (StringUtils.isBlank(rowPermissionExpression)) {
             log.debug("No effective row permission filters");
             return;
@@ -387,10 +391,12 @@ public class S2DataPermissionAspect {
     }
 
     private void doRowPermission(QueryStructReq queryStructReq,
-            AuthorizedResourceResp authorizedResource, Set<Long> modelIds) {
+            AuthorizedResourceResp authorizedResource, Set<Long> modelIds,
+            SemanticSchemaResp semanticSchemaResp) {
         log.debug("start doRowPermission logic");
 
-        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds);
+        String rowPermissionExpression = buildRowPermissionExpression(authorizedResource, modelIds,
+                semanticSchemaResp);
         if (StringUtils.isBlank(rowPermissionExpression)) {
             log.debug("No effective row permission filters");
             return;
@@ -407,7 +413,7 @@ public class S2DataPermissionAspect {
     }
 
     private String buildRowPermissionExpression(AuthorizedResourceResp authorizedResource,
-            Set<Long> modelIds) {
+            Set<Long> modelIds, SemanticSchemaResp semanticSchemaResp) {
         if (authorizedResource == null
                 || CollectionUtils.isEmpty(authorizedResource.getFilters())) {
             return null;
@@ -444,6 +450,8 @@ public class S2DataPermissionAspect {
             }
             validateDimensionFilters(new ArrayList<>(allowExpressions));
             validateDimensionFilters(new ArrayList<>(denyExpressions));
+            entry.getValue().stream().filter(DimensionFilter::isStructured)
+                    .forEach(filter -> validateStructuredFilter(filter, semanticSchemaResp));
             String allowClause = allowExpressions.stream().map(expression -> "( " + expression + " )")
                     .collect(Collectors.joining(" OR "));
             String denyClause = denyExpressions.stream().map(expression -> "( " + expression + " )")
@@ -476,6 +484,40 @@ public class S2DataPermissionAspect {
                 throw new InvalidPermissionException(
                         "Row permission filter is invalid; query execution was denied");
             }
+        }
+    }
+
+    private void validateStructuredFilter(DimensionFilter filter,
+            SemanticSchemaResp semanticSchemaResp) {
+        if (semanticSchemaResp == null || filter.getExpressions() == null
+                || filter.getExpressions().size() != 1) {
+            throw new InvalidPermissionException(
+                    "Structured row permission metadata is unavailable; query execution was denied");
+        }
+        String expression = filter.getExpressions().get(0);
+        java.util.regex.Matcher matcher = Pattern.compile(
+                "(?is)^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s+(?:=|IN|BETWEEN|LIKE)\\b")
+                .matcher(expression);
+        if (!matcher.find()) {
+            throw new InvalidPermissionException(
+                    "Structured row permission field is invalid; query execution was denied");
+        }
+        String field = matcher.group(1).toLowerCase(java.util.Locale.ROOT);
+        boolean exists = java.util.stream.Stream.concat(
+                semanticSchemaResp.getDimensions() == null ? java.util.stream.Stream.empty()
+                        : semanticSchemaResp.getDimensions().stream(),
+                semanticSchemaResp.getMetrics() == null ? java.util.stream.Stream.empty()
+                        : semanticSchemaResp.getMetrics().stream())
+                // SemanticSchemaResp is already resolved for the query's model scope;
+                // SchemaItem itself does not carry a modelId.
+                .filter(java.util.Objects::nonNull)
+                .flatMap(item -> java.util.stream.Stream.of(item.getBizName(), item.getName()))
+                .filter(StringUtils::isNotBlank)
+                .map(value -> value.toLowerCase(java.util.Locale.ROOT))
+                .anyMatch(field::equals);
+        if (!exists) {
+            throw new InvalidPermissionException(
+                    "Structured row permission field is outside the semantic model");
         }
     }
 

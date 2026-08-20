@@ -304,6 +304,8 @@ public class S2SemanticLayerService implements SemanticLayerService {
         metadata.put("cacheHit", cacheHit);
         AuthorizationContext.Snapshot authorization = AuthorizationContext.current();
         metadata.put("policyVersion", authorization == null ? 0L : authorization.policyVersion());
+        metadata.put("organizationScope", authorization == null
+                ? List.of() : authorization.userContext().effectiveOrganizationIds());
         if (queryResp != null) {
             metadata.put("rowCount", safeSize(queryResp.getResultList()));
             metadata.put("columnCount", safeSize(queryResp.getColumns()));
@@ -462,7 +464,8 @@ public class S2SemanticLayerService implements SemanticLayerService {
         QueryAuthResReq authRequest = new QueryAuthResReq();
         authRequest.setModelIds(List.of(request.getModelId()));
         AuthorizedResourceResp decision = authService.queryAuthorizedResources(authRequest, user);
-        AuthorizationContext.install(decision.getResourcePermissions(), decision.getPolicyVersion());
+        AuthorizationContext.install(decision.getResourcePermissions(), decision.getPolicyVersion(),
+                user, decision.getEffectiveOrganizationIds());
         try {
             SchemaFilterReq filter = new SchemaFilterReq();
             filter.setModelIds(List.of(request.getModelId()));
