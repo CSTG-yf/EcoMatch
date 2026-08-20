@@ -105,6 +105,9 @@ public class AuditRuleService {
         createDefault("POLICY_CHANGE_SPIKE", "Authorization policy change spike",
                 AlertRuleType.POLICY_CHANGE_SPIKE, 5L, 300L, null, null, AlertSeverity.HIGH,
                 null);
+        createDefault("AUDIT_INTEGRITY_FAILURE", "Audit integrity failure",
+                AlertRuleType.AUDIT_INTEGRITY_FAILURE, 1L, 60L, null, null,
+                AlertSeverity.CRITICAL, null);
     }
 
     private void createDefault(String code, String name, AlertRuleType type, Long threshold,
