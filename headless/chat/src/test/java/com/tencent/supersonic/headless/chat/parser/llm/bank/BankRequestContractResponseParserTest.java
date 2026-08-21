@@ -5,6 +5,7 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,10 +41,58 @@ class BankRequestContractResponseParserTest {
     }
 
     @Test
-    void rejectsProvinceAverageOutsideTheExactBenchmarkContract() {
+    void canonicalizesRecognizableProvinceAverageComparisonSlots() {
+        String contract = executeContractJson().replace("\"field\":\"benchmark\"",
+                "\"field\":\"metric_value\"");
+
+        BankRequestContract parsed = parser.parse(contract, admissionHints());
+
+        assertEquals(1, parsed.getFilters().size());
+        assertEquals("benchmark", parsed.getFilters().get(0).getField());
+        assertEquals("COMPARE", parsed.getFilters().get(0).getOperator());
+        assertEquals("PROVINCE_AVERAGE", parsed.getFilters().get(0).getValue());
+        assertTrue(parsed.getFilters().get(0).getValues().isEmpty());
+    }
+
+    @Test
+    void canonicalizesProvinceAverageBenchmarkWithWrongOperatorOrExtraValues() {
+        String wrongOperator = executeContractJson().replace("\"operator\":\"COMPARE\"",
+                "\"operator\":\"EQ\"");
+        String extraValues = executeContractJson().replace("\"values\":[]",
+                "\"values\":[\"PROVINCE_AVERAGE\"]");
+
+        for (String contract : List.of(wrongOperator, extraValues)) {
+            BankRequestContract parsed = parser.parse(contract, admissionHints());
+            assertEquals(1, parsed.getFilters().size());
+            assertEquals("COMPARE", parsed.getFilters().get(0).getOperator());
+            assertTrue(parsed.getFilters().get(0).getValues().isEmpty());
+        }
+    }
+
+    @Test
+    void addsTheBenchmarkFilterWhenOnlyAProvinceAverageDirectionIsRecognized() {
+        String contract = executeContractJson().replace(
+                "\"filters\":[{\"field\":\"benchmark\",\"operator\":\"COMPARE\","
+                        + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}]",
+                "\"filters\":[{\"field\":\"metric_value\",\"operator\":\"GT\","
+                        + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}]");
+
+        BankRequestContract parsed = parser.parse(contract, admissionHints());
+
+        assertEquals(2, parsed.getFilters().size());
+        assertEquals("metric_value", parsed.getFilters().get(0).getField());
+        assertEquals("benchmark", parsed.getFilters().get(1).getField());
+        assertEquals("COMPARE", parsed.getFilters().get(1).getOperator());
+    }
+
+    @Test
+    void stillRejectsProvinceAverageOutsideComparableSlots() {
+        String contract = executeContractJson().replace("\"field\":\"benchmark\"",
+                "\"field\":\"organization\"").replace("\"operator\":\"COMPARE\"",
+                        "\"operator\":\"EQ\"");
+
         assertThrows(BankQueryPlanParseException.class,
-                () -> parser.parse(executeContractJson().replace("\"field\":\"benchmark\"",
-                        "\"field\":\"metric_value\""), admissionHints()));
+                () -> parser.parse(contract, admissionHints()));
     }
 
     @Test
