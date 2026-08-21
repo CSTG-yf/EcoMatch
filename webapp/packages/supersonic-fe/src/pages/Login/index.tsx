@@ -36,6 +36,11 @@ const LoginPage: React.FC = () => {
         const authCodes = Array.isArray(initialState?.authCodes) ? initialState?.authCodes : [];
         if (queryUserData.superAdmin) {
           authCodes.push(ROUTE_AUTH_CODES.SYSTEM_ADMIN);
+          authCodes.push(ROUTE_AUTH_CODES.SECURITY_AUDIT);
+        }
+        const roles = new Set<string>(queryUserData.roles || []);
+        if (['SECURITY_ADMIN', 'SECURITY_AUDITOR', 'RISK_AUDITOR'].some((r) => roles.has(r))) {
+          authCodes.push(ROUTE_AUTH_CODES.SECURITY_AUDIT);
         }
         setInitialState({ ...initialState, currentUser, authCodes });
       }
@@ -103,13 +108,17 @@ const LoginPage: React.FC = () => {
                   </Space>
                 </h3>
                 <Item name="name" rules={[{ required: true }]} label="">
-                  <Input size="large" placeholder="用户名: admin" prefix={<UserOutlined />} />
+                  <Input
+                    size="large"
+                    placeholder="用户名: admin（管理员）/ jack（业务用户）"
+                    prefix={<UserOutlined />}
+                  />
                 </Item>
                 <Item name="password" rules={[{ required: true }]} label="">
                   <Input
                     size="large"
                     type="password"
-                    placeholder="密码: 123456"
+                    placeholder="密码: 123456（两个账户相同）"
                     onPressEnter={handleLogin}
                     prefix={<LockOutlined />}
                   />

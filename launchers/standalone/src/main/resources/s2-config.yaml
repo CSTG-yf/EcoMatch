@@ -20,7 +20,10 @@ s2:
     date: true
 
   demo:
-    names: S2VisitsDemo,S2SingerDemo,S2CompanyDemo,S2SmallTalkDemo
+    # 银行问数专用系统：不初始化任何样例助理/样例主题域（S2VisitsDemo 等）。
+    # 唯一助理「银行问数」由 evaluation/bank_nl2sql/bootstrap_bank_agent.py 导入。
+    # demo 数据库和 demo 聊天模型也随此开关关闭；正式模型由管理员在启动后配置。
+    names: []
     enableLLM: true
 
   authentication:

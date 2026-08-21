@@ -102,9 +102,9 @@ public abstract class S2BaseDemo implements CommandLineRunner {
     protected String driverClassName;
 
     public void run(String... args) {
-        demoDatabase = addDatabaseIfNotExist();
-        demoChatModel = addChatModelIfNotExist();
         if (demoList != null && demoList.contains(getClass().getSimpleName())) {
+            demoDatabase = addDatabaseIfNotExist();
+            demoChatModel = addChatModelIfNotExist();
             if (checkNeedToRun()) {
                 doRun();
             }

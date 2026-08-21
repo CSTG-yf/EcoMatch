@@ -47,6 +47,7 @@ type Props = {
   token?: string;
   agentIds?: number[];
   initialAgentId?: number;
+  defaultAgentName?: string;
   chatVisible?: boolean;
   noInput?: boolean;
   isDeveloper?: boolean;
@@ -63,6 +64,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     token,
     agentIds,
     initialAgentId,
+    defaultAgentName,
     chatVisible,
     noInput,
     isDeveloper,
@@ -138,11 +140,13 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     setConversationError('');
     setCurrentAgent(agent);
     onCurrentAgentChange?.(agent);
-    localStorage.setItem('AGENT_ID', `${agent?.id}`);
     if (agent) {
       updateAgentConfigMode(agent);
     }
     if (!isCopilot) {
+      // Copilot 浮窗是独立问数面，不得污染主对话页持久化的 agent 选择，
+      // 否则主对话页会被浮窗的默认选择（列表第一位）抢走。
+      localStorage.setItem('AGENT_ID', `${agent?.id}`);
       window.history.replaceState({}, '', `${window.location.pathname}?agentId=${agent?.id}`);
     }
   };
@@ -154,13 +158,20 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     );
     setAgentList(agentListValue);
     if (agentListValue.length > 0) {
-      const agentId = initialAgentId || localStorage.getItem('AGENT_ID');
-      if (agentId) {
-        const agent = agentListValue.find(item => item.id === +agentId);
-        updateCurrentAgent(agent || agentListValue[0]);
-      } else {
-        updateCurrentAgent(agentListValue[0]);
-      }
+      const explicitAgent = initialAgentId
+        ? agentListValue.find(item => item.id === initialAgentId)
+        : undefined;
+      const preferredAgent = defaultAgentName
+        ? agentListValue.find(item => item.name === defaultAgentName)
+        : undefined;
+      const persistedAgentId = localStorage.getItem('AGENT_ID');
+      const persistedAgent = persistedAgentId
+        ? agentListValue.find(item => item.id === +persistedAgentId)
+        : undefined;
+
+      // 显式深链仍可用于兼容旧功能；普通入口始终优先进入银行问数基座，
+      // 旧版本遗留的 AGENT_ID 不得把用户带回闲聊或样例助理。
+      updateCurrentAgent(explicitAgent || preferredAgent || persistedAgent || agentListValue[0]);
     }
   };
 

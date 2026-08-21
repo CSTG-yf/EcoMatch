@@ -15,20 +15,12 @@ if not exist "%PYTHON_EXE%" (
   exit /b 2
 )
 
-set /p "MODEL_ID=Bank semantic model ID [1]: "
-if not defined MODEL_ID set "MODEL_ID=1"
-set /p "CHAT_MODEL_ID=Chat model ID [1]: "
-if not defined CHAT_MODEL_ID set "CHAT_MODEL_ID=1"
-set /p "ECOMATCH_AUTH_TOKEN=Administrator token: "
-if not defined ECOMATCH_AUTH_TOKEN (
-  echo Administrator token is required.
-  pause
-  exit /b 2
-)
-
+if not defined ECOMATCH_ADMIN_PASSWORD set "ECOMATCH_ADMIN_PASSWORD=123456"
 if not exist "%RECEIPT_DIR%" mkdir "%RECEIPT_DIR%"
-"%PYTHON_EXE%" "%BOOTSTRAP%" "%REPO_ROOT%\evaluation\bank_nl2sql" --model-id "%MODEL_ID%" --chat-model-id "%CHAT_MODEL_ID%" --output "%RECEIPT%"
+
+"%PYTHON_EXE%" "%BOOTSTRAP%" "%REPO_ROOT%\evaluation\bank_nl2sql" --output "%RECEIPT%" %*
 set "RESULT=%ERRORLEVEL%"
+set "ECOMATCH_ADMIN_PASSWORD="
 set "ECOMATCH_AUTH_TOKEN="
 
 if not "%RESULT%"=="0" (
