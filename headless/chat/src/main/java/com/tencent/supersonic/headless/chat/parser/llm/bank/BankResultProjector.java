@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
+import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Converts the pivoted semantic response for supported bank plans into the stable, long-form
@@ -30,7 +32,10 @@ public class BankResultProjector {
 
     public static final String CONTRACT_PROPERTY = "bank.nl2sql.resultContract";
     private static final Set<String> LOWER_VALUE_IS_BETTER_METRICS =
-            Set.of("ZB012", "ZB013", "ZB017");
+            BankFinancialLexicon.metrics().entrySet().stream()
+                    .filter(entry -> entry.getValue()
+                            .getDirection() == BankFinancialLexicon.MetricDirection.LOWER_BETTER)
+                    .map(Map.Entry::getKey).collect(Collectors.toUnmodifiableSet());
 
     public Projection project(Contract contract, List<Map<String, Object>> sourceRows) {
         if (contract == null || contract.getType() == null) {
@@ -153,7 +158,8 @@ public class BankResultProjector {
         }
         // Loan structure share gold (S-24): metric_role + numerator/denominator/ratio.
         if (withShare && isLoanStructureShare(contract)) {
-            return projectLoanStructureShare(contract, rows, totalFromRows(rows, "ZB002"));
+            return projectLoanStructureShare(contract, rows,
+                    totalFromRows(rows, fullCompositionGroup(contract).getTotalCode()));
         }
         // Deposit structure share (M-31 分别占比): parts + total with ratio_percent. Prefer this
         // whenever the dual-share plan marks structureShare, even if SQL metric order is
@@ -161,7 +167,8 @@ public class BankResultProjector {
         // for physical stability. S-22 (plain equality/差额) keeps structureShare=false.
         if (withShare && isDepositStructureShare(contract)
                 && (contract.isStructureShare() || !isTotalMetricFirst(contract))) {
-            return projectDepositStructureShare(contract, rows, totalFromRows(rows, "ZB001"));
+            return projectDepositStructureShare(contract, rows,
+                    totalFromRows(rows, fullCompositionGroup(contract).getTotalCode()));
         }
         // Deposit multi-metric with total first (S-22): plain metric_value, no ratio.
         if (withShare && isDepositStructureShare(contract) && isTotalMetricFirst(contract)) {
@@ -218,15 +225,21 @@ public class BankResultProjector {
 
     /**
      * Rate-like multi-metric points that gold scores as plain metric_value long-form (not aggregate
-     * summary). Covers multi-rate point comparisons such as risk and provision ratios.
+     * summary). Rate-likeness follows the catalog unit (%), so the family covers every ratio metric
+     * the lexicon publishes, not a hardcoded code list.
      */
     private static boolean prefersPlainMultiMetricPoint(Contract contract) {
         Set<String> codes = metricCodes(contract);
         if (codes.isEmpty()) {
             return false;
         }
-        Set<String> rateLike = Set.of("ZB012", "ZB013", "ZB015", "ZB016", "ZB017");
-        return rateLike.containsAll(codes);
+        return codes.stream().allMatch(BankResultProjector::isRateLikeMetric);
+    }
+
+    private static boolean isRateLikeMetric(String code) {
+        BankFinancialLexicon.MetricDefinition metric =
+                BankFinancialLexicon.metrics().get(StringUtils.upperCase(code));
+        return metric != null && "%".equals(metric.getUnit());
     }
 
     private Projection projectDepositStructureShare(Contract contract,
@@ -235,7 +248,7 @@ public class BankResultProjector {
         // required evidence for equality/difference questions such as ZB003 + ZB004 = ZB001.
         // Projection must never discard a database fact merely because the model marked the same
         // result shape as a structure-share presentation.
-        List<String> order = List.of("ZB003", "ZB004", "ZB001");
+        List<String> order = fullCompositionGroup(contract).orderedCodes();
         Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
         for (Map<String, Object> row : rows) {
             byCode.put(StringUtils.upperCase(String.valueOf(row.get("metric_code"))), row);
@@ -265,13 +278,26 @@ public class BankResultProjector {
     }
 
     private static boolean isLoanStructureShare(Contract contract) {
-        Set<String> codes = metricCodes(contract);
-        return codes.contains("ZB002") && codes.contains("ZB005") && codes.contains("ZB006");
+        BankFinancialLexicon.CompositionGroupDefinition group = fullCompositionGroup(contract);
+        return group != null && "ZB002".equals(group.getTotalCode());
     }
 
     private static boolean isDepositStructureShare(Contract contract) {
+        BankFinancialLexicon.CompositionGroupDefinition group = fullCompositionGroup(contract);
+        return group != null && "ZB001".equals(group.getTotalCode());
+    }
+
+    /** Catalog composition group whose total and both parts are all selected, else null. */
+    private static BankFinancialLexicon.CompositionGroupDefinition fullCompositionGroup(
+            Contract contract) {
         Set<String> codes = metricCodes(contract);
-        return codes.contains("ZB001") && codes.contains("ZB003") && codes.contains("ZB004");
+        for (BankFinancialLexicon.CompositionGroupDefinition group : BankFinancialLexicon
+                .compositionGroups()) {
+            if (!codes.isEmpty() && codes.containsAll(group.orderedCodes())) {
+                return group;
+            }
+        }
+        return null;
     }
 
     private static boolean isTotalMetricFirst(Contract contract) {
@@ -315,8 +341,8 @@ public class BankResultProjector {
 
     private Projection projectLoanStructureShare(Contract contract, List<Map<String, Object>> rows,
             BigDecimal total) {
-        // Gold S-24 order: personal (ZB006), corporate (ZB005), total (ZB002).
-        List<String> order = List.of("ZB006", "ZB005", "ZB002");
+        // Gold S-24 order and roles: catalog group order (personal, corporate, total).
+        List<String> order = fullCompositionGroup(contract).orderedCodes();
         Map<String, String> roles =
                 Map.of("ZB006", "personal", "ZB005", "corporate", "ZB002", "total");
         Map<String, Map<String, Object>> byCode = new LinkedHashMap<>();
@@ -370,29 +396,17 @@ public class BankResultProjector {
         return aggregateRows;
     }
 
-    private static boolean isCustomerCountPair(Contract contract) {
-        Set<String> codes = new java.util.HashSet<>();
-        for (MetricBinding metric : contract.getMetrics()) {
-            if (metric != null && metric.getMetricCode() != null) {
-                codes.add(StringUtils.upperCase(metric.getMetricCode()));
-            }
-        }
-        return codes.contains("ZB020") && codes.contains("ZB021");
-    }
-
-    /** Prefer deposit total ZB001, else loan total ZB002, when both parts and total are present. */
+    /**
+     * Composition total of the first catalog group whose total and at least one part are selected.
+     */
     private static String structureShareTotalCode(Contract contract) {
-        Set<String> codes = new java.util.HashSet<>();
-        for (MetricBinding metric : contract.getMetrics()) {
-            if (metric != null && metric.getMetricCode() != null) {
-                codes.add(StringUtils.upperCase(metric.getMetricCode()));
+        Set<String> codes = metricCodes(contract);
+        for (BankFinancialLexicon.CompositionGroupDefinition group : BankFinancialLexicon
+                .compositionGroups()) {
+            if (codes.contains(group.getTotalCode())
+                    && group.getPartCodes().stream().anyMatch(codes::contains)) {
+                return group.getTotalCode();
             }
-        }
-        if (codes.contains("ZB001") && (codes.contains("ZB003") || codes.contains("ZB004"))) {
-            return "ZB001";
-        }
-        if (codes.contains("ZB002") && (codes.contains("ZB005") || codes.contains("ZB006"))) {
-            return "ZB002";
         }
         return null;
     }
@@ -563,11 +577,9 @@ public class BankResultProjector {
         if (currentValue == null || monthValue == null || yearValue == null) {
             return Projection.notApplied();
         }
-        return Projection.applied(columns(contract),
-                List.of(changeRow("MOM", current.value(), currentValue, monthBaseline.value(),
-                        monthValue),
-                        changeRow("YOY", current.value(), currentValue, yearBaseline.value(),
-                                yearValue)));
+        return Projection.applied(columns(contract), List.of(
+                changeRow("MOM", current.value(), currentValue, monthBaseline.value(), monthValue),
+                changeRow("YOY", current.value(), currentValue, yearBaseline.value(), yearValue)));
     }
 
     private Map<String, Object> changeRow(String comparisonType, Object currentValue,
@@ -1322,7 +1334,7 @@ public class BankResultProjector {
     /**
      * Normalizes a single-day multi-metric aggregate returned by the structured query renderer.
      * QueryStructReq renders multiple selected metrics as a pivot (for example, {@code zb007} and
-     * {@code zb008}) even though the published bank contract is long-form.  The values are already
+     * {@code zb008}) even though the published bank contract is long-form. The values are already
      * database aggregates; this method only attaches the reviewed metric identity and the
      * single-observation extrema/count fields required by the fact contract.
      */
@@ -1447,8 +1459,8 @@ public class BankResultProjector {
             return List.of("data_date", "metric_value", "quarter_change");
         }
         if (contract.getType() == ProjectionType.MOM_YOY_CHANGE) {
-            return List.of("comparison_type", "current_value", "baseline_value",
-                    "absolute_change", "percent_change");
+            return List.of("comparison_type", "current_value", "baseline_value", "absolute_change",
+                    "percent_change");
         }
         if (contract.getType() == ProjectionType.MULTI_METRIC_CHANGE) {
             return List.of("org_code", "org_name", "metric_code", "current_value", "baseline_value",

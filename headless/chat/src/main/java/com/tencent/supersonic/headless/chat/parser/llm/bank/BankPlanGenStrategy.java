@@ -6,6 +6,7 @@ import com.tencent.supersonic.common.pojo.enums.AppModule;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialIntentRecognizer;
+import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.chat.intent.BankIntentType;
 import com.tencent.supersonic.headless.chat.parser.llm.OnePassSCSqlGenStrategy;
@@ -279,12 +280,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private void logRepair(String stage, int attempt, String code,
             BankQueryPlanParseException exception) {
-        String message = exception == null || exception.getMessage() == null ? ""
-                : exception.getMessage();
+        String message =
+                exception == null || exception.getMessage() == null ? "" : exception.getMessage();
         KEY_PIPELINE_LOG.info(
                 "BankPlanGenStrategy repair stage={} attempt={} code={} reason={} detail=[{}]",
-                stage, attempt, code,
-                exception == null ? "NONE" : exception.getReason().name(),
+                stage, attempt, code, exception == null ? "NONE" : exception.getReason().name(),
                 message.length() > 160 ? message.substring(0, 160) : message);
     }
 
@@ -380,27 +380,31 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (queryText == null || requirements == null) {
             return;
         }
+        // These fully specified families must be validated before the generic CLARIFY exit.
+        // The recognizer supplies only evidence for a repair message; the model still owns the
+        // complete requirements contract and executable plan.
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        validateMonthAndYearComparison(queryText, requirements);
+        validateExplicitProvinceBottomRanking(queryText, requirements);
+        validateProvinceWideInstitutionRanking(queryText, requirements);
+        validateDaysAboveProvinceAverage(queryText, requirements);
+        validateStructureEqualityFamily(queryText, requirements, evidence);
         // Validation only: the model still supplies the identifiers, order and intent. The
         // catalog recognizer is used to return a repairable error when a complete two-operand
         // point ratio is incorrectly clarified or classified as another query family.
         validateGenericPointRatioQuery(queryText, requirements);
+        validateStructureShareFamily(queryText, requirements, evidence);
         if (requirements.getAction() != BankRequestContract.Action.EXECUTE) {
             return;
         }
-        if (containsAny(queryText, "全省排第几", "全省排名第几", "全省排名")) {
+        if (isProvinceRankSelectionQuestion(queryText)) {
             validateRankingIntent(requirements);
         }
+        validateRankedChangeFamily(requirements, evidence);
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
-        validateDaysAboveProvinceAverage(queryText, requirements);
-        if (queryText.contains("个人贷款") && queryText.contains("对公贷款")
-                && queryText.contains("各项贷款") && containsAny(queryText, "占比", "比例", "比重")) {
-            validateQueryFamily("loan_structure_share_mismatch", requirements,
-                    BankIntentType.POINT_QUERY, List.of("ZB006", "ZB005", "ZB002"), Set.of(),
-                    false);
-        }
-        if (queryText.contains("全省均值")
-                && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
+        if (queryText.contains("全省均值") && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
             validateProvinceAverageComparison(queryText, requirements);
         }
         if (isEndpointChangeDirectionQuery(queryText)) {
@@ -410,25 +414,173 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (!isStandalonePointRatioContext(queryText, requirements)) {
             return;
         }
-        if (queryText.contains("存款") && queryText.contains("对公") && queryText.contains("个人")
-                && containsAny(queryText, "占比", "比重", "比例")) {
-            validateQueryFamily("deposit_structure_share_mismatch", requirements,
-                    BankIntentType.POINT_QUERY, List.of("ZB003", "ZB004", "ZB001"), Set.of(), false);
-        }
-        if (containsAny(queryText, "人均利润", "人均净利润")) {
-            validateQueryFamily("per_capita_profit_mismatch", requirements, BankIntentType.RATIO,
-                    List.of("ZB011", "ZB018"), Set.of("DERIVED_ZB011_DIV_ZB018"), false);
-        }
+        validateDerivedPointRatioQuery(queryText, requirements, evidence);
         if (queryText.contains("不良贷款余额") && queryText.contains("贷款总额")
                 && containsAny(queryText, "占", "比重", "比例")) {
             validateQueryFamily("loan_share_ratio_mismatch", requirements, BankIntentType.RATIO,
                     List.of("ZB014", "ZB002"), Set.of(), false);
         }
-        if (queryText.contains("逾期贷款率") && queryText.contains("不良贷款率")
-                && containsAny(queryText, "高多少", "低多少", "相差", "差多少")) {
-            validateQueryFamily("risk_rate_pair_mismatch", requirements, BankIntentType.POINT_QUERY,
-                    List.of("ZB013", "ZB017"), Set.of(), true);
+        validateMetricPairGapQuery(queryText, requirements, evidence);
+    }
+
+    /**
+     * Slot-driven province rank selection: ranking wording plus a province-wide scope, or any of
+     * the legacy literal phrases. Change-family wording is excluded because those questions keep
+     * their CHANGE contract even when the word 排名 appears.
+     */
+    private boolean isProvinceRankSelectionQuestion(String queryText) {
+        if (containsAny(queryText, "全省排第几", "全省排名第几", "全省排名")) {
+            return true;
         }
+        return containsAny(queryText, "排第", "排名第几", "位列第", "名次")
+                && containsAny(queryText, "全省", "13家", "十三家", "各家", "全体机构", "所有农商行", "全部农商行")
+                && !containsAny(queryText, "同比", "环比", "变化", "变动", "增幅", "增长", "下降", "较上月", "较去年同期",
+                        "较年初");
+    }
+
+    /**
+     * Validates ranking-over-change questions (增幅/降幅排名). The only compilable contract keeps
+     * intent=CHANGE with an explicit non-NONE comparison: the ranking rides on limit plus answer
+     * facts, and a RANKING-labeled contract cannot carry that comparison (a requirements non-NONE
+     * comparison implies intent=CHANGE). The trigger is slot-driven — a rank signal plus change
+     * wording over a population without named organizations.
+     */
+    private void validateRankedChangeFamily(BankRequestContract requirements,
+            BankIntentResult evidence) {
+        boolean rankSignal =
+                containsAny(evidence.getOriginalText(), "排名", "排第", "前三", "后三", "前3", "后3", "第几")
+                        || evidence.getFilters().stream()
+                                .anyMatch(filter -> "rank".equals(filter.getField())
+                                        || "rank_from_bottom".equals(filter.getField()));
+        boolean changeSignal = containsAny(evidence.getOriginalText(), "增幅", "降幅", "涨跌幅", "变化幅度",
+                "增长最快", "下降最快", "增长最多", "下降最多");
+        if (!rankSignal || !changeSignal || !evidence.getOrganizations().isEmpty()
+                || evidence.getMetrics().isEmpty()) {
+            return;
+        }
+        validateExpectedIntent("ranked_change_family_mismatch", requirements,
+                BankIntentType.CHANGE);
+    }
+
+    /**
+     * Validates equality/gap questions for any catalog composition group as a point multi-metric
+     * query. The slot trigger follows recognizer evidence so alias paraphrases of both parts reach
+     * the same repairable contract; the legacy substring trigger stays because alias matching
+     * cannot span connector words (对公与个人存款). The model owns the complete requirements JSON.
+     */
+    private void validateStructureEqualityFamily(String queryText, BankRequestContract requirements,
+            BankIntentResult evidence) {
+        if (!containsAny(queryText, "是不是等于", "是否等于", "加起来", "合起来", "合计", "总和", "差额", "差多少", "相加",
+                "之和", "加总")) {
+            return;
+        }
+        if (evidence.getOrganizations().size() != 1 || evidence.getTime() == null
+                || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        Set<String> recognizedMetrics = evidenceMetricCodes(evidence);
+        for (BankFinancialLexicon.CompositionGroupDefinition group : BankFinancialLexicon
+                .compositionGroups()) {
+            boolean legacy =
+                    "deposit".equals(compositionFamilyCode(group)) && queryText.contains("存款")
+                            && queryText.contains("对公") && queryText.contains("个人");
+            if (!recognizedMetrics.containsAll(group.getPartCodes()) && !legacy) {
+                continue;
+            }
+            validateStructureEquality(compositionFamilyCode(group) + "_structure_equality_mismatch",
+                    requirements, evidence, group.orderedCodes());
+        }
+    }
+
+    /**
+     * Validates composition share questions (both parts of a catalog group, plus the total or an
+     * explicit structure word) as a point multi-metric query. Part-to-part ratio questions stay
+     * with the generic point-ratio family; change-family wording never enters this contract.
+     */
+    private void validateStructureShareFamily(String queryText, BankRequestContract requirements,
+            BankIntentResult evidence) {
+        if (requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || !containsAny(queryText, "占比", "比重", "比例", "份额")) {
+            return;
+        }
+        boolean legacyLoan = queryText.contains("个人贷款") && queryText.contains("对公贷款")
+                && queryText.contains("各项贷款");
+        boolean legacyDeposit =
+                queryText.contains("存款") && queryText.contains("对公") && queryText.contains("个人")
+                        && isStandalonePointRatioContext(queryText, requirements);
+        boolean changeFamily = containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "变化",
+                "变动", "增长", "下降", "逐月", "逐季", "逐日");
+        Set<String> recognizedMetrics = evidenceMetricCodes(evidence);
+        for (BankFinancialLexicon.CompositionGroupDefinition group : BankFinancialLexicon
+                .compositionGroups()) {
+            boolean legacy =
+                    "loan".equals(compositionFamilyCode(group)) ? legacyLoan : legacyDeposit;
+            boolean slots = recognizedMetrics.containsAll(group.getPartCodes())
+                    && (containsAny(queryText, "构成", "结构", "份额")
+                            || recognizedMetrics.contains(group.getTotalCode()));
+            if (!legacy && !(slots && !changeFamily)) {
+                continue;
+            }
+            validateQueryFamily(compositionFamilyCode(group) + "_structure_share_mismatch",
+                    requirements, BankIntentType.POINT_QUERY, group.orderedCodes(), Set.of(),
+                    false);
+        }
+    }
+
+    private String compositionFamilyCode(BankFinancialLexicon.CompositionGroupDefinition group) {
+        return group.getName().startsWith("存款") ? "deposit" : "loan";
+    }
+
+    /**
+     * Validates any recognized derived metric (存贷比/净利润率/人均利润) as a standalone point ratio:
+     * intent=RATIO with both base operands and the derived specification. The per-capita contract
+     * keeps its legacy error code so existing diagnostics stay comparable.
+     */
+    private void validateDerivedPointRatioQuery(String queryText, BankRequestContract requirements,
+            BankIntentResult evidence) {
+        for (BankIntentResult.DerivedMetricCandidate derived : evidence.getDerivedMetrics()) {
+            String errorCode = "DERIVED_ZB011_DIV_ZB018".equals(derived.getCode())
+                    ? "per_capita_profit_mismatch"
+                    : "derived_point_ratio_mismatch";
+            validateQueryFamily(errorCode, requirements, BankIntentType.RATIO,
+                    List.of(derived.getNumerator(), derived.getDenominator()),
+                    Set.of(derived.getCode()), false);
+        }
+    }
+
+    /**
+     * Validates a same-date gap between two metrics of one organization as a point multi-metric
+     * query. The legacy risk-rate substring trigger is kept as a fallback so every question that
+     * reached validation before still reaches it; slot evidence extends the family to any metric
+     * pair.
+     */
+    private void validateMetricPairGapQuery(String queryText, BankRequestContract requirements,
+            BankIntentResult evidence) {
+        boolean gapSignal = containsAny(queryText, "高多少", "低多少", "相差", "差多少", "多多少", "少多少", "差距");
+        if (!gapSignal) {
+            return;
+        }
+        boolean legacyRiskPair = queryText.contains("逾期贷款率") && queryText.contains("不良贷款率");
+        List<String> pair = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        if (!legacyRiskPair && !(evidence.getOrganizations().size() == 1 && pair.size() == 2)) {
+            return;
+        }
+        if (!legacyRiskPair && pair.size() != 2) {
+            return;
+        }
+        String errorCode =
+                new LinkedHashSet<>(pair).equals(new LinkedHashSet<>(List.of("ZB013", "ZB017")))
+                        || legacyRiskPair ? "risk_rate_pair_mismatch" : "metric_pair_gap_mismatch";
+        List<String> expected =
+                legacyRiskPair && pair.size() != 2 ? List.of("ZB013", "ZB017") : pair;
+        validateQueryFamily(errorCode, requirements, BankIntentType.POINT_QUERY, expected, Set.of(),
+                true);
+    }
+
+    private Set<String> evidenceMetricCodes(BankIntentResult evidence) {
+        return evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     }
 
     /**
@@ -438,24 +590,23 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
      */
     private void validateSelectedOrganizationRanking(String queryText,
             BankRequestContract requirements) {
-        if (queryText == null || requirements == null
-                || !containsAny(queryText, "谁", "哪家", "哪个")
+        if (queryText == null || requirements == null || !containsAny(queryText, "谁", "哪家", "哪个")
                 || !containsAny(queryText, "最多", "最少", "最高", "最低", "最大", "最小")
                 || queryText.contains("全省均值")) {
             return;
         }
-        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
-                LocalDate.now());
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         if (evidence.getOrganizations().size() < 2 || evidence.getMetrics().size() != 1) {
             return;
         }
-        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
-                .map(BankIntentResult.OrganizationSlot::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedOrganizations =
+                evidence.getOrganizations().stream().map(BankIntentResult.OrganizationSlot::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
-        Set<String> expectedMetrics = evidence.getMetrics().stream()
-                .map(BankIntentResult.MetricCandidate::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedMetrics =
+                evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
         if (requirements.getIntent() == BankIntentType.RANKING
                 && actualOrganizations.equals(expectedOrganizations)
@@ -482,27 +633,26 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                                 && !queryText.contains("占比") && !queryText.contains("比重"))) {
             return;
         }
-        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
-                LocalDate.now());
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         if (evidence.getOrganizations().size() != 2 || evidence.getMetrics().size() != 1) {
             return;
         }
-        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
-                .map(BankIntentResult.OrganizationSlot::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedOrganizations =
+                evidence.getOrganizations().stream().map(BankIntentResult.OrganizationSlot::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
-        Set<String> expectedMetrics = evidence.getMetrics().stream()
-                .map(BankIntentResult.MetricCandidate::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedMetrics =
+                evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
-        boolean answerFactsOk = requirements.getAnswerFactTypes().contains(
-                BankRequestContract.AnswerFactType.VALUE)
-                && requirements.getAnswerFactTypes().contains(
-                        BankRequestContract.AnswerFactType.GAP_VALUE);
+        boolean answerFactsOk =
+                requirements.getAnswerFactTypes().contains(BankRequestContract.AnswerFactType.VALUE)
+                        && requirements.getAnswerFactTypes()
+                                .contains(BankRequestContract.AnswerFactType.GAP_VALUE);
         if (requirements.getIntent() == BankIntentType.COMPARISON
                 && actualOrganizations.equals(expectedOrganizations)
-                && actualMetrics.equals(expectedMetrics)
-                && answerFactsOk) {
+                && actualMetrics.equals(expectedMetrics) && answerFactsOk) {
             return;
         }
         throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
@@ -518,28 +668,44 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     /** Ensures the daily count contract reaches the compiler as an executable aggregation plan. */
     private void validateDaysAboveProvinceAverage(String queryText,
             BankRequestContract requirements) {
-        if (queryText == null || requirements == null || !queryText.contains("全省均值")
-                || !queryText.contains("有多少天")) {
+        if (!isDailyProvinceAverageCountQuestion(queryText)) {
             return;
         }
-        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
-                LocalDate.now());
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         if (evidence.getOrganizations().size() != 1 || evidence.getMetrics().size() != 1) {
             return;
         }
-        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
-                .map(BankIntentResult.OrganizationSlot::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
-        Set<String> expectedMetrics = evidence.getMetrics().stream()
-                .map(BankIntentResult.MetricCandidate::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
-        boolean benchmarkPresent = requirements.getFilters().stream().anyMatch(filter ->
-                "benchmark".equals(filter.getField()) && "COMPARE".equals(filter.getOperator())
+        Set<String> expectedOrganizations =
+                evidence.getOrganizations().stream().map(BankIntentResult.OrganizationSlot::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualOrganizations =
+                new LinkedHashSet<>(safeList(requirements.getOrganizationCodes()));
+        Set<String> expectedMetrics =
+                evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        boolean metricDirectionPresent = filters.stream().anyMatch(filter -> filter != null
+                && "metric_value".equals(filter.getField())
+                && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
+                        || "LT".equals(filter.getOperator()) || "LTE".equals(filter.getOperator()))
+                && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        if (metricDirectionPresent) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "days_above_province_average_metric_filter_forbidden: the daily count query "
+                            + "family encodes the high direction in its calculation; "
+                            + "requirements.filters must contain only benchmark/COMPARE/"
+                            + "PROVINCE_AVERAGE. Remove the metric_value direction filter and "
+                            + "regenerate the complete requirements JSON.");
+        }
+        boolean benchmarkPresent = filters.stream()
+                .anyMatch(filter -> filter != null && "benchmark".equals(filter.getField())
+                        && "COMPARE".equals(filter.getOperator())
                         && "PROVINCE_AVERAGE".equals(filter.getValue()));
-        boolean countRequested = requirements.getAnswerFactTypes().contains(
-                BankRequestContract.AnswerFactType.COUNT);
+        boolean countRequested = safeList(requirements.getAnswerFactTypes())
+                .contains(BankRequestContract.AnswerFactType.COUNT);
         if (requirements.getIntent() == BankIntentType.AGGREGATION
                 && actualOrganizations.equals(expectedOrganizations)
                 && actualMetrics.equals(expectedMetrics) && benchmarkPresent && countRequested) {
@@ -554,6 +720,233 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", metrics=" + actualMetrics + ", benchmarkPresent=" + benchmarkPresent
                         + ", answerFactTypes=" + requirements.getAnswerFactTypes()
                         + ". Regenerate the complete requirements JSON for the daily fact table.");
+    }
+
+    private boolean isDailyProvinceAverageCountQuestion(String queryText) {
+        if (queryText == null || !containsAny(queryText, "全省均值", "全省平均", "平均水平")
+                || !containsAny(queryText, "多少天", "几天", "天数", "多少个交易日")
+                || !containsAny(queryText, "高于", "超过", "大于")
+                || containsAny(queryText, "低于", "小于", "排名", "第几", "趋势", "走势", "逐月", "逐季", "逐日",
+                        "环比", "同比", "较年初", "较上季", "较上月", "较同期", "增幅", "增量", "变动", "变化")) {
+            return false;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        return evidence.getOrganizations().size() == 1 && evidence.getMetrics().size() == 1
+                && evidence.getTime() != null && !evidence.getTime().isAmbiguous();
+    }
+
+    private void validateMonthAndYearComparison(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || !containsAny(queryText, "环比", "较上月")
+                || !containsAny(queryText, "同比", "较去年同期")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getMetrics().size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        List<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode).toList();
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.CHANGE
+                && expectedOrganizations.equals(safeList(requirements.getOrganizationCodes()))
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && actualTime != null
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY
+                && actualTime.getBaselineStartDate() == null
+                && actualTime.getBaselineEndDate() == null;
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "mom_and_yoy_requirements_mismatch: a fully specified same-date month-and-year "
+                        + "comparison requires action=EXECUTE, intent=CHANGE, exactly one recognized "
+                        + "organization and metric, comparison=MOM_AND_YOY, and null baseline dates; "
+                        + "expected organizations=" + expectedOrganizations + ", metrics="
+                        + expectedMetrics + ", model action=" + requirements.getAction()
+                        + ", intent=" + requirements.getIntent() + ", organizations="
+                        + safeList(requirements.getOrganizationCodes()) + ", metrics="
+                        + safeList(requirements.getMetricCodes()) + ", time=" + actualTime
+                        + ". Regenerate the complete requirements JSON; the compiler derives both "
+                        + "comparison baselines from the current date.");
+    }
+
+    private void validateExplicitProvinceBottomRanking(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null
+                || !containsAny(queryText, "全省", "全省内", "全省范围", "所有农商行", "全部农商行", "各家机构", "全体机构",
+                        "13家", "十三家")
+                || !containsAny(queryText, "最后", "倒数", "排名后", "排后")
+                || !containsAny(queryText, "哪家", "哪一", "哪个", "谁")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        BankIntentResult.FilterSlot expectedBottomRank = evidence.getFilters().stream()
+                .filter(filter -> "rank_from_bottom".equals(filter.getField())
+                        && "LTE".equals(filter.getOperator()) && filter.getValue() != null)
+                .findFirst().orElse(null);
+        // A named organization is a point-in-population rank, not a province-wide institution
+        // selection. Leave that contract to the existing selected-organization ranking path.
+        if (!evidence.getOrganizations().isEmpty() || expectedMetrics.size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()
+                || expectedBottomRank == null) {
+            return;
+        }
+        String expectedLimit = expectedBottomRank.getValue();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.RANKING
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && safeList(requirements.getOrganizationCodes()).isEmpty() && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && expectedLimit.equals(String.valueOf(requirements.getRequiredLimit()))
+                && filters.stream()
+                        .anyMatch(filter -> filter != null
+                                && "rank_from_bottom".equals(filter.getField())
+                                && "LTE".equals(filter.getOperator())
+                                && expectedLimit.equals(filter.getValue()));
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "explicit_province_bottom_ranking_mismatch: a fully specified province bottom-rank "
+                        + "selection requires action=EXECUTE, intent=RANKING, organizationCodes=[], "
+                        + "one recognized metric, the explicit date, rank_from_bottom/LTE/"
+                        + expectedLimit + ", and requiredLimit=" + expectedLimit + "; model action="
+                        + requirements.getAction() + ", intent=" + requirements.getIntent()
+                        + ", metrics=" + safeList(requirements.getMetricCodes())
+                        + ", organizations=" + safeList(requirements.getOrganizationCodes())
+                        + ", time=" + actualTime + ", filters=" + filters + ", requiredLimit="
+                        + requirements.getRequiredLimit()
+                        + ". Regenerate the complete requirements JSON; do not ask for a specific "
+                        + "organization when the question asks which institution in the province.");
+    }
+
+    /**
+     * Validates a complete whole-population "which institution is highest/lowest" question.
+     *
+     * <p>
+     * The recognizer supplies only the slots that make the contract unambiguous. In particular, an
+     * empty organization list is intentional here: "which bank" selects from the whole catalog,
+     * whereas a named organization belongs to the selected-organization ranking path above.
+     */
+    private void validateProvinceWideInstitutionRanking(String queryText,
+            BankRequestContract requirements) {
+        if (!isProvinceWideInstitutionRankingQuestion(queryText)) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (!evidence.getOrganizations().isEmpty() || evidence.getMetrics().size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        BankIntentResult.FilterSlot expectedRank = evidence.getFilters().stream()
+                .filter(filter -> ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField()))
+                        && "LTE".equals(filter.getOperator()) && filter.getValue() != null)
+                .findFirst().orElse(null);
+        if (expectedRank == null) {
+            return;
+        }
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        String expectedLimit = expectedRank.getValue();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        List<BankQueryPlan.Filter> rankFilters = filters.stream()
+                .filter(filter -> filter != null && ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField())))
+                .toList();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.RANKING
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && safeList(requirements.getOrganizationCodes()).isEmpty() && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && expectedLimit.equals(String.valueOf(requirements.getRequiredLimit()))
+                && rankFilters.size() == 1
+                && expectedRank.getField().equals(rankFilters.get(0).getField())
+                && "LTE".equals(rankFilters.get(0).getOperator())
+                && expectedLimit.equals(rankFilters.get(0).getValue());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "province_wide_institution_ranking_mismatch: a whole-population which-bank ranking "
+                        + "requires action=EXECUTE, intent=RANKING, organizationCodes=[], one "
+                        + "recognized metric, the explicit date, exactly one "
+                        + expectedRank.getField() + "/LTE/" + expectedLimit
+                        + " filter, and requiredLimit=" + expectedLimit + "; model action="
+                        + requirements.getAction() + ", intent=" + requirements.getIntent()
+                        + ", metrics=" + safeList(requirements.getMetricCodes())
+                        + ", organizations=" + safeList(requirements.getOrganizationCodes())
+                        + ", time=" + actualTime + ", filters=" + filters + ", requiredLimit="
+                        + requirements.getRequiredLimit()
+                        + ". Regenerate the complete requirements JSON; do not select an arbitrary "
+                        + "organization for a question asking which bank in the population.");
+    }
+
+    private boolean isProvinceWideInstitutionRankingQuestion(String queryText) {
+        return queryText != null && containsAny(queryText, "哪家", "哪一", "哪个", "谁")
+                && containsAny(queryText, "农商行", "银行", "机构") && containsAny(queryText, "排名", "排第",
+                        "第一", "最后", "倒数", "最高", "最低", "最多", "最少", "最大", "最小")
+                && !queryText.contains("全省均值");
+    }
+
+    /** Validates an equality/gap composition contract without changing model output. */
+    private void validateStructureEquality(String errorCode, BankRequestContract requirements,
+            BankIntentResult evidence, List<String> expectedMetrics) {
+        List<String> actualMetrics = safeList(requirements.getMetricCodes());
+        List<String> actualOrganizations = safeList(requirements.getOrganizationCodes());
+        List<BankQueryPlan.DerivedMetric> derivedMetrics =
+                safeList(requirements.getDerivedMetrics());
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankRequestContract.AnswerFactType> answerFacts =
+                safeList(requirements.getAnswerFactTypes());
+        List<BankRequestContract.AnswerFactType> expectedFacts =
+                List.of(BankRequestContract.AnswerFactType.VALUE,
+                        BankRequestContract.AnswerFactType.GAP_VALUE);
+        String expectedOrganization = evidence.getOrganizations().get(0).getCode();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.POINT_QUERY
+                && expectedMetrics.equals(actualMetrics)
+                && actualOrganizations.equals(List.of(expectedOrganization))
+                && derivedMetrics.isEmpty() && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && actualTime.getGranularity() == BankQueryPlan.TimeGranularity.DAY
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.NONE
+                && safeList(requirements.getFilters()).isEmpty()
+                && expectedFacts.equals(answerFacts);
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                errorCode + ": a same-date composition equality/gap question requires "
+                        + "action=EXECUTE, intent=POINT_QUERY, metricCodes=" + expectedMetrics
+                        + ", no derived metric or filter, one recognized organization, a DAY/NONE "
+                        + "time, and answerFactTypes=[VALUE,GAP_VALUE]; model action="
+                        + requirements.getAction() + ", intent=" + requirements.getIntent()
+                        + ", metrics=" + actualMetrics + ", organizations=" + actualOrganizations
+                        + ", time=" + actualTime + ", answerFactTypes=" + answerFacts
+                        + ". Regenerate the complete requirements JSON; do not use COMPARISON or "
+                        + "RATIO.");
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? List.of() : values;
     }
 
     private boolean isStandalonePointRatioContext(String queryText,
@@ -571,8 +964,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (!isGenericPointRatioQuestion(queryText)) {
             return;
         }
-        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
-                LocalDate.now());
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         if (evidence.getMetrics().size() != 2 || evidence.getOrganizations().size() != 1
                 || evidence.getTime() == null || evidence.getTime().getStartDate() == null
                 || evidence.getTime().getEndDate() == null) {
@@ -587,8 +980,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private boolean isGenericPointRatioQuestion(String queryText) {
         return queryText != null && queryText.contains("占")
                 && containsAny(queryText, "比重", "比例", "占比", "比率")
-                && !containsAny(queryText, "分别", "各自", "构成", "结构", "排名", "排行", "趋势", "走势",
-                        "同比", "环比", "较年初", "全省均值", "对比", "比较");
+                && !containsAny(queryText, "分别", "各自", "构成", "结构", "排名", "排行", "趋势", "走势", "同比",
+                        "环比", "较年初", "全省均值", "对比", "比较");
     }
 
     private void validateQueryFamily(String errorCode, BankRequestContract requirements,
@@ -604,10 +997,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         Set<String> unexpected = difference(actualMetrics, expectedMetrics);
         Set<String> derivedMissing = difference(expectedDerived, actualDerived);
         Set<String> derivedUnexpected = difference(actualDerived, expectedDerived);
-        boolean metricOrderMatches = allowEquivalentMetricOrder
-                || expectedMetricOrder.equals(actualMetricOrder);
-        if (requirements.getIntent() == expectedIntent && metricOrderMatches
-                && missing.isEmpty() && unexpected.isEmpty() && derivedMissing.isEmpty()
+        boolean metricOrderMatches =
+                allowEquivalentMetricOrder || expectedMetricOrder.equals(actualMetricOrder);
+        if (requirements.getIntent() == expectedIntent && metricOrderMatches && missing.isEmpty()
+                && unexpected.isEmpty() && derivedMissing.isEmpty()
                 && derivedUnexpected.isEmpty()) {
             return;
         }
@@ -649,9 +1042,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             BankRequestContract requirements) {
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
-        Set<String> expectedMetrics = evidence.getMetrics().stream()
-                .map(BankIntentResult.MetricCandidate::getCode)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedMetrics =
+                evidence.getMetrics().stream().map(BankIntentResult.MetricCandidate::getCode)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
         boolean supportedIntent = requirements.getIntent() == BankIntentType.AGGREGATION
                 || requirements.getIntent() == BankIntentType.COMPARISON
@@ -685,9 +1078,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private boolean isEndpointChangeDirectionQuery(String queryText) {
         return queryText.contains("从") && queryText.contains("到")
-                && containsAny(queryText, "变动方向", "变化方向")
-                && !containsAny(queryText, "逐日", "逐月", "逐季", "逐季度", "各日", "各月", "各季度",
-                        "趋势", "走势", "序列");
+                && containsAny(queryText, "变动方向", "变化方向") && !containsAny(queryText, "逐日", "逐月",
+                        "逐季", "逐季度", "各日", "各月", "各季度", "趋势", "走势", "序列");
     }
 
     private String clarificationRecheckMessage(String queryText) {
@@ -733,11 +1125,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankQueryPlanParseException lastError = firstError;
         for (int repair = 1; repair <= 2; repair++) {
             try {
-                String repaired = prefixCache.generate(model, config,
-                        BankPlanLlmPrefixCache.Stage.PLAN,
-                        BankPlanPromptComposer.buildPlanRepairUserContent(llmReq.getQueryText(),
-                                requirementsJson, previous, lastError.getMessage()),
-                        false);
+                String repaired =
+                        prefixCache.generate(model, config, BankPlanLlmPrefixCache.Stage.PLAN,
+                                BankPlanPromptComposer.buildPlanRepairUserContent(
+                                        llmReq.getQueryText(), requirementsJson, previous,
+                                        lastError.getMessage()),
+                                false);
                 previous = repaired;
                 candidates.add(candidateRanker.evaluate(
                         parseAndValidatePlan(llmReq.getQueryText(), repaired, planHints),
@@ -778,9 +1171,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         BankQueryPlan.AggregationResultMode actual =
                 plan.getOutput() == null ? null : plan.getOutput().getAggregationMode();
-        if (containsAny(queryText, "加起来", "合计", "总和")
-                && plan.getOrganizations() != null && plan.getOrganizations().size() > 1
-                && (plan.getDimensions() == null
+        if (containsAny(queryText, "加起来", "合计", "总和") && plan.getOrganizations() != null
+                && plan.getOrganizations().size() > 1 && (plan.getDimensions() == null
                         || !plan.getDimensions().contains("bank_organization"))) {
             throw new BankQueryPlanParseException(
                     BankQueryPlanParseException.Reason.VALIDATION_FAILED,

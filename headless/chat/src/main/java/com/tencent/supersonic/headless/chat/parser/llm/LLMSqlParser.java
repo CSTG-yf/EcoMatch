@@ -89,6 +89,14 @@ public class LLMSqlParser implements SemanticParser {
     static List<String> compilationCorrectionHints(BankPlanCompilationException.Reason reason,
             String previousPlanJson) {
         if (reason == BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION
+                && isMonthAndYearComparisonPlan(previousPlanJson)) {
+            return List.of("当前计划是同一日期的环比+同比比较：保留 intent=CHANGE、恰好一个指标、"
+                    + "恰好一个机构和当前日期；令 time.comparison=MOM_AND_YOY、"
+                    + "baselineStartDate=null、baselineEndDate=null、dimensions=[]、filters=[]、"
+                    + "calculation.type=CHANGE、orderBy=[]、limit=null 后，重新输出完整 BankQueryPlan。"
+                    + "两个基期由编译器确定，不要自行填写。");
+        }
+        if (reason == BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION
                 && isDirectTimeComparisonPlan(previousPlanJson)) {
             return List.of("当前计划已声明 time.comparison 非 NONE，却填写了 "
                     + "calculation.type=DIRECT：只将 calculation.type 改为 CHANGE；"
@@ -134,6 +142,19 @@ public class LLMSqlParser implements SemanticParser {
                     && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE
                     && plan.getCalculation().getType()
                             == BankQueryPlan.CalculationType.DIRECT;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isMonthAndYearComparisonPlan(String previousPlanJson) {
+        if (previousPlanJson == null || previousPlanJson.isBlank()) {
+            return false;
+        }
+        try {
+            BankQueryPlan plan = JsonUtil.toObject(previousPlanJson, BankQueryPlan.class);
+            return plan != null && plan.getTime() != null
+                    && plan.getTime().getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY;
         } catch (RuntimeException ignored) {
             return false;
         }

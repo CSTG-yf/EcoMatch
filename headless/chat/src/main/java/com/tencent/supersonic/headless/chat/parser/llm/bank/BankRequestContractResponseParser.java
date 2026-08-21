@@ -33,6 +33,10 @@ public class BankRequestContractResponseParser {
                         "model requirements response must contain one JSON object");
             }
             BankRequestContract contract = OBJECT_MAPPER.treeToValue(node, BankRequestContract.class);
+            // Recognizable province-average slots are canonicalized before validation; the
+            // repair loop shows the model cannot reliably produce the exact filter shape.
+            contract.setFilters(
+                    BankProvinceAverageFilterNormalizer.normalize(contract.getFilters()));
             List<String> errors = validate(contract, admission);
             if (!errors.isEmpty()) {
                 throw failure(BankQueryPlanParseException.Reason.VALIDATION_FAILED,

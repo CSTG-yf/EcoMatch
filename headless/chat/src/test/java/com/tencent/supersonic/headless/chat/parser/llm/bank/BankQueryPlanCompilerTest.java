@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -311,6 +312,23 @@ class BankQueryPlanCompilerTest {
         assertEquals(List.of("metric_value_0", "metric_value_1"),
                 compiled.getResultContract().getMetrics().stream()
                         .map(BankResultProjector.MetricBinding::getSemanticColumn).toList());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
+    void shouldSkipAdvisoryRankFiltersOnRankedChangeCompilation() {
+        BankQueryPlan plan = changePlan();
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
+        plan.getOutput().setColumns(List.of("ZB001", "ZB002"));
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("rank").operator("LTE").value("3").values(new ArrayList<>()).build())));
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, multiMetricChangeHints(), schema());
+
+        assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertFalse(compiled.getS2sql().toLowerCase().contains("rank"));
         assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
                 compiled.getResultContract().getType());
     }

@@ -23,6 +23,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -100,6 +101,7 @@ class NL2SQLParserTerminalBankPlanTest {
         assertEquals(ParseResp.ParseState.FAILED, parseContext.getResponse().getState());
         // internal prefix stripped, only the user-facing message remains
         assertEquals(BANK_USER_MESSAGE, parseContext.getResponse().getErrorMsg());
+        assertTrue(parseContext.getResponse().isTerminalError());
     }
 
     @Test

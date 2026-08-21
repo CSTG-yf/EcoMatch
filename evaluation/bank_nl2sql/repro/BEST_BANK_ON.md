@@ -10,8 +10,8 @@ Fact v3 官方运行时评测，历史局部实验不构成当前成绩。
 |------|-----|------|
 | `s2.parser.bank.constrained-plan.enable` | **true** | 银行数据集走 `BANK_CONSTRAINED_PLAN` |
 | `s2.parser.bank.max-candidates` | **1** | 默认单候选，便于稳定复现 |
-| `s2.parser.bank.plan.deterministic-short-circuit.enable` | **false** | 关闭预模型规则短路 |
-| `s2.parser.bank.plan.soft-fallback.enable` | **true** | 模型候选全拒后使用白名单规则兜底 |
+| `s2.parser.bank.plan.deterministic-short-circuit.enable` | **false** | 已停用：model-led 重构后无代码消费者，仅为兼容保留声明 |
+| `s2.parser.bank.plan.soft-fallback.enable` | **true** | 已停用：同上，规则软回退路径已随 model-led 重构移除 |
 | `s2.parser.bank.plan.thinking.enable` | **false** | plan 路径默认不思考 |
 | Agent `BANK_CONSTRAINED_PLAN` | **enable** | 对目标 Agent 开启 |
 | Agent `EXECUTION_SQL_CORRECTOR` | **enable**（建议） | 执行失败时一次受控修复 |
@@ -23,6 +23,13 @@ JVM 覆盖应与 H2 系统参数保持一致：
 -Ds2.parser.bank.plan.soft-fallback.enable=true
 -Ds2.parser.bank.plan.thinking.enable=false
 ```
+
+## 停用说明（2026-08-21 核对）
+
+`deterministic-short-circuit` 与 `soft-fallback` 两个开关自 model-led 重构（464bcd7 起）后
+在代码中不再有任何消费者：`ParserConfig` 仅保留参数声明，写入 H2 不会改变行为。历史上
+hard20 消融中「关闭 soft-fallback 掉 0.5」的证据对应已删除的旧路径，不能再用于解释当前
+系统。保留声明的目的是不动启动回执中的 systemParameter 清单与哈希。
 
 ## 一键对齐 H2 参数
 
