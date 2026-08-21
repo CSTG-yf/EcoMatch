@@ -332,6 +332,78 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void wholePopulationTopRankingRejectsAnArbitraryOrganization() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "POINT_QUERY", true),
+                provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "RANKING", false),
+                provinceWideRankingPlanJson("ZB001", "2025-12-31", "DESC"));
+
+        LLMReq request = request();
+        request.setQueryText("2025年12月31日，13家农商行中谁的存款规模排第一？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
+        assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
+                .contains("province_wide_institution_ranking_mismatch"));
+    }
+
+    @Test
+    void wholePopulationLowestRankingKeepsTheOrganizationScopeEmpty() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", true),
+                provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", false),
+                provinceWideRankingPlanJson("ZB013", "2026-03-31", "ASC"));
+
+        LLMReq request = request();
+        request.setQueryText("2026年3月末，哪家农商行的不良贷款率最低？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
+        assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
+                .contains("province_wide_institution_ranking_mismatch"));
+    }
+
+    @Test
+    void depositStructureEqualityRepairsComparisonIntoPointQuery() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                depositEqualityRequirementsJson("COMPARISON"),
+                depositEqualityRequirementsJson("POINT_QUERY"), depositEqualityPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText(
+                "2025年12月末，江苏省C市农商行的对公存款加个人存款是不是等于各项存款？差额多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        assertEquals(List.of("ZB003", "ZB004", "ZB001"),
+                response.getBankRequestContract().getMetricCodes());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("deposit_structure_equality_mismatch"));
+    }
+
+    @Test
     void daysAboveProvinceAverageRejectsASeparateMetricDirectionFilter() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(daysAboveRequirementsWithDirectionFilterJson(),
@@ -1029,6 +1101,50 @@ class BankPlanGenStrategyTest {
                 "calculation":{"type":"DIRECT","baseline":null},
                 "orderBy":[{"field":"ZB011","direction":"DESC"}],"limit":1,
                 "output":{"columns":["bank_organization","ZB011"],"orderSensitive":true}}
+                """;
+    }
+
+    private String provinceWideRankingRequirementsJson(String metric, String date, String intent,
+            boolean namedOrganization) {
+        String organizations = namedOrganization ? "[\"ORG004\"]" : "[]";
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"%s",
+                "metricCodes":["%s"],"derivedMetrics":[],"organizationCodes":%s,
+                "time":{"startDate":"%s","endDate":"%s","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"1","values":[]}],
+                "requiredLimit":1,"answerFactTypes":["VALUE","RANK"],"clarification":null}
+                """.formatted(intent, metric, organizations, date, date);
+    }
+
+    private String provinceWideRankingPlanJson(String metric, String date, String direction) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metrics":[{"bizName":"%s","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[],
+                "time":{"startDate":"%s","endDate":"%s","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"1","values":[]}],
+                "calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"%s","direction":"%s"}],"limit":1,
+                "output":{"columns":["bank_organization","%s"],"orderSensitive":true}}
+                """.formatted(metric, date, date, metric, direction, metric);
+    }
+
+    private String depositEqualityRequirementsJson(String intent) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"%s",
+                "metricCodes":["ZB003","ZB004","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG003"],
+                "time":{"startDate":"2025-12-31","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","GAP_VALUE"],"clarification":null}
+                """.formatted(intent);
+    }
+
+    private String depositEqualityPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB003","aggregation":"DEFAULT","alias":null},{"bizName":"ZB004","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG003","bizName":null}],
+                "time":{"startDate":"2025-12-31","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB003","ZB004","ZB001"],"orderSensitive":true}}
                 """;
     }
 

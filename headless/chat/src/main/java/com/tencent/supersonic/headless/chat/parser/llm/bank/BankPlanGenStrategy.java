@@ -385,7 +385,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // complete requirements contract and executable plan.
         validateMonthAndYearComparison(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
+        validateProvinceWideInstitutionRanking(queryText, requirements);
         validateDaysAboveProvinceAverage(queryText, requirements);
+        validateDepositStructureEquality(queryText, requirements);
         // Validation only: the model still supplies the identifiers, order and intent. The
         // catalog recognizer is used to return a repairable error when a complete two-operand
         // point ratio is incorrectly clarified or classified as another query family.
@@ -689,6 +691,130 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + requirements.getRequiredLimit()
                         + ". Regenerate the complete requirements JSON; do not ask for a specific "
                         + "organization when the question asks which institution in the province.");
+    }
+
+    /**
+     * Validates a complete whole-population "which institution is highest/lowest" question.
+     *
+     * <p>The recognizer supplies only the slots that make the contract unambiguous. In particular,
+     * an empty organization list is intentional here: "which bank" selects from the whole catalog,
+     * whereas a named organization belongs to the selected-organization ranking path above.
+     */
+    private void validateProvinceWideInstitutionRanking(String queryText,
+            BankRequestContract requirements) {
+        if (!isProvinceWideInstitutionRankingQuestion(queryText)) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (!evidence.getOrganizations().isEmpty() || evidence.getMetrics().size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        BankIntentResult.FilterSlot expectedRank = evidence.getFilters().stream()
+                .filter(filter -> ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField()))
+                        && "LTE".equals(filter.getOperator()) && filter.getValue() != null)
+                .findFirst().orElse(null);
+        if (expectedRank == null) {
+            return;
+        }
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        String expectedLimit = expectedRank.getValue();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        List<BankQueryPlan.Filter> rankFilters = filters.stream()
+                .filter(filter -> filter != null && ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField())))
+                .toList();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.RANKING
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && safeList(requirements.getOrganizationCodes()).isEmpty()
+                && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && expectedLimit.equals(String.valueOf(requirements.getRequiredLimit()))
+                && rankFilters.size() == 1
+                && expectedRank.getField().equals(rankFilters.get(0).getField())
+                && "LTE".equals(rankFilters.get(0).getOperator())
+                && expectedLimit.equals(rankFilters.get(0).getValue());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "province_wide_institution_ranking_mismatch: a whole-population which-bank ranking "
+                        + "requires action=EXECUTE, intent=RANKING, organizationCodes=[], one "
+                        + "recognized metric, the explicit date, exactly one " + expectedRank.getField()
+                        + "/LTE/" + expectedLimit + " filter, and requiredLimit=" + expectedLimit
+                        + "; model action=" + requirements.getAction() + ", intent="
+                        + requirements.getIntent() + ", metrics=" + safeList(requirements.getMetricCodes())
+                        + ", organizations=" + safeList(requirements.getOrganizationCodes()) + ", time="
+                        + actualTime + ", filters=" + filters + ", requiredLimit="
+                        + requirements.getRequiredLimit()
+                        + ". Regenerate the complete requirements JSON; do not select an arbitrary "
+                        + "organization for a question asking which bank in the population.");
+    }
+
+    private boolean isProvinceWideInstitutionRankingQuestion(String queryText) {
+        return queryText != null && containsAny(queryText, "哪家", "哪一", "哪个", "谁")
+                && containsAny(queryText, "农商行", "银行", "机构")
+                && containsAny(queryText, "排名", "排第", "第一", "最后", "倒数", "最高", "最低",
+                        "最多", "最少", "最大", "最小")
+                && !queryText.contains("全省均值");
+    }
+
+    /** Validates equality/gap questions for the deposit structure as a point multi-metric query. */
+    private void validateDepositStructureEquality(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || !queryText.contains("存款") || !queryText.contains("对公")
+                || !queryText.contains("个人")
+                || !containsAny(queryText, "是不是等于", "是否等于", "加起来", "合起来", "合计", "总和",
+                        "差额", "差多少")) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getTime() == null
+                || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        List<String> expectedMetrics = List.of("ZB003", "ZB004", "ZB001");
+        List<String> actualMetrics = safeList(requirements.getMetricCodes());
+        List<String> actualOrganizations = safeList(requirements.getOrganizationCodes());
+        List<BankQueryPlan.DerivedMetric> derivedMetrics = safeList(requirements.getDerivedMetrics());
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankRequestContract.AnswerFactType> answerFacts = safeList(
+                requirements.getAnswerFactTypes());
+        List<BankRequestContract.AnswerFactType> expectedFacts = List.of(
+                BankRequestContract.AnswerFactType.VALUE,
+                BankRequestContract.AnswerFactType.GAP_VALUE);
+        String expectedOrganization = evidence.getOrganizations().get(0).getCode();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.POINT_QUERY
+                && expectedMetrics.equals(actualMetrics)
+                && actualOrganizations.equals(List.of(expectedOrganization))
+                && derivedMetrics.isEmpty()
+                && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && actualTime.getGranularity() == BankQueryPlan.TimeGranularity.DAY
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.NONE
+                && safeList(requirements.getFilters()).isEmpty()
+                && expectedFacts.equals(answerFacts);
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "deposit_structure_equality_mismatch: a same-date deposit equality/gap question "
+                        + "requires action=EXECUTE, intent=POINT_QUERY, metricCodes=" + expectedMetrics
+                        + ", no derived metric or filter, one recognized organization, a DAY/NONE time,"
+                        + " and answerFactTypes=[VALUE,GAP_VALUE]; model action="
+                        + requirements.getAction() + ", intent=" + requirements.getIntent()
+                        + ", metrics=" + actualMetrics + ", organizations=" + actualOrganizations
+                        + ", time=" + actualTime + ", answerFactTypes=" + answerFacts
+                        + ". Regenerate the complete requirements JSON; do not use COMPARISON or RATIO.");
     }
 
     private <T> List<T> safeList(List<T> values) {

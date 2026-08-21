@@ -110,9 +110,15 @@ public final class BankPlanPromptComposer {
             DERIVED_ZB002_DIV_ZB001，time 使用该日且 granularity=DAY，answerFactTypes=["RATIO_VALUE"]。
             这类问题禁止要求用户再次提供银行、指标或时间，也禁止返回通用澄清文案。
             “某机构某日的存款中，对公和个人分别占比多少”是存款结构双分项查询：必须
-            action=EXECUTE、intent=POINT_QUERY，metricCodes 严格按 ["ZB003","ZB004","ZB001"] 填写，
-            derivedMetrics=[]，answerFactTypes=["VALUE","RATIO_VALUE"]。ZB001 只作为共同分母；结果必须
-            分别返回 ZB003、ZB004，不得缩成单个 ZB003/ZB001 比率。
+              action=EXECUTE、intent=POINT_QUERY，metricCodes 严格按 ["ZB003","ZB004","ZB001"] 填写，
+              derivedMetrics=[]，answerFactTypes=["VALUE","RATIO_VALUE"]。ZB001 只作为共同分母；结果必须
+              分别返回 ZB003、ZB004，不得缩成单个 ZB003/ZB001 比率。
+            “某机构某日的对公存款加个人存款是否等于各项存款/差额多少”是存款结构等式核对，
+              不是 COMPARISON 或 RATIO：必须 action=EXECUTE、intent=POINT_QUERY，
+              metricCodes 严格按 ["ZB003","ZB004","ZB001"]，derivedMetrics=[]，
+              answerFactTypes=["VALUE","GAP_VALUE"]，保留同一机构、同一 DAY 日期和 comparison=NONE；
+              output.columns 必须包含 ["bank_organization","ZB003","ZB004","ZB001"]，由结果事实校验器
+              判断两项分项之和与总额是否相等并计算差额。
             “某机构某日的人均利润/人均净利润”是目录派生指标：必须 action=EXECUTE、intent=RATIO，
             metricCodes=["ZB011","ZB018"]，derivedMetrics 逐字段填写目录中的
             DERIVED_ZB011_DIV_ZB018，answerFactTypes=["RATIO_VALUE"]；人均利润=净利润/员工人数，
@@ -197,6 +203,11 @@ public final class BankPlanPromptComposer {
               intent=RANKING、organizationCodes=[]、一个指标、明确日期，filters 使用
               rank_from_bottom/LTE/N，requiredLimit=N。题干询问“哪家”已经定义全省范围，不得要求用户
               先指定机构；若题干已经指定某一机构，则不是这个全省机构选择合同。
+            - “哪家农商行/机构的某指标最高、最低、最多、最少、排第一或排最后”同样是全体机构选择：
+              没有题干点名的机构时 organizationCodes 必须为 []，intent=RANKING，保留一个目录指标和
+              明确日期；第一/最高/最多/最大使用 filters 中唯一的 rank/LTE/1，最低/最少/最小/最后
+              使用唯一的 rank 或 rank_from_bottom/LTE/1（按题干的正向或倒数语义），requiredLimit=1。
+              不得把任意一家机构写入 organizationCodes；若题干点名机构，才使用局部排名合同。
             下面第二份是 action=CLARIFY 的完整格式：
             {
               "version":"1.0",
@@ -404,6 +415,13 @@ public final class BankPlanPromptComposer {
                operator=LTE、value="1"、values=[]，并令 limit=1；不得使用 GTE、EQ 或总机构数。
                若题干是“全省/全部机构中哪家排最后/倒数第N”，organizations 必须为 []，dimensions
                必须为 ["bank_organization"]；不得虚构一个目标机构，也不得把“哪家”当作缺槽位。
+               对“哪家农商行/机构最高、最低、最多、最少、排第一”也一样：organizations=[]，
+               dimensions=["bank_organization"]，只保留唯一 rank/LTE/1（不是机构过滤）；排序方向由
+               指标目录和编译器决定，模型不要手填物理字段或改写排名结果。
+            10b. “对公存款+个人存款是否等于各项存款/差额多少”是 POINT_QUERY 的三指标事实核对，
+                 metrics 按 [ZB003,ZB004,ZB001]、organizations 只含题干机构、DAY/NONE 时间、
+                 filters=[]、calculation.type=DIRECT，output.columns=["bank_organization","ZB003",
+                 "ZB004","ZB001"]；回答事实类型为 VALUE 和 GAP_VALUE，不能套 COMPARISON 或 RATIO。
             10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                聚合成一个值再比较。必须使用 intent=AGGREGATION、单一机构、单一指标、
                granularity=DAY、comparison=NONE，并保留 requirements_contract 中已声明的
