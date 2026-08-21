@@ -25,5 +25,5 @@ export default {
   'menu.chat': '问答对话',
   'menu.dashboard': '分析看板',
   'menu.exports': '导出中心',
-  'menu.agent': '助理管理',
+  'menu.agent': '问数配置',
 };

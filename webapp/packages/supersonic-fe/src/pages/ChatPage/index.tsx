@@ -47,6 +47,7 @@ const ChatPage = () => {
   return (
     <Chat
       initialAgentId={agentId ? +agentId : undefined}
+      defaultAgentName="银行问数"
       token={getToken() || ''}
       isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
       onSaveToDashboard={saveToDashboard}

@@ -1,4 +1,8 @@
 import { PlusOutlined } from '@ant-design/icons';
+
+// 银行问数专用系统：助理唯一（银行问数 SQL 基座），不开放新建/删除，仅保留配置编辑。
+// 多助理能力保留在代码与数据层（评测、Copilot 仍依赖），此处只做界面收口。
+const SINGLE_AGENT_MODE = true;
 import { Button, Popconfirm, Switch, Table } from 'antd';
 import moment from 'moment';
 import { useEffect, useState } from 'react';
@@ -103,17 +107,19 @@ const AgentsSection: React.FC<Props> = ({
             >
               编辑
             </a>
-            <Popconfirm
-              title="确定删除吗？"
-              onCancel={(e) => {
-                e?.stopPropagation();
-              }}
-              onConfirm={() => {
-                onDeleteAgent(agent.id!);
-              }}
-            >
-              <a>删除</a>
-            </Popconfirm>
+            {!SINGLE_AGENT_MODE && (
+              <Popconfirm
+                title="确定删除吗？"
+                onCancel={(e) => {
+                  e?.stopPropagation();
+                }}
+                onConfirm={() => {
+                  onDeleteAgent(agent.id!);
+                }}
+              >
+                <a>删除</a>
+              </Popconfirm>
+            )}
           </div>
         );
       },
@@ -124,15 +130,17 @@ const AgentsSection: React.FC<Props> = ({
     <div className={styles.agentsSection}>
       <div className={styles.content}>
         <div className={styles.searchBar}>
-          <Button
-            type="primary"
-            onClick={() => {
-              onCreatBtnClick?.();
-            }}
-          >
-            <PlusOutlined />
-            新建助理
-          </Button>
+          {!SINGLE_AGENT_MODE && (
+            <Button
+              type="primary"
+              onClick={() => {
+                onCreatBtnClick?.();
+              }}
+            >
+              <PlusOutlined />
+              新建助理
+            </Button>
+          )}
         </div>
         <Table columns={columns} dataSource={showAgents} />
       </div>

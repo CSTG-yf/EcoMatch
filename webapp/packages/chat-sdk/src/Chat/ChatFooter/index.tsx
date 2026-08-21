@@ -355,9 +355,11 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
             className={styles.composerInput}
             placeholder={
               currentAgent
-                ? `【${currentAgent.name}】将与您对话，点击${!isMobile ? '左侧' : ''}【智能助理】${
-                    !isMobile ? '列表' : ''
-                  }可切换`
+                ? agentList.length > 1
+                  ? `【${currentAgent.name}】将与您对话，点击${!isMobile ? '左侧' : ''}【智能助理】${
+                      !isMobile ? '列表' : ''
+                    }可切换`
+                  : `【${currentAgent.name}】将与您对话，请输入您的问题`
                 : '请输入您的问题'
             }
             value={inputMsg}

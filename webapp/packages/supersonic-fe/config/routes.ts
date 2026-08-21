@@ -43,6 +43,7 @@ const ROUTES = [
     path: '/agent',
     name: 'agent',
     component: './Agent',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.CHAT],
   },
   {
@@ -80,6 +81,7 @@ const ROUTES = [
     path: '/plugin',
     name: 'plugin',
     component: './ChatPlugin',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.CHAT],
   },
   {
@@ -87,12 +89,14 @@ const ROUTES = [
     name: 'metricEdit',
     hideInMenu: true,
     component: './SemanticModel/Metric/Edit',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
   },
   {
     path: '/model/',
     component: './SemanticModel/',
     name: 'semanticModel',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
     routes: [
       {
@@ -189,6 +193,7 @@ const ROUTES = [
         name: 'metricDetail',
         hideInMenu: true,
         component: './SemanticModel/Metric/Edit',
+        access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
         envEnableList: [ENV_KEY.SEMANTIC],
       },
     ],
@@ -197,12 +202,14 @@ const ROUTES = [
     path: '/governance',
     name: 'governance',
     component: './SemanticModel/Governance',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
   },
   {
     path: '/tag',
     name: 'tag',
     component: './SemanticModel/Insights',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
     hideInMenu: process.env.SHOW_TAG ? false : true,
     routes: [
@@ -237,12 +244,14 @@ const ROUTES = [
     path: '/database',
     name: 'database',
     component: './SemanticModel/components/Database/DatabaseTable',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
   },
   {
     path: '/llm',
     name: 'llm',
     component: './SemanticModel/components/LLM/LlmTable',
+    access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
     envEnableList: [ENV_KEY.SEMANTIC],
   },
   {
@@ -265,7 +274,7 @@ const ROUTES = [
   },
   {
     path: '/',
-    redirect: '/model',
+    redirect: '/chat',
   },
   {
     path: '/401',
