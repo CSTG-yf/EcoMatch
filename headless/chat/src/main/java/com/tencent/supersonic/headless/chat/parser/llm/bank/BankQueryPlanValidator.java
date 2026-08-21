@@ -336,13 +336,14 @@ public class BankQueryPlanValidator {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province-average direction requires the exact benchmark filter"));
             }
-            if (isRankFilter(filter) && (plan.getIntent() != BankIntentType.RANKING
+            if (isRankFilter(filter) && (!rankFilterIntentAllowed(plan)
                     || !"LTE".equals(filter.getOperator()) || StringUtils.isBlank(filter.getValue())
                     || !filter.getValue().matches("[1-9]\\d*")
                     || safe(filter.getValues()).findAny().isPresent())) {
                 errors.add(error("RANK_FILTER_CONTRACT_INVALID",
-                        "rank and rank_from_bottom filters require intent=RANKING, operator=LTE, "
-                                + "a positive integer value, and values=[]"));
+                        "rank and rank_from_bottom filters require intent=RANKING (or CHANGE "
+                                + "with a non-NONE comparison), operator=LTE, a positive "
+                                + "integer value, and values=[]"));
             }
             if ((provinceAverageBenchmark || provinceAverageDirection)
                     && safe(filter.getValues()).findAny().isPresent()) {
@@ -351,6 +352,11 @@ public class BankQueryPlanValidator {
             }
         }
         for (SemanticIntentHints.RequiredFilter required : hints.getRequiredFilters()) {
+            if (rankedChangeContract(plan) && isRankFieldName(required.field())) {
+                // Ranked-change results carry the full organization population; echoing the
+                // rank filter in the plan is optional metadata, not a compiled condition.
+                continue;
+            }
             boolean present = filters.stream()
                     .anyMatch(filter -> Objects.equals(required.field(), filter.getField())
                             && Objects.equals(required.operator(), filter.getOperator())
@@ -376,8 +382,26 @@ public class BankQueryPlanValidator {
     }
 
     private boolean isRankFilter(BankQueryPlan.Filter filter) {
-        return filter != null && ("rank".equals(filter.getField())
-                || "rank_from_bottom".equals(filter.getField()));
+        return filter != null && isRankFieldName(filter.getField());
+    }
+
+    private static boolean isRankFieldName(String field) {
+        return "rank".equals(field) || "rank_from_bottom".equals(field);
+    }
+
+    /**
+     * Rank filters are compiled only for RANKING plans, but a ranked-change question (growth
+     * ranking over a comparison window) must keep intent=CHANGE for its time comparison, so the
+     * filter is accepted there as advisory metadata the compiler skips.
+     */
+    private static boolean rankFilterIntentAllowed(BankQueryPlan plan) {
+        return plan.getIntent() == BankIntentType.RANKING || rankedChangeContract(plan);
+    }
+
+    private static boolean rankedChangeContract(BankQueryPlan plan) {
+        return plan.getIntent() == BankIntentType.CHANGE && plan.getTime() != null
+                && plan.getTime().getComparison() != null
+                && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE;
     }
 
     /**

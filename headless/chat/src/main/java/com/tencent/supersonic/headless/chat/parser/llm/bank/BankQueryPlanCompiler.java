@@ -943,7 +943,11 @@ public class BankQueryPlanCompiler {
     }
 
     private void validateRankFilter(BankQueryPlan plan, BankQueryPlan.Filter filter) {
-        if (plan.getIntent() != BankIntentType.RANKING || !"LTE".equals(filter.getOperator())
+        boolean rankedChange = plan.getIntent() == BankIntentType.CHANGE
+                && plan.getTime() != null && plan.getTime().getComparison() != null
+                && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE;
+        if ((plan.getIntent() != BankIntentType.RANKING && !rankedChange)
+                || !"LTE".equals(filter.getOperator())
                 || filter.getValue() == null || !filter.getValue().matches("[1-9]\\d*")) {
             throw unsupportedFilter(filter);
         }

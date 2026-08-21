@@ -294,6 +294,39 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void acceptsRankFiltersAsAdvisoryOnARankedChangeContract() {
+        BankQueryPlan plan = rankedGrowthPlan();
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("rank").operator("LTE").value("3").values(new ArrayList<>()).build())));
+
+        assertTrue(validator.validate(plan, rankedGrowthRequirements()).isValid());
+    }
+
+    @Test
+    void acceptsARankedChangePlanThatOmitsTheAdvisoryRankFilter() {
+        BankQueryPlan plan = rankedGrowthPlan();
+        plan.setFilters(new ArrayList<>());
+
+        assertTrue(validator.validate(plan, rankedGrowthRequirements()).isValid());
+    }
+
+    @Test
+    void stillRejectsRankFiltersOnChangePlansWithoutATimeComparison() {
+        BankQueryPlan plan = rankedGrowthPlan();
+        plan.getTime().setComparison(BankQueryPlan.TimeComparison.NONE);
+        plan.getTime().setBaselineStartDate(null);
+        plan.getTime().setBaselineEndDate(null);
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("rank").operator("LTE").value("3").values(new ArrayList<>()).build())));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, rankedGrowthRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("RANK_FILTER_CONTRACT_INVALID"));
+    }
+
+    @Test
     void acceptsTheExactMonthAndYearComparisonContract() {
         assertTrue(validator.validate(monthAndYearPlan(), monthAndYearRequirements()).isValid());
     }
@@ -500,6 +533,44 @@ class BankQueryPlanValidatorTest {
                 .orderBy(new ArrayList<>()).limit(7)
                 .output(BankQueryPlan.Output.builder()
                         .columns(new ArrayList<>(List.of("bank_organization", "ZB001", "ZB002")))
+                        .orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints rankedGrowthRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.CHANGE)
+                .allowedMetrics(Set.of("ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30))
+                .requiredTimeComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                .requiredBaselineStartDate(LocalDate.of(2024, 12, 31))
+                .requiredBaselineEndDate(LocalDate.of(2024, 12, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter(
+                        "rank", "LTE", "3")))
+                .requiredLimit(3).build();
+    }
+
+    private BankQueryPlan rankedGrowthPlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.CHANGE)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB011")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 4, 30))
+                        .endDate(LocalDate.of(2026, 4, 30))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                        .baselineStartDate(LocalDate.of(2024, 12, 31))
+                        .baselineEndDate(LocalDate.of(2024, 12, 31)).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.CHANGE).build())
+                .orderBy(new ArrayList<>()).limit(null).output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", "ZB011")))
                         .orderSensitive(false).build())
                 .build();
     }
