@@ -556,27 +556,6 @@ final class BankS2SqlTemplateFactory {
                 """.formatted(metric.metricCode(), index, outerWhere).trim();
     }
 
-    String compileDailyAverageRanking(TemplateContext context) {
-        requireSingleMetricWithoutMetricFilters(context, "daily-average ranking");
-        if (!context.dimensions().equals(List.of("bank_organization"))) {
-            throw new BankPlanCompilationException(
-                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
-                    "daily-average ranking requires only the organization dimension");
-        }
-        String metric = context.metrics().get(0).identifier();
-        String where = where(context.dimensionFilters(), context.dateField(),
-                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
-        String limit = "";
-        return """
-                SELECT bank_organization, %s, SUM(%s) AS %s
-                FROM %s
-                WHERE %s
-                GROUP BY bank_organization, %s
-                ORDER BY bank_organization ASC, %s ASC%s
-                """.formatted(context.dateField(), metric, metric, context.dataSetName(), where,
-                context.dateField(), context.dateField(), limit).trim();
-    }
-
     private void requireSingleMetricWithoutMetricFilters(TemplateContext context,
             String operation) {
         if (context.metrics().size() != 1 || !context.metricFilters().isEmpty()) {

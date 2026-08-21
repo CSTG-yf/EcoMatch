@@ -22,9 +22,11 @@ public class BankQueryPlanValidator {
     private static final Set<String> ORGANIZATION_DIMENSIONS = Set.of("bank_organization");
     private static final Set<String> TIME_DIMENSIONS = Set.of("bank_data_date");
 
+    // Parentheses are legitimate in display names and aliases ("成本收入比(%)"); only statement
+    // keywords, terminators and comment markers make a plan string an executable fragment.
     private static final Pattern FORBIDDEN_SQL = Pattern
             .compile("(?i)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|create|merge|"
-                    + "truncate|join|union|from|where|with)\\b|[()])");
+                    + "truncate|join|union|from|where|with)\\b)");
     private static final Pattern DERIVED_METRIC_CODE =
             Pattern.compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)");
     private static final Pattern BASE_METRIC_CODE = Pattern.compile("ZB\\d{3}");
@@ -150,45 +152,6 @@ public class BankQueryPlanValidator {
                                 + String.join(",", unexpected)));
             }
         }
-    }
-
-    private boolean requiredMetricsSatisfied(Collection<String> planOrHaystack,
-            Collection<String> required) {
-        if (required == null || required.isEmpty()) {
-            return true;
-        }
-        for (String req : required) {
-            if (!metricIdentityPresent(planOrHaystack, req)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean requiredMetricsIntersect(Collection<String> planMetrics,
-            Collection<String> required) {
-        if (required == null || required.isEmpty() || planMetrics == null
-                || planMetrics.isEmpty()) {
-            return true;
-        }
-        for (String planMetric : planMetrics) {
-            if (metricIdentityPresent(required, planMetric)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean metricIdentityPresent(Collection<String> haystack, String needle) {
-        if (haystack == null || needle == null) {
-            return false;
-        }
-        for (String item : haystack) {
-            if (needle.equals(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void validateDimensions(BankQueryPlan plan, SemanticIntentHints hints,
@@ -373,12 +336,10 @@ public class BankQueryPlanValidator {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province-average direction requires the exact benchmark filter"));
             }
-            if (isRankFilter(filter)
-                    && (plan.getIntent() != BankIntentType.RANKING
-                            || !"LTE".equals(filter.getOperator())
-                            || StringUtils.isBlank(filter.getValue())
-                            || !filter.getValue().matches("[1-9]\\d*")
-                            || safe(filter.getValues()).findAny().isPresent())) {
+            if (isRankFilter(filter) && (plan.getIntent() != BankIntentType.RANKING
+                    || !"LTE".equals(filter.getOperator()) || StringUtils.isBlank(filter.getValue())
+                    || !filter.getValue().matches("[1-9]\\d*")
+                    || safe(filter.getValues()).findAny().isPresent())) {
                 errors.add(error("RANK_FILTER_CONTRACT_INVALID",
                         "rank and rank_from_bottom filters require intent=RANKING, operator=LTE, "
                                 + "a positive integer value, and values=[]"));

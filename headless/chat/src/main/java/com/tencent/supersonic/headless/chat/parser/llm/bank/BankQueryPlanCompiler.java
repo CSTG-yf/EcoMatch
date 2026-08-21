@@ -601,16 +601,15 @@ public class BankQueryPlanCompiler {
             return trendResultContract(plan, metrics, dimensions);
         }
         boolean multiOrganizationSingleMetricAggregation =
-                plan.getIntent() == BankIntentType.AGGREGATION
-                        && plan.getOrganizations().size() > 1 && metrics.size() == 1
+                plan.getIntent() == BankIntentType.AGGREGATION && plan.getOrganizations().size() > 1
+                        && metrics.size() == 1
                         && dimensions.stream().map(ResolvedDimension::identifier)
                                 .anyMatch(ORGANIZATION_DIMENSION::equals);
-        boolean multiMetricPointAggregation =
-                plan.getIntent() == BankIntentType.AGGREGATION
-                        && plan.getOrganizations().size() == 1 && metrics.size() > 1
-                        && plan.getTime().getStartDate().equals(plan.getTime().getEndDate())
-                        && dimensions.stream().map(ResolvedDimension::identifier)
-                                .anyMatch(ORGANIZATION_DIMENSION::equals);
+        boolean multiMetricPointAggregation = plan.getIntent() == BankIntentType.AGGREGATION
+                && plan.getOrganizations().size() == 1 && metrics.size() > 1
+                && plan.getTime().getStartDate().equals(plan.getTime().getEndDate())
+                && dimensions.stream().map(ResolvedDimension::identifier)
+                        .anyMatch(ORGANIZATION_DIMENSION::equals);
         if (plan.getIntent() != BankIntentType.POINT_QUERY
                 && plan.getIntent() != BankIntentType.RANKING
                 && plan.getIntent() != BankIntentType.COMPARISON
@@ -760,11 +759,18 @@ public class BankQueryPlanCompiler {
             return String.valueOf(metric.getExtInfo().get("indicatorCode"));
         }
         if (metric.getAlias() != null) {
-            return metric.getAlias().stream().filter(StringUtils::isNotBlank)
-                    .filter(value -> value.matches("(?i)ZB\\d+")).findFirst()
-                    .orElseGet(() -> identifier(metric).toUpperCase(Locale.ROOT));
+            String aliasCode = metric.getAlias().stream().filter(StringUtils::isNotBlank)
+                    .filter(value -> value.matches("(?i)ZB\\d+")).findFirst().orElse(null);
+            if (aliasCode != null) {
+                return aliasCode;
+            }
         }
-        return identifier(metric).toUpperCase(Locale.ROOT);
+        // Never mint a pseudo-code from a display name: an unresolvable metric identity must
+        // fail closed so repair runs instead of poisoning the projector and gold comparison.
+        throw new BankPlanCompilationException(
+                BankPlanCompilationException.Reason.METRIC_UNAVAILABLE,
+                "metric_identity_unresolved: schema metric [" + identifier(metric)
+                        + "] has no registry, extInfo.indicatorCode, or ZB### alias code");
     }
 
     private boolean matchesRegistryMetric(SchemaElement element,

@@ -12,18 +12,21 @@ import java.util.Objects;
  * Bank-plan adapter over two {@link FixedSystemPrefixLlmCache} instances: one per stage
  * (REQUIREMENTS / PLAN), each with its own system prefix and prefix version.
  *
- * <p>Because the two stages share {@link BankPlanPromptComposer#COMMON_FACT_PREFIX}, the common
- * fact tokens stay byte-identical at the head of both stage prompts, so llama.cpp can keep reusing
- * the shared prefix across stage alternation while each stage still has its own stable tail
- * (KV-prefix reuse per stage).
+ * <p>
+ * Because the two stages share {@link BankPlanPromptComposer#COMMON_FACT_PREFIX}, the common fact
+ * tokens stay byte-identical at the head of both stage prompts, so llama.cpp can keep reusing the
+ * shared prefix across stage alternation while each stage still has its own stable tail (KV-prefix
+ * reuse per stage).
  *
- * <p>Completion memo keys bind stage + prefix version + dynamic user content, so a REQUIREMENTS
- * memo can never serve a PLAN call and vice versa. Memo hits are reported separately from real KV
- * cache hits and must not be counted as model-performance gains.
+ * <p>
+ * Completion memo keys bind stage + prefix version + dynamic user content, so a REQUIREMENTS memo
+ * can never serve a PLAN call and vice versa. Memo hits are reported separately from real KV cache
+ * hits and must not be counted as model-performance gains.
  *
- * <p>Thinking can be enabled via system property {@code s2.parser.bank.plan.thinking.enable=true}
- * (or the matching system parameter once loaded into JVM system properties). Thinking and
- * non-thinking use different prefix-version keys so KV caches do not mix.
+ * <p>
+ * Thinking can be enabled via system property {@code s2.parser.bank.plan.thinking.enable=true} (or
+ * the matching system parameter once loaded into JVM system properties). Thinking and non-thinking
+ * use different prefix-version keys so KV caches do not mix.
  */
 public class BankPlanLlmPrefixCache {
 
@@ -32,23 +35,21 @@ public class BankPlanLlmPrefixCache {
     private static final int DEFAULT_THINKING_MAX_TOKENS = 8192;
 
     /**
-     * Safety cap for one REQUIREMENTS decode. Observed regular maximum is about 342 tokens; the
-     * cap is a runaway-protection bound and stays above the verified maximum (and any repair hop).
+     * Safety cap for one REQUIREMENTS decode. Observed regular maximum is about 342 tokens; the cap
+     * is a runaway-protection bound and stays above the verified maximum (and any repair hop).
      */
     public static final int REQUIREMENTS_MAX_OUTPUT_TOKENS = 768;
     /**
      * Safety cap for one PLAN decode, applied to both normal and repair calls. Observed regular
-     * maximum is about 457 tokens and long repairs about 593; the cap is a runaway-protection
-     * bound above both.
+     * maximum is about 457 tokens and long repairs about 593; the cap is a runaway-protection bound
+     * above both.
      */
     public static final int PLAN_MAX_OUTPUT_TOKENS = 1024;
 
-    private static final String REQUIREMENTS_WARM_PROBE = "前缀预热：忽略本条业务内容。\n"
-            + "<stage>REQUIREMENTS</stage>\n"
-            + "只输出一个短 JSON 占位对象，不执行任何业务理解。";
-    private static final String PLAN_WARM_PROBE = "前缀预热：忽略本条业务内容。\n"
-            + "<stage>PLAN</stage>\n"
-            + "只输出一个短 JSON 占位对象，不执行任何业务理解。";
+    private static final String REQUIREMENTS_WARM_PROBE =
+            "前缀预热：忽略本条业务内容。\n" + "<stage>REQUIREMENTS</stage>\n" + "只输出一个短 JSON 占位对象，不执行任何业务理解。";
+    private static final String PLAN_WARM_PROBE =
+            "前缀预热：忽略本条业务内容。\n" + "<stage>PLAN</stage>\n" + "只输出一个短 JSON 占位对象，不执行任何业务理解。";
 
     private final FixedSystemPrefixLlmCache requirementsDelegate;
     private final FixedSystemPrefixLlmCache planDelegate;
@@ -62,17 +63,17 @@ public class BankPlanLlmPrefixCache {
     }
 
     public BankPlanLlmPrefixCache(int memoCapacity, boolean autoWarm, boolean enableThinking) {
-        this.requirementsDelegate = buildDelegate(Stage.REQUIREMENTS, enableThinking, memoCapacity,
-                autoWarm);
+        this.requirementsDelegate =
+                buildDelegate(Stage.REQUIREMENTS, enableThinking, memoCapacity, autoWarm);
         this.planDelegate = buildDelegate(Stage.PLAN, enableThinking, memoCapacity, autoWarm);
     }
 
     private static FixedSystemPrefixLlmCache buildDelegate(Stage stage, boolean enableThinking,
             int memoCapacity, boolean autoWarm) {
         String version = stageVersion(stage) + (enableThinking ? ":think" : ":nothink");
-        String prefix = stage == Stage.REQUIREMENTS
-                ? BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX
-                : BankPlanPromptComposer.PLAN_SYSTEM_PREFIX;
+        String prefix =
+                stage == Stage.REQUIREMENTS ? BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX
+                        : BankPlanPromptComposer.PLAN_SYSTEM_PREFIX;
         String probe = stage == Stage.REQUIREMENTS ? REQUIREMENTS_WARM_PROBE : PLAN_WARM_PROBE;
         int cap = stage == Stage.REQUIREMENTS ? REQUIREMENTS_MAX_OUTPUT_TOKENS
                 : PLAN_MAX_OUTPUT_TOKENS;
@@ -95,7 +96,7 @@ public class BankPlanLlmPrefixCache {
     }
 
     public boolean isThinkingEnabled() {
-        return requirementsDelegate.stats().get("enableThinking") instanceof Boolean thinking
+        return requirementsDelegate.stats().get("enableThinking")instanceof Boolean thinking
                 && thinking;
     }
 
@@ -168,9 +169,5 @@ public class BankPlanLlmPrefixCache {
     public enum Stage {
         REQUIREMENTS, PLAN;
 
-        public static Stage of(String name) {
-            return Objects.requireNonNull(Stage.valueOf(name.toUpperCase(java.util.Locale.ROOT)),
-                    "unknown stage");
-        }
     }
 }

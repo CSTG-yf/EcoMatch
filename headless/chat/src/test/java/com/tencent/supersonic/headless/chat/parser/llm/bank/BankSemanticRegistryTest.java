@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BankSemanticRegistryTest {
@@ -62,8 +63,8 @@ class BankSemanticRegistryTest {
         assertTrue(root.isObject());
         assertTrue(root.path("required").toString().contains("\"filters\""));
         assertTrue(root.path("required").toString().contains("\"limit\""));
-        assertEquals(21, root.path("properties").path("metrics").path("items")
-                .path("properties").path("bizName").path("enum").size());
+        assertEquals(21, root.path("properties").path("metrics").path("items").path("properties")
+                .path("bizName").path("enum").size());
     }
 
     @Test
@@ -88,6 +89,18 @@ class BankSemanticRegistryTest {
         assertEquals("万元", BankSemanticRegistry.metrics().get("ZB011").unit());
         assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("ZB011 净利润"));
         assertTrue(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX.contains("unit=万元"));
+    }
+
+    @Test
+    void everyMetricCarriesACatalogDescriptionDistinctFromItsName() {
+        BankSemanticRegistry.metrics().forEach((code, metric) -> {
+            assertFalse(metric.description().isBlank(), code + " must carry a catalog description");
+            assertNotEquals(metric.name(), metric.description(),
+                    code + " description must not be a copy of the display name");
+            assertFalse(metric.unit().isBlank(), code + " must declare a unit");
+        });
+        assertTrue(BankSemanticRegistry.sharedCatalog().contains("desc="));
+        assertTrue(BankSemanticRegistry.sharedCatalog().contains("期末总余额"));
     }
 
     @Test
@@ -133,16 +146,16 @@ class BankSemanticRegistryTest {
     void planCapabilityCatalogCarriesPlanOnlyEnumsAndOutputFacts() {
         String capabilities = BankSemanticRegistry.planCapabilityCatalog();
 
-        BankSemanticRegistry.aggregations().forEach(
-                value -> assertTrue(capabilities.contains(value), value + " missing"));
-        BankSemanticRegistry.calculationTypes().forEach(
-                value -> assertTrue(capabilities.contains(value), value + " missing"));
-        BankSemanticRegistry.sortDirections().forEach(
-                value -> assertTrue(capabilities.contains(value), value + " missing"));
-        BankSemanticRegistry.filterOperators().forEach(
-                value -> assertTrue(capabilities.contains(value), value + " missing"));
-        BankSemanticRegistry.outputFacts().keySet().forEach(
-                value -> assertTrue(capabilities.contains(value), value + " missing"));
+        BankSemanticRegistry.aggregations()
+                .forEach(value -> assertTrue(capabilities.contains(value), value + " missing"));
+        BankSemanticRegistry.calculationTypes()
+                .forEach(value -> assertTrue(capabilities.contains(value), value + " missing"));
+        BankSemanticRegistry.sortDirections()
+                .forEach(value -> assertTrue(capabilities.contains(value), value + " missing"));
+        BankSemanticRegistry.filterOperators()
+                .forEach(value -> assertTrue(capabilities.contains(value), value + " missing"));
+        BankSemanticRegistry.outputFacts().keySet()
+                .forEach(value -> assertTrue(capabilities.contains(value), value + " missing"));
         assertTrue(capabilities.contains("aggregation"));
         assertTrue(capabilities.contains("calculation type"));
         assertTrue(capabilities.contains("sort direction"));
@@ -160,8 +173,8 @@ class BankSemanticRegistryTest {
         assertTrue(contract.contains("operators"));
         BankSemanticRegistry.filterOperators().forEach(
                 operator -> assertTrue(contract.contains(operator), operator + " missing"));
-        BankSemanticRegistry.filterFields().forEach(
-                field -> assertTrue(contract.contains(field), field + " missing"));
+        BankSemanticRegistry.filterFields()
+                .forEach(field -> assertTrue(contract.contains(field), field + " missing"));
         assertFalse(contract.contains("calculation"),
                 "filter contract must stay free of PLAN-only calculation rules");
         assertFalse(contract.contains("orderBy"),
