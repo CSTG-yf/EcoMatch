@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.server.security.audit;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
@@ -20,6 +21,7 @@ import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.Date;
 import java.util.EnumSet;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -70,7 +72,80 @@ public class AuditAnomalyEngine {
             case SENSITIVE_RESOURCE_ACCESS -> evaluateFrequency(rule, event,
                     AuditEventType.MASK_APPLIED, "Frequent sensitive-resource access detected",
                     true);
+            case CROSS_ORGANIZATION_ACCESS -> evaluateCrossOrganizationAccess(rule, event);
+            case POLICY_CHANGE_SPIKE -> evaluatePolicyChangeSpike(rule, event);
         }
+    }
+
+    private void evaluateCrossOrganizationAccess(AuditRuleDO rule, AuditEventDO event) {
+        if (!isAccessEvent(event) || StringUtils.isBlank(event.getOrganizationId())) {
+            return;
+        }
+        long organizationCount = countDistinctOrganizations(event, rule.getWindowSeconds());
+        if (organizationCount < rule.getThresholdValue()) {
+            return;
+        }
+        createOrUpdateAlert(rule, event, "Cross-organization access detected",
+                "User accessed " + organizationCount + " organizations in "
+                        + rule.getWindowSeconds() + " seconds", organizationCount);
+    }
+
+    private void evaluatePolicyChangeSpike(AuditRuleDO rule, AuditEventDO event) {
+        AuditEventType eventType = parseEventType(event);
+        if (eventType == null || !EnumSet.of(AuditEventType.POLICY_CREATED,
+                AuditEventType.POLICY_UPDATED, AuditEventType.POLICY_DISABLED)
+                .contains(eventType)) {
+            return;
+        }
+        long changeCount = countPolicyChanges(event, rule.getWindowSeconds());
+        if (changeCount < rule.getThresholdValue()) {
+            return;
+        }
+        createOrUpdateAlert(rule, event, "Authorization policy change spike",
+                "Observed " + changeCount + " policy changes in " + rule.getWindowSeconds()
+                        + " seconds", changeCount);
+    }
+
+    private boolean isAccessEvent(AuditEventDO event) {
+        AuditEventType eventType = parseEventType(event);
+        return eventType != null && EnumSet.of(AuditEventType.QUERY_STARTED,
+                AuditEventType.EXPORT_STARTED,
+                AuditEventType.SHARE_ACCESSED, AuditEventType.OBJECT_ACCESS_ALLOWED,
+                AuditEventType.AUTH_ALLOWED).contains(eventType);
+    }
+
+    private AuditEventType parseEventType(AuditEventDO event) {
+        try {
+            return AuditEventType.valueOf(event.getEventType());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private long countDistinctOrganizations(AuditEventDO event, Long windowSeconds) {
+        Date end = event.getEventTime() == null ? new Date() : event.getEventTime();
+        Date start = new Date(end.getTime() - normalizedWindow(windowSeconds) * 1000L);
+        QueryWrapper<AuditEventDO> wrapper = new QueryWrapper<AuditEventDO>()
+                .select("COUNT(DISTINCT organization_id) AS organization_count")
+                .eq("user_name", event.getUserName()).isNotNull("organization_id")
+                .ge("event_time", start).le("event_time", end);
+        List<Object> values = auditEventMapper.selectObjs(wrapper);
+        return values == null || values.isEmpty() || values.get(0) == null ? 0
+                : ((Number) values.get(0)).longValue();
+    }
+
+    private long countPolicyChanges(AuditEventDO event, Long windowSeconds) {
+        Date end = event.getEventTime() == null ? new Date() : event.getEventTime();
+        Date start = new Date(end.getTime() - normalizedWindow(windowSeconds) * 1000L);
+        return auditEventMapper.selectCount(new LambdaQueryWrapper<AuditEventDO>()
+                .in(AuditEventDO::getEventType, AuditEventType.POLICY_CREATED.name(),
+                        AuditEventType.POLICY_UPDATED.name(), AuditEventType.POLICY_DISABLED.name())
+                .eq(AuditEventDO::getUserName, event.getUserName())
+                .ge(AuditEventDO::getEventTime, start).le(AuditEventDO::getEventTime, end));
+    }
+
+    private long normalizedWindow(Long windowSeconds) {
+        return Math.max(1, windowSeconds == null ? 1 : windowSeconds);
     }
 
     private void evaluateFrequency(AuditRuleDO rule, AuditEventDO event,

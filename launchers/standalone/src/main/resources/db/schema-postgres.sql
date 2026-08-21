@@ -24,8 +24,18 @@ CREATE TABLE IF NOT EXISTS s2_agent (
 
 CREATE TABLE IF NOT EXISTS s2_auth_groups (
     group_id integer NOT NULL PRIMARY KEY,
-    config varchar(2048) DEFAULT NULL
+    model_id bigint,
+    policy_code varchar(128),
+    enabled smallint NOT NULL DEFAULT 1,
+    policy_version bigint NOT NULL DEFAULT 1,
+    valid_from timestamp,
+    valid_to timestamp,
+    updated_at timestamp,
+    updated_by varchar(128),
+    config text
 );
+CREATE INDEX IF NOT EXISTS idx_auth_group_model_enabled
+    ON s2_auth_groups(model_id, enabled);
 
 CREATE TABLE IF NOT EXISTS s2_available_date_info (
     id SERIAL PRIMARY KEY,

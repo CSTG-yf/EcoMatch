@@ -3,6 +3,7 @@ package com.tencent.supersonic.headless.core.cache;
 import com.tencent.supersonic.common.pojo.QueryAuthorization;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.auth.api.authorization.context.AuthorizationContext;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
@@ -99,8 +100,11 @@ public class DefaultQueryCache implements QueryCache {
     public String getCacheKey(SemanticQueryReq semanticQueryReq, User user) {
         String baseKey = getCacheKey(semanticQueryReq);
         String userScope = securityScope(user);
+        AuthorizationContext.Snapshot snapshot = AuthorizationContext.current();
+        String policyScope = snapshot == null ? "policy=0"
+                : "policy=" + snapshot.policyVersion();
         CacheManager cacheManager = ContextUtils.getBean(CacheManager.class);
-        return cacheManager.generateCacheKey(baseKey, userScope);
+        return cacheManager.generateCacheKey(baseKey, userScope + "|" + policyScope);
     }
 
     String securityScope(User user) {
@@ -114,8 +118,12 @@ public class DefaultQueryCache implements QueryCache {
                 .entrySet().stream().sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining(","));
+        AuthorizationContext.Snapshot snapshot = AuthorizationContext.current();
+        String organizations = snapshot == null || snapshot.userContext() == null ? ""
+                : snapshot.userContext().effectiveOrganizationIds().stream().sorted()
+                        .collect(Collectors.joining(","));
         return DigestUtils.sha256Hex(String.join("|", user.getName(),
-                String.valueOf(user.isSuperAdmin()), roles, attributes));
+                String.valueOf(user.isSuperAdmin()), roles, attributes, organizations));
     }
 
     String commandScope(SemanticQueryReq request) {
@@ -147,6 +155,7 @@ public class DefaultQueryCache implements QueryCache {
         target.setDataMasked(source.isDataMasked());
         target.setMaskedColumns(source.getMaskedColumns() == null ? new LinkedHashSet<>()
                 : new LinkedHashSet<>(source.getMaskedColumns()));
+        target.setMaskingPolicyVersion(source.getMaskingPolicyVersion());
         target.setErrorMsg(source.getErrorMsg());
         return target;
     }

@@ -4,6 +4,8 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.auth.api.authorization.pojo.ColumnAccessMode;
+import com.tencent.supersonic.auth.api.authorization.pojo.ResourcePermission;
 import com.tencent.supersonic.headless.api.pojo.SchemaItem;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -11,6 +13,9 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -19,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collection;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -47,16 +53,21 @@ public class DataMaskingService {
     }
 
     public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user) {
+        mask(response, schema, user, Collections.emptyList());
+    }
+
+    /** Apply the resolved field-level decisions before data is returned to any caller. */
+    public void mask(SemanticQueryResp response, SemanticSchemaResp schema, User user,
+            Collection<ResourcePermission> resourcePermissions) {
         MaskingPolicy policy = currentPolicy();
-        if (response == null || canViewRawData(user, policy) || response.getResultList() == null
+        boolean hasResolvedPermissions = resourcePermissions != null && !resourcePermissions.isEmpty();
+        boolean globalRawAccess = canViewRawData(user, policy) && !hasResolvedPermissions;
+        if (response == null || globalRawAccess || response.getResultList() == null
                 || response.getResultList().isEmpty()) {
             return;
         }
         requireMaskingMetadata(response, schema);
         Set<String> sensitiveFields = getSensitiveFields(schema);
-        if (sensitiveFields.isEmpty()) {
-            return;
-        }
         Set<String> schemaFields = getSchemaFields(schema);
 
         Set<String> maskedColumns =
@@ -77,7 +88,21 @@ public class DataMaskingService {
             declaredResultKeys.addAll(normalizedResultKeys);
             boolean sensitive = isSensitive(column, sensitiveFields);
             boolean unknownLineage = Collections.disjoint(normalizedResultKeys, schemaFields);
-            if (!sensitive && !unknownLineage) {
+            ResourcePermission permission = resolvePermission(column, resultKeys,
+                    resourcePermissions);
+            if (permission != null && permission.getAccessMode() == ColumnAccessMode.DENY) {
+                throw new InvalidPermissionException(
+                        "Column permission denied; query result was not returned");
+            }
+            boolean explicitlyMasked = permission != null
+                    && permission.getAccessMode() == ColumnAccessMode.MASKED;
+            boolean rawAuthorized = permission != null
+                    && permission.getAccessMode() == ColumnAccessMode.RAW
+                    && !unknownLineage;
+            boolean globallyRawAuthorized = permission == null && canViewRawData(user, policy)
+                    && !unknownLineage;
+            if (rawAuthorized || globallyRawAuthorized
+                    || (!sensitive && !unknownLineage && !explicitlyMasked)) {
                 continue;
             }
             String sensitiveField = resultKeys.stream()
@@ -94,7 +119,8 @@ public class DataMaskingService {
                     maskedColumns.add(key);
                     if (row.get(key) != null) {
                         row.put(key, unknownLineage ? "****"
-                                : maskValue(key, sensitiveField, row.get(key), policy));
+                                : maskValue(key, sensitiveField, row.get(key), policy,
+                                        permission == null ? null : permission.getMaskingStrategy()));
                     }
                 }
             }
@@ -132,7 +158,11 @@ public class DataMaskingService {
     }
 
     private Object maskValue(String resultField, String sensitiveField, Object value,
-            MaskingPolicy policy) {
+            MaskingPolicy policy, String maskingStrategy) {
+        if (StringUtils.isNotBlank(maskingStrategy)) {
+            return applyStrategy(MaskingStrategy.valueOf(maskingStrategy.trim().toUpperCase(Locale.ROOT)),
+                    String.valueOf(value));
+        }
         MaskingStrategy aliasStrategy =
                 policy.fieldStrategies.get(resultField.toLowerCase(Locale.ROOT));
         if (aliasStrategy != null) {
@@ -216,6 +246,21 @@ public class DataMaskingService {
         return text.charAt(0) + "***";
     }
 
+    private ResourcePermission resolvePermission(QueryColumn column, Set<String> resultKeys,
+            Collection<ResourcePermission> permissions) {
+        if (permissions == null || permissions.isEmpty()) {
+            return null;
+        }
+        Set<String> normalizedKeys = resultKeys.stream().filter(StringUtils::isNotBlank)
+                .map(value -> value.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
+        return permissions.stream().filter(permission -> permission != null
+                && StringUtils.isNotBlank(permission.getResourceName())
+                && (permission.getModelId() == null || permission.getModelId().equals(column.getModelId())))
+                .filter(permission -> normalizedKeys.contains(
+                        permission.getResourceName().toLowerCase(Locale.ROOT)))
+                .findFirst().orElse(null);
+    }
+
     private Object applyStrategy(MaskingStrategy strategy, String value) {
         switch (strategy) {
             case FULL:
@@ -225,8 +270,24 @@ public class DataMaskingService {
             case FIRST_LAST:
                 return value.length() <= 2 ? "****"
                         : value.charAt(0) + "***" + value.charAt(value.length() - 1);
+            case HASH:
+                return sha256(value);
             default:
                 return value;
+        }
+    }
+
+    private String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte item : digest) {
+                result.append(String.format(Locale.ROOT, "%02x", item));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
         }
     }
 
@@ -286,7 +347,7 @@ public class DataMaskingService {
     }
 
     private enum MaskingStrategy {
-        FULL, LAST4, FIRST_LAST
+        FULL, LAST4, FIRST_LAST, HASH
     }
 
     private static final class MaskingPolicy {

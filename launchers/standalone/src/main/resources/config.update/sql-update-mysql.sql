@@ -448,6 +448,22 @@ CREATE TABLE IF NOT EXISTS `s2_dashboard`
 ) ENGINE = InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --20260725 BE-09 audit and security alert
+
+--20260820 DATA-SECURITY fine-grained policy V2 compatibility migration
+ALTER TABLE `s2_auth_groups`
+    MODIFY COLUMN `config` MEDIUMTEXT COLLATE utf8mb4_unicode_ci;
+ALTER TABLE `s2_auth_groups`
+    ADD COLUMN IF NOT EXISTS `model_id` BIGINT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `policy_code` VARCHAR(128) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS `policy_version` BIGINT NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS `valid_from` DATETIME DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `valid_to` DATETIME DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `updated_at` DATETIME DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `updated_by` VARCHAR(128) DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS `idx_auth_group_model_enabled`
+    ON `s2_auth_groups` (`model_id`, `enabled`);
+
 CREATE TABLE IF NOT EXISTS `s2_audit_event` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `event_id` VARCHAR(64) NOT NULL,

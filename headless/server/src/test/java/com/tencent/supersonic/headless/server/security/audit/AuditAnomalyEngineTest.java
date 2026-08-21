@@ -71,6 +71,32 @@ class AuditAnomalyEngineTest {
                 any(), eq(1L));
     }
 
+    @Test
+    void alertsWhenOneUserTouchesMultipleOrganizations() {
+        AuditRuleDO rule = rule(AlertRuleType.CROSS_ORGANIZATION_ACCESS, 2, 300);
+        AuditEventDO event = event(AuditEventType.QUERY_STARTED, new Date());
+        when(ruleService.listEnabled()).thenReturn(List.of(rule));
+        when(eventMapper.selectObjs(any())).thenReturn(List.of(2L));
+
+        engine.evaluate(event);
+
+        verify(alertService).upsert(eq(rule), eq(event), any(),
+                eq("Cross-organization access detected"), any(), eq(2L));
+    }
+
+    @Test
+    void alertsWhenPolicyChangesSpike() {
+        AuditRuleDO rule = rule(AlertRuleType.POLICY_CHANGE_SPIKE, 2, 300);
+        AuditEventDO event = event(AuditEventType.POLICY_UPDATED, new Date());
+        when(ruleService.listEnabled()).thenReturn(List.of(rule));
+        when(eventMapper.selectCount(any())).thenReturn(2L);
+
+        engine.evaluate(event);
+
+        verify(alertService).upsert(eq(rule), eq(event), any(),
+                eq("Authorization policy change spike"), any(), eq(2L));
+    }
+
     private AuditRuleDO rule(AlertRuleType type, long threshold, long window) {
         AuditRuleDO rule = new AuditRuleDO();
         rule.setId(1L);

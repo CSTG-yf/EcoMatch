@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, forwardRef } from 'react';
-import { Form, Input, Select } from 'antd';
+import { Form, Input, InputNumber, Select, Switch } from 'antd';
 import type { ForwardRefRenderFunction } from 'react';
 import SelectPartner from '@/components/SelectPartner';
 import SelectTMEPerson from '@/components/SelectTMEPerson';
@@ -75,10 +75,30 @@ const PermissionCreateForm: ForwardRefRenderFunction<any, Props> = (
         >
           <Select mode="tags" tokenSeparators={[',']} placeholder="输入角色后回车" />
         </FormItem>
-        <FormItem
-          label="按用户属性"
-          tooltip="所有属性条件同时满足时策略才会生效"
-        >
+        <FormItem name="effect" label="策略效果" initialValue="ALLOW">
+          <Select
+            options={[
+              { value: 'ALLOW', label: '允许' },
+              { value: 'DENY', label: '拒绝' },
+            ]}
+          />
+        </FormItem>
+        <FormItem name="orgScope" label="机构范围" initialValue="CURRENT">
+          <Select
+            options={[
+              { value: 'CURRENT', label: '当前机构' },
+              { value: 'CURRENT_AND_CHILDREN', label: '当前机构及下级' },
+              { value: 'CUSTOM', label: '指定机构集合' },
+            ]}
+          />
+        </FormItem>
+        <FormItem name="priority" label="优先级" initialValue={0}>
+          <InputNumber min={0} max={10000} style={{ width: '100%' }} />
+        </FormItem>
+        <FormItem name="enabled" label="启用策略" valuePropName="checked" initialValue={true}>
+          <Switch />
+        </FormItem>
+        <FormItem label="按用户属性" tooltip="所有属性条件同时满足时策略才会生效">
           <AttributeConditionEditor />
         </FormItem>
       </Form>

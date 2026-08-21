@@ -93,9 +93,19 @@ COMMENT ON TABLE s2_user IS 'user information table';
 create table s2_auth_groups
 (
     group_id INT,
-    config varchar(2048),
+    model_id BIGINT,
+    policy_code varchar(128),
+    enabled SMALLINT DEFAULT 1,
+    policy_version BIGINT DEFAULT 1,
+    valid_from TIMESTAMP,
+    valid_to TIMESTAMP,
+    updated_at TIMESTAMP,
+    updated_by varchar(128),
+    config LONGVARCHAR,
     PRIMARY KEY (`group_id`)
 );
+CREATE INDEX IF NOT EXISTS idx_auth_group_model_enabled
+    ON s2_auth_groups(model_id, enabled);
 
 CREATE TABLE IF NOT EXISTS `s2_metric` (
     `id` INT NOT NULL  AUTO_INCREMENT,
