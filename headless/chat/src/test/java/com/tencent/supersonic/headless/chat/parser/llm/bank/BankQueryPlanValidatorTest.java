@@ -293,6 +293,52 @@ class BankQueryPlanValidatorTest {
         assertTrue(validator.validate(plan, bottomRankingRequirements()).isValid());
     }
 
+    @Test
+    void acceptsTheExactMonthAndYearComparisonContract() {
+        assertTrue(validator.validate(monthAndYearPlan(), monthAndYearRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsMonthAndYearComparisonWithMultipleMetrics() {
+        BankQueryPlan plan = monthAndYearPlan();
+        plan.getMetrics().add(BankQueryPlan.Metric.builder().bizName("ZB011")
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build());
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, monthAndYearRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.summary().contains("MOM_AND_YOY_SINGLE_METRIC_REQUIRED"));
+    }
+
+    @Test
+    void rejectsMonthAndYearComparisonWithoutExactlyOneOrganization() {
+        BankQueryPlan noOrganization = monthAndYearPlan();
+        noOrganization.setOrganizations(new ArrayList<>());
+        BankQueryPlan twoOrganizations = monthAndYearPlan();
+        twoOrganizations.getOrganizations()
+                .add(BankQueryPlan.Organization.builder().code("ORG007").build());
+
+        assertTrue(validator.validate(noOrganization, monthAndYearRequirements()).summary()
+                .contains("MOM_AND_YOY_SINGLE_ORGANIZATION_REQUIRED"));
+        assertTrue(validator.validate(twoOrganizations, monthAndYearRequirements()).summary()
+                .contains("MOM_AND_YOY_SINGLE_ORGANIZATION_REQUIRED"));
+    }
+
+    @Test
+    void rejectsMonthAndYearComparisonDimensionsAndFilters() {
+        BankQueryPlan plan = monthAndYearPlan();
+        plan.setDimensions(new ArrayList<>(List.of("bank_organization")));
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("metric_value").operator("GT").value("0").values(new ArrayList<>())
+                .build())));
+
+        String summary = validator.validate(plan, monthAndYearRequirements()).summary();
+
+        assertTrue(summary.contains("MOM_AND_YOY_DIMENSIONS_FORBIDDEN"));
+        assertTrue(summary.contains("MOM_AND_YOY_METRIC_FILTER_FORBIDDEN"));
+    }
+
     private SemanticIntentHints requirements() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.COMPARISON)
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))
@@ -303,6 +349,37 @@ class BankQueryPlanValidatorTest {
                 .requiredEndDate(LocalDate.of(2025, 7, 31))
                 .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
                         "COMPARE", "PROVINCE_AVERAGE")))
+                .build();
+    }
+
+    private SemanticIntentHints monthAndYearRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.CHANGE)
+                .allowedMetrics(Set.of("ZB002", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB002")).requiredOrganizationCodes(Set.of("ORG006"))
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30))
+                .requiredTimeComparison(BankQueryPlan.TimeComparison.MOM_AND_YOY).build();
+    }
+
+    private BankQueryPlan monthAndYearPlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.CHANGE)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>()).dimensions(new ArrayList<>())
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG006").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 4, 30))
+                        .endDate(LocalDate.of(2026, 4, 30))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.MOM_AND_YOY).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.CHANGE).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("ZB002"))).orderSensitive(true).build())
                 .build();
     }
 

@@ -59,6 +59,7 @@ public class BankQueryPlanValidator {
         validateOrderingAndLimit(plan, hints, errors);
         validateOutput(plan, hints, errors);
         validateAbsoluteThresholdContract(plan, errors);
+        validateMonthAndYearComparisonContract(plan, errors);
         return new ValidationResult(errors);
     }
 
@@ -743,6 +744,43 @@ public class BankQueryPlanValidator {
         if (safe(plan.getOrderBy()).findAny().isPresent()) {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_ORDER_REQUIRED",
                     "days-above-province-average count requires no ordering"));
+        }
+    }
+
+    /**
+     * MOM_AND_YOY is a compiler-owned scalar comparison. Keeping the model plan to one metric and
+     * one organization avoids ambiguous multi-series projections and lets the compiler derive both
+     * baselines from the current date.
+     */
+    private void validateMonthAndYearComparisonContract(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null || time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY) {
+            return;
+        }
+        List<String> metrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).toList();
+        if (metrics.size() != 1 || safe(plan.getDerivedMetrics()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_SINGLE_METRIC_REQUIRED",
+                    "MOM_AND_YOY requires exactly one direct metric"));
+        }
+        List<String> organizations = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank).toList();
+        if (organizations.size() != 1) {
+            errors.add(error("MOM_AND_YOY_SINGLE_ORGANIZATION_REQUIRED",
+                    "MOM_AND_YOY requires exactly one organization"));
+        }
+        if (safe(plan.getDimensions()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_DIMENSIONS_FORBIDDEN",
+                    "MOM_AND_YOY dimensions must be empty"));
+        }
+        if (safe(plan.getFilters()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_METRIC_FILTER_FORBIDDEN",
+                    "MOM_AND_YOY filters must be empty"));
+        }
+        if (time.getBaselineStartDate() != null || time.getBaselineEndDate() != null) {
+            errors.add(error("MOM_AND_YOY_BASELINES_MUST_BE_DERIVED",
+                    "MOM_AND_YOY baseline dates must be null so the compiler can derive them"));
         }
     }
 

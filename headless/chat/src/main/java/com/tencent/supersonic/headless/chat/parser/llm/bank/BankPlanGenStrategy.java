@@ -380,6 +380,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (queryText == null || requirements == null) {
             return;
         }
+        // These fully specified families must be validated before the generic CLARIFY exit.
+        // The recognizer supplies only evidence for a repair message; the model still owns the
+        // complete requirements contract and executable plan.
+        validateMonthAndYearComparison(queryText, requirements);
+        validateExplicitProvinceBottomRanking(queryText, requirements);
+        validateDaysAboveProvinceAverage(queryText, requirements);
         // Validation only: the model still supplies the identifiers, order and intent. The
         // catalog recognizer is used to return a repairable error when a complete two-operand
         // point ratio is incorrectly clarified or classified as another query family.
@@ -392,7 +398,6 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         }
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
-        validateDaysAboveProvinceAverage(queryText, requirements);
         if (queryText.contains("个人贷款") && queryText.contains("对公贷款")
                 && queryText.contains("各项贷款") && containsAny(queryText, "占比", "比例", "比重")) {
             validateQueryFamily("loan_structure_share_mismatch", requirements,
@@ -518,8 +523,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     /** Ensures the daily count contract reaches the compiler as an executable aggregation plan. */
     private void validateDaysAboveProvinceAverage(String queryText,
             BankRequestContract requirements) {
-        if (queryText == null || requirements == null || !queryText.contains("全省均值")
-                || !queryText.contains("有多少天")) {
+        if (!isDailyProvinceAverageCountQuestion(queryText)) {
             return;
         }
         BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
@@ -530,15 +534,33 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         Set<String> expectedOrganizations = evidence.getOrganizations().stream()
                 .map(BankIntentResult.OrganizationSlot::getCode)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> actualOrganizations = new LinkedHashSet<>(requirements.getOrganizationCodes());
+        Set<String> actualOrganizations = new LinkedHashSet<>(safeList(
+                requirements.getOrganizationCodes()));
         Set<String> expectedMetrics = evidence.getMetrics().stream()
                 .map(BankIntentResult.MetricCandidate::getCode)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Set<String> actualMetrics = new LinkedHashSet<>(requirements.getMetricCodes());
-        boolean benchmarkPresent = requirements.getFilters().stream().anyMatch(filter ->
-                "benchmark".equals(filter.getField()) && "COMPARE".equals(filter.getOperator())
-                        && "PROVINCE_AVERAGE".equals(filter.getValue()));
-        boolean countRequested = requirements.getAnswerFactTypes().contains(
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        boolean metricDirectionPresent = filters.stream().anyMatch(filter -> filter != null
+                && "metric_value".equals(filter.getField())
+                && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
+                        || "LT".equals(filter.getOperator())
+                        || "LTE".equals(filter.getOperator()))
+                && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        if (metricDirectionPresent) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "days_above_province_average_metric_filter_forbidden: the daily count query "
+                            + "family encodes the high direction in its calculation; "
+                            + "requirements.filters must contain only benchmark/COMPARE/"
+                            + "PROVINCE_AVERAGE. Remove the metric_value direction filter and "
+                            + "regenerate the complete requirements JSON.");
+        }
+        boolean benchmarkPresent = filters.stream().anyMatch(filter -> filter != null
+                && "benchmark".equals(filter.getField())
+                && "COMPARE".equals(filter.getOperator())
+                && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        boolean countRequested = safeList(requirements.getAnswerFactTypes()).contains(
                 BankRequestContract.AnswerFactType.COUNT);
         if (requirements.getIntent() == BankIntentType.AGGREGATION
                 && actualOrganizations.equals(expectedOrganizations)
@@ -554,6 +576,123 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", metrics=" + actualMetrics + ", benchmarkPresent=" + benchmarkPresent
                         + ", answerFactTypes=" + requirements.getAnswerFactTypes()
                         + ". Regenerate the complete requirements JSON for the daily fact table.");
+    }
+
+    private boolean isDailyProvinceAverageCountQuestion(String queryText) {
+        if (queryText == null
+                || !containsAny(queryText, "全省均值", "全省平均", "平均水平")
+                || !containsAny(queryText, "多少天", "几天", "天数", "多少个交易日")
+                || !containsAny(queryText, "高于", "超过", "大于")
+                || containsAny(queryText, "低于", "小于", "排名", "第几", "趋势", "走势", "逐月",
+                        "逐季", "逐日", "环比", "同比", "较年初", "较上季", "较上月", "较同期",
+                        "增幅", "增量", "变动", "变化")) {
+            return false;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        return evidence.getOrganizations().size() == 1 && evidence.getMetrics().size() == 1
+                && evidence.getTime() != null && !evidence.getTime().isAmbiguous();
+    }
+
+    private void validateMonthAndYearComparison(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || !containsAny(queryText, "环比", "较上月")
+                || !containsAny(queryText, "同比", "较去年同期")) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getMetrics().size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()) {
+            return;
+        }
+        List<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode).toList();
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.CHANGE
+                && expectedOrganizations.equals(safeList(requirements.getOrganizationCodes()))
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && actualTime != null
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY
+                && actualTime.getBaselineStartDate() == null
+                && actualTime.getBaselineEndDate() == null;
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "mom_and_yoy_requirements_mismatch: a fully specified same-date month-and-year "
+                        + "comparison requires action=EXECUTE, intent=CHANGE, exactly one recognized "
+                        + "organization and metric, comparison=MOM_AND_YOY, and null baseline dates; "
+                        + "expected organizations=" + expectedOrganizations + ", metrics="
+                        + expectedMetrics + ", model action=" + requirements.getAction()
+                        + ", intent=" + requirements.getIntent() + ", organizations="
+                        + safeList(requirements.getOrganizationCodes()) + ", metrics="
+                        + safeList(requirements.getMetricCodes()) + ", time=" + actualTime
+                        + ". Regenerate the complete requirements JSON; the compiler derives both "
+                        + "comparison baselines from the current date.");
+    }
+
+    private void validateExplicitProvinceBottomRanking(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null
+                || !containsAny(queryText, "全省", "全省内", "全省范围", "所有农商行", "全部农商行",
+                        "各家机构", "全体机构", "13家", "十三家")
+                || !containsAny(queryText, "最后", "倒数", "排名后", "排后")
+                || !containsAny(queryText, "哪家", "哪一", "哪个", "谁")) {
+            return;
+        }
+        BankIntentResult evidence = clarificationEvidenceRecognizer.recognize(queryText,
+                LocalDate.now());
+        List<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        BankIntentResult.FilterSlot expectedBottomRank = evidence.getFilters().stream()
+                .filter(filter -> "rank_from_bottom".equals(filter.getField())
+                        && "LTE".equals(filter.getOperator()) && filter.getValue() != null)
+                .findFirst().orElse(null);
+        // A named organization is a point-in-population rank, not a province-wide institution
+        // selection. Leave that contract to the existing selected-organization ranking path.
+        if (!evidence.getOrganizations().isEmpty() || expectedMetrics.size() != 1
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()
+                || expectedBottomRank == null) {
+            return;
+        }
+        String expectedLimit = expectedBottomRank.getValue();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        List<BankQueryPlan.Filter> filters = safeList(requirements.getFilters());
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.RANKING
+                && expectedMetrics.equals(safeList(requirements.getMetricCodes()))
+                && safeList(requirements.getOrganizationCodes()).isEmpty()
+                && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && evidence.getTime().getEndDate().equals(actualTime.getEndDate())
+                && expectedLimit.equals(String.valueOf(requirements.getRequiredLimit()))
+                && filters.stream().anyMatch(filter -> filter != null
+                        && "rank_from_bottom".equals(filter.getField())
+                        && "LTE".equals(filter.getOperator())
+                        && expectedLimit.equals(filter.getValue()));
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "explicit_province_bottom_ranking_mismatch: a fully specified province bottom-rank "
+                        + "selection requires action=EXECUTE, intent=RANKING, organizationCodes=[], "
+                        + "one recognized metric, the explicit date, rank_from_bottom/LTE/"
+                        + expectedLimit + ", and requiredLimit=" + expectedLimit + "; model action="
+                        + requirements.getAction() + ", intent=" + requirements.getIntent()
+                        + ", metrics=" + safeList(requirements.getMetricCodes())
+                        + ", organizations=" + safeList(requirements.getOrganizationCodes())
+                        + ", time=" + actualTime + ", filters=" + filters + ", requiredLimit="
+                        + requirements.getRequiredLimit()
+                        + ". Regenerate the complete requirements JSON; do not ask for a specific "
+                        + "organization when the question asks which institution in the province.");
+    }
+
+    private <T> List<T> safeList(List<T> values) {
+        return values == null ? List.of() : values;
     }
 
     private boolean isStandalonePointRatioContext(String queryText,

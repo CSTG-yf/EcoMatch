@@ -166,9 +166,12 @@ public class NL2SQLParser implements ChatQueryParser {
                     if (BankNl2SqlError.isTerminalParserError(errorMsg)) {
                         // fail-closed: a constrained bank plan failure is terminal, so never
                         // fall back to MapModeEnum.ALL; strip the internal parser prefix and
-                        // surface only the user-facing message.
+                        // surface only the user-facing message. Preserve the terminal marker on
+                        // the chat response so downstream processors cannot ask another model to
+                        // invent a friendlier (and potentially false) root-cause explanation.
                         parseContext.getResponse()
                                 .setErrorMsg(BankNl2SqlError.toUserMessage(errorMsg));
+                        parseContext.getResponse().setTerminalError(true);
                     } else {
                         queryNLReq.setSelectedParseInfo(null);
                         queryNLReq.setMapModeEnum(MapModeEnum.ALL);

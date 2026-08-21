@@ -60,6 +60,21 @@ class LLMSqlParserTest {
     }
 
     @Test
+    void compilationRepairExplainsTheExactMonthAndYearComparisonShape() {
+        List<String> hints = LLMSqlParser.compilationCorrectionHints(
+                BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION, """
+                        {"intent":"CHANGE","metrics":[{"bizName":"ZB002"}],
+                        "organizations":[{"code":"ORG006"}],"time":{"comparison":"MOM_AND_YOY"},
+                        "calculation":{"type":"DIRECT"}}
+                        """);
+
+        assertEquals(1, hints.size());
+        assertTrue(hints.get(0).contains("恰好一个机构"));
+        assertTrue(hints.get(0).contains("time.comparison=MOM_AND_YOY"));
+        assertTrue(hints.get(0).contains("baselineStartDate=null"));
+    }
+
+    @Test
     void shouldRetryCompilationOnceWithSanitizedToolFeedbackThenStopOnRepeatedFailure() {
         LLMRequestService requestService = mock(LLMRequestService.class);
         LLMResponseService responseService = mock(LLMResponseService.class);

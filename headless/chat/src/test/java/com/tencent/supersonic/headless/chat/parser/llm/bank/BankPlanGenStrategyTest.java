@@ -270,6 +270,105 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void daysAboveProvinceAverageRepairsAnInitialClarifyBeforeTheGenericClarifyExit() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(),
+                daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("2025年全年，江苏省B市农商行的不良贷款率有多少天高于全省均值？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.AGGREGATION, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("days_above_province_average_mismatch"));
+    }
+
+    @Test
+    void monthAndYearComparisonRepairsAnInitialClarifyWithTheExactContract() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(),
+                monthAndYearRequirementsJson(), monthAndYearPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("分析江苏省F市农商行在2026-04-30的各项贷款余额环比（较上月）和同比（较去年同期）的变化情况。");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankQueryPlan.TimeComparison.MOM_AND_YOY,
+                response.getBankRequestContract().getTime().getComparison());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("mom_and_yoy_requirements_mismatch"));
+    }
+
+    @Test
+    void provinceBottomRankingRepairsAnInitialClarifyWithoutInventingAnOrganization() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(clarificationJson(),
+                provinceBottomRequirementsJson(), provinceBottomPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("2025年8月末，全省净利润排最后一名的是哪家？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
+                .contains("explicit_province_bottom_ranking_mismatch"));
+    }
+
+    @Test
+    void daysAboveProvinceAverageRejectsASeparateMetricDirectionFilter() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(daysAboveRequirementsWithDirectionFilterJson(),
+                daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("2025年全年，江苏省B市农商行的不良贷款率有多少天高于全省均值？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        new TestBankPlanGenStrategy(model).generate(request);
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
+                .contains("days_above_province_average_metric_filter_forbidden"));
+    }
+
+    @Test
+    void namedOrganizationRankQuestionDoesNotUseProvinceWideBottomSelectorContract() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(rankingRequirementsJson(), rankingPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("江苏省H市农商行的成本收入比在2026-04-30是否全省排名最后？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB016"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(List.of("ORG008"), response.getBankRequestContract().getOrganizationCodes());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
     void loanStructureShareReturnsRatioIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(loanStructureShareRequirementsJson("RATIO"),
@@ -877,6 +976,59 @@ class BankPlanGenStrategyTest {
                 "filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]}],
                 "calculation":{"type":"COUNT_DAYS_ABOVE_PROVINCE_AVERAGE","baseline":null},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB013"],"orderSensitive":true}}
+                """;
+    }
+
+    private String daysAboveRequirementsWithDirectionFilterJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"AGGREGATION",
+                "metricCodes":["ZB013"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2025-01-01","endDate":"2025-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"benchmark","operator":"COMPARE","value":"PROVINCE_AVERAGE","values":[]},{"field":"metric_value","operator":"GT","value":"PROVINCE_AVERAGE","values":[]}],
+                "requiredLimit":null,"answerFactTypes":["COUNT"],"clarification":null}
+                """;
+    }
+
+    private String monthAndYearRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB002"],"derivedMetrics":[],"organizationCodes":["ORG006"],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"MOM_AND_YOY","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","CHANGE_RATE"],"clarification":null}
+                """;
+    }
+
+    private String monthAndYearPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":[],"organizations":[{"code":"ORG006","bizName":null}],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"MOM_AND_YOY","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["ZB002"],"orderSensitive":true}}
+                """;
+    }
+
+    private String provinceBottomRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metricCodes":["ZB011"],"derivedMetrics":[],"organizationCodes":[],
+                "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank_from_bottom","operator":"LTE","value":"1","values":[]}],
+                "requiredLimit":1,"answerFactTypes":["VALUE","RANK"],"clarification":null}
+                """;
+    }
+
+    private String provinceBottomPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metrics":[{"bizName":"ZB011","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[],
+                "time":{"startDate":"2025-08-31","endDate":"2025-08-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank_from_bottom","operator":"LTE","value":"1","values":[]}],
+                "calculation":{"type":"DIRECT","baseline":null},
+                "orderBy":[{"field":"ZB011","direction":"DESC"}],"limit":1,
+                "output":{"columns":["bank_organization","ZB011"],"orderSensitive":true}}
                 """;
     }
 

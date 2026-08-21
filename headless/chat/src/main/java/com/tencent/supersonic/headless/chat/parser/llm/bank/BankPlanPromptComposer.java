@@ -137,6 +137,10 @@ public final class BankPlanPromptComposer {
               直接 action=EXECUTE，intent=CHANGE，organizationCodes=[]，requiredLimit=N；不得因没有目标机构而澄清。
             - 只要 time.comparison 不是 NONE（包括同比、环比、较年初或两个明确时点的变动），
               REQUIREMENTS 的 intent 必须为 CHANGE；“评估”“分析”“结构”等业务标题不改变这一执行意图。
+            - 同一句明确要求某机构、某指标在同一当前日期的“环比和同比/同比及环比”时，直接
+              action=EXECUTE、intent=CHANGE；只保留恰好一个 organizationCodes 和一个 metricCodes，
+              time.comparison=MOM_AND_YOY，当前日期写入 startDate/endDate，两个 baseline 字段必须为 null。
+              环比与同比基期由编译器确定，不得自行填写，也不得因题目同时要求两种比较而 CLARIFY。
             - “某机构某指标全年/期间日均值，以及最高日和最低日”已经给出单机构、指标和期间。
               直接 action=EXECUTE，intent=AGGREGATION；不得把“日均值”理解成缺少指标或时间。
             - “某机构某指标在某日与全省均值比，是高还是低/差多少”已经给出唯一机构、指标、日期和
@@ -185,6 +189,14 @@ public final class BankPlanPromptComposer {
               也不得因日期为 2026 年或“分别”而返回 CLARIFY。
             - “有多少家农商行高于/低于全省均值”是逐机构阈值计数：intent=THRESHOLD，organizationCodes=[]，
               answerFactTypes 必须包含 COUNT；不要改写为单机构省均值比较或普通排名。
+            - “某机构某指标在期间有多少天高于全省均值”是单机构逐日计数：必须 action=EXECUTE、
+              intent=AGGREGATION、一个机构、一个指标、完整 DAY 日期范围，filters 只保留
+              benchmark/COMPARE/PROVINCE_AVERAGE，answerFactTypes 至少包含 COUNT。该专用合同只支持
+              “高于/超过/大于”；不得把“低于/小于”伪装成同一查询族。
+            - “全省/全部机构中，哪家某指标排最后/倒数第N”是全省机构选择：必须 action=EXECUTE、
+              intent=RANKING、organizationCodes=[]、一个指标、明确日期，filters 使用
+              rank_from_bottom/LTE/N，requiredLimit=N。题干询问“哪家”已经定义全省范围，不得要求用户
+              先指定机构；若题干已经指定某一机构，则不是这个全省机构选择合同。
             下面第二份是 action=CLARIFY 的完整格式：
             {
               "version":"1.0",
@@ -320,22 +332,26 @@ public final class BankPlanPromptComposer {
                同一时点两个基础指标的绝对差值也不使用 RATIO 或 CHANGE：metrics 保留题干中的两个指标，
                intent=POINT_QUERY、calculation.type=DIRECT；不得使用 calculation.type=RATIO，
                也不得将其中一个指标当成基期。
-            3a. 逐季序列的精确计划合同：intent=TREND，time 保留完整起止日期、granularity=DAY、
+            3a. 同一日期同时要求环比和同比时，必须使用唯一计划形状：intent=CHANGE，恰好一个 metrics、
+                恰好一个 organizations，time.comparison=MOM_AND_YOY，当前日期写入 startDate/endDate，
+                baselineStartDate=null、baselineEndDate=null，dimensions=[]、filters=[]、
+                calculation.type=CHANGE、orderBy=[]、limit=null。编译器会派生上月末和去年同期两个基期。
+            3b. 逐季序列的精确计划合同：intent=TREND，time 保留完整起止日期、granularity=DAY、
                 comparison=NONE、baselineStartDate/baselineEndDate=null；dimensions 必须包含 "bank_data_date"，
                 calculation.type=DIRECT，orderBy 按 bank_data_date ASC，output.columns 包含日期和所选指标。
                 不得压缩为起点与终点的 CHANGE，也不得只返回两个端点。
-            3b. “从某个明确期末到另一个明确期末，多个指标的变动方向分别是什么”是端点变化，
+            3c. “从某个明确期末到另一个明确期末，多个指标的变动方向分别是什么”是端点变化，
                 不是逐日趋势序列。intent=CHANGE、comparison=PERIOD_OVER_PERIOD，
                 当前端点写 startDate=endDate，较早端点写 baselineStartDate=baselineEndDate；必须
                 calculation.type=CHANGE，dimensions=["bank_organization"]，保留全部明示指标。
-            3c. “不良贷款余额占贷款总额的比重/比例”是点值比率：intent=RATIO、
+            3d. “不良贷款余额占贷款总额的比重/比例”是点值比率：intent=RATIO、
                 metrics 按 ZB014、ZB002 排列，calculation.type=RATIO、baseline="ZB002"，
                 dimensions=["bank_organization"]，不得退化为两个基础指标的 DIRECT 查询。
-            3d. 通用两个基础指标的点值比率也使用同一计划形状：metrics 按题干分子、分母排列，
+            3e. 通用两个基础指标的点值比率也使用同一计划形状：metrics 按题干分子、分母排列，
                 derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，dimensions 必须包含
                 bank_organization，output.columns 先列机构再列两个基础指标；编译器会计算 RATIO_VALUE。
                 不得把这类明确比重问题改成 POINT_QUERY 或 DIRECT。
-            3e. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
+            3f. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
                 dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
                 返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
             4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
@@ -386,6 +402,8 @@ public final class BankPlanPromptComposer {
                limit 设为 N。排名过滤器只能用于 RANKING，不能用来代替机构或指标过滤。
                “排最后一名/倒数第一”就是后1名：只填写 rank_from_bottom 过滤器，必须
                operator=LTE、value="1"、values=[]，并令 limit=1；不得使用 GTE、EQ 或总机构数。
+               若题干是“全省/全部机构中哪家排最后/倒数第N”，organizations 必须为 []，dimensions
+               必须为 ["bank_organization"]；不得虚构一个目标机构，也不得把“哪家”当作缺槽位。
             10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                聚合成一个值再比较。必须使用 intent=AGGREGATION、单一机构、单一指标、
                granularity=DAY、comparison=NONE，并保留 requirements_contract 中已声明的
@@ -393,7 +411,8 @@ public final class BankPlanPromptComposer {
                dimensions=["bank_organization"]、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
                orderBy=[]、limit=null，output.columns 只写 ["bank_organization","ZB###"]；
                编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
-               不得先对全年求和或平均后只比较一次。
+               不得先对全年求和或平均后只比较一次。这个专用 calculation 只表示“高于”，遇到
+               “低于/小于全省均值多少天”不得套用 COUNT_DAYS_ABOVE_PROVINCE_AVERAGE。
             10a. “某机构某指标全年/期间有多少天高于全省均值”是评测事实库中的日粒度计数：
                 intent=AGGREGATION，保留该机构、该指标和完整日期范围，filters 必须包含
                 benchmark/COMPARE/PROVINCE_AVERAGE，calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
@@ -454,14 +473,14 @@ public final class BankPlanPromptComposer {
             REQUIREMENTS_SYSTEM_PREFIX + "\n\n" + PLAN_STAGE_SECTION;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v51-stage-split";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v52-stage-split";
 
     /** Version of the REQUIREMENTS stage prefix; part of the stage cache key. */
     public static final String REQUIREMENTS_PREFIX_VERSION =
-            "bank-requirements-sys-v2-stage-split";
+            "bank-requirements-sys-v3-stage-split";
 
     /** Version of the PLAN stage prefix; part of the stage cache key. */
-    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v50-stage-split";
+    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v51-stage-split";
 
     private BankPlanPromptComposer() {}
 
@@ -563,6 +582,10 @@ public final class BankPlanPromptComposer {
                  - “某机构某指标全年有多少天高于全省均值”必须执行 AGGREGATION 的逐日计数合同：
                    benchmark=COMPARE/PROVINCE_AVERAGE、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
                    answerFactTypes 至少包含 COUNT；不能因为字母城市名、日频或未来年份而澄清。
+                 - 同一日期同时要求环比和同比时必须执行 CHANGE：恰好一个机构、一个指标，
+                   comparison=MOM_AND_YOY，baselineStartDate/baselineEndDate=null；两个基期由编译器派生。
+                 - “全省哪家排最后/倒数第N”必须执行 RANKING，organizationCodes=[]，使用
+                   rank_from_bottom/LTE/N 且 requiredLimit=N；“哪家”不是缺失机构。
                  - “个人贷款和对公贷款分别占各项贷款的比例”必须执行 POINT_QUERY，metricCodes 按
                    ["ZB006","ZB005","ZB002"]，answerFactTypes=["VALUE","RATIO_VALUE"]；不能退化为单一 RATIO。
                 - “某机构某指标在明确日期和全省均值比，是高还是低/差多少”已经具备完整槽位，必须输出

@@ -90,6 +90,8 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("COUNT_DAYS_ABOVE_PROVINCE_AVERAGE"));
         assertTrue(sys.contains("DAYS_ABOVE_AVERAGE"));
         assertTrue(sys.contains("不得先对全年求和或平均后只比较一次"));
+        assertTrue(sys.contains("这个专用 calculation 只表示“高于”"));
+        assertTrue(sys.contains("不得把“低于/小于”伪装成同一查询族"));
         assertTrue(sys.contains("只改正 error 指出的非法槽位"));
         assertTrue(sys.contains("绝对阈值判断的精确计划合同"));
         assertTrue(sys.contains("\"intent\":\"THRESHOLD\""));
@@ -99,6 +101,19 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("output.columns 必须精确为 [\"bank_organization\",\"<所选 ZB###>\"]"));
         assertTrue(sys.contains("排最后一名/倒数第一"));
         assertTrue(sys.contains("operator=LTE、value=\"1\"、values=[]"));
+    }
+
+    @Test
+    void promptsCarryExactMonthAndYearAndProvinceBottomContracts() {
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+        String plan = BankPlanPromptComposer.PLAN_SYSTEM_PREFIX;
+
+        assertTrue(requirements.contains("time.comparison=MOM_AND_YOY"));
+        assertTrue(requirements.contains("恰好一个 organizationCodes 和一个 metricCodes"));
+        assertTrue(requirements.contains("rank_from_bottom/LTE/N"));
+        assertTrue(plan.contains("恰好一个 organizations"));
+        assertTrue(plan.contains("编译器会派生上月末和去年同期两个基期"));
+        assertTrue(plan.contains("不得把“哪家”当作缺槽位"));
     }
 
     @Test
