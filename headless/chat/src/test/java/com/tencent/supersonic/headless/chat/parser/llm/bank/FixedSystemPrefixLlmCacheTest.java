@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,10 +58,8 @@ class FixedSystemPrefixLlmCacheTest {
         assertEquals(768, cache.stats().get("safetyMaxTokens"));
         assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 768),
                 cache.resolveOptions("http://127.0.0.1:8080", null));
-        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
-                cache.resolveOptions("http://127.0.0.1:8080",
-                        LlamaCppPrefixChatClient.ChatOptions.warmup(false)),
-                "explicit requests (warm-up) must win over the safety cap");
+        assertWarmup(cache.resolveOptions("http://127.0.0.1:8080",
+                LlamaCppPrefixChatClient.ChatOptions.warmup(false)), false, 1);
     }
 
     @Test
@@ -108,18 +107,14 @@ class FixedSystemPrefixLlmCacheTest {
         FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
                 false, "预热", false, 0, "PLAN", 1024);
 
-        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
-                cache.resolveOptions("https://api.deepseek.com/v1",
-                        LlamaCppPrefixChatClient.ChatOptions.warmup(false)),
-                "explicit warm-up must win on remote endpoints");
+        assertWarmup(cache.resolveOptions("https://api.deepseek.com/v1",
+                LlamaCppPrefixChatClient.ChatOptions.warmup(false)), false, 1);
         assertEquals(new LlamaCppPrefixChatClient.ChatOptions(true, 2048),
                 cache.resolveOptions("https://api.deepseek.com/v1",
                         LlamaCppPrefixChatClient.ChatOptions.thinking(2048)),
                 "explicit thinking must win on remote endpoints");
-        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
-                cache.resolveOptions("http://127.0.0.1:8080",
-                        LlamaCppPrefixChatClient.ChatOptions.warmup(false)),
-                "explicit warm-up must win on local endpoints");
+        assertWarmup(cache.resolveOptions("http://127.0.0.1:8080",
+                LlamaCppPrefixChatClient.ChatOptions.warmup(false)), false, 1);
     }
 
     @Test
@@ -173,5 +168,41 @@ class FixedSystemPrefixLlmCacheTest {
                 "dynamic part must be a sha-256 hex digest");
         assertFalse(key.contains("同一动态内容"),
                 "memo keys must never embed raw user content");
+    }
+
+    @Test
+    void structuredStagesBindTheirOwnPublishedContractSchema() {
+        ChatModelConfig config = new ChatModelConfig();
+        config.setJsonFormat(true);
+        config.setJsonFormatType("json_schema");
+        FixedSystemPrefixLlmCache requirements = new FixedSystemPrefixLlmCache("系统前缀", "v", 32,
+                false, "预热", false, 0, "REQUIREMENTS", 768);
+        FixedSystemPrefixLlmCache plan = new FixedSystemPrefixLlmCache("系统前缀", "v", 32, false,
+                "预热", false, 0, "PLAN", 1024);
+
+        LlamaCppPrefixChatClient.ChatOptions requirementOptions =
+                requirements.bindStageSchema(config, LlamaCppPrefixChatClient.ChatOptions.defaults());
+        LlamaCppPrefixChatClient.ChatOptions planOptions =
+                plan.bindStageSchema(config, LlamaCppPrefixChatClient.ChatOptions.defaults());
+
+        assertEquals("bank_request_contract", requirementOptions.jsonSchemaName());
+        assertEquals(BankRequestContract.JSON_SCHEMA, requirementOptions.jsonSchema());
+        assertEquals("bank_query_plan", planOptions.jsonSchemaName());
+        assertEquals(BankQueryPlan.JSON_SCHEMA, planOptions.jsonSchema());
+    }
+
+    @Test
+    void schemaCapabilityFailureNeverFallsBackToAnotherModelPath() {
+        assertFalse(FixedSystemPrefixLlmCache.shouldFallbackToLangchain(
+                LlamaCppPrefixChatClient.JsonSchemaCapabilityException.unexpectedStatus(500)));
+        assertTrue(FixedSystemPrefixLlmCache.shouldFallbackToLangchain(
+                new IllegalStateException("ordinary transport failure")));
+    }
+
+    private static void assertWarmup(LlamaCppPrefixChatClient.ChatOptions options,
+            boolean thinking, int maximum) {
+        assertEquals(thinking, options.enableThinking());
+        assertEquals(maximum, options.maxTokens());
+        assertTrue(options.omitResponseFormat());
     }
 }

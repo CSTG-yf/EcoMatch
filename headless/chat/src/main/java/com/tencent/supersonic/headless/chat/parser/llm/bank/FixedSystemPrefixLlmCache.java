@@ -289,11 +289,15 @@ public class FixedSystemPrefixLlmCache {
             try {
                 LlamaCppPrefixChatClient.ChatResult result =
                         llamaCppClient.chat(config, systemPrefix, dynamicUserContent,
-                                resolveOptions(config.getBaseUrl(), requestedOptions));
+                                bindStageSchema(config, resolveOptions(config.getBaseUrl(),
+                                        requestedOptions)));
                 llamaCppCalls.incrementAndGet();
                 recordLlamaCppTimings(result);
                 return result.content();
             } catch (RuntimeException ex) {
+                if (!shouldFallbackToLangchain(ex)) {
+                    throw ex;
+                }
                 LOG.warn(
                         "llama.cpp prefix chat failed, falling back to langchain4j: version={} stage={} type={}, error=[{}]",
                         prefixVersion, stageLabel, ex.getClass().getSimpleName(),
@@ -309,6 +313,26 @@ public class FixedSystemPrefixLlmCache {
             throw new IllegalStateException("no chat model available after llama.cpp failure");
         }
         return model.generate(composeFullPrompt(dynamicUserContent));
+    }
+
+    static boolean shouldFallbackToLangchain(RuntimeException exception) {
+        return !(exception instanceof LlamaCppPrefixChatClient.JsonSchemaCapabilityException);
+    }
+
+    LlamaCppPrefixChatClient.ChatOptions bindStageSchema(ChatModelConfig config,
+            LlamaCppPrefixChatClient.ChatOptions options) {
+        if (options.enableThinking() || options.omitResponseFormat()
+                || !Boolean.TRUE.equals(config.getJsonFormat())
+                || !"json_schema".equalsIgnoreCase(config.getJsonFormatType())) {
+            return options;
+        }
+        if ("REQUIREMENTS".equalsIgnoreCase(stageLabel)) {
+            return options.withJsonSchema("bank_request_contract", BankRequestContract.JSON_SCHEMA);
+        }
+        if ("PLAN".equalsIgnoreCase(stageLabel)) {
+            return options.withJsonSchema("bank_query_plan", BankQueryPlan.JSON_SCHEMA);
+        }
+        return options;
     }
 
     /**

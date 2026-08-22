@@ -196,7 +196,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             }
         } else {
             modelConfig.setJsonFormat(true);
-            modelConfig.setJsonFormatType("json_object");
+            modelConfig.setJsonFormatType("json_schema");
         }
         // Structured repair owns retries. Do not multiply a provider timeout underneath it.
         modelConfig.setMaxRetries(0);

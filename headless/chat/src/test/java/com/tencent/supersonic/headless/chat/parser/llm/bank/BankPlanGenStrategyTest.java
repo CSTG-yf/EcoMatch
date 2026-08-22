@@ -48,7 +48,7 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of(), response.getBankCandidateDiagnostics()
                 .get("bank.nl2sql.requirementsRepairReasons"));
         verify(model, times(2)).generate(anyString());
-        assertEquals("json_object", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
+        assertEquals("json_schema", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getJsonFormatType());
         assertEquals(0, request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getMaxRetries());

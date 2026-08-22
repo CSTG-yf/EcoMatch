@@ -17,6 +17,8 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,6 +40,17 @@ public class LlamaCppPrefixChatClient {
     private static final Logger LOG = LoggerFactory.getLogger(LlamaCppPrefixChatClient.class);
     private static final Logger KEY_PIPELINE = LoggerFactory.getLogger("keyPipeline");
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ConcurrentMap<JsonSchemaCapabilityKey, JsonSchemaCapability>
+            JSON_SCHEMA_CAPABILITIES = new ConcurrentHashMap<>();
+    private static final String JSON_SCHEMA_PROBE_NAME = "bank_json_schema_capability_probe";
+    private static final String JSON_SCHEMA_PROBE_SYSTEM =
+            "You are a capability probe. Return only the requested JSON object.";
+    private static final String JSON_SCHEMA_PROBE_USER =
+            "Return a minimal capability acknowledgement.";
+    private static final String JSON_SCHEMA_PROBE = """
+            {"type":"object","additionalProperties":false,"required":["ok"],
+            "properties":{"ok":{"type":"boolean"}}}
+            """.strip();
 
     private static final Pattern THINK_BLOCK = Pattern.compile("(?is)<think\\b[^>]*>.*?</think>");
     private static final Pattern THINK_BLOCK_ALT =
@@ -48,7 +61,13 @@ public class LlamaCppPrefixChatClient {
     private final HttpClient httpClient =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
-    public record ChatOptions(boolean enableThinking, int maxTokens) {
+    public record ChatOptions(boolean enableThinking, int maxTokens, String jsonSchemaName,
+            String jsonSchema, boolean omitResponseFormat) {
+
+        public ChatOptions(boolean enableThinking, int maxTokens) {
+            this(enableThinking, maxTokens, null, null, false);
+        }
+
         public static ChatOptions defaults() {
             return new ChatOptions(false, 0);
         }
@@ -66,11 +85,34 @@ public class LlamaCppPrefixChatClient {
          * should consume the smallest possible completion while still exercising the chat template.
          */
         public static ChatOptions warmup(boolean thinkingEnabled) {
-            return new ChatOptions(thinkingEnabled, thinkingEnabled ? 1024 : 1);
+            return new ChatOptions(thinkingEnabled, thinkingEnabled ? 1024 : 1, null, null, true);
         }
 
         public static ChatOptions thinking(int maxTokens) {
             return new ChatOptions(true, Math.max(1024, maxTokens));
+        }
+
+        public static ChatOptions jsonSchema(String name, String schema) {
+            if (StringUtils.isBlank(name) || StringUtils.isBlank(schema)) {
+                throw new IllegalArgumentException("json schema name and schema are required");
+            }
+            return new ChatOptions(false, 0, name, schema, false);
+        }
+
+        public ChatOptions withMaxTokens(int maximum) {
+            return new ChatOptions(enableThinking, Math.max(0, maximum), jsonSchemaName,
+                    jsonSchema, omitResponseFormat);
+        }
+
+        public ChatOptions withJsonSchema(String name, String schema) {
+            if (StringUtils.isBlank(name) || StringUtils.isBlank(schema)) {
+                throw new IllegalArgumentException("json schema name and schema are required");
+            }
+            return new ChatOptions(enableThinking, maxTokens, name, schema, omitResponseFormat);
+        }
+
+        public boolean hasJsonSchema() {
+            return StringUtils.isNotBlank(jsonSchemaName) && StringUtils.isNotBlank(jsonSchema);
         }
     }
 
@@ -93,54 +135,14 @@ public class LlamaCppPrefixChatClient {
         }
 
         String url = resolveChatCompletionsUrl(config.getBaseUrl());
-        ObjectNode body = MAPPER.createObjectNode();
-        body.put("model", StringUtils.defaultIfBlank(config.getModelName(), "local"));
-        body.put("cache_prompt", true);
-        body.put("stream", false);
-        if (config.getTemperature() != null) {
-            body.put("temperature", config.getTemperature());
-        } else {
-            body.put("temperature", 0.0d);
-        }
-        if (config.getTopP() != null) {
-            body.put("top_p", config.getTopP());
-        }
-        if (opts.maxTokens() > 0) {
-            body.put("max_tokens", opts.maxTokens());
-        }
-
-        applyThinkingOptions(body, config, opts);
-
-        ArrayNode messages = body.putArray("messages");
-        ObjectNode system = messages.addObject();
-        system.put("role", "system");
-        system.put("content", systemPrefix);
-        ObjectNode user = messages.addObject();
-        user.put("role", "user");
-        user.put("content", userContent);
-
-        // Thinking runs longer; default timeout floors higher when enabled.
-        long configured =
-                config.getTimeOut() == null || config.getTimeOut() <= 0 ? 0L : config.getTimeOut();
-        long timeoutSec = opts.enableThinking() ? Math.max(configured, 300L)
-                : (configured <= 0 ? 120L : configured);
         try {
-            String json = MAPPER.writeValueAsString(body);
-            HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(timeoutSec))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json));
-            String apiKey = resolveApiKey(config);
-            if (StringUtils.isNotBlank(apiKey)) {
-                request.header("Authorization", "Bearer " + apiKey);
-            }
-
-            HttpResponse<String> response =
-                    httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            boolean schemaSupported = !isJsonSchemaRequest(config, opts)
+                    || resolveJsonSchemaCapability(config, url) == JsonSchemaCapability.SUPPORTED;
+            ObjectNode body = createRequestBody(config, systemPrefix, userContent, opts,
+                    schemaSupported);
+            HttpResponse<String> response = post(config, url, body, opts);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException(
-                        "llama.cpp chat failed status=" + response.statusCode() + " body="
-                                + StringUtils.left(response.body(), 300));
+                throw failedResponse(response);
             }
             return parseResponse(response.body(), opts.enableThinking());
         } catch (InterruptedException e) {
@@ -160,17 +162,165 @@ public class LlamaCppPrefixChatClient {
      * required for the final JSON to be returned in message.content.
      */
     static void applyThinkingOptions(ObjectNode body, ChatModelConfig config, ChatOptions options) {
+        applyThinkingOptions(body, config, options, true);
+    }
+
+    private static void applyThinkingOptions(ObjectNode body, ChatModelConfig config,
+            ChatOptions options, boolean jsonSchemaSupported) {
         ChatOptions opts = options == null ? ChatOptions.defaults() : options;
         ObjectNode templateKwargs = body.putObject("chat_template_kwargs");
         templateKwargs.put("enable_thinking", opts.enableThinking());
         // Some llama.cpp builds only inspect the top-level flag.
         body.put("enable_thinking", opts.enableThinking());
         if (!opts.enableThinking() && Boolean.TRUE.equals(config.getJsonFormat())) {
+            if (opts.omitResponseFormat()) {
+                return;
+            }
             ObjectNode responseFormat = body.putObject("response_format");
             String type = StringUtils.defaultIfBlank(config.getJsonFormatType(), "json_object");
-            responseFormat.put("type", "json_schema".equalsIgnoreCase(type) ? "json_object" : type);
+            if (!"json_schema".equalsIgnoreCase(type)) {
+                responseFormat.put("type", type);
+                return;
+            }
+            if (!jsonSchemaSupported) {
+                responseFormat.put("type", "json_object");
+                return;
+            }
+            if (!opts.hasJsonSchema()) {
+                throw new IllegalArgumentException(
+                        "json_schema response format requires a named schema definition");
+            }
+            responseFormat.put("type", "json_schema");
+            ObjectNode jsonSchema = responseFormat.putObject("json_schema");
+            jsonSchema.put("name", opts.jsonSchemaName());
+            try {
+                jsonSchema.set("schema", MAPPER.readTree(opts.jsonSchema()));
+            } catch (Exception exception) {
+                throw new IllegalArgumentException("json schema must be valid JSON", exception);
+            }
         }
     }
+
+    static void clearJsonSchemaCapabilitiesForTests() {
+        JSON_SCHEMA_CAPABILITIES.clear();
+    }
+
+    private boolean isJsonSchemaRequest(ChatModelConfig config, ChatOptions options) {
+        return !options.enableThinking() && options.hasJsonSchema()
+                && Boolean.TRUE.equals(config.getJsonFormat())
+                && "json_schema".equalsIgnoreCase(config.getJsonFormatType());
+    }
+
+    private JsonSchemaCapability resolveJsonSchemaCapability(ChatModelConfig config, String url) {
+        JsonSchemaCapabilityKey key = new JsonSchemaCapabilityKey(url,
+                StringUtils.defaultIfBlank(config.getModelName(), "local"));
+        return JSON_SCHEMA_CAPABILITIES.computeIfAbsent(key,
+                ignored -> probeJsonSchemaCapability(config, url));
+    }
+
+    private JsonSchemaCapability probeJsonSchemaCapability(ChatModelConfig config, String url) {
+        try {
+            ChatOptions options = ChatOptions.jsonSchema(JSON_SCHEMA_PROBE_NAME, JSON_SCHEMA_PROBE)
+                    .withMaxTokens(16);
+            ObjectNode body = createRequestBody(config, JSON_SCHEMA_PROBE_SYSTEM,
+                    JSON_SCHEMA_PROBE_USER, options, true);
+            HttpResponse<String> response = post(config, url, body, options);
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                LOG.info("llama.cpp json_schema capability supported endpoint={} model={}", url,
+                        StringUtils.defaultIfBlank(config.getModelName(), "local"));
+                return JsonSchemaCapability.SUPPORTED;
+            }
+            if (response.statusCode() == 400 || response.statusCode() == 501) {
+                LOG.warn("llama.cpp json_schema capability unsupported endpoint={} model={} status={}; falling back to json_object",
+                        url, StringUtils.defaultIfBlank(config.getModelName(), "local"),
+                        response.statusCode());
+                return JsonSchemaCapability.UNSUPPORTED;
+            }
+            throw JsonSchemaCapabilityException.unexpectedStatus(response.statusCode());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw JsonSchemaCapabilityException.probeFailed("interrupted", exception);
+        } catch (JsonSchemaCapabilityException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw JsonSchemaCapabilityException.probeFailed("request_failed", exception);
+        }
+    }
+
+    private ObjectNode createRequestBody(ChatModelConfig config, String systemPrefix,
+            String userContent, ChatOptions options, boolean jsonSchemaSupported) {
+        ObjectNode body = MAPPER.createObjectNode();
+        body.put("model", StringUtils.defaultIfBlank(config.getModelName(), "local"));
+        body.put("cache_prompt", true);
+        body.put("stream", false);
+        if (config.getTemperature() != null) {
+            body.put("temperature", config.getTemperature());
+        } else {
+            body.put("temperature", 0.0d);
+        }
+        if (config.getTopP() != null) {
+            body.put("top_p", config.getTopP());
+        }
+        if (options.maxTokens() > 0) {
+            body.put("max_tokens", options.maxTokens());
+        }
+        applyThinkingOptions(body, config, options, jsonSchemaSupported);
+
+        ArrayNode messages = body.putArray("messages");
+        ObjectNode system = messages.addObject();
+        system.put("role", "system");
+        system.put("content", systemPrefix);
+        ObjectNode user = messages.addObject();
+        user.put("role", "user");
+        user.put("content", userContent);
+        return body;
+    }
+
+    private HttpResponse<String> post(ChatModelConfig config, String url, ObjectNode body,
+            ChatOptions options) throws Exception {
+        String json = MAPPER.writeValueAsString(body);
+        HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(url))
+                .timeout(Duration.ofSeconds(resolveTimeoutSeconds(config, options)))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json));
+        String apiKey = resolveApiKey(config);
+        if (StringUtils.isNotBlank(apiKey)) {
+            request.header("Authorization", "Bearer " + apiKey);
+        }
+        return httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static long resolveTimeoutSeconds(ChatModelConfig config, ChatOptions options) {
+        long configured =
+                config.getTimeOut() == null || config.getTimeOut() <= 0 ? 0L : config.getTimeOut();
+        return options.enableThinking() ? Math.max(configured, 300L)
+                : (configured <= 0 ? 120L : configured);
+    }
+
+    private static IllegalStateException failedResponse(HttpResponse<String> response) {
+        return new IllegalStateException("llama.cpp chat failed status=" + response.statusCode());
+    }
+
+    static final class JsonSchemaCapabilityException extends IllegalStateException {
+
+        private JsonSchemaCapabilityException(String code, Throwable cause) {
+            super("llama.cpp json_schema capability probe failed code=" + code, cause);
+        }
+
+        static JsonSchemaCapabilityException unexpectedStatus(int statusCode) {
+            return new JsonSchemaCapabilityException("unexpected_status_" + statusCode, null);
+        }
+
+        static JsonSchemaCapabilityException probeFailed(String code, Throwable cause) {
+            return new JsonSchemaCapabilityException(code, cause);
+        }
+    }
+
+    private enum JsonSchemaCapability {
+        SUPPORTED, UNSUPPORTED
+    }
+
+    private record JsonSchemaCapabilityKey(String endpoint, String modelName) {}
 
     static String resolveChatCompletionsUrl(String baseUrl) {
         String root = baseUrl.trim();
