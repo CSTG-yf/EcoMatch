@@ -26,6 +26,8 @@ public class SemanticQueryResp extends QueryResult<Map<String, Object>> {
     boolean useCache;
     boolean dataMasked;
     Set<String> maskedColumns = new LinkedHashSet<>();
+    /** Policy version used to authorize and mask this response. */
+    long maskingPolicyVersion;
     Map<String, Object> executionTelemetry = new LinkedHashMap<>();
     private String errorMsg;
 

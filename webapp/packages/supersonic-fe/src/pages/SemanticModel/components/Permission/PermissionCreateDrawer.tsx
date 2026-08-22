@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, message, Form, Space, Drawer, Input } from 'antd';
+import { Button, message, Form, Space, Drawer, Input, Select } from 'antd';
 import { ProCard } from '@ant-design/pro-components';
 import { useModel } from '@umijs/max';
 import { createGroupAuth, updateGroupAuth } from '../../service';
@@ -39,13 +39,14 @@ const PermissionCreateDrawer: React.FC<Props> = ({
   const [selectedDimensionKeyList, setSelectedDimensionKeyList] = useState<string[]>([]);
   const [selectedMetricKeyList, setSelectedMetricKeyList] = useState<string[]>([]);
   const [selectedKeyList, setSelectedKeyList] = useState<string[]>([]);
+  const [columnAccessMode, setColumnAccessMode] = useState<string>('MASKED');
   const [basicInfoValues, setBasicInfoValues] = useState<Record<string, any>>({});
   const watchedRowFilter = Form.useWatch('dimensionFilters', form);
 
   const saveAuth = async () => {
     const basicInfoFormValues = await basicInfoFormRef.current.formRef.validateFields();
     const values = await form.validateFields();
-    const { dimensionFilters, dimensionFilterDescription } = values;
+    const { dimensionFilters, dimensionFilterDescription, rowFilterRulesJson } = values;
     const { attributeConditionEntries = [], ...basicValues } = basicInfoFormValues;
     const hasSubject =
       basicValues.authorizedDepartmentIds?.length ||
@@ -75,6 +76,31 @@ const PermissionCreateDrawer: React.FC<Props> = ({
     }
     permissonData.authRules = [target];
 
+    let rowFilterRules: any[] = [];
+    if (rowFilterRulesJson?.trim()) {
+      try {
+        rowFilterRules = JSON.parse(rowFilterRulesJson);
+        if (!Array.isArray(rowFilterRules)) {
+          throw new Error('not-array');
+        }
+      } catch {
+        message.error('结构化行权限必须是合法 JSON 数组');
+        return;
+      }
+    }
+    const resourcePermissions = [
+      ...selectedDimensionKeyList.map((resourceName) => ({
+        resourceType: 'DIMENSION',
+        resourceName,
+        accessMode: columnAccessMode,
+      })),
+      ...selectedMetricKeyList.map((resourceName) => ({
+        resourceType: 'METRIC',
+        resourceName,
+        accessMode: columnAccessMode,
+      })),
+    ];
+
     let saveAuthQuery = createGroupAuth;
     if (basicInfoFormValues.groupId) {
       saveAuthQuery = updateGroupAuth;
@@ -84,6 +110,8 @@ const PermissionCreateDrawer: React.FC<Props> = ({
       attributeConditions,
       dimensionFilters: dimensionFilters ? [dimensionFilters] : [],
       dimensionFilterDescription,
+      rowFilterRules,
+      resourcePermissions,
       authRules: [
         {
           dimensions: selectedDimensionKeyList,
@@ -103,15 +131,20 @@ const PermissionCreateDrawer: React.FC<Props> = ({
 
   useEffect(() => {
     form.resetFields();
-    const { dimensionFilters, dimensionFilterDescription } = permissonData;
+    const { dimensionFilters, dimensionFilterDescription, rowFilterRules = [] } = permissonData;
     form.setFieldsValue({
       dimensionFilterDescription,
       dimensionFilters: Array.isArray(dimensionFilters) ? dimensionFilters[0] || '' : '',
+      rowFilterRulesJson: rowFilterRules.length ? JSON.stringify(rowFilterRules, null, 2) : '',
     });
     const dimensionAuth = permissonData?.authRules?.[0]?.dimensions || [];
     const metricAuth = permissonData?.authRules?.[0]?.metrics || [];
     setSelectedDimensionKeyList(dimensionAuth);
     setSelectedMetricKeyList(metricAuth);
+    const configuredMode = permissonData?.resourcePermissions?.find(
+      (permission: any) => permission?.accessMode,
+    )?.accessMode;
+    setColumnAccessMode(configuredMode || 'MASKED');
 
     const dimensionKeys = dimensionList.reduce((dimensionChangeList: string[], item: any) => {
       if (dimensionAuth.includes(item.bizName)) {
@@ -169,6 +202,17 @@ const PermissionCreateDrawer: React.FC<Props> = ({
             </ProCard>
 
             <ProCard title="列权限" bordered tooltip="仅对敏感度为高的指标/维度进行授权">
+              <Form.Item label="所选字段访问模式" style={{ maxWidth: 320 }}>
+                <Select
+                  value={columnAccessMode}
+                  onChange={setColumnAccessMode}
+                  options={[
+                    { value: 'MASKED', label: '允许查询并脱敏' },
+                    { value: 'RAW', label: '允许原值（高风险）' },
+                    { value: 'DENY', label: '禁止访问' },
+                  ]}
+                />
+              </Form.Item>
               <DimensionMetricVisibleTransfer
                 titles={['未授权维度/指标', '已授权维度/指标']}
                 listStyle={{
@@ -238,6 +282,16 @@ const PermissionCreateDrawer: React.FC<Props> = ({
                   </FormItem>
                   <FormItem name="dimensionFilterDescription" label="描述">
                     <TextArea placeholder="行权限描述" />
+                  </FormItem>
+                  <FormItem
+                    name="rowFilterRulesJson"
+                    label="结构化行规则（JSON）"
+                    tooltip="数组元素包含 field、operator、values、valueSource"
+                  >
+                    <TextArea
+                      autoSize={{ minRows: 3, maxRows: 8 }}
+                      placeholder="可选，使用白名单字段和操作符"
+                    />
                   </FormItem>
                 </Form>
               </div>

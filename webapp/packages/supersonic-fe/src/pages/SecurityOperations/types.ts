@@ -28,6 +28,7 @@ export type AuditEvent = {
   fileType?: string;
   fileSize?: number;
   durationMs?: number;
+  metadata?: Record<string, unknown>;
   eventTime: string;
   eventHash?: string;
 };

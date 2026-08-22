@@ -70,6 +70,12 @@ const AuditEventsTab: React.FC = () => {
         QUERY_FAILED: '查询失败',
         AUTH_ALLOWED: '授权通过',
         AUTH_DENIED: '授权拒绝',
+        POLICY_CREATED: '策略创建',
+        POLICY_UPDATED: '策略更新',
+        POLICY_DISABLED: '策略停用',
+        POLICY_PREVIEWED: '策略预览',
+        ROW_FILTER_APPLIED: '行权限应用',
+        COLUMN_ACCESS_DENIED: '列权限拒绝',
         MASK_APPLIED: '应用脱敏',
         EXPORT_STARTED: '导出开始',
         EXPORT_SUCCEEDED: '导出成功',
@@ -187,6 +193,9 @@ const AuditEventsTab: React.FC = () => {
               </Descriptions.Item>
               <Descriptions.Item label="原因码">
                 {selectedEvent.reasonCode || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="策略版本">
+                {String(selectedEvent.metadata?.policyVersion ?? '-')}
               </Descriptions.Item>
               <Descriptions.Item label="脱敏摘要">
                 {selectedEvent.maskingSummary || '-'}

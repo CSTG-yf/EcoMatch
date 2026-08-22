@@ -133,6 +133,14 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                     "data": {
                         "state": "FAILED",
                         "errorMsg": "[BANK_CONSTRAINED_PLAN]plan output order mismatch",
+                        "bankRoutingAttemptTelemetry": {
+                            "bankConstrainedPlanEnabled": True,
+                            "bankDatasetQualified": True,
+                            "selectedSqlGenType": "BANK_CONSTRAINED_PLAN",
+                            "llmCandidateCreated": True,
+                            "candidateRejectionState": "VALIDATION_REJECTED",
+                            "candidateValidationErrorType": "OUTPUT_ORDER_MISMATCH",
+                        },
                     },
                 }
             raise AssertionError(f"Unexpected path: {path}")
@@ -149,6 +157,11 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(item["errorStage"], "PARSE_RESPONSE")
         self.assertFalse(item["errorTransport"])
         self.assertEqual(item["backendError"], "[BANK_CONSTRAINED_PLAN]plan output order mismatch")
+        self.assertEqual(item["bankRouting"]["selectedSqlGenType"], "BANK_CONSTRAINED_PLAN")
+        self.assertEqual(item["bankRouting"]["candidateRejectionState"], "VALIDATION_REJECTED")
+        self.assertEqual(
+            item["bankRouting"]["candidateValidationErrorType"], "OUTPUT_ORDER_MISMATCH"
+        )
 
     def test_warmup_uses_disposable_parse_only_chain_and_returns_separate_timing(self) -> None:
         requests: list[tuple[str, dict]] = []

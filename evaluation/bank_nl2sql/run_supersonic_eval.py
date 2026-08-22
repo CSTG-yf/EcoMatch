@@ -514,6 +514,10 @@ def _evaluate_record(
             post_json(f"{query_api_prefix}/parse", parse_payload)
         )
         item["parseMs"] = round((time.perf_counter() - started) * 1000, 3)
+        # A fail-closed bank parse can still carry safe routing diagnostics. Capture them before
+        # returning on error so reports retain the true failure stage without exposing prompts,
+        # candidate JSON, SQL text, or result rows.
+        item["bankRouting"] = _bank_routing_telemetry(parse_response)
         parse_error = parse_response.get("errorMsg")
         if isinstance(parse_error, str) and parse_error.strip():
             item["backendError"] = parse_error.strip()
@@ -529,7 +533,6 @@ def _evaluate_record(
         item["parse"] = True
         item["s2sql"] = s2sql
         item["queryId"] = query_id
-        item["bankRouting"] = _bank_routing_telemetry(parse_response)
     except Exception as error:
         item["errorCategory"] = _error_category(error, "PARSE_ERROR")
         _record_error(item, error, default_stage="PARSE")

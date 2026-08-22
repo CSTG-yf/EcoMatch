@@ -220,15 +220,16 @@ public final class BankSemanticRegistry {
     }
 
     /**
-     * Compact, cache-stable facts shared by both prompt stages. This is the single source of
-     * truth for every metric, derived metric and organization line rendered into any stage
-     * prefix; the composer never re-types catalog rows.
+     * Compact, cache-stable facts shared by both prompt stages. This is the single source of truth
+     * for every metric, derived metric and organization line rendered into any stage prefix; the
+     * composer never re-types catalog rows.
      */
     public static String sharedCatalog() {
         String metricLines = METRICS.values().stream()
-                .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s）".formatted(
-                        metric.code(), metric.name(), metric.aliases(), metric.unit(),
-                        metric.defaultAggregation(), metric.direction()))
+                .map(metric -> "%s %s（aliases=%s, unit=%s, defaultAgg=%s, direction=%s, desc=%s）"
+                        .formatted(metric.code(), metric.name(), metric.aliases(), metric.unit(),
+                                metric.defaultAggregation(), metric.direction(),
+                                metric.description()))
                 .collect(Collectors.joining("\n"));
         String derivedMetricLines = DERIVED_METRICS.values().stream()
                 .map(metric -> "%s %s（formula=%s, unit=%s, direction=%s）".formatted(metric.code(),
@@ -256,8 +257,8 @@ public final class BankSemanticRegistry {
 
                 机构代码与范围（organizations=[] 表示全省/各家范围）：
                 %s
-                """.formatted(VERSION, PLAN_ACTIONS, INTENTS, TIME_GRANULARITIES,
-                TIME_COMPARISONS, metricLines, derivedMetricLines, organizationLines).strip();
+                """.formatted(VERSION, PLAN_ACTIONS, INTENTS, TIME_GRANULARITIES, TIME_COMPARISONS,
+                metricLines, derivedMetricLines, organizationLines).strip();
     }
 
     /** PLAN-only enums and compiler output facts; rendered only into the PLAN stage prefix. */
@@ -313,8 +314,10 @@ public final class BankSemanticRegistry {
                 """.formatted(filterFields(), FILTER_OPERATORS).strip();
     }
 
-    /** Legacy combined catalog; superseded by {@link #sharedCatalog()} plus
-     * {@link #planCapabilityCatalog()} in the split stage prefixes. */
+    /**
+     * Legacy combined catalog; superseded by {@link #sharedCatalog()} plus
+     * {@link #planCapabilityCatalog()} in the split stage prefixes.
+     */
     public static String promptCatalog() {
         return sharedCatalog() + "\n\n" + planCapabilityCatalog();
     }
@@ -350,23 +353,16 @@ public final class BankSemanticRegistry {
     private static Map<String, MetricDefinition> buildMetrics() {
         LinkedHashMap<String, MetricDefinition> metrics = new LinkedHashMap<>();
         BankFinancialLexicon.metrics().forEach((code, source) -> {
-            Direction direction = switch (code) {
-                case "ZB012", "ZB013", "ZB017" -> Direction.LOWER_BETTER;
-                case "ZB015", "ZB016" -> Direction.HIGHER_BETTER;
+            Direction direction = switch (source.getDirection()) {
+                case HIGHER_BETTER -> Direction.HIGHER_BETTER;
+                case LOWER_BETTER -> Direction.LOWER_BETTER;
                 default -> Direction.NEUTRAL;
-            };
-            String unit = switch (code) {
-                case "ZB012", "ZB013", "ZB015", "ZB016", "ZB017" -> "%";
-                case "ZB011" -> "万元";
-                case "ZB018" -> "人";
-                case "ZB019" -> "个";
-                case "ZB020", "ZB021" -> "户";
-                default -> "亿元";
             };
             metrics.put(code,
                     new MetricDefinition(code, source.getName(), source.getAliases(),
-                            source.getName(), unit, BankQueryPlan.Aggregation.DEFAULT.name(),
-                            AGGREGATIONS, direction, "", Set.of(), INTENTS,
+                            source.getDescription(), source.getUnit(),
+                            BankQueryPlan.Aggregation.DEFAULT.name(), AGGREGATIONS, direction, "",
+                            Set.of(), INTENTS,
                             immutableSet("METRIC_VALUE", "CURRENT_VALUE", "BASELINE_VALUE",
                                     "ABSOLUTE_CHANGE", "PERCENT_CHANGE", "RANK_POSITION",
                                     "PROVINCIAL_AVERAGE", "DAILY_AVERAGE", "MINIMUM_VALUE",

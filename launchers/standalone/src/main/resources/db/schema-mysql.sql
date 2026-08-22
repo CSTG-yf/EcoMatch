@@ -25,7 +25,16 @@ CREATE TABLE IF NOT EXISTS `s2_agent` (
 
 CREATE TABLE IF NOT EXISTS `s2_auth_groups` (
                                                 `group_id` int(11) NOT NULL,
-    `config` varchar(2048) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    `model_id` bigint DEFAULT NULL,
+    `policy_code` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT 1,
+    `policy_version` bigint NOT NULL DEFAULT 1,
+    `valid_from` datetime DEFAULT NULL,
+    `valid_to` datetime DEFAULT NULL,
+    `updated_at` datetime DEFAULT NULL,
+    `updated_by` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    `config` mediumtext COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    KEY `idx_auth_group_model_enabled` (`model_id`, `enabled`),
     PRIMARY KEY (`group_id`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

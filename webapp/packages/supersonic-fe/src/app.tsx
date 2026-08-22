@@ -152,10 +152,63 @@ const SiderHeader: React.FC<{ logoDom: React.ReactNode; collapsed?: boolean }> =
   );
 };
 
+/**
+ * 银行问数前端重构（第一步：仅菜单归组，不增删路由/页面）。
+ * 用户：问数、分析看板、指标市场、导出中心；
+ * 管理员（superAdmin）：额外看到"管理中心"顶级入口，点击进入后左侧边栏平铺展示
+ * 全部管理页面（不使用多级级联菜单）；安全审计码持有者可看到安全运营。
+ * 所有路由保持注册不变，管理员直连 URL 仍可访问，普通用户按权限拦截。
+ */
+const buildRoleMenu = (menuData: any[], initialState: any) => {
+  const byPath = (path: string) =>
+    menuData.find(
+      (item: any) =>
+        (item.path === path || item.path === `${path}/`) &&
+        !item.hideInMenu &&
+        !item.redirect,
+    );
+  const pick = (paths: string[]) => paths.map(byPath).filter(Boolean);
+
+  const userItems = pick(['/chat', '/dashboard', '/metric', '/exports']);
+
+  const isAdmin = !!initialState?.currentUser?.superAdmin;
+  const hasSecurityAudit = (initialState?.authCodes || []).includes(
+    ROUTE_AUTH_CODES.SECURITY_AUDIT,
+  );
+
+  if (!isAdmin) {
+    return hasSecurityAudit ? [...userItems, ...pick(['/security'])] : userItems;
+  }
+
+  // 管理中心：侧边栏平铺全部管理页，顺序按职责域排列（问数配置 / 数据与口径 /
+  // 平台与连接 / 安全与评估），不做多级目录。
+  const adminItems = pick([
+    '/agent',
+    '/plugin',
+    '/model',
+    '/governance',
+    '/tag',
+    '/database',
+    '/llm',
+    '/system',
+    '/security',
+    '/evaluation',
+  ]);
+
+  return [
+    ...userItems,
+    // path 落在第一个管理页（助理管理）：点击进入后侧边栏平铺全部管理项
+    ...(adminItems.length > 0
+      ? [{ name: '管理中心', path: '/agent', children: adminItems }]
+      : []),
+  ];
+};
+
 export const layout: RunTimeLayoutConfig = (params) => {
   const { initialState, setInitialState } = params as any;
   const siderCollapsed = Boolean((initialState as any)?.siderCollapsed);
   return {
+    menuDataRender: (menuData: any[]) => buildRoleMenu(menuData, initialState),
     onMenuHeaderClick: (e) => {
       e.preventDefault();
       history.push(replaceRoute);

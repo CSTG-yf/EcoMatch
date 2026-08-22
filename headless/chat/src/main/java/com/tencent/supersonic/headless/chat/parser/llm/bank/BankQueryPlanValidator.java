@@ -22,9 +22,11 @@ public class BankQueryPlanValidator {
     private static final Set<String> ORGANIZATION_DIMENSIONS = Set.of("bank_organization");
     private static final Set<String> TIME_DIMENSIONS = Set.of("bank_data_date");
 
+    // Parentheses are legitimate in display names and aliases ("成本收入比(%)"); only statement
+    // keywords, terminators and comment markers make a plan string an executable fragment.
     private static final Pattern FORBIDDEN_SQL = Pattern
             .compile("(?i)(;|--|/\\*|\\*/|\\b(select|insert|update|delete|drop|alter|create|merge|"
-                    + "truncate|join|union|from|where|with)\\b|[()])");
+                    + "truncate|join|union|from|where|with)\\b)");
     private static final Pattern DERIVED_METRIC_CODE =
             Pattern.compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)");
     private static final Pattern BASE_METRIC_CODE = Pattern.compile("ZB\\d{3}");
@@ -59,6 +61,7 @@ public class BankQueryPlanValidator {
         validateOrderingAndLimit(plan, hints, errors);
         validateOutput(plan, hints, errors);
         validateAbsoluteThresholdContract(plan, errors);
+        validateMonthAndYearComparisonContract(plan, errors);
         return new ValidationResult(errors);
     }
 
@@ -149,45 +152,6 @@ public class BankQueryPlanValidator {
                                 + String.join(",", unexpected)));
             }
         }
-    }
-
-    private boolean requiredMetricsSatisfied(Collection<String> planOrHaystack,
-            Collection<String> required) {
-        if (required == null || required.isEmpty()) {
-            return true;
-        }
-        for (String req : required) {
-            if (!metricIdentityPresent(planOrHaystack, req)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean requiredMetricsIntersect(Collection<String> planMetrics,
-            Collection<String> required) {
-        if (required == null || required.isEmpty() || planMetrics == null
-                || planMetrics.isEmpty()) {
-            return true;
-        }
-        for (String planMetric : planMetrics) {
-            if (metricIdentityPresent(required, planMetric)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean metricIdentityPresent(Collection<String> haystack, String needle) {
-        if (haystack == null || needle == null) {
-            return false;
-        }
-        for (String item : haystack) {
-            if (needle.equals(item)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void validateDimensions(BankQueryPlan plan, SemanticIntentHints hints,
@@ -372,15 +336,14 @@ public class BankQueryPlanValidator {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province-average direction requires the exact benchmark filter"));
             }
-            if (isRankFilter(filter)
-                    && (plan.getIntent() != BankIntentType.RANKING
-                            || !"LTE".equals(filter.getOperator())
-                            || StringUtils.isBlank(filter.getValue())
-                            || !filter.getValue().matches("[1-9]\\d*")
-                            || safe(filter.getValues()).findAny().isPresent())) {
+            if (isRankFilter(filter) && (!rankFilterIntentAllowed(plan)
+                    || !"LTE".equals(filter.getOperator()) || StringUtils.isBlank(filter.getValue())
+                    || !filter.getValue().matches("[1-9]\\d*")
+                    || safe(filter.getValues()).findAny().isPresent())) {
                 errors.add(error("RANK_FILTER_CONTRACT_INVALID",
-                        "rank and rank_from_bottom filters require intent=RANKING, operator=LTE, "
-                                + "a positive integer value, and values=[]"));
+                        "rank and rank_from_bottom filters require intent=RANKING (or CHANGE "
+                                + "with a non-NONE comparison), operator=LTE, a positive "
+                                + "integer value, and values=[]"));
             }
             if ((provinceAverageBenchmark || provinceAverageDirection)
                     && safe(filter.getValues()).findAny().isPresent()) {
@@ -389,6 +352,11 @@ public class BankQueryPlanValidator {
             }
         }
         for (SemanticIntentHints.RequiredFilter required : hints.getRequiredFilters()) {
+            if (rankedChangeContract(plan) && isRankFieldName(required.field())) {
+                // Ranked-change results carry the full organization population; echoing the
+                // rank filter in the plan is optional metadata, not a compiled condition.
+                continue;
+            }
             boolean present = filters.stream()
                     .anyMatch(filter -> Objects.equals(required.field(), filter.getField())
                             && Objects.equals(required.operator(), filter.getOperator())
@@ -414,8 +382,26 @@ public class BankQueryPlanValidator {
     }
 
     private boolean isRankFilter(BankQueryPlan.Filter filter) {
-        return filter != null && ("rank".equals(filter.getField())
-                || "rank_from_bottom".equals(filter.getField()));
+        return filter != null && isRankFieldName(filter.getField());
+    }
+
+    private static boolean isRankFieldName(String field) {
+        return "rank".equals(field) || "rank_from_bottom".equals(field);
+    }
+
+    /**
+     * Rank filters are compiled only for RANKING plans, but a ranked-change question (growth
+     * ranking over a comparison window) must keep intent=CHANGE for its time comparison, so the
+     * filter is accepted there as advisory metadata the compiler skips.
+     */
+    private static boolean rankFilterIntentAllowed(BankQueryPlan plan) {
+        return plan.getIntent() == BankIntentType.RANKING || rankedChangeContract(plan);
+    }
+
+    private static boolean rankedChangeContract(BankQueryPlan plan) {
+        return plan.getIntent() == BankIntentType.CHANGE && plan.getTime() != null
+                && plan.getTime().getComparison() != null
+                && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE;
     }
 
     /**
@@ -743,6 +729,43 @@ public class BankQueryPlanValidator {
         if (safe(plan.getOrderBy()).findAny().isPresent()) {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_ORDER_REQUIRED",
                     "days-above-province-average count requires no ordering"));
+        }
+    }
+
+    /**
+     * MOM_AND_YOY is a compiler-owned scalar comparison. Keeping the model plan to one metric and
+     * one organization avoids ambiguous multi-series projections and lets the compiler derive both
+     * baselines from the current date.
+     */
+    private void validateMonthAndYearComparisonContract(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null || time.getComparison() != BankQueryPlan.TimeComparison.MOM_AND_YOY) {
+            return;
+        }
+        List<String> metrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).toList();
+        if (metrics.size() != 1 || safe(plan.getDerivedMetrics()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_SINGLE_METRIC_REQUIRED",
+                    "MOM_AND_YOY requires exactly one direct metric"));
+        }
+        List<String> organizations = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank).toList();
+        if (organizations.size() != 1) {
+            errors.add(error("MOM_AND_YOY_SINGLE_ORGANIZATION_REQUIRED",
+                    "MOM_AND_YOY requires exactly one organization"));
+        }
+        if (safe(plan.getDimensions()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_DIMENSIONS_FORBIDDEN",
+                    "MOM_AND_YOY dimensions must be empty"));
+        }
+        if (safe(plan.getFilters()).findAny().isPresent()) {
+            errors.add(error("MOM_AND_YOY_METRIC_FILTER_FORBIDDEN",
+                    "MOM_AND_YOY filters must be empty"));
+        }
+        if (time.getBaselineStartDate() != null || time.getBaselineEndDate() != null) {
+            errors.add(error("MOM_AND_YOY_BASELINES_MUST_BE_DERIVED",
+                    "MOM_AND_YOY baseline dates must be null so the compiler can derive them"));
         }
     }
 

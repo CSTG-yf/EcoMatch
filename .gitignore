@@ -24,3 +24,4 @@ evaluation/.venv/
 assembly/build/*-SNAPSHOT
 **/node_modules/
 benchmark/res/
+docker/supersonic_pg

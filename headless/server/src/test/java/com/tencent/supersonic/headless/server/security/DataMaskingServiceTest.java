@@ -4,6 +4,8 @@ import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.auth.api.authorization.pojo.ColumnAccessMode;
+import com.tencent.supersonic.auth.api.authorization.pojo.ResourcePermission;
 import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticSchemaResp;
@@ -90,6 +92,29 @@ class DataMaskingServiceTest {
 
         assertEquals("****", service.maskValue("customer_name", "张三"));
         assertEquals("****1234", service.maskValue("account_no", "622200001234"));
+    }
+
+    @Test
+    void appliesExplicitMaskingToAFieldWithoutSensitiveMetadata() {
+        DataMaskingService service = new DataMaskingService("", "");
+        SemanticQueryResp response = response("customer_code", "CUST-001");
+        DimSchemaResp dimension = new DimSchemaResp();
+        dimension.setName("customer_code");
+        dimension.setBizName("customer_code");
+        dimension.setSensitiveLevel(SensitiveLevelEnum.LOW.getCode());
+        SemanticSchemaResp schema = new SemanticSchemaResp();
+        schema.setDimensions(List.of(dimension));
+
+        ResourcePermission permission = new ResourcePermission();
+        permission.setResourceName("customer_code");
+        permission.setAccessMode(ColumnAccessMode.MASKED);
+        permission.setMaskingStrategy("HASH");
+
+        service.mask(response, schema, User.get(2L, "analyst"), List.of(permission));
+
+        assertEquals("dad78bf22ec097479e7cc04c28fd8b1851a0336763939365b624cc80d4f4ca65",
+                response.getResultList().get(0).get("customer_code"));
+        assertTrue(response.isDataMasked());
     }
 
     @Test
