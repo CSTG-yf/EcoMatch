@@ -1,0 +1,17 @@
+{
+  "status": "VALID",
+  "dataOrigin": "SYNTHETIC",
+  "questionCount": 360,
+  "metricCoverage": 360,
+  "splitCounts": {
+    "train": 216,
+    "dev": 72,
+    "test": 72
+  },
+  "goldSqlExecutable": 360,
+  "blindFields": [
+    "id",
+    "question"
+  ],
+  "officialInputs": []
+}

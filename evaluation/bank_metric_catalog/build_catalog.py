@@ -14,14 +14,24 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .catalog_source import DOMAIN_QUOTAS, SCENE_QUOTAS, SOURCES, VERSION, build_metric_records
-except ImportError:  # direct script execution from repository root
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from evaluation.bank_metric_catalog.catalog_source import (  # type: ignore[no-redef]
+    from .catalog_source import (
+        CLEANUP_POLICY_VERSION,
         DOMAIN_QUOTAS,
         SCENE_QUOTAS,
         SOURCES,
         VERSION,
+        build_cleanup_report,
+        build_metric_records,
+    )
+except ImportError:  # direct script execution from repository root
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from evaluation.bank_metric_catalog.catalog_source import (  # type: ignore[no-redef]
+        CLEANUP_POLICY_VERSION,
+        DOMAIN_QUOTAS,
+        SCENE_QUOTAS,
+        SOURCES,
+        VERSION,
+        build_cleanup_report,
         build_metric_records,
     )
 
@@ -101,16 +111,20 @@ def build_release(output_dir: Path) -> dict[str, Any]:
     metrics_payload = _jsonl_bytes(metrics)
     sources_payload = _json_bytes(sources, pretty=True)
     review_payload = _review_csv_bytes(metrics)
+    cleanup_report = build_cleanup_report(metrics)
+    cleanup_report_payload = _json_bytes(cleanup_report, pretty=True)
     schema_payload = SCHEMA_PATH.read_bytes()
 
     (output_dir / "metrics.jsonl").write_bytes(metrics_payload)
     (output_dir / "sources.json").write_bytes(sources_payload)
     (output_dir / "review.csv").write_bytes(review_payload)
+    (output_dir / "metric_cleanup_report.json").write_bytes(cleanup_report_payload)
 
     manifest = {
         "version": VERSION,
         "status": "CANDIDATE",
         "schemaVersion": "1.1.0",
+        "cleanupPolicyVersion": CLEANUP_POLICY_VERSION,
         "metricCount": len(metrics),
         "legacyMetricCount": sum(len(item["legacyCodes"]) for item in metrics),
         "sourceCount": len(sources),
@@ -125,6 +139,10 @@ def build_release(output_dir: Path) -> dict[str, Any]:
             "metrics.jsonl": {"sha256": _sha256(metrics_payload), "bytes": len(metrics_payload)},
             "sources.json": {"sha256": _sha256(sources_payload), "bytes": len(sources_payload)},
             "review.csv": {"sha256": _sha256(review_payload), "bytes": len(review_payload)},
+            "metric_cleanup_report.json": {
+                "sha256": _sha256(cleanup_report_payload),
+                "bytes": len(cleanup_report_payload),
+            },
             "../schema.json": {"sha256": _sha256(schema_payload), "bytes": len(schema_payload)},
         },
     }
