@@ -42,6 +42,20 @@ import static org.mockito.Mockito.when;
 class SqlExecutorTest {
 
     @Test
+    void doesNotUsePhysicalSqlRepairForAConstrainedBankPlan() {
+        SemanticParseInfo bankPlanParse = new SemanticParseInfo();
+        bankPlanParse.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                BankPlanToolResult.started(1, "trace", "fingerprint", "STRUCT",
+                        List.of("metric_value")));
+
+        assertFalse(SqlExecutor.shouldAttemptPhysicalSqlRepair(bankPlanParse));
+        bankPlanParse.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                Map.of("malformed", true));
+        assertFalse(SqlExecutor.shouldAttemptPhysicalSqlRepair(bankPlanParse));
+        assertTrue(SqlExecutor.shouldAttemptPhysicalSqlRepair(new SemanticParseInfo()));
+    }
+
+    @Test
     void sendsCorrectedS2SqlForAuthorizationWhilePreservingPhysicalSqlInfo() throws Exception {
         String correctedS2Sql = "SELECT `存款余额` FROM `银行指标`";
         String physicalSql = "SELECT deposit_balance FROM bank_metric";
