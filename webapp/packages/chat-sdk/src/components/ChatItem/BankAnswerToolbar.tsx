@@ -12,11 +12,7 @@ import {
 import { message, Tooltip } from 'antd';
 import classNames from 'classnames';
 import { useContext, useState } from 'react';
-import {
-  ChatContextType,
-  DashboardQuerySource,
-  MsgDataType,
-} from '../../common/type';
+import { ChatContextType, DashboardQuerySource, MsgDataType } from '../../common/type';
 import { PREFIX_CLS } from '../../common/constants';
 import { updateQAFeedback } from '../../service';
 import { exportTextFile } from '../../utils/utils';
@@ -32,6 +28,7 @@ type Props = {
   scoreValue?: number;
   isParserError?: boolean;
   isSimpleMode?: boolean;
+  isDeveloper?: boolean;
   data?: MsgDataType;
   parseInfo?: ChatContextType;
   workflowStage: QueryWorkflowStage;
@@ -53,6 +50,7 @@ const BankAnswerToolbar: React.FC<Props> = ({
   scoreValue,
   isParserError = false,
   isSimpleMode = false,
+  isDeveloper = false,
   data,
   parseInfo,
   workflowStage,
@@ -131,9 +129,7 @@ const BankAnswerToolbar: React.FC<Props> = ({
     <div className={toolbarCls} role="toolbar" aria-label="回答操作">
       <div className={`${toolbarCls}-group`}>
         {onContinueQuestion &&
-          renderButton('continue', '继续追问', <CommentOutlined />, () =>
-            onContinueQuestion(msg)
-          )}
+          renderButton('continue', '继续追问', <CommentOutlined />, () => onContinueQuestion(msg))}
         {onRefresh &&
           !isParserError &&
           renderButton('refresh', '重新查询', <ReloadOutlined />, onRefresh)}
@@ -173,15 +169,17 @@ const BankAnswerToolbar: React.FC<Props> = ({
           )}
       </div>
       <div className={`${toolbarCls}-group ${toolbarCls}-group-right`}>
-        {parseInfo &&
+        {isDeveloper &&
+          parseInfo &&
           renderButton('diagnostics', '技术详情', <BugOutlined />, () => setDiagnosticsOpen(true))}
-        {hasLogSource &&
+        {isDeveloper &&
+          hasLogSource &&
           renderButton('export-log', '导出日志', <FileTextOutlined />, onExportLog)}
         {renderButton('like', '正确', <LikeOutlined />, like, { active: score === 5 })}
         {renderButton('dislike', '错误', <DislikeOutlined />, dislike, { active: score === 1 })}
       </div>
       <TechnicalDiagnosticsModal
-        open={diagnosticsOpen}
+        open={isDeveloper && diagnosticsOpen}
         question={msg}
         parseInfo={parseInfo}
         workflowStage={workflowStage}

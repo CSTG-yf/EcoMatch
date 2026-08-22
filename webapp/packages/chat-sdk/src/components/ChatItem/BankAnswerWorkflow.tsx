@@ -27,12 +27,7 @@ import { PREFIX_CLS } from '../../common/constants';
 import { isMobile } from '../../utils/utils';
 import FilterItem from './FilterItem';
 import { QueryWorkflowStage, WORKFLOW_STAGE_TEXT } from './workflow';
-import {
-  confidenceLevel,
-  filterSummaries,
-  semanticNames,
-  sqlValidationLabel,
-} from './trustModel';
+import { confidenceLevel, filterSummaries, semanticNames, sqlValidationLabel } from './trustModel';
 import {
   COMPARISON_LABELS,
   INTENT_LABELS,
@@ -67,6 +62,8 @@ type Props = {
   workflowStage: QueryWorkflowStage;
   parseTip?: string;
   isSimpleMode?: boolean;
+  isDeveloper?: boolean;
+  isDebugMode?: boolean;
   dimensionFilters?: FilterItemType[];
   dateInfo?: DateInfoType;
   entityInfo?: EntityInfoType;
@@ -199,6 +196,8 @@ const BankAnswerWorkflow: React.FC<Props> = ({
   workflowStage,
   parseTip,
   isSimpleMode,
+  isDeveloper,
+  isDebugMode,
   dimensionFilters,
   dateInfo,
   entityInfo,
@@ -358,8 +357,7 @@ const BankAnswerWorkflow: React.FC<Props> = ({
   if (requirements?.time?.comparison) {
     caliberDetails.push({
       label: '比较口径',
-      value:
-        COMPARISON_LABELS[requirements.time.comparison] || requirements.time.comparison,
+      value: COMPARISON_LABELS[requirements.time.comparison] || requirements.time.comparison,
     });
   }
   if (filters.length) {
@@ -613,7 +611,7 @@ const BankAnswerWorkflow: React.FC<Props> = ({
                     {noteParts.length > 1 && ` · ${noteParts.slice(1).join(' · ')}`}
                   </p>
                 )}
-                {sqlTabs.length > 0 && (
+                {isDeveloper && isDebugMode && sqlTabs.length > 0 && (
                   <div className={`${prefixCls}-stage-more`}>
                     <div className={`${prefixCls}-sql-tabs`} role="tablist" aria-label="SQL版本">
                       {sqlTabs.map(item => (

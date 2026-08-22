@@ -75,8 +75,9 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [currentConversation, setCurrentConversation] = useState<ConversationDetailType>();
   const [conversationInitializing, setConversationInitializing] = useState(false);
   const [conversationError, setConversationError] = useState('');
-  // 历史侧边栏在桌面端固定展示；移动端不适用常驻侧边栏
-  const historyVisible = !isMobile;
+  const [mobileHistoryVisible, setMobileHistoryVisible] = useState(false);
+  // 桌面端固定展示；移动端由底部入口打开全屏历史面板。
+  const historyVisible = !isMobile || mobileHistoryVisible;
   const [agentList, setAgentList] = useState<AgentType[]>([]);
   const [currentAgent, setCurrentAgent] = useState<AgentType>();
   const [mobileAgentsVisible, setMobileAgentsVisible] = useState(false);
@@ -380,6 +381,9 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
       isAdd,
     });
     saveConversationToLocal(conversation);
+    if (isMobile) {
+      setMobileHistoryVisible(false);
+    }
   };
 
   const onMsgDataLoaded = (
@@ -430,7 +434,11 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
-  const onCloseConversation = () => {};
+  const onCloseConversation = () => {
+    if (isMobile) {
+      setMobileHistoryVisible(false);
+    }
+  };
 
   const chatClass = classNames(styles.chat, {
     [styles.mobile]: isMobile,
@@ -441,11 +449,12 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     <ConfigProvider locale={locale}>
       <div className={chatClass}>
         <div className={styles.chatSection}>
-          {/* 固定历史侧边栏：不再有助理列表，历史对话常驻展示 */}
+          {/* 桌面端固定展示，移动端通过底部入口打开全屏历史面板。 */}
           <Conversation
             currentAgent={currentAgent}
             currentConversation={currentConversation}
             historyVisible={historyVisible}
+            closable={!!isMobile}
             onSelectConversation={onSelectConversation}
             onCloseConversation={onCloseConversation}
             onInitializationChange={(loading, error) => {
@@ -512,6 +521,14 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                       chatId={currentConversation?.chatId}
                       agentList={agentList}
                       currentAgent={currentAgent}
+                      onToggleHistoryVisible={() => {
+                        setMobileAgentsVisible(false);
+                        setMobileHistoryVisible(visible => !visible);
+                      }}
+                      onOpenAgents={() => {
+                        setMobileHistoryVisible(false);
+                        setMobileAgentsVisible(true);
+                      }}
                       onInputMsgChange={onInputMsgChange}
                       onSendMsg={sendMsg}
                       onAddConversation={onAddConversation}

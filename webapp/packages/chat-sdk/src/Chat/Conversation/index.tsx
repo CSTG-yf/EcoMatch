@@ -15,13 +15,14 @@ import styles from './style.module.less';
 import { AgentType, ConversationDetailType } from '../type';
 import { DEFAULT_CONVERSATION_NAME } from '../constants';
 import moment from 'moment';
-import { DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { CloseOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { selectInitialConversation } from '../conversationState';
 
 type Props = {
   currentAgent?: AgentType;
   currentConversation?: ConversationDetailType;
   historyVisible?: boolean;
+  closable?: boolean;
   onSelectConversation: (
     conversation: ConversationDetailType,
     sendMsgParams?: any,
@@ -36,6 +37,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
     currentAgent,
     currentConversation,
     historyVisible,
+    closable,
     onSelectConversation,
     onCloseConversation,
     onInitializationChange,
@@ -190,6 +192,16 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
             >
               新对话
             </div>
+            {closable && (
+              <Button
+                type="text"
+                size="small"
+                className={styles.closeIcon}
+                aria-label="关闭历史会话"
+                icon={<CloseOutlined />}
+                onClick={onCloseConversation}
+              />
+            )}
           </div>
         </div>
         <div className={styles.searchConversation}>
@@ -301,6 +313,7 @@ function areEqual(prevProps: Props, nextProps: Props) {
     prevProps.currentAgent?.id === nextProps.currentAgent?.id &&
     prevProps.currentConversation?.chatId === nextProps.currentConversation?.chatId &&
     prevProps.historyVisible === nextProps.historyVisible &&
+    prevProps.closable === nextProps.closable &&
     prevProps.onInitializationChange === nextProps.onInitializationChange
   ) {
     return true;

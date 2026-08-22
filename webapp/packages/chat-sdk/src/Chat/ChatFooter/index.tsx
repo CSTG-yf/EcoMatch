@@ -16,6 +16,8 @@ type Props = {
   chatId?: number;
   currentAgent?: AgentType;
   agentList: AgentType[];
+  onToggleHistoryVisible: () => void;
+  onOpenAgents: () => void;
   onInputMsgChange: (value: string) => void;
   onSendMsg: (msg: string, dataSetId?: number) => void;
   onAddConversation: (agent?: AgentType) => void;
@@ -41,6 +43,8 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
     chatId,
     currentAgent,
     agentList,
+    onToggleHistoryVisible,
+    onOpenAgents,
     onInputMsgChange,
     onSendMsg,
     onAddConversation,
@@ -321,19 +325,52 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   return (
     <div className={chatFooterClass}>
       <div className={styles.tools}>
-        <div
+        <button
+          type="button"
           className={styles.toolItem}
+          aria-label="新对话"
+          title="新对话"
           onClick={() => {
             onAddConversation();
           }}
         >
           <IconFont type="icon-c003xiaoxiduihua" className={styles.toolIcon} />
-          <div>新对话</div>
-        </div>
-        <div className={styles.toolItem} onClick={onOpenShowcase}>
+          <span className={styles.toolLabel}>新对话</span>
+        </button>
+        {isMobile && (
+          <button
+            type="button"
+            className={styles.toolItem}
+            aria-label="历史对话"
+            title="历史对话"
+            onClick={onToggleHistoryVisible}
+          >
+            <IconFont type="icon-lishi" className={styles.toolIcon} />
+            <span className={styles.toolLabel}>历史对话</span>
+          </button>
+        )}
+        {isMobile && agentList.length > 1 && (
+          <button
+            type="button"
+            className={styles.toolItem}
+            aria-label="智能助理"
+            title="智能助理"
+            onClick={onOpenAgents}
+          >
+            <IconFont type="icon-zhinengzhuli" className={styles.toolIcon} />
+            <span className={styles.toolLabel}>智能助理</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className={styles.toolItem}
+          aria-label="showcase"
+          title="showcase"
+          onClick={onOpenShowcase}
+        >
           <IconFont type="icon-showcase" className={styles.toolIcon} />
-          <div>showcase</div>
-        </div>
+          <span className={styles.toolLabel}>showcase</span>
+        </button>
       </div>
       <div className={styles.composer}>
         <div className={styles.composerInputWrapper}>

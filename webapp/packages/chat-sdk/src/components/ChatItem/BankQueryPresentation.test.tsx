@@ -4,6 +4,14 @@ import BankClarificationPanel from './BankClarificationPanel';
 import BusinessInsightPanel from './BusinessInsightPanel';
 import MultiTurnContextBar from './MultiTurnContextBar';
 import TechnicalDiagnosticsModal from './TechnicalDiagnosticsModal';
+import BankAnswerToolbar from './BankAnswerToolbar';
+
+jest.mock('./index', () => {
+  const React = jest.requireActual('react');
+  return {
+    ChartItemContext: React.createContext({ register: jest.fn(), call: jest.fn() }),
+  };
+});
 
 beforeEach(() => {
   window.matchMedia = jest.fn().mockImplementation(query => ({
@@ -88,6 +96,62 @@ describe('bank query presentation', () => {
     expect(screen.getByText('较上月增长 3.2%')).toBeInTheDocument();
     expect(screen.getByText('期末贷款本金余额')).toBeInTheDocument();
     expect(screen.getByText('结果已按权限脱敏')).toBeInTheDocument();
+  });
+
+  it('only shows SQL versions when developer debug access is enabled', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      sqlInfo: {
+        parsedS2SQL: 'SELECT 贷款余额 FROM 贷款主题',
+        querySQL: 'SELECT loan_balance FROM loan_fact',
+      },
+    } as any;
+
+    const { unmount } = render(
+      <BankAnswerWorkflow
+        question="查询贷款余额"
+        workflowStage="completed"
+        parseInfo={parseInfo}
+        isDeveloper={false}
+        isDebugMode
+      />
+    );
+    openWorkflow();
+    expect(screen.queryByRole('tab', { name: '最终执行 SQL' })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <BankAnswerWorkflow
+        question="查询贷款余额"
+        workflowStage="completed"
+        parseInfo={parseInfo}
+        isDeveloper
+        isDebugMode
+      />
+    );
+    openWorkflow();
+    expect(screen.getByRole('tab', { name: '最终执行 SQL' })).toBeInTheDocument();
+  });
+
+  it('hides diagnostics and log export from non-developer users', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      sqlInfo: { querySQL: 'SELECT loan_balance FROM loan_fact' },
+    } as any;
+    const props = {
+      msg: '查询贷款余额',
+      queryId: 1,
+      parseInfo,
+      workflowStage: 'completed' as const,
+    };
+
+    const { rerender } = render(<BankAnswerToolbar {...props} isDeveloper={false} />);
+    expect(screen.queryByRole('button', { name: '技术详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '导出日志' })).not.toBeInTheDocument();
+
+    rerender(<BankAnswerToolbar {...props} isDeveloper />);
+    expect(screen.getByRole('button', { name: '技术详情' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导出日志' })).toBeInTheDocument();
   });
 
   it('does not render empty optional panels', () => {

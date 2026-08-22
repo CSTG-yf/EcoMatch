@@ -11,13 +11,7 @@ import {
   RangeValue,
 } from '../../common/type';
 import { createContext, useEffect, useRef, useState } from 'react';
-import {
-  chatExecute,
-  chatParse,
-  queryData,
-  switchEntity,
-  getExecuteSummary,
-} from '../../service';
+import { chatExecute, chatParse, queryData, switchEntity, getExecuteSummary } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
 import { message, Spin } from 'antd';
 import AssistantAvatar from '../AssistantAvatar';
@@ -86,6 +80,7 @@ const ChatItem: React.FC<Props> = ({
   parseTimeCostValue,
   msgData,
   isDeveloper,
+  isDebugMode,
   integrateSystem,
   executeItemNode,
   renderCustomExecuteNode,
@@ -540,6 +535,8 @@ const ChatItem: React.FC<Props> = ({
               workflowStage={workflowStage}
               parseTip={parseTip}
               isSimpleMode={isSimpleMode}
+              isDeveloper={isDeveloper}
+              isDebugMode={isDebugMode}
               dimensionFilters={dimensionFilters}
               dateInfo={dateInfo}
               entityInfo={entityInfo}
@@ -600,6 +597,7 @@ const ChatItem: React.FC<Props> = ({
                   scoreValue={score}
                   isParserError={isParserError}
                   isSimpleMode={isSimpleMode}
+                  isDeveloper={isDeveloper}
                   data={data}
                   parseInfo={parseInfo}
                   workflowStage={workflowStage}

@@ -1,7 +1,12 @@
 import AvatarDropdown from '@/components/RightContent/AvatarDropdown';
 import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
-import { ControlOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import {
+  ControlOutlined,
+  MenuFoldOutlined,
+  MenuOutlined,
+  MenuUnfoldOutlined,
+} from '@ant-design/icons';
 import { history, RunTimeLayoutConfig, useModel } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
@@ -139,16 +144,39 @@ const SiderHeader: React.FC<{ logoDom: React.ReactNode; collapsed?: boolean }> =
       ) : (
         logoDom
       )}
-      <span
+      <button
+        type="button"
         className="sider-collapse-trigger"
+        aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
         title={collapsed ? '展开侧边栏' : '收起侧边栏'}
         onClick={toggle}
       >
         {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-      </span>
+      </button>
     </div>
   );
 };
+
+const MobileLayoutHeader: React.FC<{
+  collapsed?: boolean;
+  onCollapse?: (collapsed: boolean) => void;
+}> = ({ collapsed, onCollapse }) => (
+  <div className="mobile-layout-header">
+    <button
+      type="button"
+      className="mobile-menu-trigger"
+      aria-label={collapsed ? '打开主导航' : '关闭主导航'}
+      aria-expanded={!collapsed}
+      onClick={() => onCollapse?.(!collapsed)}
+    >
+      <MenuOutlined />
+    </button>
+    <span className="mobile-brand-logo" role="img" aria-label="银行问数">
+      <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" />
+      <img src={`${publicPath}branding/bank-query-text.svg`} alt="" />
+    </span>
+  </div>
+);
 
 /**
  * 银行问数前端重构（第一步：仅菜单归组，不增删路由/页面）。
@@ -227,8 +255,11 @@ export const layout: RunTimeLayoutConfig = (params) => {
       </span>
     ),
     contentStyle: { background: '#fff', ...(initialState?.contentStyle || {}) },
-    // 侧边栏布局：顶部不需要 header，账户入口收进侧边栏底部
-    headerRender: false,
+    // 桌面端侧边布局无需顶栏；移动端保留位于 Drawer 外部的主导航入口。
+    headerRender: (props) =>
+      props?.isMobile ? (
+        <MobileLayoutHeader collapsed={props.collapsed} onCollapse={props.onCollapse} />
+      ) : null,
     menuFooterRender: (props) =>
       props?.collapsed ? (
         <div className="sider-account" style={{ textAlign: 'center' }}>
