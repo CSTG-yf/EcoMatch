@@ -1,8 +1,8 @@
-import RightContent from '@/components/RightContent';
-import S2Icon, { ICON } from '@/components/S2Icon';
-import { Space, Spin, ConfigProvider } from 'antd';
+import AvatarDropdown from '@/components/RightContent/AvatarDropdown';
+import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
-import { history, RunTimeLayoutConfig } from '@umijs/max';
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { history, RunTimeLayoutConfig, useModel } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
 import { queryCurrentUser } from './services/user';
@@ -121,36 +121,79 @@ export function onRouteChange() {
   }, 100);
 }
 
+// 侧边栏头部：logo + 折叠按钮（折叠态堆叠为 图标/按钮 两行）
+const SiderHeader: React.FC<{ logoDom: React.ReactNode; collapsed?: boolean }> = ({
+  logoDom,
+  collapsed,
+}) => {
+  const { setInitialState } = useModel('@@initialState');
+  const toggle = () =>
+    setInitialState((state: any) => ({ ...state, siderCollapsed: !collapsed }));
+  return (
+    <div className="sider-header-wrap">
+      {collapsed ? (
+        <img
+          src={`${publicPath}branding/bank-query-avatar.svg`}
+          alt="银行问数"
+          width={30}
+          height={30}
+        />
+      ) : (
+        logoDom
+      )}
+      <span
+        className="sider-collapse-trigger"
+        title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+        onClick={toggle}
+      >
+        {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+      </span>
+    </div>
+  );
+};
+
 export const layout: RunTimeLayoutConfig = (params) => {
-  const { initialState } = params as any;
+  const { initialState, setInitialState } = params as any;
+  const siderCollapsed = Boolean((initialState as any)?.siderCollapsed);
   return {
     onMenuHeaderClick: (e) => {
       e.preventDefault();
       history.push(replaceRoute);
     },
-    logo: (
-      <Space>
-        <S2Icon
-          icon={ICON.iconlogobiaoshi}
-          size={30}
-          color="#1672fa"
-          style={{ display: 'inline-block', marginTop: 8 }}
-        />
-        <div className="logo" style={{ position: 'relative', top: '-2px' }}>
-          SuperSonic
-        </div>
-      </Space>
+    // 侧边栏头部：logo + 折叠按钮
+    menuHeaderRender: (logoDom, _titleDom, props) => (
+      <SiderHeader logoDom={logoDom} collapsed={props?.collapsed} />
     ),
-    contentStyle: { ...(initialState?.contentStyle || {}) },
-    rightContentRender: () => <RightContent />,
+    collapsed: siderCollapsed,
+    onCollapse: (collapsed) => setInitialState({ ...initialState, siderCollapsed: collapsed }),
+    collapsedButtonRender: false,
+    logo: (
+      <img
+        src={`${publicPath}branding/bank-query-logo.svg`}
+        alt="银行问数"
+        className="brand-logo"
+      />
+    ),
+    contentStyle: { background: '#fff', ...(initialState?.contentStyle || {}) },
+    // 侧边栏布局：顶部不需要 header，账户入口收进侧边栏底部
+    headerRender: false,
+    menuFooterRender: (props) =>
+      props?.collapsed ? (
+        <div className="sider-account" style={{ textAlign: 'center' }}>
+          <AvatarDropdown hideName />
+        </div>
+      ) : (
+        <div className="sider-account" style={{ padding: '0 16px' }}>
+          <AvatarDropdown />
+        </div>
+      ),
     disableContentMargin: true,
-    // menuHeaderRender: undefined,
     childrenRender: (dom) => {
       return (
         <ConfigProvider theme={configProviderTheme}>
           <div
             style={{
-              height: location.pathname.includes('chat') ? 'calc(100vh - 56px)' : undefined,
+              height: location.pathname.includes('chat') ? '100vh' : undefined,
             }}
           >
             {/* <AppPage dom={dom} /> */}

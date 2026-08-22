@@ -1,11 +1,10 @@
 // import type { FC } from 'react';
 import styles from './style.less';
-import { Button, Form, Input, message, Space } from 'antd';
+import { Button, Form, Input, message } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import RegisterForm from './components/RegisterForm';
 // import ForgetPwdForm from './components/ForgetPwdForm';
 import { ROUTE_AUTH_CODES } from '../../../config/routes';
-import S2Icon, { ICON } from '@/components/S2Icon';
 import React, { useState } from 'react';
 import { useForm } from 'antd/lib/form/Form';
 import type { RegisterFormDetail } from './components/types';
@@ -15,6 +14,7 @@ import { queryCurrentUser } from '@/services/user';
 import { history, useModel } from '@umijs/max';
 import CryptoJS from 'crypto-js';
 import { encryptPassword } from '@/utils/utils';
+import { publicPath } from '../../../config/defaultSettings';
 
 const { Item } = Form;
 const LoginPage: React.FC = () => {
@@ -92,15 +92,11 @@ const LoginPage: React.FC = () => {
             <Form form={form} labelCol={{ span: 6 }} colon={false}>
               <div className={styles.loginMain}>
                 <h3 className={styles.title}>
-                  <Space>
-                    <S2Icon
-                      icon={ICON.iconlogobiaoshi}
-                      size={30}
-                      color="#296DF3"
-                      style={{ display: 'inline-block', marginTop: 8 }}
-                    />
-                    <div>SuperSonic</div>
-                  </Space>
+                  <img
+                    src={`${publicPath}branding/bank-query-logo.svg`}
+                    alt="银行问数"
+                    className={styles.brandLogo}
+                  />
                 </h3>
                 <Item name="name" rules={[{ required: true }]} label="">
                   <Input size="large" placeholder="用户名: admin" prefix={<UserOutlined />} />
