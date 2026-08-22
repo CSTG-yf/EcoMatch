@@ -192,9 +192,61 @@ ol {
 }
 
 .brand-logo {
-  display: block;
-  width: 142px;
-  height: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.brand-logo-mark {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.brand-logo-text-img {
+  height: 44px;
+  width: auto;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.sider-header-wrap {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+
+.sider-collapse-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 14px;
+  right: 2px;
+  flex-shrink: 0;
+  z-index: 2;
+  padding: 4px;
+  color: rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  font-size: 16px;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.75);
+  }
+}
+
+.ant-pro-sider-collapsed .sider-header-wrap {
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 0;
+}
+
+.ant-pro-sider-collapsed .sider-collapse-trigger {
+  position: static;
 }
 
 
@@ -340,7 +392,7 @@ ol {
   }
 }
 
-/* ===== 侧边栏布局定制：字号与折叠按钮 ===== */
+/* ===== 侧边栏布局定制：字号 ===== */
 .ant-pro-sider .ant-menu-item,
 .ant-pro-sider .ant-menu-submenu-title {
   font-size: 15px;
@@ -351,34 +403,11 @@ ol {
   font-size: 15px;
 }
 
-.sider-header-wrap {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  padding-right: 4px;
-}
-
-.sider-collapse-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  color: rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  font-size: 16px;
-
-  &:hover {
-    color: rgba(0, 0, 0, 0.75);
-  }
-}
-
-.ant-pro-sider-collapsed .sider-header-wrap {
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 0;
-}
-
 .sider-account {
   font-size: 14px;
+}
+
+.brand-logo-collapsed {
+  width: 30px;
+  height: 30px;
 }

@@ -16,8 +16,6 @@ type Props = {
   chatId?: number;
   currentAgent?: AgentType;
   agentList: AgentType[];
-  onToggleHistoryVisible: () => void;
-  onOpenAgents: () => void;
   onInputMsgChange: (value: string) => void;
   onSendMsg: (msg: string, dataSetId?: number) => void;
   onAddConversation: (agent?: AgentType) => void;
@@ -43,8 +41,6 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
     chatId,
     currentAgent,
     agentList,
-    onToggleHistoryVisible,
-    onOpenAgents,
     onInputMsgChange,
     onSendMsg,
     onAddConversation,
@@ -334,16 +330,6 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
           <IconFont type="icon-c003xiaoxiduihua" className={styles.toolIcon} />
           <div>新对话</div>
         </div>
-        <div className={styles.toolItem} onClick={onToggleHistoryVisible}>
-          <IconFont type="icon-lishi" className={styles.toolIcon} />
-          <div>历史对话</div>
-        </div>
-        {agentList?.length > 1 && (
-          <div className={styles.toolItem} onClick={onOpenAgents}>
-            <IconFont type="icon-zhinengzhuli" className={styles.toolIcon} />
-            <div>智能助理</div>
-          </div>
-        )}
         <div className={styles.toolItem} onClick={onOpenShowcase}>
           <IconFont type="icon-showcase" className={styles.toolIcon} />
           <div>showcase</div>
@@ -356,9 +342,9 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
             placeholder={
               currentAgent
                 ? agentList.length > 1
-                  ? `【${currentAgent.name}】将与您对话，点击${!isMobile ? '左侧' : ''}【智能助理】${
-                      !isMobile ? '列表' : ''
-                    }可切换`
+                  ? `【${currentAgent.name}】将与您对话，点击${
+                      !isMobile ? '左侧' : ''
+                    }【智能助理】${!isMobile ? '列表' : ''}可切换`
                   : `【${currentAgent.name}】将与您对话，请输入您的问题`
                 : '请输入您的问题'
             }

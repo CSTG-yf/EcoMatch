@@ -15,7 +15,7 @@ import styles from './style.module.less';
 import { AgentType, ConversationDetailType } from '../type';
 import { DEFAULT_CONVERSATION_NAME } from '../constants';
 import moment from 'moment';
-import { CloseOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { selectInitialConversation } from '../conversationState';
 
 type Props = {
@@ -190,7 +190,6 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
             >
               新对话
             </div>
-            <CloseOutlined className={styles.closeIcon} onClick={onCloseConversation} />
           </div>
         </div>
         <div className={styles.searchConversation}>

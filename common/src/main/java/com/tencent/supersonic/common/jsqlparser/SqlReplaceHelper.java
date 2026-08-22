@@ -801,14 +801,14 @@ public class SqlReplaceHelper {
         }
         Expression having = plainSelect.getHaving();
         if (Objects.nonNull(having)) {
-            plainSelect.setHaving(QueryExpressionReplaceVisitor.replace(having, replace,
-                    aliasFields, cteNames));
+            plainSelect.setHaving(
+                    QueryExpressionReplaceVisitor.replace(having, replace, aliasFields, cteNames));
         }
 
         Expression where = plainSelect.getWhere();
         if (Objects.nonNull(where)) {
-            plainSelect.setWhere(QueryExpressionReplaceVisitor.replace(where, replace,
-                    aliasFields, cteNames));
+            plainSelect.setWhere(
+                    QueryExpressionReplaceVisitor.replace(where, replace, aliasFields, cteNames));
         }
 
         GroupByElement groupBy = plainSelect.getGroupBy();
@@ -826,8 +826,8 @@ public class SqlReplaceHelper {
         List<OrderByElement> orderByElements = plainSelect.getOrderByElements();
         if (!CollectionUtils.isEmpty(orderByElements)) {
             for (OrderByElement orderByElement : orderByElements) {
-                orderByElement.setExpression(QueryExpressionReplaceVisitor.replace(
-                        orderByElement.getExpression(), replace, aliasFields, cteNames));
+                orderByElement.setExpression(QueryExpressionReplaceVisitor
+                        .replace(orderByElement.getExpression(), replace, aliasFields, cteNames));
             }
         }
 
@@ -835,10 +835,11 @@ public class SqlReplaceHelper {
         if (!CollectionUtils.isEmpty(joins)) {
             for (Join join : joins) {
                 if (!CollectionUtils.isEmpty(join.getOnExpressions())) {
-                    join.setOnExpressions(join.getOnExpressions().stream()
-                            .map(onExpression -> QueryExpressionReplaceVisitor.replace(
-                                    onExpression, replace, aliasFields, cteNames))
-                            .collect(Collectors.toList()));
+                    join.setOnExpressions(
+                            join.getOnExpressions().stream()
+                                    .map(onExpression -> QueryExpressionReplaceVisitor
+                                            .replace(onExpression, replace, aliasFields, cteNames))
+                                    .collect(Collectors.toList()));
                 }
             }
         }
@@ -863,8 +864,9 @@ public class SqlReplaceHelper {
         } else if (select instanceof SetOperationList) {
             SetOperationList setOperationList = (SetOperationList) select;
             if (!CollectionUtils.isEmpty(setOperationList.getSelects())) {
-                setOperationList.getSelects().forEach(subSelectBody ->
-                        collectPlainSelects(subSelectBody, plainSelectList, cteNames));
+                setOperationList.getSelects()
+                        .forEach(subSelectBody -> collectPlainSelects(subSelectBody,
+                                plainSelectList, cteNames));
             }
             collectWithItemPlainSelects(setOperationList.getWithItemsList(), plainSelectList,
                     cteNames);
@@ -934,8 +936,7 @@ public class SqlReplaceHelper {
 
             @Override
             public void visit(AnyComparisonExpression anyComparisonExpression) {
-                collectPlainSelects(anyComparisonExpression.getSelect(), plainSelectList,
-                        cteNames);
+                collectPlainSelects(anyComparisonExpression.getSelect(), plainSelectList, cteNames);
             }
         };
         if (Objects.nonNull(plainSelect.getWhere())) {

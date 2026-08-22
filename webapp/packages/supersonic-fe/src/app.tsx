@@ -1,7 +1,7 @@
 import AvatarDropdown from '@/components/RightContent/AvatarDropdown';
 import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
-import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { ControlOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import { history, RunTimeLayoutConfig, useModel } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
@@ -127,16 +127,14 @@ const SiderHeader: React.FC<{ logoDom: React.ReactNode; collapsed?: boolean }> =
   collapsed,
 }) => {
   const { setInitialState } = useModel('@@initialState');
-  const toggle = () =>
-    setInitialState((state: any) => ({ ...state, siderCollapsed: !collapsed }));
+  const toggle = () => setInitialState((state: any) => ({ ...state, siderCollapsed: !collapsed }));
   return (
     <div className="sider-header-wrap">
       {collapsed ? (
         <img
-          src={`${publicPath}branding/bank-query-avatar.svg`}
+          src={`${publicPath}branding/bank-query-icon.svg`}
           alt="银行问数"
-          width={30}
-          height={30}
+          className="brand-logo-collapsed"
         />
       ) : (
         logoDom
@@ -163,9 +161,7 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
   const byPath = (path: string) =>
     menuData.find(
       (item: any) =>
-        (item.path === path || item.path === `${path}/`) &&
-        !item.hideInMenu &&
-        !item.redirect,
+        (item.path === path || item.path === `${path}/`) && !item.hideInMenu && !item.redirect,
     );
   const pick = (paths: string[]) => paths.map(byPath).filter(Boolean);
 
@@ -199,7 +195,7 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
     ...userItems,
     // path 落在第一个管理页（助理管理）：点击进入后侧边栏平铺全部管理项
     ...(adminItems.length > 0
-      ? [{ name: '管理中心', path: '/agent', children: adminItems }]
+      ? [{ name: '管理中心', icon: <ControlOutlined />, path: '/agent', children: adminItems }]
       : []),
   ];
 };
@@ -221,11 +217,14 @@ export const layout: RunTimeLayoutConfig = (params) => {
     onCollapse: (collapsed) => setInitialState({ ...initialState, siderCollapsed: collapsed }),
     collapsedButtonRender: false,
     logo: (
-      <img
-        src={`${publicPath}branding/bank-query-logo.svg`}
-        alt="银行问数"
-        className="brand-logo"
-      />
+      <span className="brand-logo">
+        <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" className="brand-logo-mark" />
+        <img
+          src={`${publicPath}branding/bank-query-text.svg`}
+          alt="银行问数"
+          className="brand-logo-text-img"
+        />
+      </span>
     ),
     contentStyle: { background: '#fff', ...(initialState?.contentStyle || {}) },
     // 侧边栏布局：顶部不需要 header，账户入口收进侧边栏底部

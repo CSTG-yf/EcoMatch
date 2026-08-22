@@ -16,7 +16,6 @@ import Conversation from './Conversation';
 import ChatFooter from './ChatFooter';
 import classNames from 'classnames';
 import { cloneDeep, isBoolean } from 'lodash';
-import AgentList from './AgentList';
 import MobileAgents from './MobileAgents';
 import { HistoryMsgItemType, MsgDataType, SendMsgParamsType } from '../common/type';
 import { getHistoryMsg } from '../service';
@@ -76,11 +75,11 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [currentConversation, setCurrentConversation] = useState<ConversationDetailType>();
   const [conversationInitializing, setConversationInitializing] = useState(false);
   const [conversationError, setConversationError] = useState('');
-  const [historyVisible, setHistoryVisible] = useState(false);
+  // 历史侧边栏在桌面端固定展示；移动端不适用常驻侧边栏
+  const historyVisible = !isMobile;
   const [agentList, setAgentList] = useState<AgentType[]>([]);
   const [currentAgent, setCurrentAgent] = useState<AgentType>();
   const [mobileAgentsVisible, setMobileAgentsVisible] = useState(false);
-  const [agentListVisible, setAgentListVisible] = useState(true);
   const [showCaseVisible, setShowCaseVisible] = useState(false);
 
   const [isSimpleMode, setIsSimpleMode] = useState<boolean>(false);
@@ -95,7 +94,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   }));
 
   const sendCopilotMsg = (params: SendMsgParamsType) => {
-    setAgentListVisible(false);
     const { agentId, msg, modelId } = params;
     if (currentAgent?.id !== agentId) {
       setMessageList([]);
@@ -382,9 +380,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
       isAdd,
     });
     saveConversationToLocal(conversation);
-    if (isMobile) {
-      setHistoryVisible(false);
-    }
   };
 
   const onMsgDataLoaded = (
@@ -412,10 +407,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
-  const onToggleHistoryVisible = () => {
-    setHistoryVisible(!historyVisible);
-  };
-
   const onAddConversation = () => {
     conversationRef.current?.onAddConversation();
     inputFocus();
@@ -439,9 +430,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
-  const onCloseConversation = () => {
-    setHistoryVisible(false);
-  };
+  const onCloseConversation = () => {};
 
   const chatClass = classNames(styles.chat, {
     [styles.mobile]: isMobile,
@@ -452,14 +441,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     <ConfigProvider locale={locale}>
       <div className={chatClass}>
         <div className={styles.chatSection}>
-          {!isMobile && agentList.length > 1 && agentListVisible && !historyVisible && (
-            <AgentList
-              agentList={agentList}
-              currentAgent={currentAgent}
-              onSelectAgent={onSelectAgent}
-            />
-          )}
-          {/* 历史对话展示在副侧边栏位置，替换助理列表；组件常驻挂载以保留会话操作能力 */}
+          {/* 固定历史侧边栏：不再有助理列表，历史对话常驻展示 */}
           <Conversation
             currentAgent={currentAgent}
             currentConversation={currentConversation}
@@ -530,18 +512,10 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                       chatId={currentConversation?.chatId}
                       agentList={agentList}
                       currentAgent={currentAgent}
-                      onToggleHistoryVisible={onToggleHistoryVisible}
                       onInputMsgChange={onInputMsgChange}
                       onSendMsg={sendMsg}
                       onAddConversation={onAddConversation}
                       onSelectAgent={onSelectAgent}
-                      onOpenAgents={() => {
-                        if (isMobile) {
-                          setMobileAgentsVisible(true);
-                        } else {
-                          setAgentListVisible(!agentListVisible);
-                        }
-                      }}
                       onOpenShowcase={() => {
                         setShowCaseVisible(!showCaseVisible);
                       }}

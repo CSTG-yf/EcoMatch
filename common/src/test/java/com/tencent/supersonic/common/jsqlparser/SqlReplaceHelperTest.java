@@ -28,10 +28,10 @@ class SqlReplaceHelperTest {
 
     @Test
     void shouldReplaceNestedInExpressionInsideParenthesizedAndOrFilter() {
-        String sql = "SELECT * FROM t_33 "
-                + "WHERE (bank_data_date IN ('2025-03-31', '2025-06-30') "
-                + "AND bank_organization IN ('org_1', 'org_2')) "
-                + "OR metric_code IN ('m_1', 'm_2')";
+        String sql =
+                "SELECT * FROM t_33 " + "WHERE (bank_data_date IN ('2025-03-31', '2025-06-30') "
+                        + "AND bank_organization IN ('org_1', 'org_2')) "
+                        + "OR metric_code IN ('m_1', 'm_2')";
 
         Map<String, String> fieldMap = new HashMap<>();
         fieldMap.put("bank_data_date", "data_date");
@@ -53,8 +53,7 @@ class SqlReplaceHelperTest {
         String sql = "SELECT bank_data_date FROM t_33 "
                 + "WHERE bank_organization NOT IN ('org_1', 'org_2')";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         Assert.assertFalse(rewritten.contains("bank_organization"));
         assertTrue(rewritten.contains("org_code NOT IN ('org_1', 'org_2')"));
@@ -65,8 +64,7 @@ class SqlReplaceHelperTest {
         String sql = "SELECT bank_data_date FROM t_33 "
                 + "WHERE bank_data_date BETWEEN '2025-01-01' AND '2025-06-30'";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("WHERE data_date BETWEEN '2025-01-01' AND '2025-06-30'"));
     }
@@ -76,11 +74,10 @@ class SqlReplaceHelperTest {
         String sql = "SELECT CASE WHEN bank_indicator > 100 THEN bank_organization "
                 + "ELSE bank_data_date END FROM t_33";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
-        assertTrue(rewritten.contains(
-                "CASE WHEN metric_code > 100 THEN org_code ELSE data_date END"));
+        assertTrue(
+                rewritten.contains("CASE WHEN metric_code > 100 THEN org_code ELSE data_date END"));
         Assert.assertFalse(rewritten.contains("bank_"));
     }
 
@@ -88,8 +85,7 @@ class SqlReplaceHelperTest {
     void shouldReplaceFieldsInFunctionArguments() {
         String sql = "SELECT datediff('day', bank_data_date, '2025-03-31') AS days FROM t_33";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("datediff('day', data_date, '2025-03-31') AS days"));
     }
@@ -98,8 +94,7 @@ class SqlReplaceHelperTest {
     void shouldReplaceFieldsInsideMultipleParenthesis() {
         String sql = "SELECT * FROM t_33 WHERE (((bank_organization = 'org_1')))";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("(((org_code = 'org_1')))"));
     }
@@ -110,8 +105,7 @@ class SqlReplaceHelperTest {
                 + "ON a.bank_organization = b.bank_organization "
                 + "AND b.bank_data_date BETWEEN '2025-01-01' AND '2025-06-30'";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         Assert.assertFalse(rewritten.contains("a.bank_organization"));
         Assert.assertFalse(rewritten.contains("b.bank_data_date"));
@@ -125,8 +119,7 @@ class SqlReplaceHelperTest {
                 + "GROUP BY bank_organization "
                 + "HAVING sum(bank_indicator) > 100 AND count(bank_data_date) > 1";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         Assert.assertFalse(rewritten.contains("GROUP BY bank_organization"));
         Assert.assertFalse(rewritten.contains("HAVING sum(bank_indicator)"));
@@ -138,8 +131,7 @@ class SqlReplaceHelperTest {
     void shouldReplaceFieldsInOrderByClause() {
         String sql = "SELECT bank_data_date FROM t_33 ORDER BY bank_data_date DESC";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("ORDER BY data_date DESC"));
     }
@@ -149,13 +141,12 @@ class SqlReplaceHelperTest {
         String sql = "WITH cte AS (SELECT bank_organization FROM t_33) "
                 + "SELECT bank_organization FROM cte WHERE bank_organization = 'org_1'";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
-        assertTrue(rewritten.contains("WITH cte AS (SELECT org_code AS bank_organization "
-                + "FROM t_33)"));
-        assertTrue(rewritten.contains("SELECT bank_organization FROM cte "
-                + "WHERE bank_organization = 'org_1'"));
+        assertTrue(rewritten
+                .contains("WITH cte AS (SELECT org_code AS bank_organization " + "FROM t_33)"));
+        assertTrue(rewritten.contains(
+                "SELECT bank_organization FROM cte " + "WHERE bank_organization = 'org_1'"));
     }
 
     @Test
@@ -164,8 +155,7 @@ class SqlReplaceHelperTest {
                 + "SELECT cte.bank_organization FROM t_33 JOIN cte "
                 + "ON t_33.bank_organization = cte.bank_organization";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("SELECT cte.bank_organization FROM t_33 JOIN cte"));
         assertTrue(rewritten.contains("ON t_33.org_code = cte.bank_organization"));
@@ -179,11 +169,10 @@ class SqlReplaceHelperTest {
                 + "ON t_33.bank_organization = c.bank_organization "
                 + "WHERE c.bank_organization = 'org_1'";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
-        assertTrue(rewritten.contains("WITH cte AS (SELECT org_code AS bank_organization "
-                + "FROM t_33)"));
+        assertTrue(rewritten
+                .contains("WITH cte AS (SELECT org_code AS bank_organization " + "FROM t_33)"));
         assertTrue(rewritten.contains("SELECT c.bank_organization FROM t_33 JOIN cte c"));
         assertTrue(rewritten.contains("ON t_33.org_code = c.bank_organization"));
         assertTrue(rewritten.contains("WHERE c.bank_organization = 'org_1'"));
@@ -195,12 +184,11 @@ class SqlReplaceHelperTest {
         String sql = "SELECT * FROM t_33 WHERE EXISTS "
                 + "(SELECT 1 FROM t_33 WHERE bank_data_date = '2025-03-31')";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         Assert.assertFalse(rewritten.contains("bank_data_date"));
-        assertTrue(rewritten.contains("EXISTS (SELECT 1 FROM t_33 WHERE data_date = "
-                + "'2025-03-31')"));
+        assertTrue(rewritten
+                .contains("EXISTS (SELECT 1 FROM t_33 WHERE data_date = " + "'2025-03-31')"));
     }
 
     @Test
@@ -209,12 +197,11 @@ class SqlReplaceHelperTest {
                 + "sum(bank_indicator) OVER (PARTITION BY bank_organization "
                 + "ORDER BY bank_data_date) AS total FROM t_33";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         Assert.assertFalse(rewritten.contains("OVER (PARTITION BY bank_organization"));
-        assertTrue(rewritten.contains("sum(metric_code) OVER (PARTITION BY org_code "
-                + "ORDER BY data_date) AS total"));
+        assertTrue(rewritten.contains(
+                "sum(metric_code) OVER (PARTITION BY org_code " + "ORDER BY data_date) AS total"));
     }
 
     @Test
@@ -222,8 +209,7 @@ class SqlReplaceHelperTest {
         String sql = "SELECT sum(bank_indicator) AS bank_indicator FROM t_33 "
                 + "HAVING bank_indicator > 10";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
         assertTrue(rewritten.contains("sum(metric_code) AS bank_indicator"));
         assertTrue(rewritten.contains("HAVING bank_indicator > 10"));
@@ -234,13 +220,10 @@ class SqlReplaceHelperTest {
         String sql = "SELECT user_name, 100 AS const FROM t_33 "
                 + "WHERE user_name = 'alice' AND amount > 100.5";
 
-        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql,
-                initFieldExprMap());
+        String rewritten = SqlReplaceHelper.replaceSqlByExpression("t_33", sql, initFieldExprMap());
 
-        Assert.assertEquals(
-                "SELECT user_name, 100 AS const FROM t_33 "
-                        + "WHERE user_name = 'alice' AND amount > 100.5",
-                rewritten);
+        Assert.assertEquals("SELECT user_name, 100 AS const FROM t_33 "
+                + "WHERE user_name = 'alice' AND amount > 100.5", rewritten);
     }
 
     @Test

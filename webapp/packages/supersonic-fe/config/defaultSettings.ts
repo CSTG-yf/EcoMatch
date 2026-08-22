@@ -7,7 +7,7 @@ const Settings: DefaultSetting = {
   navTheme: 'light',
   colorPrimary: '#296DF3',
   layout: 'side',
-  siderWidth: 176,
+  siderWidth: 240,
   contentWidth: 'Fluid',
   fixedHeader: false,
   fixSiderbar: true,
