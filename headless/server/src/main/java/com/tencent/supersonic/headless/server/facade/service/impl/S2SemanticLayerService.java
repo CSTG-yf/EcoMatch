@@ -199,12 +199,14 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 }
             }
 
-            if (Objects.isNull(queryResp)) {
+            if (queryResp == null) {
                 state = TaskStatusEnum.ERROR;
-            } else {
-                queryResp.appendErrorMsg(queryStatement.getErrMsg());
-                maskBeforeCache(queryReq, queryResp, user);
+                publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_EXECUTOR", null);
+                throw new IllegalStateException("未找到可用的查询执行器");
             }
+
+            queryResp.appendErrorMsg(queryStatement.getErrMsg());
+            maskBeforeCache(queryReq, queryResp, user);
 
             // 5.reset cache and set stateInfo
             Boolean setCacheSuccess = queryCache.put(queryReq, cacheKey, queryResp);
@@ -213,12 +215,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 statUtils.updateResultCacheKey(cacheKey);
             }
 
-            if (queryResp == null) {
-                publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_RESULT", null);
-            } else {
-                publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, false);
-            }
-
+            publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, false);
             return queryResp;
         } catch (Exception e) {
             log.error("Exception in semantic query [{}]: type={}, error=[{}]",

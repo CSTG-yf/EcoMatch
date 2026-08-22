@@ -52,6 +52,26 @@ describe('dashboard query source', () => {
     expect(serialized).not.toContain('queryresults');
   });
 
+  it('顶层 modelId 与 dataSet.model 缺失时，从 metric/dimension 元素的 model 兜底取数', () => {
+    // 后端真实情况：DATASET 根元素 model 为 null，modelId 只在 metric/dimension 元素上 set
+    const noTopModelId = {
+      id: 17,
+      queryId: 29,
+      dataSet: { id: 5, model: null, name: '银行经营数据' },
+      dataSetId: 5,
+      dimensions: [{ bizName: '机构', name: 'org_name', model: 33 }],
+      metrics: [{ bizName: '不良率', name: 'npl_ratio', model: 33 }],
+      dimensionFilters: [],
+    } as any;
+    const source = buildDashboardQuerySource({
+      question: '对比各机构存款',
+      context: noTopModelId,
+      data: { queryId: 29, queryState: 'SUCCESS', queryResults: [{ a: 1 }] } as any,
+    });
+    expect(source.modelId).toBe(33);
+    expect(source.semanticQuery.modelId).toBe(33);
+  });
+
   it('only enables saving successful non-empty authorized results', () => {
     expect(
       canSaveDashboardResult({

@@ -109,7 +109,21 @@ export const buildDashboardQuerySource = ({
   const effectiveContext = data?.chatContext || context;
   const queryId = data?.queryId ?? effectiveContext?.queryId;
   const parseId = effectiveContext?.id;
-  const modelId = effectiveContext?.modelId;
+  // 后端 chat 响应顶层没有 modelId；DATASET 根元素的 dataSet.model 未 set（恒 null）。
+  // modelId 真实落点是每个 metric/dimension 元素的 model 字段（SchemaElement.model），
+  // 看板只需任意一个 modelId 用于反查 domainId，故从元素 model 兜底取数。
+  const firstElementModel = [
+    ...(effectiveContext?.metrics || []),
+    ...(effectiveContext?.dimensions || []),
+  ]
+    .map((field: FieldType) => Number(field?.model))
+    .find((value) => Number.isInteger(value) && value > 0);
+  const modelId =
+    effectiveContext?.modelId ??
+    (effectiveContext?.dataSet?.model != null && Number(effectiveContext.dataSet.model) > 0
+      ? Number(effectiveContext.dataSet.model)
+      : undefined) ??
+    firstElementModel;
   const dimensions = (effectiveContext?.dimensions || []).map(copyField);
   const metrics = (effectiveContext?.metrics || []).map(copyField);
   const dimensionFilters = (effectiveContext?.dimensionFilters || []).map(copyFilter);

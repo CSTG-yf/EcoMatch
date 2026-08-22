@@ -190,7 +190,15 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
     ...userItems,
     // path 落在第一个管理页（问数配置）：点击进入后侧边栏平铺全部管理项
     ...(adminItems.length > 0
-      ? [{ name: '管理中心', icon: <ControlOutlined />, path: '/agent', children: adminItems }]
+      ? [
+          {
+            name: '管理中心',
+            locale: 'menu.adminCenter',
+            icon: <ControlOutlined />,
+            path: '/agent',
+            children: adminItems,
+          },
+        ]
       : []),
   ];
 };

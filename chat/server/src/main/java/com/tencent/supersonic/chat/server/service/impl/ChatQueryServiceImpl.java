@@ -60,6 +60,7 @@ import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher
 import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
 import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
 import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
+import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
@@ -463,6 +464,10 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         Integer parseId = chatQueryDataReq.getParseId();
         SemanticParseInfo parseInfo =
                 chatManageService.getParseInfo(chatQueryDataReq.getQueryId(), parseId);
+        if (parseInfo == null || parseInfo.getSqlInfo() == null
+                || StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedS2SQL())) {
+            throw new InvalidArgumentException("历史问数解析结果不可用于看板刷新");
+        }
         mergeParseInfo(parseInfo, chatQueryDataReq);
         DataSetSchema dataSetSchema =
                 semanticLayerService.getDataSetSchema(parseInfo.getDataSetId());
@@ -512,7 +517,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     private List<String> getFieldsFromSql(SemanticParseInfo parseInfo) {
         SqlInfo sqlInfo = parseInfo.getSqlInfo();
-        if (Objects.isNull(sqlInfo) || StringUtils.isNotBlank(sqlInfo.getCorrectedS2SQL())) {
+        if (Objects.isNull(sqlInfo) || StringUtils.isBlank(sqlInfo.getCorrectedS2SQL())) {
             return new ArrayList<>();
         }
         return SqlSelectHelper.getAllSelectFields(sqlInfo.getCorrectedS2SQL());
@@ -521,6 +526,14 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     private void handleLLMQueryMode(ChatQueryDataReq chatQueryDataReq, SemanticQuery semanticQuery,
             DataSetSchema dataSetSchema, User user) throws Exception {
         SemanticParseInfo parseInfo = semanticQuery.getParseInfo();
+        if (StringUtils.isNotBlank(parseInfo.getSqlInfo().getQuerySQL())
+                && CollectionUtils.isEmpty(chatQueryDataReq.getDimensionFilters())
+                && CollectionUtils.isEmpty(chatQueryDataReq.getMetricFilters())) {
+            // 首次看板刷新直接复用问数成功时保存的物理 SQL；只有看板筛选发生变化时才重建/翻译 S2SQL。
+            // 这样 bank LLM_S2SQL 的复杂 CTE 不会在无筛选刷新时被二次改写破坏。
+            log.info("reuse stored physical SQL for dashboard refresh");
+            return;
+        }
         String rebuiltS2SQL;
         if (checkMetricReplace(chatQueryDataReq, parseInfo)) {
             log.info("rebuild S2SQL with adjusted metrics!");
@@ -634,13 +647,17 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             queryResult.setQueryColumns(queryResp.getColumns());
             queryResult.setDataMasked(queryResp.isDataMasked());
             queryResult.setMaskedColumns(queryResp.getMaskedColumns());
+            queryResult.setErrorMsg(queryResp.getErrorMsg());
         } else {
             queryResult.setQueryResults(new ArrayList<>());
             queryResult.setQueryColumns(new ArrayList<>());
+            queryResult.setErrorMsg("未找到可用的查询执行器");
         }
 
         queryResult.setQueryMode(queryMode);
-        queryResult.setQueryState(QueryState.SUCCESS);
+        queryResult.setQueryState(StringUtils.isBlank(queryResult.getErrorMsg())
+                ? QueryState.SUCCESS
+                : QueryState.SEARCH_EXCEPTION);
         return queryResult;
     }
 
