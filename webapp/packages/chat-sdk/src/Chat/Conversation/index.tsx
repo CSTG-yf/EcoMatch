@@ -15,7 +15,7 @@ import styles from './style.module.less';
 import { AgentType, ConversationDetailType } from '../type';
 import { DEFAULT_CONVERSATION_NAME } from '../constants';
 import moment from 'moment';
-import { CloseOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { CloseOutlined, DeleteOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import { selectInitialConversation } from '../conversationState';
 
 type Props = {
@@ -184,14 +184,17 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
         <div className={styles.titleBar}>
           <div className={styles.title}>历史对话</div>
           <div className={styles.rightOperation}>
-            <div
+            <Button
+              type="text"
+              size="small"
               className={styles.newConversation}
+              aria-label="新对话"
+              title="新对话"
+              icon={<PlusOutlined />}
               onClick={() => {
                 onAddConversation();
               }}
-            >
-              新对话
-            </div>
+            />
             {closable && (
               <Button
                 type="text"
@@ -267,9 +270,6 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
                         <div className={styles.topTitleBar}>
                           <div className={styles.conversationTitleBar}>
                             <div className={styles.conversationName}>{item.chatName}</div>
-                            {currentConversation?.chatId === item.chatId && (
-                              <div className={styles.currentConversation}>当前对话</div>
-                            )}
                           </div>
                           <div className={styles.conversationTime}>
                             {convertTime(item.lastTime || '')}

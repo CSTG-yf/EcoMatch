@@ -34,7 +34,9 @@ body,
   -webkit-font-smoothing:antialiased;
   margin: 0;
   min-width: 1280px;
-  overflow-x: scroll;
+  /* 原为 scroll：强制常驻横向滚动条会吃掉约 15px 视口高度，导致页面出现纵向滚动、
+     侧边栏/顶栏随之上移。改为 auto 按需出现。 */
+  overflow-x: auto;
 }
 
 @media (max-width: 767px) {
@@ -199,8 +201,8 @@ ol {
 }
 
 .brand-logo-mark {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
 }
 
@@ -211,49 +213,17 @@ ol {
   min-width: 0;
 }
 
-.sider-header-wrap {
-  position: relative;
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  padding-right: 4px;
+/* mix 布局：顶栏 logo 区右缘与侧边栏（宽 200）右缘对齐。
+   默认 .ant-pro-top-nav-header-main 有 16px 左内边距且 logo 区为自适应宽度，导致两条边错位。 */
+.ant-pro-top-nav-header-main {
+  padding-inline-start: 0;
 }
 
-.sider-collapse-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  position: absolute;
-  top: 14px;
-  right: 2px;
+.ant-pro-top-nav-header-main-left {
+  box-sizing: border-box;
+  width: 200px;
   flex-shrink: 0;
-  z-index: 2;
-  padding: 4px;
-  border: 0;
-  background: transparent;
-  color: rgba(0, 0, 0, 0.18);
-  cursor: pointer;
-  font-size: 16px;
-
-  &:hover {
-    color: rgba(0, 0, 0, 0.75);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--tme-primary-color);
-    outline-offset: 2px;
-  }
-}
-
-.ant-pro-sider-collapsed .sider-header-wrap {
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 0;
-}
-
-.ant-pro-sider-collapsed .sider-collapse-trigger {
-  position: static;
+  padding-left: 16px;
 }
 
 .mobile-layout-header {
@@ -466,9 +436,4 @@ ol {
 
 .sider-account {
   font-size: 14px;
-}
-
-.brand-logo-collapsed {
-  width: 30px;
-  height: 30px;
 }

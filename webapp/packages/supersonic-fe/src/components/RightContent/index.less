@@ -2,10 +2,12 @@
 
 // 账户项样式（顶栏和侧边栏底部共用，不挂在 .right 下）
 .account {
+  display: inline-flex;
+  align-items: center;
+
   .avatar {
     margin-right: 8px;
     color: var(--tme-primary-color);
-    vertical-align: top;
     background: rgba(150, 150, 150, 0.85);
   }
   .userName {
