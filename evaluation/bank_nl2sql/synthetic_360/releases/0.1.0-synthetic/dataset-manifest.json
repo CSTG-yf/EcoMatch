@@ -1,0 +1,32 @@
+{
+  "dataOrigin": "SYNTHETIC",
+  "files": {
+    "expected.jsonl": {
+      "bytes": 83591,
+      "sha256": "07c21ab89f3c95f0cd2e24d519e0135cc71ffa01a07ae1c03eb19f3846569cb2"
+    },
+    "questions.jsonl": {
+      "bytes": 201327,
+      "sha256": "c30d04b048ae1dcb6e3088c0f7640c8ec00b791c331d7470f3d72f9430cd74e1"
+    },
+    "questions_blind.jsonl": {
+      "bytes": 42496,
+      "sha256": "1c5b86c3ae6df4e32c6c2b377009178778644f26472d75db08cd9c89c0b142ab"
+    }
+  },
+  "metricCoverage": 360,
+  "officialEligible": false,
+  "officialInputs": [],
+  "queryTypes": [
+    "POINT_QUERY"
+  ],
+  "questionCount": 360,
+  "sourceFactRelease": "0.1.0-synthetic",
+  "splitCounts": {
+    "dev": 72,
+    "test": 72,
+    "train": 216
+  },
+  "status": "SYNTHETIC_CANDIDATE",
+  "version": "0.1.0-synthetic-point-v1"
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EcoMatch synthetic 360 point query",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "split", "metricCode", "question", "queryType", "dataOrigin", "expected", "goldSql"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^SYNQ-[0-9a-f]{20}$"},
+    "split": {"enum": ["train", "dev", "test"]},
+    "metricCode": {"type": "string", "pattern": "^CNB(?:00[1-9]|0[1-9][0-9]|[12][0-9][0-9]|3[0-5][0-9]|360)$"},
+    "question": {"type": "string", "minLength": 8},
+    "queryType": {"const": "POINT_QUERY"},
+    "dataOrigin": {"const": "SYNTHETIC"},
+    "expected": {
+      "type": "object",
+      "required": ["columns", "rows"],
+      "properties": {
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "rows": {"type": "array"}
+      }
+    },
+    "goldSql": {"type": "string", "pattern": "^SELECT "}
+  }
+}

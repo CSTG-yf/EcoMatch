@@ -186,6 +186,58 @@ class BankMetricCatalogValidationTest(unittest.TestCase):
         self.assertFalse(schema["additionalProperties"])
         self.assertEqual(set(schema["required"]), set(self.metrics[0]))
 
+    def test_aliases_are_business_terms_not_mechanical_suffixes(self) -> None:
+        mechanical_suffixes = ("指标", "口径", "统计")
+        self.assertFalse(
+            [
+                (metric["code"], alias)
+                for metric in self.metrics
+                for alias in metric["aliases"]
+                if alias.endswith(mechanical_suffixes)
+            ]
+        )
+        by_name = {metric["name"]: metric for metric in self.metrics}
+        expected_aliases = {
+            "各项存款余额": {"存款余额", "存款规模"},
+            "资本充足率": {"资本充足比例", "总资本充足率"},
+            "数字渠道交易金额": {"数字渠道交易额", "数字渠道交易规模"},
+            "个人客户AUM": {"个人客户资产规模", "个人客户管理资产"},
+        }
+        for name, aliases in expected_aliases.items():
+            with self.subTest(name=name):
+                self.assertTrue(aliases.issubset(set(by_name[name]["aliases"])))
+
+        # "收益" is not a safe generic alias for a base "收入" metric:
+        # in banking it can denote a net or investment return metric.
+        self.assertNotIn("手续费及佣金收益", by_name["手续费及佣金收入"]["aliases"])
+        self.assertIn("手续费及佣金收入额", by_name["手续费及佣金收入"]["aliases"])
+
+    def test_cleanup_report_covers_release_and_is_machine_readable(self) -> None:
+        report_path = self.release_dir / "metric_cleanup_report.json"
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(360, report["metricCount"])
+        self.assertEqual(360, report["reviewedMetricCount"])
+        self.assertEqual(0, report["mechanicalAliasCount"])
+        self.assertEqual([], report["normalizedNameDuplicates"])
+        self.assertEqual([], report["aliasCollisions"])
+        self.assertEqual([], report["unitAggregationIssues"])
+        self.assertEqual([], report["formulaIssues"])
+        self.assertGreaterEqual(report["humanReviewRequiredCount"], 1)
+        self.assertEqual(report["cleanupPolicyVersion"], "360-metric-cleanup-v1")
+
+    def test_derived_formula_semantics_are_fail_closed(self) -> None:
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["metricType"] == "DERIVED")
+        target["formula"]["expression"] = "not the declared formula"
+        with self.assertRaisesRegex(CatalogValidationError, "formula expression mismatch"):
+            validate_records(metrics, self.sources)
+
+        metrics = copy.deepcopy(self.metrics)
+        target = next(metric for metric in metrics if metric["metricType"] == "DERIVED")
+        target["unit"] = "万元"
+        with self.assertRaisesRegex(CatalogValidationError, "derived metric must use percent"):
+            validate_records(metrics, self.sources)
+
     def test_reviewed_unit_and_direction_examples_are_preserved(self) -> None:
         by_name = {metric["name"]: metric for metric in self.metrics}
         self.assertEqual("%", by_name["存贷比"]["unit"])

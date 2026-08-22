@@ -1,0 +1,30 @@
+{
+  "version": "0.1.0-public-disclosure",
+  "status": "PUBLIC_DISCLOSURE_CANDIDATE",
+  "schemaVersion": "1.0.0",
+  "dataOrigin": "PUBLIC_DISCLOSURE",
+  "catalogVersion": "0.1.0-candidate",
+  "officialInputs": [],
+  "official21MetricEvaluationModified": false,
+  "reviewStatus": "PUBLIC_SOURCE_EXTRACTED_PENDING_BUSINESS_REVIEW",
+  "counts": {
+    "facts": 18,
+    "metrics": 18,
+    "organizations": 1,
+    "dates": 1
+  },
+  "files": {
+    "facts.jsonl": {
+      "sha256": "1f84ce44b5197bd279c1b0d5715c42d7547e457d3a8a1b3cafecbf137afc6d96",
+      "bytes": 10621
+    },
+    "queries.jsonl": {
+      "sha256": "a5dfde23bfd8122a2e59653c2e9c800bd49bf8301c28683aad0750f5e580cf2f",
+      "bytes": 2163
+    },
+    "sources.json": {
+      "sha256": "4e81599f4ede97a68e26fb7930c4283220aa9d2aa80286f7372a3ad65529fb82",
+      "bytes": 549
+    }
+  }
+}

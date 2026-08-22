@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CSTG-yf/EcoMatch/evaluation/bank_metric_catalog/qa_schema.json",
+  "title": "EcoMatch Banking Metric Generalization QA Case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "split", "caseType", "question", "queryFeatures", "expected", "source",
+    "officialEligible", "factDataIncluded", "valuePolicy"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^BMQ-[0-9a-f]{20}$"},
+    "split": {"enum": ["train", "dev", "test"]},
+    "caseType": {"enum": ["CANONICAL_QUERY", "ALIAS_QUERY", "GOVERNANCE_QA"]},
+    "question": {"type": "string", "minLength": 8},
+    "queryFeatures": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action", "metricCode", "metricName", "matchedText", "scene", "domain",
+        "unit", "aggregation", "definition"
+      ],
+      "properties": {
+        "action": {"enum": ["ROUTE_TO_DATA_QUERY", "EXPLAIN_METRIC"]},
+        "metricCode": {"type": "string", "pattern": "^CNB[0-9]{3}$"},
+        "metricName": {"type": "string", "minLength": 1},
+        "matchedText": {"type": "string", "minLength": 1},
+        "scene": {"enum": ["OPERATIONS", "RISK", "CUSTOMER_MARKETING"]},
+        "domain": {"type": "string", "minLength": 1},
+        "unit": {"type": "string", "minLength": 1},
+        "aggregation": {"enum": ["SNAPSHOT", "SUM", "COUNT", "AVG", "RATIO"]},
+        "definition": {"type": ["string", "null"]}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "catalogVersion", "metricCode", "metricReviewStatus"],
+      "properties": {
+        "kind": {"const": "bank_metric_catalog_generalization"},
+        "catalogVersion": {"const": "0.1.0-candidate"},
+        "metricCode": {"type": "string", "pattern": "^CNB[0-9]{3}$"},
+        "metricReviewStatus": {"const": "CANDIDATE"}
+      }
+    },
+    "officialEligible": {"const": false},
+    "factDataIncluded": {"const": false},
+    "valuePolicy": {"const": "SYNTHETIC_OR_DESENSITIZED_ONLY"}
+  }
+}

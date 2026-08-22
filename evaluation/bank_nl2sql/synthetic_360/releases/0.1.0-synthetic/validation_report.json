@@ -1,0 +1,15 @@
+{
+  "status": "VALID",
+  "dataOrigin": "SYNTHETIC",
+  "generatorVersion": "synthetic-360-v1",
+  "counts": {
+    "metrics": 360,
+    "organizations": 13,
+    "dates": 17,
+    "facts": 79560
+  },
+  "duplicateKeys": [],
+  "missingBaseCells": [],
+  "derivedFormulaErrors": 0,
+  "officialInputs": []
+}
