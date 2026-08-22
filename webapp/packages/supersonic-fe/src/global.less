@@ -191,6 +191,125 @@ ol {
   padding-right: 50px;
 }
 
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.brand-logo-mark {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+.brand-logo-text-img {
+  height: 44px;
+  width: auto;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.sider-header-wrap {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 4px;
+}
+
+.sider-collapse-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 14px;
+  right: 2px;
+  flex-shrink: 0;
+  z-index: 2;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  font-size: 16px;
+
+  &:hover {
+    color: rgba(0, 0, 0, 0.75);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--tme-primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.ant-pro-sider-collapsed .sider-header-wrap {
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 0;
+}
+
+.ant-pro-sider-collapsed .sider-collapse-trigger {
+  position: static;
+}
+
+.mobile-layout-header {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.mobile-menu-trigger {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-color-secondary);
+  font-size: 20px;
+  cursor: pointer;
+
+  &:hover {
+    background: #f5f7fa;
+    color: var(--tme-primary-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--tme-primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.mobile-brand-logo {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+
+  img:first-child {
+    width: 28px;
+    height: 28px;
+  }
+
+  img:last-child {
+    width: auto;
+    max-width: 132px;
+    height: 30px;
+  }
+}
 
 .g6ContextMenuContainer {
   font-size: 12px;
@@ -332,4 +451,24 @@ ol {
     }
   }
   }
+}
+
+/* ===== 侧边栏布局定制：字号 ===== */
+.ant-pro-sider .ant-menu-item,
+.ant-pro-sider .ant-menu-submenu-title {
+  font-size: 15px;
+}
+
+.ant-pro-sider .ant-menu .ant-menu-item .ant-pro-base-menu-inline-item-text,
+.ant-pro-sider .ant-menu .ant-menu-item a {
+  font-size: 15px;
+}
+
+.sider-account {
+  font-size: 14px;
+}
+
+.brand-logo-collapsed {
+  width: 30px;
+  height: 30px;
 }

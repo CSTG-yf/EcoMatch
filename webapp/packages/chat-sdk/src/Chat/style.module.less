@@ -1,8 +1,7 @@
 .chat {
   height: 100%;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(23, 74, 228, 0) 29.44%, rgba(23, 74, 228, 0.06) 100%),
-    linear-gradient(90deg, #f3f3f7 0%, #f3f3f7 20%, #ebf0f9 60%, #f3f3f7 80%, #f3f3f7 100%);
+  background: #fff;
 
   .chatSection {
     display: flex;
@@ -36,43 +35,7 @@
           display: flex;
           flex-direction: column;
           width: 100%;
-
-          .chatHeader {
-            position: absolute;
-            top: 0;
-            z-index: 9;
-            display: flex;
-            align-items: baseline;
-            width: 100%;
-            padding: 14px 16px;
-            background: rgba(243, 243, 247, 0.85);
-            backdrop-filter: blur(2px);
-
-            .chatHeaderTitle {
-              color: var(--text-color);
-              font-weight: 500;
-              font-size: 15px;
-            }
-
-            .chatHeaderTip {
-              max-width: 600px;
-              margin-left: 5px;
-              overflow: hidden;
-              color: var(--text-color-third);
-              font-size: 12px;
-              white-space: nowrap;
-              text-overflow: ellipsis;
-            }
-          }
         }
-      }
-    }
-  }
-
-  &.historyVisible {
-    .chatSection {
-      .chatApp {
-        width: calc(100% - 707px);
       }
     }
   }

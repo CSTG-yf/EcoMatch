@@ -40,6 +40,13 @@
         }
 
         .closeIcon {
+          display: inline-flex;
+          width: 44px;
+          min-width: 44px;
+          height: 44px;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
           color: var(--text-color);
           font-size: 16px;
           cursor: pointer;
@@ -170,10 +177,10 @@
   }
 
   &.historyVisible {
-    flex: 0 0 min(400px, 36vw);
-    width: 400px;
+    flex: 0 0 248px;
+    width: 248px;
     padding: 10px 16px;
-    border-left: 1px solid #f1f1f1;
+    border-right: 1px solid #f1f1f1;
     z-index: 99;
     visibility: visible;
   }

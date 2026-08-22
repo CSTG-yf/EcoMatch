@@ -1,7 +1,7 @@
-import { Button, Space, Spin, Tooltip, message } from 'antd';
-import { CheckCircleFilled, DashboardOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { Space, Spin } from 'antd';
+import { CheckCircleFilled, CloseCircleFilled, InfoCircleOutlined } from '@ant-design/icons';
 import { PREFIX_CLS } from '../../common/constants';
-import { ChatContextType, DashboardQuerySource, MsgDataType } from '../../common/type';
+import { MsgDataType } from '../../common/type';
 import ChatMsg from '../ChatMsg';
 import WebPage from '../ChatMsg/WebPage';
 import Loading from './Loading';
@@ -10,7 +10,6 @@ import { solarizedlight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import React, { ReactNode, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import BusinessInsightPanel from './BusinessInsightPanel';
-import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
 
 type Props = {
   queryId?: number;
@@ -27,8 +26,6 @@ type Props = {
   triggerResize?: boolean;
   isDeveloper?: boolean;
   isSimpleMode?: boolean;
-  dashboardContext?: ChatContextType;
-  onSaveToDashboard?: (source: DashboardQuerySource) => void;
 };
 
 const ExecuteItem: React.FC<Props> = ({
@@ -37,7 +34,6 @@ const ExecuteItem: React.FC<Props> = ({
   queryMode,
   executeLoading,
   entitySwitchLoading = false,
-  chartIndex,
   executeTip,
   executeErrorMsg,
   executeItemNode,
@@ -46,18 +42,20 @@ const ExecuteItem: React.FC<Props> = ({
   triggerResize,
   isDeveloper,
   isSimpleMode,
-  dashboardContext,
-  onSaveToDashboard,
 }) => {
   const prefixCls = `${PREFIX_CLS}-item`;
   const [showErrMsg, setShowErrMsg] = useState<boolean>(false);
   const titlePrefix = queryMode === 'PLAIN_TEXT' || queryMode === 'WEB_SERVICE' ? '问答' : '数据';
 
-  const getNodeTip = (title: ReactNode, tip?: string | ReactNode) => {
+  const getNodeTip = (title: ReactNode, tip?: string | ReactNode, failed?: boolean) => {
     return (
       <>
         <div className={`${prefixCls}-title-bar`}>
-          <CheckCircleFilled className={`${prefixCls}-step-icon`} />
+          {failed ? (
+            <CloseCircleFilled className={`${prefixCls}-step-error-icon`} />
+          ) : (
+            <CheckCircleFilled className={`${prefixCls}-step-icon`} />
+          )}
           <div className={`${prefixCls}-step-title`}>
             {title}
             {!tip && <Loading />}
@@ -71,10 +69,6 @@ const ExecuteItem: React.FC<Props> = ({
   if (executeLoading) {
     return getNodeTip(`${titlePrefix}查询中`);
   }
-
-  const handleCopy = (_: string, result: any) => {
-    result ? message.success('复制SQL成功', 1) : message.error('复制SQL失败', 1);
-  };
 
   if (executeTip) {
     return getNodeTip(
@@ -103,7 +97,8 @@ const ExecuteItem: React.FC<Props> = ({
             {executeErrorMsg}
           </SyntaxHighlighter>
         )}
-      </>
+      </>,
+      true
     );
   }
 
@@ -111,59 +106,13 @@ const ExecuteItem: React.FC<Props> = ({
     return null;
   }
 
-  const saveCapability = canSaveDashboardResult(data);
-  const saveAction = onSaveToDashboard ? (
-    <Tooltip title={saveCapability.reason || '将当前语义查询保存为看板组件'}>
-      <span>
-        <Button
-          size="small"
-          type="link"
-          icon={<DashboardOutlined />}
-          disabled={!saveCapability.enabled}
-          onClick={() =>
-            onSaveToDashboard(
-              buildDashboardQuerySource({
-                question,
-                context: dashboardContext,
-                data,
-              })
-            )
-          }
-        >
-          保存到看板
-        </Button>
-      </span>
-    </Tooltip>
-  ) : null;
-
   return (
     <>
-      {!isSimpleMode && (
-        <div className={`${prefixCls}-title-bar`}>
-          <CheckCircleFilled className={`${prefixCls}-step-icon`} />
-          <div
-            className={`${prefixCls}-step-title ${prefixCls}-execute-title-bar`}
-            style={{ width: '100%' }}
-          >
-            <div>
-              {titlePrefix}查询
-              {!!data?.queryTimeCost && isDeveloper && (
-                <span className={`${prefixCls}-title-tip`}>(耗时: {data.queryTimeCost}ms)</span>
-              )}
-            </div>
-            {saveAction}
-          </div>
-        </div>
-      )}
-      {isSimpleMode && saveAction && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{saveAction}</div>
-      )}
-
       <div
         className={`${prefixCls}-content-container ${
           isSimpleMode ? `${prefixCls}-content-container-simple` : ''
         }`}
-        style={{ borderLeft: queryMode === 'PLAIN_TEXT' ? 'none' : undefined }}
+        style={{ borderLeft: 'none' }}
       >
         <Spin spinning={entitySwitchLoading}>
           {data.queryAuthorization?.message && (
@@ -174,7 +123,7 @@ const ExecuteItem: React.FC<Props> = ({
             recommendation={data.recommendedChart}
           />
           {data.textSummary && !data.businessExplanation?.summary && (
-            <p className={`${prefixCls}-step-title`}>
+            <p className={`${prefixCls}-step-title ${prefixCls}-summary-text`}>
               <span style={{ marginRight: 5 }}>总结:</span>
               <ReactMarkdown>{data.textSummary}</ReactMarkdown>
             </p>

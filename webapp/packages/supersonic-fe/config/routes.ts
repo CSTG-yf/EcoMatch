@@ -29,6 +29,7 @@ const ROUTES = [
   },
   {
     path: '/chat',
+    icon: 'MessageOutlined',
     name: 'chat',
     component: './ChatPage',
     envEnableList: [ENV_KEY.CHAT],
@@ -41,6 +42,7 @@ const ROUTES = [
   // },
   {
     path: '/agent',
+    icon: 'RobotOutlined',
     name: 'agent',
     component: './Agent',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -60,12 +62,14 @@ const ROUTES = [
   },
   {
     path: '/dashboard',
+    icon: 'DashboardOutlined',
     name: 'dashboard',
     component: './Dashboard',
     envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
   },
   {
     path: '/exports',
+    icon: 'ExportOutlined',
     name: 'exports',
     component: './ExportCenter',
     envEnableList: [ENV_KEY.CHAT, ENV_KEY.SEMANTIC],
@@ -79,6 +83,7 @@ const ROUTES = [
   },
   {
     path: '/plugin',
+    icon: 'ApiOutlined',
     name: 'plugin',
     component: './ChatPlugin',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -94,6 +99,7 @@ const ROUTES = [
   },
   {
     path: '/model/',
+    icon: 'DeploymentUnitOutlined',
     component: './SemanticModel/',
     name: 'semanticModel',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -167,6 +173,7 @@ const ROUTES = [
 
   {
     path: '/metric',
+    icon: 'FundOutlined',
     name: 'metric',
     component: './SemanticModel/Metric',
     envEnableList: [ENV_KEY.SEMANTIC],
@@ -200,6 +207,7 @@ const ROUTES = [
   },
   {
     path: '/governance',
+    icon: 'AuditOutlined',
     name: 'governance',
     component: './SemanticModel/Governance',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -207,6 +215,7 @@ const ROUTES = [
   },
   {
     path: '/tag',
+    icon: 'TagsOutlined',
     name: 'tag',
     component: './SemanticModel/Insights',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -242,6 +251,7 @@ const ROUTES = [
   },
   {
     path: '/database',
+    icon: 'DatabaseOutlined',
     name: 'database',
     component: './SemanticModel/components/Database/DatabaseTable',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -249,6 +259,7 @@ const ROUTES = [
   },
   {
     path: '/llm',
+    icon: 'BulbOutlined',
     name: 'llm',
     component: './SemanticModel/components/LLM/LlmTable',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
@@ -256,18 +267,21 @@ const ROUTES = [
   },
   {
     path: '/system',
+    icon: 'SettingOutlined',
     name: 'system',
     component: './System',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
   },
   {
     path: '/evaluation',
+    icon: 'FundViewOutlined',
     name: 'evaluation',
     component: './Evaluation',
     access: ROUTE_AUTH_CODES.SYSTEM_ADMIN,
   },
   {
     path: '/security',
+    icon: 'SafetyCertificateOutlined',
     name: 'security',
     component: './SecurityOperations',
     access: ROUTE_AUTH_CODES.SECURITY_AUDIT,

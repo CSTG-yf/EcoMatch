@@ -54,6 +54,8 @@ public class JsonUtil {
         objectMapper.enable(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY);
 
         objectMapper.registerModule(new JavaTimeModule());
+        // Java8 日期序列化为 ISO 字符串（如 2026-03-31），而非 [2026,3,31] 数字数组
+        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     /**

@@ -6,8 +6,8 @@ export type DefaultSetting = ProLayoutProps & {
 const Settings: DefaultSetting = {
   navTheme: 'light',
   colorPrimary: '#296DF3',
-  layout: 'mix',
-  splitMenus: true,
+  layout: 'side',
+  siderWidth: 240,
   contentWidth: 'Fluid',
   fixedHeader: false,
   fixSiderbar: true,

@@ -22,6 +22,7 @@ type Props = {
   currentAgent?: AgentType;
   currentConversation?: ConversationDetailType;
   historyVisible?: boolean;
+  closable?: boolean;
   onSelectConversation: (
     conversation: ConversationDetailType,
     sendMsgParams?: any,
@@ -36,6 +37,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
     currentAgent,
     currentConversation,
     historyVisible,
+    closable,
     onSelectConversation,
     onCloseConversation,
     onInitializationChange,
@@ -190,7 +192,16 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
             >
               新对话
             </div>
-            <CloseOutlined className={styles.closeIcon} onClick={onCloseConversation} />
+            {closable && (
+              <Button
+                type="text"
+                size="small"
+                className={styles.closeIcon}
+                aria-label="关闭历史会话"
+                icon={<CloseOutlined />}
+                onClick={onCloseConversation}
+              />
+            )}
           </div>
         </div>
         <div className={styles.searchConversation}>
@@ -302,6 +313,7 @@ function areEqual(prevProps: Props, nextProps: Props) {
     prevProps.currentAgent?.id === nextProps.currentAgent?.id &&
     prevProps.currentConversation?.chatId === nextProps.currentConversation?.chatId &&
     prevProps.historyVisible === nextProps.historyVisible &&
+    prevProps.closable === nextProps.closable &&
     prevProps.onInitializationChange === nextProps.onInitializationChange
   ) {
     return true;

@@ -1,8 +1,13 @@
-import RightContent from '@/components/RightContent';
-import S2Icon, { ICON } from '@/components/S2Icon';
-import { Space, Spin, ConfigProvider } from 'antd';
+import AvatarDropdown from '@/components/RightContent/AvatarDropdown';
+import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
-import { history, RunTimeLayoutConfig } from '@umijs/max';
+import {
+  ControlOutlined,
+  MenuFoldOutlined,
+  MenuOutlined,
+  MenuUnfoldOutlined,
+} from '@ant-design/icons';
+import { history, RunTimeLayoutConfig, useModel } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
 import { queryCurrentUser } from './services/user';
@@ -121,6 +126,58 @@ export function onRouteChange() {
   }, 100);
 }
 
+// 侧边栏头部：logo + 折叠按钮（折叠态堆叠为 图标/按钮 两行）
+const SiderHeader: React.FC<{ logoDom: React.ReactNode; collapsed?: boolean }> = ({
+  logoDom,
+  collapsed,
+}) => {
+  const { setInitialState } = useModel('@@initialState');
+  const toggle = () => setInitialState((state: any) => ({ ...state, siderCollapsed: !collapsed }));
+  return (
+    <div className="sider-header-wrap">
+      {collapsed ? (
+        <img
+          src={`${publicPath}branding/bank-query-icon.svg`}
+          alt="银行问数"
+          className="brand-logo-collapsed"
+        />
+      ) : (
+        logoDom
+      )}
+      <button
+        type="button"
+        className="sider-collapse-trigger"
+        aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+        title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+        onClick={toggle}
+      >
+        {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+      </button>
+    </div>
+  );
+};
+
+const MobileLayoutHeader: React.FC<{
+  collapsed?: boolean;
+  onCollapse?: (collapsed: boolean) => void;
+}> = ({ collapsed, onCollapse }) => (
+  <div className="mobile-layout-header">
+    <button
+      type="button"
+      className="mobile-menu-trigger"
+      aria-label={collapsed ? '打开主导航' : '关闭主导航'}
+      aria-expanded={!collapsed}
+      onClick={() => onCollapse?.(!collapsed)}
+    >
+      <MenuOutlined />
+    </button>
+    <span className="mobile-brand-logo" role="img" aria-label="银行问数">
+      <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" />
+      <img src={`${publicPath}branding/bank-query-text.svg`} alt="" />
+    </span>
+  </div>
+);
+
 /**
  * 银行问数前端重构（第一步：仅菜单归组，不增删路由/页面）。
  * 用户：问数、分析看板、指标市场、导出中心；
@@ -132,9 +189,7 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
   const byPath = (path: string) =>
     menuData.find(
       (item: any) =>
-        (item.path === path || item.path === `${path}/`) &&
-        !item.hideInMenu &&
-        !item.redirect,
+        (item.path === path || item.path === `${path}/`) && !item.hideInMenu && !item.redirect,
     );
   const pick = (paths: string[]) => paths.map(byPath).filter(Boolean);
 
@@ -168,42 +223,60 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
     ...userItems,
     // path 落在第一个管理页（助理管理）：点击进入后侧边栏平铺全部管理项
     ...(adminItems.length > 0
-      ? [{ name: '管理中心', path: '/agent', children: adminItems }]
+      ? [{ name: '管理中心', icon: <ControlOutlined />, path: '/agent', children: adminItems }]
       : []),
   ];
 };
 
 export const layout: RunTimeLayoutConfig = (params) => {
-  const { initialState } = params as any;
+  const { initialState, setInitialState } = params as any;
+  const siderCollapsed = Boolean((initialState as any)?.siderCollapsed);
   return {
     menuDataRender: (menuData: any[]) => buildRoleMenu(menuData, initialState),
     onMenuHeaderClick: (e) => {
       e.preventDefault();
       history.push(replaceRoute);
     },
-    logo: (
-      <Space>
-        <S2Icon
-          icon={ICON.iconlogobiaoshi}
-          size={30}
-          color="#1672fa"
-          style={{ display: 'inline-block', marginTop: 8 }}
-        />
-        <div className="logo" style={{ position: 'relative', top: '-2px' }}>
-          SuperSonic
-        </div>
-      </Space>
+    // 侧边栏头部：logo + 折叠按钮
+    menuHeaderRender: (logoDom, _titleDom, props) => (
+      <SiderHeader logoDom={logoDom} collapsed={props?.collapsed} />
     ),
-    contentStyle: { ...(initialState?.contentStyle || {}) },
-    rightContentRender: () => <RightContent />,
+    collapsed: siderCollapsed,
+    onCollapse: (collapsed) => setInitialState({ ...initialState, siderCollapsed: collapsed }),
+    collapsedButtonRender: false,
+    logo: (
+      <span className="brand-logo">
+        <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" className="brand-logo-mark" />
+        <img
+          src={`${publicPath}branding/bank-query-text.svg`}
+          alt="银行问数"
+          className="brand-logo-text-img"
+        />
+      </span>
+    ),
+    contentStyle: { background: '#fff', ...(initialState?.contentStyle || {}) },
+    // 桌面端侧边布局无需顶栏；移动端保留位于 Drawer 外部的主导航入口。
+    headerRender: (props) =>
+      props?.isMobile ? (
+        <MobileLayoutHeader collapsed={props.collapsed} onCollapse={props.onCollapse} />
+      ) : null,
+    menuFooterRender: (props) =>
+      props?.collapsed ? (
+        <div className="sider-account" style={{ textAlign: 'center' }}>
+          <AvatarDropdown hideName />
+        </div>
+      ) : (
+        <div className="sider-account" style={{ padding: '0 16px' }}>
+          <AvatarDropdown />
+        </div>
+      ),
     disableContentMargin: true,
-    // menuHeaderRender: undefined,
     childrenRender: (dom) => {
       return (
         <ConfigProvider theme={configProviderTheme}>
           <div
             style={{
-              height: location.pathname.includes('chat') ? 'calc(100vh - 56px)' : undefined,
+              height: location.pathname.includes('chat') ? '100vh' : undefined,
             }}
           >
             {/* <AppPage dom={dom} /> */}

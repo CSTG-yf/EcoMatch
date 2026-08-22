@@ -9,42 +9,30 @@ import {
   ParseStateEnum,
   ParseTimeCostType,
   RangeValue,
-  SimilarQuestionType,
 } from '../../common/type';
 import { createContext, useEffect, useRef, useState } from 'react';
-import {
-  chatExecute,
-  chatParse,
-  queryData,
-  deleteQuery,
-  switchEntity,
-  getExecuteSummary,
-} from '../../service';
+import { chatExecute, chatParse, queryData, switchEntity, getExecuteSummary } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
-import { Button, message, Spin } from 'antd';
-import { HistoryOutlined } from '@ant-design/icons';
-import IconFont from '../IconFont';
+import { message, Spin } from 'antd';
+import AssistantAvatar from '../AssistantAvatar';
 import ExpandParseTip from './ExpandParseTip';
-import ParseTip from './ParseTip';
 import ExecuteItem from './ExecuteItem';
 import { isMobile } from '../../utils/utils';
 import classNames from 'classnames';
-import Tools from '../Tools';
-import SqlItem from './SqlItem';
-import SimilarQuestionItem from './SimilarQuestionItem';
 import { AgentType } from '../../Chat/type';
 import dayjs, { Dayjs } from 'dayjs';
 import { exportCsvFile } from '../../utils/utils';
 import { useMethodRegister } from '../../hooks';
-import BankQueryOverview from './BankQueryOverview';
-import QueryStageStatus from './QueryStageStatus';
+import BankAnswerWorkflow from './BankAnswerWorkflow';
+import BankAnswerToolbar from './BankAnswerToolbar';
 import MultiTurnContextBar from './MultiTurnContextBar';
-import TrustExplanationPanel from './TrustExplanationPanel';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
 import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
-const SUMMARY_POLL_MAX_ATTEMPTS = 60;
+// 总结轮询上限 2 分钟：解释阶段走 LLM，复杂问题可能较慢；
+// 到达上限不代表查询失败（execute 已拿到数据），只代表解释未就绪
+const SUMMARY_POLL_MAX_ATTEMPTS = 240;
 
 type Props = {
   msg: string;
@@ -92,13 +80,12 @@ const ChatItem: React.FC<Props> = ({
   parseTimeCostValue,
   msgData,
   isDeveloper,
+  isDebugMode,
   integrateSystem,
   executeItemNode,
   renderCustomExecuteNode,
   isSimpleMode,
   currentAgent,
-  isDebugMode,
-  isLastMessage,
   onMsgDataLoaded,
   onUpdateMessageScroll,
   onSendMsg,
@@ -129,29 +116,9 @@ const ChatItem: React.FC<Props> = ({
   const [isParserError, setIsParseError] = useState<boolean>(false);
   const [multiTurnContext, setMultiTurnContext] = useState<MultiTurnContextType>();
   const [workflowStage, setWorkflowStage] = useState<QueryWorkflowStage>('idle');
+  const [totalWallMs, setTotalWallMs] = useState<number>();
+  const queryStartRef = useRef(0);
   const summaryPollToken = useRef(0);
-
-  const resetState = () => {
-    summaryPollToken.current += 1;
-    setParseLoading(false);
-    setParseTimeCost(undefined);
-    setParseInfo(undefined);
-    setParseInfoOptions([]);
-    setPreParseMode(false);
-    setShowExpandParseTip(false);
-    setPreParseInfoOptions([]);
-    setParseTip('');
-    setExecuteMode(false);
-    setDimensionFilters([]);
-    setData(undefined);
-    setExecuteErrorMsg('');
-    setDateInfo({} as DateInfoType);
-    setEntityInfo({} as EntityInfoType);
-    setDataCache({});
-    setIsParseError(false);
-    setMultiTurnContext(undefined);
-    setWorkflowStage('idle');
-  };
 
   const prefixCls = `${PREFIX_CLS}-item`;
 
@@ -198,7 +165,8 @@ const ChatItem: React.FC<Props> = ({
       return;
     }
     if (attempt >= SUMMARY_POLL_MAX_ATTEMPTS) {
-      setWorkflowStage('timeout');
+      // 轮询超时只说明解释未生成，查询本身已成功，按完成处理
+      setWorkflowStage('completed');
       return;
     }
     try {
@@ -292,6 +260,8 @@ const ChatItem: React.FC<Props> = ({
   };
 
   const sendMsg = async () => {
+    queryStartRef.current = performance.now();
+    setTotalWallMs(undefined);
     setWorkflowStage('parsing');
     setIsParseError(false);
     setParseLoading(true);
@@ -371,8 +341,9 @@ const ChatItem: React.FC<Props> = ({
       updateDimensionFitlers(parseInfoValue.dimensionFilters || []);
       setDateInfo(parseInfoValue.dateInfo);
       setExecuteMode(true);
-      updateData({ code: 200, data: msgData, msg: 'success' });
-      setWorkflowStage('completed');
+      // 历史消息也可能是失败的查询，按实际结果决定终态，不能一律显示完成
+      const valid = updateData({ code: 200, data: msgData, msg: 'success' });
+      setWorkflowStage(valid ? 'completed' : 'failed');
     } else if (msg) {
       sendMsg();
     }
@@ -391,6 +362,14 @@ const ChatItem: React.FC<Props> = ({
     },
     []
   );
+
+  // 终态时定格前端实测的全链路墙钟耗时（历史消息没有，回退用后端 parseTime）
+  useEffect(() => {
+    const terminal = ['completed', 'failed', 'forbidden', 'timeout'].includes(workflowStage);
+    if (terminal && queryStartRef.current > 0 && totalWallMs === undefined) {
+      setTotalWallMs(Math.round(performance.now() - queryStartRef.current));
+    }
+  }, [workflowStage]);
 
   const onSwitchEntity = async (entityId: string) => {
     setEntitySwitchLoading(true);
@@ -462,39 +441,6 @@ const ChatItem: React.FC<Props> = ({
     }
   };
 
-  const deleteQueryInfo = async (queryId: number) => {
-    const { code }: any = await deleteQuery(queryId);
-    if (code === 200) {
-      resetState();
-      initChatItem(msg, undefined);
-    }
-  };
-
-  const onSelectParseInfo = async (parseInfoValue: ChatContextType) => {
-    setParseInfo(parseInfoValue);
-    updateDimensionFitlers(parseInfoValue.dimensionFilters || []);
-    setDateInfo(parseInfoValue.dateInfo);
-    if (parseInfoValue.entityInfo) {
-      setEntityInfo(parseInfoValue.entityInfo);
-    }
-    if (dataCache[parseInfoValue.id!]) {
-      const { tip, data } = dataCache[parseInfoValue.id!];
-      setExecuteTip(tip);
-      setData(data);
-      onMsgDataLoaded?.(
-        {
-          ...(data as any),
-          parseInfos,
-          queryId: parseInfoValue.queryId,
-        },
-        true,
-        true
-      );
-    } else {
-      onExecute(parseInfoValue, parseInfoOptions, true);
-    }
-  };
-
   const onExpandSelectParseInfo = async (parseInfoValue: ChatContextType) => {
     setParseInfo(parseInfoValue);
     setPreParseMode(false);
@@ -560,10 +506,6 @@ const ChatItem: React.FC<Props> = ({
     }
   };
 
-  const onSelectQuestion = (question: SimilarQuestionType) => {
-    onSendMsg?.(question.queryText);
-  };
-
   const contentClass = classNames(`${prefixCls}-content`, {
     [`${prefixCls}-content-mobile`]: isMobile,
   });
@@ -575,7 +517,7 @@ const ChatItem: React.FC<Props> = ({
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>
-        {!isMobile && <IconFont type="icon-zhinengsuanfa" className={`${prefixCls}-avatar`} />}
+        {!isMobile && <AssistantAvatar size={32} className={`${prefixCls}-avatar`} />}
         <div className={isMobile ? `${prefixCls}-mobile-msg-card` : ''}>
           <div className={`${prefixCls}-time`}>
             {parseTimeCost?.parseStartTime
@@ -583,16 +525,27 @@ const ChatItem: React.FC<Props> = ({
               : ''}
           </div>
           <div className={contentClass}>
-            <QueryStageStatus stage={workflowStage} />
-            <BankQueryOverview parseInfo={parseInfo} />
             <MultiTurnContextBar context={multiTurnContext} question={msg} onSendMsg={onSendMsg} />
-            <TrustExplanationPanel
+            <BankAnswerWorkflow
               question={msg}
               parseInfo={parseInfo}
+              parseTimeCost={parseTimeCost}
+              totalTimeCost={totalWallMs}
+              data={data}
               workflowStage={workflowStage}
+              parseTip={parseTip}
+              isSimpleMode={isSimpleMode}
               isDeveloper={isDeveloper}
-              parseError={parseTip}
-              executeError={executeErrorMsg}
+              isDebugMode={isDebugMode}
+              dimensionFilters={dimensionFilters}
+              dateInfo={dateInfo}
+              entityInfo={entityInfo}
+              agentId={agentId}
+              integrateSystem={integrateSystem}
+              onFiltersChange={onFiltersChange}
+              onSwitchEntity={onSwitchEntity}
+              onDateInfoChange={onDateInfoChange}
+              handlePresetClick={handlePresetClick}
             />
             <>
               {currentAgent?.enableFeedback === 1 && !questionId && showExpandParseTip && (
@@ -613,54 +566,11 @@ const ChatItem: React.FC<Props> = ({
                   />
                 </div>
               )}
-
-              {!preParseMode && (
-                <ParseTip
-                  isSimpleMode={isSimpleMode}
-                  parseLoading={parseLoading}
-                  parseInfoOptions={parseInfoOptions}
-                  parseTip={parseTip}
-                  currentParseInfo={parseInfo}
-                  agentId={agentId}
-                  dimensionFilters={dimensionFilters}
-                  dateInfo={dateInfo}
-                  entityInfo={entityInfo}
-                  integrateSystem={integrateSystem}
-                  parseTimeCost={parseTimeCost?.parseTime}
-                  isDeveloper={isDeveloper}
-                  onSelectParseInfo={onSelectParseInfo}
-                  onSwitchEntity={onSwitchEntity}
-                  onFiltersChange={onFiltersChange}
-                  onDateInfoChange={onDateInfoChange}
-                  onRefresh={() => {
-                    onRefresh();
-                  }}
-                  handlePresetClick={handlePresetClick}
-                />
-              )}
             </>
 
             {executeMode && (
               <Spin spinning={entitySwitchLoading}>
                 <div style={{ minHeight: 50 }}>
-                  {!isMobile &&
-                    parseInfo?.sqlInfo &&
-                    isDeveloper &&
-                    isDebugMode &&
-                    !isSimpleMode && (
-                      <SqlItem
-                        agentId={agentId}
-                        queryId={parseInfo.queryId}
-                        question={actualQueryText}
-                        llmReq={llmReq}
-                        llmResp={llmResp}
-                        integrateSystem={integrateSystem}
-                        queryMode={parseInfo.queryMode}
-                        sqlInfo={parseInfo.sqlInfo}
-                        sqlTimeCost={parseTimeCost?.sqlTime}
-                        executeErrorMsg={executeErrorMsg}
-                      />
-                    )}
                   <ExecuteItem
                     isSimpleMode={isSimpleMode}
                     queryId={parseInfo?.queryId}
@@ -675,51 +585,37 @@ const ChatItem: React.FC<Props> = ({
                     executeItemNode={executeItemNode}
                     isDeveloper={isDeveloper}
                     renderCustomExecuteNode={renderCustomExecuteNode}
-                    dashboardContext={parseInfo}
-                    onSaveToDashboard={onSaveToDashboard}
                   />
                 </div>
               </Spin>
             )}
-            {executeMode &&
-              !executeLoading &&
-              !isSimpleMode &&
+            {(parseTip !== '' || (executeMode && !executeLoading)) &&
               parseInfo?.queryMode !== 'PLAIN_TEXT' && (
-                <SimilarQuestionItem
-                  queryId={parseInfo?.queryId}
-                  defaultExpanded={parseTip !== '' || executeTip !== ''}
-                  similarQueries={data?.similarQueries}
-                  onSelectQuestion={onSelectQuestion}
+                <BankAnswerToolbar
+                  msg={msg}
+                  queryId={parseInfo?.queryId || 0}
+                  scoreValue={score}
+                  isParserError={isParserError}
+                  isSimpleMode={isSimpleMode}
+                  isDeveloper={isDeveloper}
+                  data={data}
+                  parseInfo={parseInfo}
+                  workflowStage={workflowStage}
+                  parseError={parseTip}
+                  executeError={executeErrorMsg}
+                  executeErrorMsg={executeErrorMsg}
+                  llmReq={llmReq}
+                  llmResp={llmResp}
+                  agentId={agentId}
+                  onContinueQuestion={onContinueQuestion}
+                  onRefresh={executeMode && !executeTip ? () => onRefresh() : undefined}
+                  onExportData={() => {
+                    onExportData();
+                  }}
+                  onSaveToDashboard={onSaveToDashboard}
                 />
               )}
-            {onContinueQuestion && (
-              <Button
-                className={`${prefixCls}-continue-question`}
-                type="link"
-                size="small"
-                icon={<HistoryOutlined />}
-                onClick={() => onContinueQuestion(msg)}
-              >
-                从此问题继续
-              </Button>
-            )}
           </div>
-          {(parseTip !== '' || (executeMode && !executeLoading)) &&
-            parseInfo?.queryMode !== 'PLAIN_TEXT' && (
-              <Tools
-                isLastMessage={isLastMessage}
-                queryId={parseInfo?.queryId || 0}
-                scoreValue={score}
-                isParserError={isParserError}
-                onExportData={() => {
-                  onExportData();
-                }}
-                isSimpleMode={isSimpleMode}
-                onReExecute={queryId => {
-                  deleteQueryInfo(queryId);
-                }}
-              />
-            )}
         </div>
       </div>
     </ChartItemContext.Provider>

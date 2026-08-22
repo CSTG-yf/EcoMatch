@@ -16,25 +16,12 @@ import Conversation from './Conversation';
 import ChatFooter from './ChatFooter';
 import classNames from 'classnames';
 import { cloneDeep, isBoolean } from 'lodash';
-import AgentList from './AgentList';
 import MobileAgents from './MobileAgents';
 import { HistoryMsgItemType, MsgDataType, SendMsgParamsType } from '../common/type';
 import { getHistoryMsg } from '../service';
 import ShowCase from '../ShowCase';
 import { jsonParse } from '../utils/utils';
-import {
-  Alert,
-  Button,
-  ConfigProvider,
-  Drawer,
-  Modal,
-  Row,
-  Col,
-  Space,
-  Spin,
-  Switch,
-  Tooltip,
-} from 'antd';
+import { Alert, Button, ConfigProvider, Drawer, Modal, Spin } from 'antd';
 import { buildContinuationDraft, mergeHistoryMessages } from './conversationState';
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
@@ -88,11 +75,12 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [currentConversation, setCurrentConversation] = useState<ConversationDetailType>();
   const [conversationInitializing, setConversationInitializing] = useState(false);
   const [conversationError, setConversationError] = useState('');
-  const [historyVisible, setHistoryVisible] = useState(false);
+  const [mobileHistoryVisible, setMobileHistoryVisible] = useState(false);
+  // 桌面端固定展示；移动端由底部入口打开全屏历史面板。
+  const historyVisible = !isMobile || mobileHistoryVisible;
   const [agentList, setAgentList] = useState<AgentType[]>([]);
   const [currentAgent, setCurrentAgent] = useState<AgentType>();
   const [mobileAgentsVisible, setMobileAgentsVisible] = useState(false);
-  const [agentListVisible, setAgentListVisible] = useState(true);
   const [showCaseVisible, setShowCaseVisible] = useState(false);
 
   const [isSimpleMode, setIsSimpleMode] = useState<boolean>(false);
@@ -107,7 +95,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   }));
 
   const sendCopilotMsg = (params: SendMsgParamsType) => {
-    setAgentListVisible(false);
     const { agentId, msg, modelId } = params;
     if (currentAgent?.id !== agentId) {
       setMessageList([]);
@@ -395,7 +382,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     });
     saveConversationToLocal(conversation);
     if (isMobile) {
-      setHistoryVisible(false);
+      setMobileHistoryVisible(false);
     }
   };
 
@@ -424,10 +411,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
-  const onToggleHistoryVisible = () => {
-    setHistoryVisible(!historyVisible);
-  };
-
   const onAddConversation = () => {
     conversationRef.current?.onAddConversation();
     inputFocus();
@@ -452,7 +435,9 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   };
 
   const onCloseConversation = () => {
-    setHistoryVisible(false);
+    if (isMobile) {
+      setMobileHistoryVisible(false);
+    }
   };
 
   const chatClass = classNames(styles.chat, {
@@ -464,13 +449,20 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     <ConfigProvider locale={locale}>
       <div className={chatClass}>
         <div className={styles.chatSection}>
-          {!isMobile && agentList.length > 1 && agentListVisible && (
-            <AgentList
-              agentList={agentList}
-              currentAgent={currentAgent}
-              onSelectAgent={onSelectAgent}
-            />
-          )}
+          {/* 桌面端固定展示，移动端通过底部入口打开全屏历史面板。 */}
+          <Conversation
+            currentAgent={currentAgent}
+            currentConversation={currentConversation}
+            historyVisible={historyVisible}
+            closable={!!isMobile}
+            onSelectConversation={onSelectConversation}
+            onCloseConversation={onCloseConversation}
+            onInitializationChange={(loading, error) => {
+              setConversationInitializing(loading);
+              setConversationError(error || '');
+            }}
+            ref={conversationRef}
+          />
           <div className={styles.chatApp}>
             {!currentConversation && (conversationInitializing || conversationError) && (
               <div className={styles.conversationState}>
@@ -493,32 +485,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             {currentConversation && (
               <div className={styles.chatBody}>
                 <div className={styles.chatContent}>
-                  {currentAgent && !isMobile && !noInput && (
-                    <div className={styles.chatHeader}>
-                      <Row style={{ width: '100%' }}>
-                        <Col flex="1 1 200px">
-                          <Space>
-                            <div className={styles.chatHeaderTitle}>{currentAgent.name}</div>
-                            <div className={styles.chatHeaderTip}>{currentAgent.description}</div>
-                            <Tooltip title="精简模式下，问答结果将以文本形式输出">
-                              <Switch
-                                key={currentAgent.id}
-                                style={{ position: 'relative', top: -1 }}
-                                size="small"
-                                value={isSimpleMode}
-                                checkedChildren="精简模式"
-                                unCheckedChildren="精简模式"
-                                onChange={checked => {
-                                  setIsSimpleMode(checked);
-                                }}
-                              />
-                            </Tooltip>
-                          </Space>
-                        </Col>
-                        <Col flex="0 1 118px"></Col>
-                      </Row>
-                    </div>
-                  )}
                   <MessageContainer
                     id="messageContainer"
                     isSimpleMode={isSimpleMode}
@@ -555,18 +521,18 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                       chatId={currentConversation?.chatId}
                       agentList={agentList}
                       currentAgent={currentAgent}
-                      onToggleHistoryVisible={onToggleHistoryVisible}
+                      onToggleHistoryVisible={() => {
+                        setMobileAgentsVisible(false);
+                        setMobileHistoryVisible(visible => !visible);
+                      }}
+                      onOpenAgents={() => {
+                        setMobileHistoryVisible(false);
+                        setMobileAgentsVisible(true);
+                      }}
                       onInputMsgChange={onInputMsgChange}
                       onSendMsg={sendMsg}
                       onAddConversation={onAddConversation}
                       onSelectAgent={onSelectAgent}
-                      onOpenAgents={() => {
-                        if (isMobile) {
-                          setMobileAgentsVisible(true);
-                        } else {
-                          setAgentListVisible(!agentListVisible);
-                        }
-                      }}
                       onOpenShowcase={() => {
                         setShowCaseVisible(!showCaseVisible);
                       }}
@@ -577,18 +543,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
               </div>
             )}
           </div>
-          <Conversation
-            currentAgent={currentAgent}
-            currentConversation={currentConversation}
-            historyVisible={historyVisible}
-            onSelectConversation={onSelectConversation}
-            onCloseConversation={onCloseConversation}
-            onInitializationChange={(loading, error) => {
-              setConversationInitializing(loading);
-              setConversationError(error || '');
-            }}
-            ref={conversationRef}
-          />
           {currentAgent &&
             (isMobile ? (
               <Drawer

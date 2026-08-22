@@ -1,7 +1,6 @@
-import IconFont from '../../components/IconFont';
 import { Drawer } from 'antd';
 import classNames from 'classnames';
-import { AGENT_ICONS } from '../constants';
+import AssistantAvatar from '../../components/AssistantAvatar';
 import { AgentType } from '../type';
 import styles from './style.module.less';
 
@@ -30,12 +29,13 @@ const MobileAgents: React.FC<Props> = ({
       onClose={onClose}
     >
       <div className={styles.agentListContent}>
-        {agentList.map((agent, index) => {
+        {agentList.map(agent => {
           const agentItemClass = classNames(styles.agentItem, {
             [styles.active]: currentAgent?.id === agent.id,
           });
           return (
-            <div
+            <button
+              type="button"
               key={agent.id}
               className={agentItemClass}
               onClick={() => {
@@ -44,14 +44,11 @@ const MobileAgents: React.FC<Props> = ({
               }}
             >
               <div className={styles.agentTitleBar}>
-                <IconFont
-                  type={AGENT_ICONS[index % AGENT_ICONS.length]}
-                  className={styles.avatar}
-                />
+                <AssistantAvatar size={32} className={styles.avatar} />
                 <div className={styles.agentName}>{agent.name}</div>
               </div>
               <div className={styles.agentDesc}>{agent.description}</div>
-            </div>
+            </button>
           );
         })}
       </div>

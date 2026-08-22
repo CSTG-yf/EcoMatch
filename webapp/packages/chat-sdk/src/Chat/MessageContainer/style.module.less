@@ -6,11 +6,16 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: scroll;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 
   .messageList {
     display: flex;
     flex-direction: column;
-    padding: 70px 20px 60px 14px;
+    padding: 24px 20px 60px 14px;
     row-gap: 16px;
 
     .historyState {

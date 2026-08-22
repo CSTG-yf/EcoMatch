@@ -84,12 +84,6 @@ const Table: React.FC<Props> = ({ data, size, loading, question, onApplyAuth }) 
 
   return (
     <div className={prefixCls} data-testid="ui-chat-result-table">
-      {question && (
-        <div className={`${prefixCls}-top-bar`}>
-          <div className={`${prefixCls}-indicator-name`}>{question}</div>
-        </div>
-      )}
-
       <AntTable
         pagination={
           queryResults.length <= 10 ? false : { defaultPageSize: 10, position: ['bottomCenter'] }
