@@ -3,8 +3,7 @@ import { AgentType } from '../type';
 import styles from './style.module.less';
 import classNames from 'classnames';
 import { message } from 'antd';
-import IconFont from '../../components/IconFont';
-import { AGENT_ICONS } from '../constants';
+import AssistantAvatar from '../../components/AssistantAvatar';
 
 type Props = {
   agentList: AgentType[];
@@ -24,7 +23,7 @@ const AgentList: React.FC<Props> = ({ agentList, currentAgent, onSelectAgent }) 
         <PlusCircleOutlined className={styles.plusIcon} onClick={onAddAgent} />
       </div>
       <div className={styles.agentListContent}>
-        {agentList.map((agent, index) => {
+        {agentList.map((agent) => {
           const agentItemClass = classNames(styles.agentItem, {
             [styles.active]: currentAgent?.id === agent.id,
           });
@@ -36,7 +35,7 @@ const AgentList: React.FC<Props> = ({ agentList, currentAgent, onSelectAgent }) 
                 onSelectAgent(agent);
               }}
             >
-              <IconFont type={AGENT_ICONS[index % AGENT_ICONS.length]} className={styles.avatar} />
+              <AssistantAvatar size={32} className={styles.avatar} />
               <div className={styles.agentInfo}>
                 <div className={styles.agentName}>{agent.name}</div>
                 <div className={styles.agentDesc}>{agent.description}</div>

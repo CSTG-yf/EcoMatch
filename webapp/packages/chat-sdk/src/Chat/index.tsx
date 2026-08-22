@@ -22,19 +22,7 @@ import { HistoryMsgItemType, MsgDataType, SendMsgParamsType } from '../common/ty
 import { getHistoryMsg } from '../service';
 import ShowCase from '../ShowCase';
 import { jsonParse } from '../utils/utils';
-import {
-  Alert,
-  Button,
-  ConfigProvider,
-  Drawer,
-  Modal,
-  Row,
-  Col,
-  Space,
-  Spin,
-  Switch,
-  Tooltip,
-} from 'antd';
+import { Alert, Button, ConfigProvider, Drawer, Modal, Spin } from 'antd';
 import { buildContinuationDraft, mergeHistoryMessages } from './conversationState';
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
@@ -453,13 +441,26 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     <ConfigProvider locale={locale}>
       <div className={chatClass}>
         <div className={styles.chatSection}>
-          {!isMobile && agentList.length > 1 && agentListVisible && (
+          {!isMobile && agentList.length > 1 && agentListVisible && !historyVisible && (
             <AgentList
               agentList={agentList}
               currentAgent={currentAgent}
               onSelectAgent={onSelectAgent}
             />
           )}
+          {/* 历史对话展示在副侧边栏位置，替换助理列表；组件常驻挂载以保留会话操作能力 */}
+          <Conversation
+            currentAgent={currentAgent}
+            currentConversation={currentConversation}
+            historyVisible={historyVisible}
+            onSelectConversation={onSelectConversation}
+            onCloseConversation={onCloseConversation}
+            onInitializationChange={(loading, error) => {
+              setConversationInitializing(loading);
+              setConversationError(error || '');
+            }}
+            ref={conversationRef}
+          />
           <div className={styles.chatApp}>
             {!currentConversation && (conversationInitializing || conversationError) && (
               <div className={styles.conversationState}>
@@ -482,32 +483,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             {currentConversation && (
               <div className={styles.chatBody}>
                 <div className={styles.chatContent}>
-                  {currentAgent && !isMobile && !noInput && (
-                    <div className={styles.chatHeader}>
-                      <Row style={{ width: '100%' }}>
-                        <Col flex="1 1 200px">
-                          <Space>
-                            <div className={styles.chatHeaderTitle}>{currentAgent.name}</div>
-                            <div className={styles.chatHeaderTip}>{currentAgent.description}</div>
-                            <Tooltip title="精简模式下，问答结果将以文本形式输出">
-                              <Switch
-                                key={currentAgent.id}
-                                style={{ position: 'relative', top: -1 }}
-                                size="small"
-                                value={isSimpleMode}
-                                checkedChildren="精简模式"
-                                unCheckedChildren="精简模式"
-                                onChange={checked => {
-                                  setIsSimpleMode(checked);
-                                }}
-                              />
-                            </Tooltip>
-                          </Space>
-                        </Col>
-                        <Col flex="0 1 118px"></Col>
-                      </Row>
-                    </div>
-                  )}
                   <MessageContainer
                     id="messageContainer"
                     isSimpleMode={isSimpleMode}
@@ -566,18 +541,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
               </div>
             )}
           </div>
-          <Conversation
-            currentAgent={currentAgent}
-            currentConversation={currentConversation}
-            historyVisible={historyVisible}
-            onSelectConversation={onSelectConversation}
-            onCloseConversation={onCloseConversation}
-            onInitializationChange={(loading, error) => {
-              setConversationInitializing(loading);
-              setConversationError(error || '');
-            }}
-            ref={conversationRef}
-          />
           {currentAgent &&
             (isMobile ? (
               <Drawer

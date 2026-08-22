@@ -20,7 +20,7 @@ import {
 } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
 import { message, Spin } from 'antd';
-import IconFont from '../IconFont';
+import AssistantAvatar from '../AssistantAvatar';
 import ExpandParseTip from './ExpandParseTip';
 import ExecuteItem from './ExecuteItem';
 import { isMobile } from '../../utils/utils';
@@ -346,8 +346,9 @@ const ChatItem: React.FC<Props> = ({
       updateDimensionFitlers(parseInfoValue.dimensionFilters || []);
       setDateInfo(parseInfoValue.dateInfo);
       setExecuteMode(true);
-      updateData({ code: 200, data: msgData, msg: 'success' });
-      setWorkflowStage('completed');
+      // 历史消息也可能是失败的查询，按实际结果决定终态，不能一律显示完成
+      const valid = updateData({ code: 200, data: msgData, msg: 'success' });
+      setWorkflowStage(valid ? 'completed' : 'failed');
     } else if (msg) {
       sendMsg();
     }
@@ -521,7 +522,7 @@ const ChatItem: React.FC<Props> = ({
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>
-        {!isMobile && <IconFont type="icon-zhinengsuanfa" className={`${prefixCls}-avatar`} />}
+        {!isMobile && <AssistantAvatar size={32} className={`${prefixCls}-avatar`} />}
         <div className={isMobile ? `${prefixCls}-mobile-msg-card` : ''}>
           <div className={`${prefixCls}-time`}>
             {parseTimeCost?.parseStartTime

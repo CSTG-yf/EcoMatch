@@ -1,5 +1,5 @@
 import { Space, Spin } from 'antd';
-import { CheckCircleFilled, InfoCircleOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, CloseCircleFilled, InfoCircleOutlined } from '@ant-design/icons';
 import { PREFIX_CLS } from '../../common/constants';
 import { MsgDataType } from '../../common/type';
 import ChatMsg from '../ChatMsg';
@@ -47,11 +47,15 @@ const ExecuteItem: React.FC<Props> = ({
   const [showErrMsg, setShowErrMsg] = useState<boolean>(false);
   const titlePrefix = queryMode === 'PLAIN_TEXT' || queryMode === 'WEB_SERVICE' ? '问答' : '数据';
 
-  const getNodeTip = (title: ReactNode, tip?: string | ReactNode) => {
+  const getNodeTip = (title: ReactNode, tip?: string | ReactNode, failed?: boolean) => {
     return (
       <>
         <div className={`${prefixCls}-title-bar`}>
-          <CheckCircleFilled className={`${prefixCls}-step-icon`} />
+          {failed ? (
+            <CloseCircleFilled className={`${prefixCls}-step-error-icon`} />
+          ) : (
+            <CheckCircleFilled className={`${prefixCls}-step-icon`} />
+          )}
           <div className={`${prefixCls}-step-title`}>
             {title}
             {!tip && <Loading />}
@@ -93,7 +97,8 @@ const ExecuteItem: React.FC<Props> = ({
             {executeErrorMsg}
           </SyntaxHighlighter>
         )}
-      </>
+      </>,
+      true
     );
   }
 
@@ -118,7 +123,7 @@ const ExecuteItem: React.FC<Props> = ({
             recommendation={data.recommendedChart}
           />
           {data.textSummary && !data.businessExplanation?.summary && (
-            <p className={`${prefixCls}-step-title`}>
+            <p className={`${prefixCls}-step-title ${prefixCls}-summary-text`}>
               <span style={{ marginRight: 5 }}>总结:</span>
               <ReactMarkdown>{data.textSummary}</ReactMarkdown>
             </p>
