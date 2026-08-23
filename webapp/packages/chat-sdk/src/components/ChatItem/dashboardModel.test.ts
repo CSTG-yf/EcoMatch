@@ -11,6 +11,17 @@ describe('dashboard query source', () => {
     metrics: [{ bizName: '存款余额', name: 'deposit_balance' }],
     dateInfo: { startDate: '2025-01-01', endDate: '2025-06-30' },
     dimensionFilters: [{ bizName: '机构', value: '江苏省B市农商行' }],
+    metricFilters: [
+      {
+        bizName: '存款余额',
+        operator: '>',
+        value: {
+          threshold: 100,
+          sql: 'select * from metric_filter_secret',
+          secret: 'never-persist-this',
+        },
+      },
+    ],
     sqlInfo: { correctSql: 'select * from secret_table' },
     properties: { token: 'never-persist-this' },
   } as any;
@@ -42,12 +53,21 @@ describe('dashboard query source', () => {
         parseId: 17,
         dataSetId: 5,
         modelId: 3,
+        metricFilters: [
+          {
+            bizName: '存款余额',
+            operator: '>',
+            value: { threshold: 100 },
+          },
+        ],
       },
     });
 
     const serialized = JSON.stringify(source).toLowerCase();
     expect(serialized).not.toContain('sql');
     expect(serialized).not.toContain('token');
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('never-persist-this');
     expect(serialized).not.toContain('properties');
     expect(serialized).not.toContain('queryresults');
   });

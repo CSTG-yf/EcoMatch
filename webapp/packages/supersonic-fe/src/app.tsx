@@ -121,7 +121,6 @@ export function onRouteChange() {
   }, 100);
 }
 
-
 const MobileLayoutHeader: React.FC<{
   collapsed?: boolean;
   onCollapse?: (collapsed: boolean) => void;

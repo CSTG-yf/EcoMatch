@@ -49,6 +49,8 @@ public abstract class SemanticQueryReq {
 
     protected Cache cacheInfo = new Cache();
 
+    /** Server-produced SQL metadata; external JSON must not supply executable physical SQL. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     protected SqlInfo sqlInfo = new SqlInfo();
 
     public void addModelId(Long modelId) {

@@ -27,12 +27,12 @@ const DashboardCard: React.FC<Props> = ({
   const rows = Array.isArray(result?.queryResults) ? result.queryResults : [];
   const hasSuccessfulResult = result?.queryState === 'SUCCESS';
   const columns = Array.isArray(result?.queryColumns)
-      ? result.queryColumns.slice(0, 8).map((column: any) => ({
-          title: column.bizName || column.name,
-          dataIndex: dashboardColumnKey(column),
-          key: dashboardColumnKey(column),
-          ellipsis: true,
-        }))
+    ? result.queryColumns.slice(0, 8).map((column: any) => ({
+        title: column.bizName || column.name,
+        dataIndex: dashboardColumnKey(column),
+        key: dashboardColumnKey(column),
+        ellipsis: true,
+      }))
     : [];
   const dimensionColumn = columns[0];
   const metricColumns = columns.slice(1);

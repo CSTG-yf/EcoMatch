@@ -9,7 +9,13 @@ jest.mock('@/services/request', () => ({
 const mockedRequest = request as jest.MockedFunction<typeof request>;
 const originalApiBaseUrl = process.env.API_BASE_URL;
 process.env.API_BASE_URL = '/api/semantic/';
-const { createDashboard, refreshDashboardQuery, updateDashboard } = require('./service');
+const {
+  createDashboard,
+  getDashboardDataSetDomain,
+  getDashboardModel,
+  refreshDashboardQuery,
+  updateDashboard,
+} = require('./service');
 
 describe('dashboard service contracts', () => {
   afterAll(() => {
@@ -64,6 +70,22 @@ describe('dashboard service contracts', () => {
     expect(mockedRequest).toHaveBeenCalledWith('/api/chat/query/dashboardQueryData', {
       method: 'POST',
       data: { dashboardId: 7, componentId: 'component-1' },
+    });
+  });
+
+  it('keeps model lookup on the viewer-authorized endpoint', async () => {
+    await getDashboardModel(33);
+
+    expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/model/getModelListByIds/33', {
+      method: 'GET',
+    });
+  });
+
+  it('resolves a data set domain through the viewer-authorized endpoint', async () => {
+    await getDashboardDataSetDomain(5);
+
+    expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/dataSet/5/domain', {
+      method: 'GET',
     });
   });
 });

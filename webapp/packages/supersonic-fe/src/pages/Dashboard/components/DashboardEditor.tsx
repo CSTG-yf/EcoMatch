@@ -49,10 +49,7 @@ import {
 import { Dashboard, DashboardAccessScope, DashboardComponent, DashboardConfig } from '../types';
 import DashboardCard from './DashboardCard';
 import styles from '../style.less';
-import {
-  ShareCreateDialog,
-  ShareManagementDialog,
-} from '../../ControlledShare';
+import { ShareCreateDialog, ShareManagementDialog } from '../../ControlledShare';
 import {
   CreateExport,
   buildDashboardExportRequest,
@@ -626,10 +623,7 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
         dashboardName={draft.name}
         onClose={() => setShareCreateOpen(false)}
       />
-      <ShareManagementDialog
-        open={shareManageOpen}
-        onClose={() => setShareManageOpen(false)}
-      />
+      <ShareManagementDialog open={shareManageOpen} onClose={() => setShareManageOpen(false)} />
 
       <div className={styles.editorBody}>
         <aside className={styles.componentRail}>

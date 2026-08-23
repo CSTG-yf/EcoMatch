@@ -379,7 +379,12 @@ public class S2DataPermissionAspect {
             String modifiedSql = SqlAddHelper.addWhere(originalSql, expression);
             log.debug("Applying model-scoped row permission to SQL [{}]",
                     SensitiveLogUtils.summarize(originalSql));
+            if (StringUtils.isBlank(modifiedSql) || StringUtils.equals(originalSql, modifiedSql)) {
+                throw new InvalidPermissionException(
+                        "Row permission filter could not be applied; query execution was denied");
+            }
             querySqlReq.setSql(modifiedSql);
+            querySqlReq.setRowPermissionApplied(true);
             log.debug("Row permission applied to SQL [{}]",
                     SensitiveLogUtils.summarize(modifiedSql));
         } catch (JSQLParserException e) {

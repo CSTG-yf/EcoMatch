@@ -117,7 +117,7 @@ export const buildDashboardQuerySource = ({
     ...(effectiveContext?.dimensions || []),
   ]
     .map((field: FieldType) => Number(field?.model))
-    .find((value) => Number.isInteger(value) && value > 0);
+    .find(value => Number.isInteger(value) && value > 0);
   const modelId =
     effectiveContext?.modelId ??
     (effectiveContext?.dataSet?.model != null && Number(effectiveContext.dataSet.model) > 0
@@ -127,6 +127,7 @@ export const buildDashboardQuerySource = ({
   const dimensions = (effectiveContext?.dimensions || []).map(copyField);
   const metrics = (effectiveContext?.metrics || []).map(copyField);
   const dimensionFilters = (effectiveContext?.dimensionFilters || []).map(copyFilter);
+  const metricFilters = (effectiveContext?.metricFilters || []).map(copyFilter);
 
   return {
     queryId,
@@ -147,6 +148,7 @@ export const buildDashboardQuerySource = ({
       metrics,
       dateInfo: copyDateInfo(effectiveContext?.dateInfo),
       dimensionFilters,
+      metricFilters,
     },
   };
 };

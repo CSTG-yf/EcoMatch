@@ -4,8 +4,7 @@ import queryString from 'query-string';
 import { Chat, DashboardQuerySource } from 'supersonic-chat-sdk';
 import { canViewDeveloperDiagnostics } from '@/utils/developerAccess';
 import { message } from 'antd';
-import { getDashboardModel } from '../Dashboard/service';
-import { getDataSetDetail } from '../SemanticModel/service';
+import { getDashboardDataSetDomain, getDashboardModel } from '../Dashboard/service';
 import { buildQueryExportRequest } from '../ExportCenter';
 
 const ChatPage = () => {
@@ -14,10 +13,9 @@ const ChatPage = () => {
   const query = queryString.parse(location.search) || {};
   const { agentId } = query;
 
-  // 保存到看板只需要 domainId。两条取得路径：
-  //  1) 有 modelId：model -> domain（getModelListByIds，VIEWER 校验）
-  //  2) modelId 缺失（bank 投影后 metrics/dimensions 为空）但有 dataSetId：
-  //     dataSet -> domainId（GET /dataSet/{id}，该接口是 ADMIN 级，superAdmin 放行）
+  // 保存到看板只需要 domainId。两条路径都只使用 VIEWER 权限接口：
+  //  1) 有 modelId：model -> domain（getModelListByIds）
+  //  2) modelId 缺失但有 dataSetId：dataSet -> domain
   const saveToDashboard = async (source: DashboardQuerySource) => {
     try {
       const modelId = Number(source.modelId || source.semanticQuery?.modelId);
@@ -32,11 +30,11 @@ const ChatPage = () => {
         const models = response?.data || response;
         domainId = Number(Array.isArray(models) ? models[0]?.domainId : models?.domainId);
       } else if (Number.isInteger(dataSetId) && dataSetId > 0) {
-        const response: any = await getDataSetDetail(dataSetId);
+        const response: any = await getDashboardDataSetDomain(dataSetId);
         if (response?.code != null && Number(response.code) !== 200) {
-          throw new Error(response?.msg || '无该数据集的管理权限，无法保存到看板');
+          throw new Error(response?.msg || '当前用户不可见该数据集，无法保存到看板');
         }
-        domainId = Number(response?.data?.domainId ?? response?.domainId);
+        domainId = Number(response?.data ?? response);
       } else {
         throw new Error('无法识别该问数结果所属的数据模型，暂不能保存到看板');
       }

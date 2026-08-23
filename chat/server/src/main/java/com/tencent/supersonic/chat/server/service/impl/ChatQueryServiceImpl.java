@@ -26,11 +26,12 @@ import com.tencent.supersonic.common.jsqlparser.SqlAddHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlRemoveHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlReplaceHelper;
 import com.tencent.supersonic.common.jsqlparser.SqlSelectHelper;
+import com.tencent.supersonic.common.pojo.DateConf;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.AuthType;
+import com.tencent.supersonic.common.pojo.enums.DatePeriodEnum;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
-import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
@@ -78,6 +79,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -93,6 +96,8 @@ import java.util.stream.Collectors;
 public class ChatQueryServiceImpl implements ChatQueryService {
 
     private static final int MAX_BANK_PLAN_ATTEMPTS = 3;
+    private static final DateTimeFormatter MONTH_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM");
     private static final Set<String> REPAIRABLE_BANK_PLAN_ERRORS = Set.of("SQL_SAFETY_POLICY",
             "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH");
 
@@ -468,6 +473,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 || StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedS2SQL())) {
             throw new InvalidArgumentException("历史问数解析结果不可用于看板刷新");
         }
+        boolean reusePhysicalSql = canReusePhysicalSql(parseInfo, chatQueryDataReq);
         mergeParseInfo(parseInfo, chatQueryDataReq);
         DataSetSchema dataSetSchema =
                 semanticLayerService.getDataSetSchema(parseInfo.getDataSetId());
@@ -476,12 +482,13 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         semanticQuery.setParseInfo(parseInfo);
 
         if (LLMSqlQuery.QUERY_MODE.equalsIgnoreCase(parseInfo.getQueryMode())) {
-            handleLLMQueryMode(chatQueryDataReq, semanticQuery, dataSetSchema, user);
+            handleLLMQueryMode(chatQueryDataReq, semanticQuery, dataSetSchema, user,
+                    reusePhysicalSql);
         } else {
             handleRuleQueryMode(semanticQuery, dataSetSchema, user);
         }
 
-        return executeQuery(semanticQuery, user);
+        return executeQuery(semanticQuery, user, reusePhysicalSql);
     }
 
     private void publishChatAudit(User user, Long chatId, Long queryId, String question,
@@ -515,32 +522,98 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 + (result.getQueryState() == null ? "UNKNOWN" : result.getQueryState().name());
     }
 
-    private List<String> getFieldsFromSql(SemanticParseInfo parseInfo) {
-        SqlInfo sqlInfo = parseInfo.getSqlInfo();
-        if (Objects.isNull(sqlInfo) || StringUtils.isBlank(sqlInfo.getCorrectedS2SQL())) {
-            return new ArrayList<>();
-        }
-        return SqlSelectHelper.getAllSelectFields(sqlInfo.getCorrectedS2SQL());
+    static boolean canReusePhysicalSql(SemanticParseInfo parseInfo, ChatQueryDataReq request) {
+        return parseInfo != null && request != null && parseInfo.getSqlInfo() != null
+                && StringUtils.isNotBlank(parseInfo.getSqlInfo().getQuerySQL())
+                && StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL())
+                && isStaticDate(parseInfo.getDateInfo()) && isStaticDate(request.getDateInfo())
+                && Objects.equals(dateSnapshot(parseInfo.getDateInfo()),
+                        dateSnapshot(request.getDateInfo()))
+                && schemaElements(parseInfo.getMetrics()).equals(schemaElements(request.getMetrics()))
+                && schemaElements(parseInfo.getDimensions())
+                        .equals(schemaElements(request.getDimensions()))
+                && filters(parseInfo.getDimensionFilters())
+                        .equals(filters(request.getDimensionFilters()))
+                && filters(parseInfo.getMetricFilters()).equals(filters(request.getMetricFilters()));
     }
 
+    private static boolean isStaticDate(DateConf date) {
+        return date == null || date.getDateMode() == DateConf.DateMode.BETWEEN
+                || date.getDateMode() == DateConf.DateMode.LIST
+                || date.getDateMode() == DateConf.DateMode.ALL;
+    }
+
+    private static Set<SchemaElementSnapshot> schemaElements(Set<SchemaElement> elements) {
+        if (CollectionUtils.isEmpty(elements)) {
+            return Set.of();
+        }
+        return elements.stream().filter(Objects::nonNull).map(SchemaElementSnapshot::from)
+                .collect(Collectors.toSet());
+    }
+
+    private static Set<QueryFilterSnapshot> filters(Set<QueryFilter> filters) {
+        if (CollectionUtils.isEmpty(filters)) {
+            return Set.of();
+        }
+        return filters.stream().filter(Objects::nonNull).map(QueryFilterSnapshot::from)
+                .collect(Collectors.toSet());
+    }
+
+    private static DateSnapshot dateSnapshot(DateConf date) {
+        if (date == null) {
+            return null;
+        }
+        DateConf.DateMode mode = date.getDateMode();
+        if (mode == null) {
+            return new DateSnapshot(null, null, null, List.of(), null, null);
+        }
+        return switch (mode) {
+            case RECENT -> new DateSnapshot(mode, null, null, List.of(), date.getUnit(),
+                    date.getPeriod());
+            case LIST -> new DateSnapshot(mode, null, null, List.copyOf(date.getDateList()), null,
+                    null);
+            case BETWEEN, AVAILABLE -> new DateSnapshot(mode, date.getStartDate(), date.getEndDate(),
+                    List.of(), null, null);
+            case ALL -> new DateSnapshot(mode, null, null, List.of(), null, null);
+        };
+    }
+
+    private record SchemaElementSnapshot(Long id, Long model, String name, String bizName,
+            Object type, String defaultAgg) {
+        private static SchemaElementSnapshot from(SchemaElement element) {
+            return new SchemaElementSnapshot(element.getId(), element.getModel(), element.getName(),
+                    element.getBizName(), element.getType(), element.getDefaultAgg());
+        }
+    }
+
+    private record QueryFilterSnapshot(String bizName, String name, Object operator, Object value,
+            Long elementId, String function) {
+        private static QueryFilterSnapshot from(QueryFilter filter) {
+            return new QueryFilterSnapshot(filter.getBizName(), filter.getName(),
+                    filter.getOperator(), filter.getValue(), filter.getElementID(),
+                    filter.getFunction());
+        }
+    }
+
+    private record DateSnapshot(DateConf.DateMode dateMode, String startDate, String endDate,
+            List<String> dateList, Integer unit, Object period) {}
+
     private void handleLLMQueryMode(ChatQueryDataReq chatQueryDataReq, SemanticQuery semanticQuery,
-            DataSetSchema dataSetSchema, User user) throws Exception {
+            DataSetSchema dataSetSchema, User user, boolean reusePhysicalSql) throws Exception {
         SemanticParseInfo parseInfo = semanticQuery.getParseInfo();
-        if (StringUtils.isNotBlank(parseInfo.getSqlInfo().getQuerySQL())
-                && CollectionUtils.isEmpty(chatQueryDataReq.getDimensionFilters())
-                && CollectionUtils.isEmpty(chatQueryDataReq.getMetricFilters())) {
-            // 首次看板刷新直接复用问数成功时保存的物理 SQL；只有看板筛选发生变化时才重建/翻译 S2SQL。
-            // 这样 bank LLM_S2SQL 的复杂 CTE 不会在无筛选刷新时被二次改写破坏。
-            log.info("reuse stored physical SQL for dashboard refresh");
+        if (reusePhysicalSql) {
+            log.info("reuse stored physical SQL for unchanged dashboard refresh");
             return;
         }
+        validateSupportedDashboardRefresh(parseInfo, chatQueryDataReq);
         String rebuiltS2SQL;
-        if (checkMetricReplace(chatQueryDataReq, parseInfo)) {
-            log.info("rebuild S2SQL with adjusted metrics!");
+        if (!schemaElements(parseInfo.getMetrics())
+                .equals(schemaElements(chatQueryDataReq.getMetrics()))) {
+            log.info("rebuild S2SQL with adjusted metric");
             SchemaElement metricToReplace = chatQueryDataReq.getMetrics().iterator().next();
             rebuiltS2SQL = replaceMetrics(parseInfo, metricToReplace);
         } else {
-            log.info("rebuild S2SQL with adjusted filters!");
+            log.info("rebuild S2SQL with adjusted filters or date");
             rebuiltS2SQL = replaceFilters(chatQueryDataReq, parseInfo, dataSetSchema);
         }
         // reset SqlInfo and request re-translation
@@ -552,6 +625,56 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         parseInfo.getSqlInfo().setQuerySQL(explain.getQuerySQL());
     }
 
+    private void validateSupportedDashboardRefresh(SemanticParseInfo parseInfo,
+            ChatQueryDataReq request) {
+        if (parseInfo.getDateInfo() != null && request.getDateInfo() == null) {
+            throw new InvalidArgumentException("看板刷新暂不支持清空日期条件");
+        }
+        if (request.getDateInfo() != null
+                && request.getDateInfo().getDateMode() == DateConf.DateMode.AVAILABLE) {
+            throw new InvalidArgumentException("看板刷新暂不支持按数据可用日期动态计算");
+        }
+        if (!schemaElements(parseInfo.getDimensions())
+                .equals(schemaElements(request.getDimensions()))) {
+            throw new InvalidArgumentException("看板刷新暂不支持新增、删除或替换维度");
+        }
+
+        Set<SchemaElementSnapshot> storedMetrics = schemaElements(parseInfo.getMetrics());
+        Set<SchemaElementSnapshot> requestedMetrics = schemaElements(request.getMetrics());
+        if (storedMetrics.equals(requestedMetrics)) {
+            return;
+        }
+        if (storedMetrics.size() != 1 || requestedMetrics.size() != 1) {
+            throw new InvalidArgumentException("看板刷新仅支持单指标替换，不支持指标新增或删除");
+        }
+        boolean otherSemanticsUnchanged = filters(parseInfo.getDimensionFilters())
+                .equals(filters(request.getDimensionFilters()))
+                && filters(parseInfo.getMetricFilters()).equals(filters(request.getMetricFilters()))
+                && isStaticDate(parseInfo.getDateInfo()) && isStaticDate(request.getDateInfo())
+                && Objects.equals(dateSnapshot(parseInfo.getDateInfo()),
+                        dateSnapshot(request.getDateInfo()));
+        if (!otherSemanticsUnchanged) {
+            throw new InvalidArgumentException("看板刷新不支持同时替换指标和修改筛选或动态日期");
+        }
+
+        SchemaElement storedMetric = parseInfo.getMetrics().iterator().next();
+        SchemaElement requestedMetric = request.getMetrics().iterator().next();
+        if (sameSchemaElementIgnoringDefaultAgg(storedMetric, requestedMetric)) {
+            throw new InvalidArgumentException("看板刷新不支持修改指标默认聚合方式");
+        }
+        if (Objects.equals(storedMetric.getName(), requestedMetric.getName())) {
+            throw new InvalidArgumentException("看板刷新仅支持替换为不同的单个指标");
+        }
+    }
+
+    private boolean sameSchemaElementIgnoringDefaultAgg(SchemaElement left, SchemaElement right) {
+        return Objects.equals(left.getId(), right.getId())
+                && Objects.equals(left.getModel(), right.getModel())
+                && Objects.equals(left.getName(), right.getName())
+                && Objects.equals(left.getBizName(), right.getBizName())
+                && Objects.equals(left.getType(), right.getType());
+    }
+
     private void handleRuleQueryMode(SemanticQuery semanticQuery, DataSetSchema dataSetSchema,
             User user) {
         log.info("rule begin replace metrics and revise filters!");
@@ -560,25 +683,16 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         semanticQuery.buildS2Sql(dataSetSchema);
     }
 
-    private QueryResult executeQuery(SemanticQuery semanticQuery, User user) throws Exception {
+    private QueryResult executeQuery(SemanticQuery semanticQuery, User user,
+            boolean reuseStoredPhysicalSql) throws Exception {
         SemanticQueryReq semanticQueryReq = semanticQuery.buildSemanticQueryReq();
         SemanticParseInfo parseInfo = semanticQuery.getParseInfo();
+        semanticQueryReq.setTrustedCompiledSql(reuseStoredPhysicalSql
+                && StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
         QueryResult queryResult = doExecution(semanticQueryReq, parseInfo.getQueryMode(), user);
         queryResult.setChatContext(semanticQuery.getParseInfo());
         parseInfo.getSqlInfo().setQuerySQL(queryResult.getQuerySql());
         return queryResult;
-    }
-
-    private boolean checkMetricReplace(ChatQueryDataReq chatQueryDataReq,
-            SemanticParseInfo parseInfo) {
-        List<String> oriFields = getFieldsFromSql(parseInfo);
-        Set<SchemaElement> metrics = chatQueryDataReq.getMetrics();
-        if (CollectionUtils.isEmpty(oriFields) || CollectionUtils.isEmpty(metrics)) {
-            return false;
-        }
-        List<String> metricNames =
-                metrics.stream().map(SchemaElement::getName).collect(Collectors.toList());
-        return !oriFields.containsAll(metricNames);
     }
 
     private String replaceFilters(ChatQueryDataReq queryData, SemanticParseInfo parseInfo,
@@ -608,8 +722,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 SqlSelectHelper.getHavingExpressions(correctorSql);
         List<Expression> addHavingConditions = new ArrayList<>();
         Set<String> removeHavingFieldNames =
-                updateFilters(havingExpressionList, queryData.getDimensionFilters(),
-                        parseInfo.getDimensionFilters(), addHavingConditions);
+                updateFilters(havingExpressionList, queryData.getMetricFilters(),
+                        parseInfo.getMetricFilters(), addHavingConditions);
         correctorSql = SqlReplaceHelper.replaceHavingValue(correctorSql, new HashMap<>());
         correctorSql = SqlRemoveHelper.removeHavingCondition(correctorSql, removeHavingFieldNames);
 
@@ -668,11 +782,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         if (Objects.isNull(queryData.getDateInfo())) {
             return removeFieldNames;
         }
-        if (queryData.getDateInfo().getUnit() > 1) {
-            queryData.getDateInfo()
-                    .setStartDate(DateUtils.getBeforeDate(queryData.getDateInfo().getUnit() + 1));
-            queryData.getDateInfo().setEndDate(DateUtils.getBeforeDate(0));
-        }
+        refreshDynamicDateRange(queryData.getDateInfo());
         SchemaElement partitionDimension = dataSetSchema.getPartitionDimension();
         // startDate equals to endDate
         for (FieldExpression fieldExpression : fieldExpressionList) {
@@ -712,6 +822,37 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         return removeFieldNames;
     }
 
+    private void refreshDynamicDateRange(DateConf dateInfo) {
+        if (dateInfo.getDateMode() == DateConf.DateMode.AVAILABLE) {
+            throw new InvalidArgumentException("看板刷新暂不支持按数据可用日期动态计算");
+        }
+        if (dateInfo.getDateMode() != DateConf.DateMode.RECENT) {
+            return;
+        }
+        if (dateInfo.getUnit() == null || dateInfo.getUnit() < 1 || dateInfo.getPeriod() == null) {
+            throw new InvalidArgumentException("最近日期范围必须包含有效的周期和正整数单位");
+        }
+
+        int unit = dateInfo.getUnit();
+        LocalDate endDate = LocalDate.now().minusDays(1);
+        if (dateInfo.getPeriod() == DatePeriodEnum.DAY) {
+            dateInfo.setStartDate(endDate.minusDays(unit - 1L).toString());
+            dateInfo.setEndDate(endDate.toString());
+            return;
+        }
+        if (dateInfo.getPeriod() == DatePeriodEnum.WEEK) {
+            dateInfo.setStartDate(endDate.minusDays(unit * 7L).toString());
+            dateInfo.setEndDate(endDate.toString());
+            return;
+        }
+        if (dateInfo.getPeriod() == DatePeriodEnum.MONTH) {
+            dateInfo.setStartDate(endDate.minusMonths(unit).format(MONTH_DATE_FORMATTER));
+            dateInfo.setEndDate(endDate.format(MONTH_DATE_FORMATTER));
+            return;
+        }
+        throw new InvalidArgumentException("看板刷新暂不支持该最近日期周期");
+    }
+
     private <T extends ComparisonOperator> void addTimeFilters(String date, T comparisonExpression,
             List<Expression> addConditions, SchemaElement partitionDimension) {
         Column column = new Column(partitionDimension.getName());
@@ -725,18 +866,37 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             Set<QueryFilter> metricFilters, Set<QueryFilter> contextMetricFilters,
             List<Expression> addConditions) {
         Set<String> removeFieldNames = new HashSet<>();
+        Set<String> requestedFieldNames = CollectionUtils.isEmpty(metricFilters) ? Set.of()
+                : metricFilters.stream().filter(Objects::nonNull).map(QueryFilter::getName)
+                        .filter(StringUtils::isNotBlank).collect(Collectors.toSet());
+        if (!CollectionUtils.isEmpty(contextMetricFilters)) {
+            contextMetricFilters.stream().filter(Objects::nonNull).map(QueryFilter::getName)
+                    .filter(StringUtils::isNotBlank).filter(name -> !requestedFieldNames.contains(name))
+                    .filter(name -> fieldExpressionList.stream()
+                            .map(FieldExpression::getFieldName).filter(Objects::nonNull)
+                            .anyMatch(fieldName -> fieldName.contains(name)))
+                    .forEach(removeFieldNames::add);
+        }
         if (CollectionUtils.isEmpty(metricFilters)) {
             return removeFieldNames;
         }
 
         for (QueryFilter dslQueryFilter : metricFilters) {
+            if (dslQueryFilter == null || StringUtils.isBlank(dslQueryFilter.getName())) {
+                continue;
+            }
+            boolean matched = false;
             for (FieldExpression fieldExpression : fieldExpressionList) {
                 if (fieldExpression.getFieldName() != null
                         && fieldExpression.getFieldName().contains(dslQueryFilter.getName())) {
                     removeFieldNames.add(dslQueryFilter.getName());
-                    handleFilter(dslQueryFilter, contextMetricFilters, addConditions);
+                    matched = true;
                     break;
                 }
+            }
+            handleFilter(dslQueryFilter, contextMetricFilters, addConditions);
+            if (!matched) {
+                log.debug("Adding new dashboard filter [{}]", dslQueryFilter.getName());
             }
         }
         return removeFieldNames;

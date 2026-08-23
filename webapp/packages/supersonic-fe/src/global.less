@@ -1,5 +1,3 @@
-
-
 :root:root {
   --tme-primary-color: #1672fa;
   --blue: #296df3;
@@ -22,8 +20,12 @@
   --processing-color: #ff2442;
   --error-color: #ff4d4f;
   --highlight-color: #ff4d4f;
-  --font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Microsoft YaHei,"Helvetica Neue",Arial,"Noto Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";
-  --tencent-font-family: 'tencentFont',-apple-system,BlinkMacSystemFont,"Segoe UI",Microsoft YaHei,"Helvetica Neue",Arial,"Noto Sans",sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Microsoft YaHei, 'Helvetica Neue',
+    Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  --tencent-font-family: 'tencentFont', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Microsoft YaHei, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
 html,
@@ -31,7 +33,7 @@ body,
 #root {
   height: 100%;
   font-family: var(--tencent-font-family);
-  -webkit-font-smoothing:antialiased;
+  -webkit-font-smoothing: antialiased;
   margin: 0;
   min-width: 1280px;
   /* 原为 scroll：强制常驻横向滚动条会吃掉约 15px 视口高度，导致页面出现纵向滚动、
@@ -86,14 +88,13 @@ ol {
     width: 100%;
     overflow-x: auto;
 
-    &-thead>tr,
-    &-tbody>tr {
-
-      >th,
-      >td {
+    &-thead > tr,
+    &-tbody > tr {
+      > th,
+      > td {
         white-space: pre;
 
-        >span {
+        > span {
           display: block;
         }
       }
@@ -102,9 +103,8 @@ ol {
 }
 
 // 兼容IE11
-@media screen and(-ms-high-contrast: active),
-  (-ms-high-contrast: none) {
-  body .ant-design-pro>.ant-layout {
+@media screen and(-ms-high-contrast: active), (-ms-high-contrast: none) {
+  body .ant-design-pro > .ant-layout {
     min-height: 100vh;
   }
 }
@@ -137,7 +137,6 @@ ol {
 //   }
 // }
 
-
 .ant-pro-layout .ant-pro-layout-bg-list {
   background: #fafafb;
 }
@@ -145,7 +144,6 @@ ol {
   padding: 0;
   background-color: #fafafb;
 }
-
 
 .ellipsis {
   overflow: hidden;
@@ -156,27 +154,27 @@ ol {
   font-size: 30px;
 }
 
-.ant-menu-root>.ant-menu-item.ant-menu-item-selected {
+.ant-menu-root > .ant-menu-item.ant-menu-item-selected {
   color: var(--tme-primary-color);
   font-weight: 500;
 }
-.ant-menu-light.ant-menu-horizontal >.ant-menu-item:hover {
+.ant-menu-light.ant-menu-horizontal > .ant-menu-item:hover {
   background: #f0f5ff;
 }
 .ant-menu-light .ant-menu-item:not(.ant-menu-item-selected):not(.ant-menu-submenu-selected):hover {
   color: var(--tme-primary-color);
 }
 
-.ant-menu-light.ant-menu-horizontal >.ant-menu-item-selected:hover::after {
+.ant-menu-light.ant-menu-horizontal > .ant-menu-item-selected:hover::after {
   border-bottom-color: var(--tme-primary-color);
   border-bottom-width: 2px;
 }
-.ant-menu-light.ant-menu-horizontal >.ant-menu-item-selected::after {
-    border-bottom-color: var(--tme-primary-color);
-    border-bottom-width: 2px;
+.ant-menu-light.ant-menu-horizontal > .ant-menu-item-selected::after {
+  border-bottom-color: var(--tme-primary-color);
+  border-bottom-width: 2px;
 }
 
-.ant-menu-light.ant-menu-horizontal >.ant-menu-item:hover::after {
+.ant-menu-light.ant-menu-horizontal > .ant-menu-item:hover::after {
   border-bottom-color: var(--tme-primary-color);
 }
 
@@ -288,15 +286,15 @@ ol {
   h3 {
     padding-bottom: 5px;
     margin: 0;
-    border-bottom: 1px solid #4E86F5;
+    border-bottom: 1px solid #4e86f5;
   }
   li {
     cursor: pointer;
-    list-style-type:none;
+    list-style-type: none;
     line-height: 25px;
     margin-left: 0;
     &:hover {
-      color: #4E86F5;
+      color: #4e86f5;
     }
   }
   ul {
@@ -321,15 +319,15 @@ ol {
   }
 }
 
-.inherit-from-model-row{
+.inherit-from-model-row {
   background-color: #e6edfc;
 
   .ant-table-cell-row-hover {
-    background-color:#e6edfc!important;
+    background-color: #e6edfc !important;
   }
 }
 
-.ant-form-item .ant-form-item-label >label {
+.ant-form-item .ant-form-item-label > label {
   font-weight: 500;
   color: #667085;
 }
@@ -361,13 +359,13 @@ ol {
     white-space: nowrap;
     font-weight: 400;
   }
- &.ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
-  font-weight: 400;
-  color: rgb(38, 38, 38);
- }
+  &.ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+    font-weight: 400;
+    color: rgb(38, 38, 38);
+  }
 }
 .ant-form-item .ant-form-item-label > label {
-  font-family: "tencentFont", sans-serif;
+  font-family: 'tencentFont', sans-serif;
   margin-right: 10px;
 }
 .supersonicForm {
@@ -386,10 +384,10 @@ ol {
       background: var(--tme-primary-color);
     }
     .ant-form-item .ant-form-item-label > label {
-      color:#262626;
+      color: #262626;
     }
     .ant-form-item-label {
-      font-family: "tencentFont", sans-serif;
+      font-family: 'tencentFont', sans-serif;
       margin-right: 10px;
     }
     .ant-input {
@@ -405,21 +403,21 @@ ol {
       &.ant-select-multiple {
         .ant-select-selector {
           padding: 6px 14px 6px 12px;
-         }
+        }
       }
-    .ant-select-selector {
-      padding: 5px 14px 5px 12px;
-      .ant-select-selection-placeholder {
-        padding: 0px 8px 0px 8px;
-      }
-      .ant-select-selection-overflow-item {
-        .ant-select-selection-item {
-          color: rgb(22, 119, 255);
-          background-color: rgb(230, 244, 255);
+      .ant-select-selector {
+        padding: 5px 14px 5px 12px;
+        .ant-select-selection-placeholder {
+          padding: 0px 8px 0px 8px;
+        }
+        .ant-select-selection-overflow-item {
+          .ant-select-selection-item {
+            color: rgb(22, 119, 255);
+            background-color: rgb(230, 244, 255);
+          }
         }
       }
     }
-  }
   }
 }
 

@@ -16,6 +16,7 @@ import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
+import com.tencent.supersonic.headless.api.pojo.SqlInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import com.tencent.supersonic.headless.api.pojo.request.*;
 import com.tencent.supersonic.headless.api.pojo.response.*;
@@ -152,6 +153,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
         TaskStatusEnum state = TaskStatusEnum.SUCCESS;
         long queryStart = System.nanoTime();
         String auditSql = getRequestSql(queryReq);
+        boolean failureAudited = false;
         log.info("semantic query request [{}]", SensitiveLogUtils.summarize(queryReq));
         publishQueryStarted(queryReq, user, auditSql);
         try {
@@ -202,6 +204,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
             if (queryResp == null) {
                 state = TaskStatusEnum.ERROR;
                 publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_EXECUTOR", null);
+                failureAudited = true;
                 throw new IllegalStateException("未找到可用的查询执行器");
             }
 
@@ -222,8 +225,10 @@ public class S2SemanticLayerService implements SemanticLayerService {
                     SensitiveLogUtils.summarize(queryReq), e.getClass().getSimpleName(),
                     SensitiveLogUtils.summarize(e));
             state = TaskStatusEnum.ERROR;
-            publishQueryFailed(queryReq, user, auditSql, queryStart, "QUERY_EXCEPTION",
-                    e.getClass().getSimpleName());
+            if (!failureAudited) {
+                publishQueryFailed(queryReq, user, auditSql, queryStart, "QUERY_EXCEPTION",
+                        e.getClass().getSimpleName());
+            }
             throw e;
         } finally {
             statUtils.statInfo2DbAsync(state);
@@ -524,15 +529,22 @@ public class S2SemanticLayerService implements SemanticLayerService {
         if (semanticQueryReq instanceof QueryMultiStructReq) {
             queryStatement = buildMultiStructQueryStatement((QueryMultiStructReq) semanticQueryReq);
         }
-        if (Objects.nonNull(queryStatement) && Objects.nonNull(semanticQueryReq.getSqlInfo())
-                && StringUtils.isNotBlank(semanticQueryReq.getSqlInfo().getQuerySQL())) {
-            queryStatement.setSql(semanticQueryReq.getSqlInfo().getQuerySQL());
+        boolean rowPermissionApplied = semanticQueryReq instanceof QuerySqlReq querySqlReq
+                && querySqlReq.isRowPermissionApplied();
+        SqlInfo sqlInfo = semanticQueryReq.getSqlInfo();
+        boolean hasCorrectedPhysicalSql = sqlInfo != null
+                && StringUtils.isNotBlank(sqlInfo.getCorrectedQuerySQL());
+        boolean trustedCompiledSql = semanticQueryReq.isTrustedCompiledSql()
+                && !hasCorrectedPhysicalSql;
+        if (Objects.nonNull(queryStatement) && !rowPermissionApplied && hasCorrectedPhysicalSql) {
+            queryStatement.setSql(sqlInfo.getCorrectedQuerySQL());
+            queryStatement.setIsTranslated(true);
+        } else if (Objects.nonNull(queryStatement) && !rowPermissionApplied && trustedCompiledSql
+                && sqlInfo != null && StringUtils.isNotBlank(sqlInfo.getQuerySQL())) {
+            queryStatement.setSql(sqlInfo.getQuerySQL());
             queryStatement.setIsTranslated(true);
         }
         if (queryStatement != null) {
-            boolean trustedCompiledSql = semanticQueryReq.isTrustedCompiledSql()
-                    && (semanticQueryReq.getSqlInfo() == null || StringUtils
-                            .isBlank(semanticQueryReq.getSqlInfo().getCorrectedQuerySQL()));
             queryStatement.setTrustedCompiledSql(trustedCompiledSql);
             queryStatement.setUser(user);
         }
