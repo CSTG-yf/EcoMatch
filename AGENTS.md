@@ -63,7 +63,7 @@
 |------|--------|
 | 模型只产出受约束 **plan JSON** | 模型直接写最终 SQL / free-SQL 当主路径 |
 | 每种问法对应一种**查询族模板** | 按 train 题号 / 题面硬编码 builder |
-| 编译失败则 repair / 拒答 / soft-fallback（有开关） | 假成功、脏 SQL 进执行器 |
+| 编译失败则结构化 repair / cold-replan / 拒答 | 假成功、脏 SQL 进执行器 |
 | 结果事实与实体绑定可审计，对齐 `resultExact` | 列随便长，靠碰巧出现正确数字 |
 | 扩展 `BankS2SqlTemplateFactory` 等编译层 | 在 prompt 里贴 gold SQL 或标准答案数字 |
 
@@ -85,7 +85,7 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 - **抽象骨架 / 查询族**（与具体题号无关）：如「单机构 + 多指标 + 日点 → aggregation summary 模板」。
 - **结构化多步 repair**：校验错误回灌模型，改 plan JSON，不贴答案。
-- **cold-replan / 受控 soft-fallback**（白名单规则 plan，仍不开放 unconstrained free-SQL）。
+- **cold-replan / 结构化 repair**（错误反馈交给模型修正 plan，仍不开放 unconstrained free-SQL）。
 - 单测用**合成**问句与 hints，不依赖冻结集原题全文当唯一路径。
 
 用户明确要求「不要作弊、不要训练集当样例」时，**优先执行本红线**，不得用「提分」绕过。
@@ -120,14 +120,16 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 | 开关 | 推荐默认 | 说明 |
 |------|----------|------|
 | `s2.parser.bank.plan.deterministic-short-circuit.enable` | **false** | 预模型规则短路：提分有限、掩盖模型路径、泛化差；仅消融/时延实验可开 |
-| `s2.parser.bank.plan.soft-fallback.enable` | **true** | 模型候选与 cold-replan 全拒后，白名单规则兜底；关闭会造成已知运行时回归 |
 | `s2.parser.bank.max-candidates` | **1** | 多候选未证明正式评分收益，且时延近倍增；仅诊断失败模式时再升 |
 | `s2.parser.bank.plan.thinking.enable` | **false**（除非专项 A/B） | 短路开启时 thinking 无效；主线不默认开 |
 | `s2.parser.bank.constrained-plan.enable` | bank-on 评测时 **true** | 与 free-SQL 路径消融对照时显式切换 |
 
+旧的 `s2.parser.bank.plan.soft-fallback.enable` 已随规则计划回退路径移除，不再是可配置参数。
+模型候选失败后只能走结构化 repair / cold-replan，仍不可满足时明确拒答或请求澄清。
+
 消融要求：
 
-- 报告记录 `planSource`（DETERMINISTIC / MODEL / MODEL_COLD_REPLAN / SOFT_FALLBACK）。  
+- 报告记录 `planSource`（DETERMINISTIC / MODEL / MODEL_COLD_REPLAN / MODEL_TOOL_REPAIR）。
 - 对比用同一 `ids-file`、同一 agent、同一数据集冻结版本。  
 - 脚本与产物可放 `.local-dev/bank-nl2sql/ablation/`（不提交大日志亦可）。  
 - 主指标：Fact v3 `caseAccuracy`（全分母，等于 `resultExact`）；最终回答不参与计分；不把 SQL 文本或表形态当分数。
@@ -191,7 +193,6 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 s2.parser.bank.constrained-plan.enable              = true
 s2.parser.bank.max-candidates                       = 1
 s2.parser.bank.plan.deterministic-short-circuit.enable = false
-s2.parser.bank.plan.soft-fallback.enable            = true
 s2.parser.bank.plan.thinking.enable                 = false
 agent 33: BANK_CONSTRAINED_PLAN=on; EXECUTION_SQL_CORRECTOR=on（建议）
 ```
@@ -200,7 +201,6 @@ JVM 建议：
 
 ```text
 -Ds2.parser.bank.plan.deterministic-short-circuit.enable=false
--Ds2.parser.bank.plan.soft-fallback.enable=true
 -Ds2.parser.bank.plan.thinking.enable=false
 ```
 

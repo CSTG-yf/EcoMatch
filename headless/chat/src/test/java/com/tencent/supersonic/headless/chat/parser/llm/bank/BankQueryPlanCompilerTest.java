@@ -57,6 +57,35 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCanonicalizeOutputColumnsWhenModelUsesEquivalentOrder() {
+        BankQueryPlan plan = rankingPlan();
+        plan.getOutput().setColumns(List.of("ZB001", "bank_organization"));
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, rankingHints(), schema());
+
+        assertEquals(List.of("bank_organization", "ZB001"), compiled.getOutputColumns());
+    }
+
+    @Test
+    void shouldRejectMissingOrDuplicateOutputColumns() {
+        BankQueryPlan missing = rankingPlan();
+        missing.getOutput().setColumns(List.of("bank_organization"));
+        BankPlanCompilationException missingException = assertThrows(
+                BankPlanCompilationException.class,
+                () -> compiler.compile(missing, rankingHints(), schema()));
+        assertEquals(BankPlanCompilationException.Reason.OUTPUT_ORDER_MISMATCH,
+                missingException.getReason());
+
+        BankQueryPlan duplicate = rankingPlan();
+        duplicate.getOutput().setColumns(List.of("bank_organization", "bank_organization", "ZB001"));
+        BankPlanCompilationException duplicateException = assertThrows(
+                BankPlanCompilationException.class,
+                () -> compiler.compile(duplicate, rankingHints(), schema()));
+        assertEquals(BankPlanCompilationException.Reason.OUTPUT_ORDER_MISMATCH,
+                duplicateException.getReason());
+    }
+
+    @Test
     void shouldCompileCombinedGoodAndPoorPerformanceRankHints() {
         BankQueryPlan plan = rankingPlan();
         plan.setFilters(List.of(

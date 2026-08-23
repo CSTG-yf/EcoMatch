@@ -20,4 +20,14 @@ class ParserConfigTest {
     void keepsConstrainedBankCandidatesSingleByDefault() {
         Assert.assertEquals("1", ParserConfig.PARSER_BANK_MAX_CANDIDATES.getDefaultValue());
     }
+
+    @Test
+    void doesNotExposeRemovedBankSoftFallbackParameter() {
+        ParserConfig parserConfig = new ParserConfig();
+
+        boolean exposed = parserConfig.getSysParameters().stream().map(Parameter::getName)
+                .anyMatch("s2.parser.bank.plan.soft-fallback.enable"::equals);
+
+        Assert.assertFalse(exposed);
+    }
 }

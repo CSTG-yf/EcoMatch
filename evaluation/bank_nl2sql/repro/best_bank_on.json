@@ -18,13 +18,11 @@
     "s2.parser.bank.max-candidates": "1",
     "s2.parser.bank.plan.thinking.enable": "false",
     "s2.parser.bank.plan.deterministic-short-circuit.enable": "false",
-    "s2.parser.bank.plan.soft-fallback.enable": "true",
     "s2.parser.bank.free-sql.thinking.enable": "true"
   },
   "jvmSystemProperties": {
     "s2.parser.bank.plan.thinking.enable": "false",
-    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false",
-    "s2.parser.bank.plan.soft-fallback.enable": "true"
+    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false"
   },
   "agentChatApps": {
     "BANK_CONSTRAINED_PLAN": { "enable": true },
@@ -51,7 +49,6 @@
   "notRecommended": {
     "s2.parser.bank.plan.deterministic-short-circuit.enable": "true",
     "s2.parser.bank.max-candidates": "2",
-    "s2.parser.bank.plan.soft-fallback.enable": "false",
-    "why": "Use only as engineering comparison cells; promote no configuration without a fresh official Fact v3 run."
+    "why": "Use only as engineering comparison cells; promote no configuration without a fresh official Fact v3 run. The removed soft-fallback key is not a valid comparison cell."
   }
 }

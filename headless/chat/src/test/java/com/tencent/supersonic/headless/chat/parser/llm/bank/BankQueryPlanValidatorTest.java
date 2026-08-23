@@ -243,6 +243,14 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void acceptsEquivalentAbsoluteThresholdOutputColumnsInAnyOrder() {
+        BankQueryPlan plan = absoluteThresholdPlan();
+        plan.getOutput().setColumns(List.of("ZB015", "bank_organization"));
+
+        assertTrue(validator.validate(plan, absoluteThresholdRequirements()).isValid());
+    }
+
+    @Test
     void rejectsMalformedBottomRankingSliceBeforeTheCompiler() {
         BankQueryPlan plan = derivedMetricRankingPlan();
         plan.setDerivedMetrics(new ArrayList<>());
