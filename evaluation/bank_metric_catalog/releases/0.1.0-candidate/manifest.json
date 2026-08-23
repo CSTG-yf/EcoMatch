@@ -4,9 +4,13 @@
       "bytes": 1803,
       "sha256": "8be21d1c6f7aff332ae33fdf6dc611fac905ca0dbbac271581df380557df9fe8"
     },
+    "metric_cleanup_report.json": {
+      "bytes": 5606,
+      "sha256": "bb8696948d9a9134fa91c6507b06b77bbaa3f0915e099e41f2fad220d8cc97a9"
+    },
     "metrics.jsonl": {
-      "bytes": 427393,
-      "sha256": "e74e91103a350c2437ef547c729242a470aa7063516860cdc517a772232ee3d0"
+      "bytes": 409885,
+      "sha256": "dcefcf851ab3212641433a9d91ceab63d9ce3596244e8526c1e72b648d6f5c92"
     },
     "review.csv": {
       "bytes": 220792,
@@ -17,6 +21,7 @@
       "sha256": "472a9794d681fd31c7bf2a03cbd5c57ab59193ef064377d65deca79ad4c3beed"
     }
   },
+  "cleanupPolicyVersion": "360-metric-cleanup-v1",
   "domainCounts": {
     "acquisition_activation_retention": 20,
     "assets_liabilities_deposits_loans": 45,

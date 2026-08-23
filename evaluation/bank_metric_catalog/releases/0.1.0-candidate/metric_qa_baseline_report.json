@@ -1,0 +1,218 @@
+{
+  "byCaseType": {
+    "ALIAS_QUERY": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 360,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "CANONICAL_QUERY": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 360,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "GOVERNANCE_QA": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 360,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    }
+  },
+  "byDomain": {
+    "acquisition_activation_retention": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 60,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "assets_liabilities_deposits_loans": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 135,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "capital_solvency": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 75,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "complaint_satisfaction_service_quality": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 30,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "concentration_operational_compliance": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 45,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "credit_asset_quality": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 105,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "customer_base_structure": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 60,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "digital_channel_service_usage": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 60,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "income_profit_cost_efficiency": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 105,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "liquidity_alm": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 75,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "market_interest_fx_risk": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 60,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "payments_accounts_transactions": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 105,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "penetration_cross_sell_aum": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 60,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "product_channel_operations": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 105,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    }
+  },
+  "byScene": {
+    "CUSTOMER_MARKETING": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 270,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "OPERATIONS": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 450,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "RISK": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 360,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    }
+  },
+  "bySplit": {
+    "dev": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 216,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "test": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 216,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    },
+    "train": {
+      "actionAccuracy": 1.0,
+      "caseAccuracy": 1.0,
+      "count": 648,
+      "definitionAccuracy": 1.0,
+      "metadataAccuracy": 1.0,
+      "metricCodeAccuracy": 1.0
+    }
+  },
+  "counts": {
+    "actionCorrect": 1080,
+    "caseCorrect": 1080,
+    "completeMetrics": 360,
+    "metricCodeCorrect": 1080,
+    "recognizedMetrics": 360
+  },
+  "errorCategories": {},
+  "evaluationMode": "LEXICON_BASELINE",
+  "failures": [],
+  "goldCount": 1080,
+  "knownMetricCount": 360,
+  "metrics": {
+    "actionAccuracy": 1.0,
+    "caseAccuracy": 1.0,
+    "completeMetricCoverageRate": 1.0,
+    "definitionAccuracy": 1.0,
+    "metadataAccuracy": 1.0,
+    "metricCodeAccuracy": 1.0,
+    "recognizedMetricCoverageRate": 1.0
+  },
+  "predictionCount": 1080,
+  "unmatchedPredictionIds": [],
+  "warning": "词典基线仅用于验证360指标映射和评测链路，不代表大模型或正式赛题成绩。"
+}

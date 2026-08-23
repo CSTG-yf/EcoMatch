@@ -1,0 +1,61 @@
+{
+  "artifacts": {
+    "../../qa_schema.json": {
+      "bytes": 2273,
+      "sha256": "b9961e60c69eef99165c71ea370d75dd3a638c758cca414722fe1b0d03a9387d"
+    },
+    "metric_qa.jsonl": {
+      "bytes": 887504,
+      "sha256": "f01349222a17f2304818310e30d38dc8241ce3d0d5e4c77eb9ea1fd2d06b6efa"
+    },
+    "metric_qa_blind.jsonl": {
+      "bytes": 162171,
+      "sha256": "652f0e444a0c06992befd83d855c940fbe22f3db30c76d6efa25fe297531400e"
+    }
+  },
+  "caseTypeCounts": {
+    "ALIAS_QUERY": 360,
+    "CANONICAL_QUERY": 360,
+    "GOVERNANCE_QA": 360
+  },
+  "casesPerMetric": 3,
+  "catalogMetricsSha256": "dcefcf851ab3212641433a9d91ceab63d9ce3596244e8526c1e72b648d6f5c92",
+  "catalogVersion": "0.1.0-candidate",
+  "domainCounts": {
+    "acquisition_activation_retention": 60,
+    "assets_liabilities_deposits_loans": 135,
+    "capital_solvency": 75,
+    "complaint_satisfaction_service_quality": 30,
+    "concentration_operational_compliance": 45,
+    "credit_asset_quality": 105,
+    "customer_base_structure": 60,
+    "digital_channel_service_usage": 60,
+    "income_profit_cost_efficiency": 105,
+    "liquidity_alm": 75,
+    "market_interest_fx_risk": 60,
+    "payments_accounts_transactions": 105,
+    "penetration_cross_sell_aum": 60,
+    "product_channel_operations": 105
+  },
+  "evaluationScope": "METRIC_RECOGNITION_AND_GOVERNANCE",
+  "factDataIncluded": false,
+  "metricCount": 360,
+  "official21MetricEvaluationModified": false,
+  "officialEligible": false,
+  "qaCaseCount": 1080,
+  "sceneCounts": {
+    "CUSTOMER_MARKETING": 270,
+    "OPERATIONS": 450,
+    "RISK": 360
+  },
+  "schemaVersion": "1.1.0",
+  "splitCounts": {
+    "dev": 216,
+    "test": 216,
+    "train": 648
+  },
+  "splitPolicy": "metric-code-mod-5; remainder 0=test, 1=dev, otherwise=train",
+  "status": "CANDIDATE",
+  "valuePolicy": "SYNTHETIC_OR_DESENSITIZED_ONLY",
+  "version": "1.1.0-candidate"
+}

@@ -16,13 +16,29 @@ from typing import Any
 from urllib.parse import urlparse
 
 try:
-    from .catalog_source import DOMAIN_QUOTAS, LEGACY_TARGET_NAMES, SCENE_QUOTAS
+    from .catalog_source import (
+        CLEANUP_POLICY_VERSION,
+        DERIVED_FORMULAS,
+        DOMAIN_QUOTAS,
+        LEGACY_TARGET_NAMES,
+        MECHANICAL_ALIAS_SUFFIXES,
+        SCENE_QUOTAS,
+        build_cleanup_report,
+        infer_aggregation,
+        infer_unit,
+    )
 except ImportError:  # direct script execution from repository root
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from evaluation.bank_metric_catalog.catalog_source import (  # type: ignore[no-redef]
+        CLEANUP_POLICY_VERSION,
+        DERIVED_FORMULAS,
         DOMAIN_QUOTAS,
         LEGACY_TARGET_NAMES,
+        MECHANICAL_ALIAS_SUFFIXES,
         SCENE_QUOTAS,
+        build_cleanup_report,
+        infer_aggregation,
+        infer_unit,
     )
 
 
@@ -197,6 +213,8 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
         for alias in metric["aliases"]:
             if not isinstance(alias, str) or not alias.strip():
                 _fail(f"empty alias: {code}")
+            if alias.endswith(MECHANICAL_ALIAS_SUFFIXES):
+                _fail(f"mechanical alias is not allowed: {code} -> {alias}")
             normalized_alias = _normalize(alias)
             if normalized_alias in aliases:
                 _fail(f"duplicate alias: {alias}")
@@ -226,10 +244,20 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
             _fail(f"percentage metric cannot use SUM: {code}")
         if metric["unit"] == "万元" and metric["aggregation"] == "COUNT":
             _fail(f"currency metric cannot use COUNT aggregation: {code}")
-        if metric["aggregation"] == "RATIO" and metric["unit"] != "%":
-            _fail(f"RATIO metric must use percent unit: {code}")
         if name.endswith("额") and metric["unit"] in {"户", "笔", "件", "次", "个"}:
             _fail(f"amount metric cannot use count unit: {code}")
+        if metric["metricType"] == "DERIVED" and (
+            metric["unit"] != "%" or metric["aggregation"] != "RATIO"
+        ):
+            _fail(f"derived metric must use percent unit and RATIO aggregation: {code}")
+        if metric["aggregation"] == "RATIO" and metric["unit"] != "%":
+            _fail(f"RATIO metric must use percent unit: {code}")
+        expected_unit = infer_unit(name)
+        if metric["unit"] != expected_unit:
+            _fail(f"unit inference mismatch: {code}")
+        expected_aggregation = infer_aggregation(name, metric["metricType"])
+        if metric["aggregation"] != expected_aggregation:
+            _fail(f"aggregation inference mismatch: {code}")
         if not isinstance(metric["definition"], str) or len(metric["definition"].strip()) < 20:
             _fail(f"definition is too short: {code}")
         if not isinstance(metric["dimensions"], list) or not metric["dimensions"]:
@@ -262,10 +290,11 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
                 f"expected {expected_name}"
             )
     for normalized_alias, code in aliases.items():
-        if normalized_alias in names and names[normalized_alias] != next(m["name"] for m in metrics if m["code"] == code):
+        if normalized_alias in names:
             _fail(f"alias collides with canonical name: {code}")
 
     by_code = {metric["code"]: metric for metric in metrics}
+    code_by_name = {metric["name"]: metric["code"] for metric in metrics}
     for metric in metrics:
         formula = metric["formula"]
         if metric["metricType"] == "BASE":
@@ -285,6 +314,22 @@ def validate_records(metrics: list[dict[str, Any]], sources: list[dict[str, Any]
             if operand == metric["code"]:
                 _fail(f"derived metric cannot reference itself: {metric['code']}")
     _validate_no_cycles(metrics, by_code)
+
+    for metric in metrics:
+        if metric["metricType"] != "DERIVED":
+            continue
+        formula = metric["formula"]
+        declared = DERIVED_FORMULAS.get(metric["name"])
+        if not declared:
+            _fail(f"derived formula source missing: {metric['code']}")
+        expected_operands = [code_by_name[name] for name in declared["operands"]]
+        expected_expression = " / ".join(declared["operands"]) + " * 100"
+        if (
+            formula["operation"] != declared["operation"]
+            or formula["operands"] != expected_operands
+            or formula["expression"] != expected_expression
+        ):
+            _fail(f"formula expression mismatch: {metric['code']}")
 
     scene_counts = dict(sorted(Counter(metric["scene"] for metric in metrics).items()))
     domain_counts = dict(sorted(Counter(metric["domain"] for metric in metrics).items()))
@@ -309,6 +354,8 @@ def validate_release(release_dir: Path) -> dict[str, Any]:
         _fail("manifest version/status mismatch")
     if manifest.get("schemaVersion") != "1.1.0":
         _fail("manifest schema version mismatch")
+    if manifest.get("cleanupPolicyVersion") != CLEANUP_POLICY_VERSION:
+        _fail("manifest cleanup policy mismatch")
     if manifest.get("metricCount") != 360 or manifest.get("factDataIncluded") is not False:
         _fail("manifest metric/fact contract mismatch")
     if manifest.get("legacyMetricCount") != report["legacyMetricCount"]:
@@ -322,6 +369,7 @@ def validate_release(release_dir: Path) -> dict[str, Any]:
         "metrics.jsonl": release_dir / "metrics.jsonl",
         "sources.json": release_dir / "sources.json",
         "review.csv": release_dir / "review.csv",
+        "metric_cleanup_report.json": release_dir / "metric_cleanup_report.json",
         "../schema.json": Path(__file__).resolve().parent / "schema.json",
     }
     for name, path in artifact_paths.items():
@@ -332,6 +380,13 @@ def validate_release(release_dir: Path) -> dict[str, Any]:
             _fail(f"byte size mismatch: {name}")
     if manifest.get("sceneCounts") != report["sceneCounts"] or manifest.get("domainCounts") != report["domainCounts"]:
         _fail("manifest count summary mismatch")
+    cleanup_report_path = release_dir / "metric_cleanup_report.json"
+    try:
+        cleanup_report = json.loads(cleanup_report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _fail(f"cleanup report unreadable: {exc}")
+    if cleanup_report != build_cleanup_report(metrics):
+        _fail("cleanup report content mismatch")
     review_rows = list(csv.DictReader(io.StringIO((release_dir / "review.csv").read_text(encoding="utf-8-sig"))))
     if [row.get("code") for row in review_rows] != [metric["code"] for metric in metrics]:
         _fail("review.csv must contain the same 360 metrics in code order")

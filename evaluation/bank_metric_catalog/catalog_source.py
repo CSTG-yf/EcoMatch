@@ -13,6 +13,8 @@ from typing import Any
 
 VERSION = "0.1.0-candidate"
 RETRIEVED_AT = "2026-08-18"
+CLEANUP_POLICY_VERSION = "360-metric-cleanup-v1"
+MECHANICAL_ALIAS_SUFFIXES = ("指标", "口径", "统计")
 
 SCENE_QUOTAS = {"OPERATIONS": 150, "RISK": 120, "CUSTOMER_MARKETING": 90}
 DOMAIN_QUOTAS = {
@@ -875,6 +877,9 @@ COMMON_ALIAS_OVERRIDES: dict[str, tuple[str, ...]] = {
     "网点数量": ("网点数", "营业网点数", "网点"),
     "个人客户总数": ("个人客户数", "零售客户数"),
     "对公客户总数": ("对公客户数", "公司客户数"),
+    "数字渠道交易金额": ("数字渠道交易额", "数字渠道交易规模"),
+    "个人客户AUM": ("个人客户资产规模", "个人客户管理资产"),
+    "经济增加值": ("EVA", "经济利润"),
 }
 
 
@@ -892,15 +897,68 @@ def _alias_candidates(name: str) -> list[str]:
     candidates = list(COMMON_ALIAS_OVERRIDES.get(name, ()))
     if name.startswith("各项"):
         candidates.append(name[2:])
+    # These replacements are domain terms used in banking reports, rather
+    # than generic labels such as "指标" or "口径".
     replacements = (
+        ("总资产", ("资产总额", "资产规模")),
+        ("总负债", ("负债总额", "负债规模")),
+        ("存贷比", ("存贷比例", "存贷比率")),
+        ("净息差", ("净息差率", "净利息差")),
+        ("净利差", ("净利差率", "净利息利差")),
+        ("每股收益", ("每股盈利", "EPS")),
+        ("销售额", ("销售金额", "销售规模")),
+        ("赎回额", ("赎回金额", "赎回规模")),
+        ("兑付额", ("兑付金额", "兑付规模")),
+        ("处置额", ("处置金额", "处置规模")),
+        ("核销额", ("核销金额", "核销规模")),
+        ("清收额", ("清收金额", "清收规模")),
+        ("净增额", ("净增金额", "净增规模")),
+        ("投放", ("投放额", "投放金额")),
+        ("金额", ("额", "规模")),
+        ("总额", ("额", "规模")),
         ("余额", ("", "规模")),
-        ("数量", ("数",)),
-        ("总数", ("数",)),
-        ("笔数", ("业务量",)),
-        ("平均时长", ("平均耗时",)),
-        ("占比", ("比例",)),
-        ("比率", ("比例",)),
-        ("率", ("比例",)),
+        ("额", ("金额", "规模")),
+        ("存续规模", ("存续余额", "存续金额")),
+        ("规模", ("余额", "存量规模")),
+        ("数量", ("数", "总量")),
+        ("总数", ("数", "总量")),
+        ("笔数", ("业务笔数", "业务量")),
+        ("业务量", ("业务数", "业务笔数")),
+        ("平均处理时长", ("平均耗时", "平均处理时间")),
+        ("平均时长", ("平均耗时", "平均处理时间")),
+        ("时长", ("耗时", "持续时间")),
+        ("占比", ("比例", "构成比")),
+        ("集中度", ("集中比例", "集中系数")),
+        ("满意度", ("满意比例", "满意评分")),
+        ("比率", ("比例", "占比")),
+        ("比例", ("比率", "占比")),
+        ("率", ("比例", "比率")),
+        ("AUM", ("管理资产规模", "资产管理规模")),
+        ("资产", ("资产余额", "资产规模")),
+        ("负债", ("负债余额", "负债规模")),
+        ("资本", ("资本额", "资本规模")),
+        ("缺口", ("缺口额", "缺口规模")),
+        ("额度", ("融资额度", "额度规模")),
+        ("价值", ("价值金额", "价值规模")),
+        ("评估值", ("评估结果", "评估水平")),
+        ("要求", ("要求比例", "监管要求")),
+        ("资金", ("资金余额", "资金规模")),
+        ("依存度", ("依存比例", "依赖度")),
+        ("敏感度", ("敏感比例", "敏感性")),
+        ("成本", ("成本额", "成本金额")),
+        ("费用", ("费用额", "费用金额")),
+        ("费", ("费用", "费用金额")),
+        ("支出", ("支出额", "支出金额")),
+        ("收入", ("收入额", "收入金额")),
+        ("收益", ("收益额", "盈利收益")),
+        ("利润", ("利润额", "盈利")),
+        ("损失", ("损失额", "减值损失额")),
+        ("暴露", ("风险暴露", "风险敞口")),
+        ("头寸", ("头寸规模", "风险敞口")),
+        ("久期", ("平均期限", "期限")),
+        ("人数", ("数", "数量")),
+        ("数", ("数量", "总数")),
+        ("量", ("数量", "总量")),
     )
     for suffix, alternatives in replacements:
         if name.endswith(suffix):
@@ -909,7 +967,14 @@ def _alias_candidates(name: str) -> list[str]:
             break
     if "日均" in name:
         candidates.append(name.replace("日均", "每日平均"))
-    candidates.extend((f"{name}指标", f"{name}口径", f"{name}统计"))
+    if "线上" in name:
+        candidates.append(name.replace("线上", "在线"))
+    if "对公" in name:
+        candidates.append(name.replace("对公", "公司"))
+    if "个人" in name:
+        candidates.append(name.replace("个人", "零售"))
+    if "手机银行" in name:
+        candidates.append(name.replace("手机银行", "手机银行App"))
     return candidates
 
 
@@ -1066,3 +1131,104 @@ def build_metric_records() -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+def build_cleanup_report(metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    """Audit the generated catalog without promoting candidate metadata."""
+
+    normalized_names: dict[str, list[str]] = {}
+    for metric in metrics:
+        normalized_names.setdefault(_normalize_alias(metric["name"]), []).append(metric["name"])
+    normalized_name_duplicates = [
+        {"normalized": key, "names": sorted(values)}
+        for key, values in sorted(normalized_names.items())
+        if len(values) > 1
+    ]
+
+    aliases_by_normalized: dict[str, list[str]] = {}
+    for metric in metrics:
+        for alias in metric["aliases"]:
+            aliases_by_normalized.setdefault(_normalize_alias(alias), []).append(metric["code"])
+    canonical_names = set(normalized_names)
+    alias_collisions = [
+        {"normalized": key, "metricCodes": sorted(set(codes))}
+        for key, codes in sorted(aliases_by_normalized.items())
+        if len(set(codes)) > 1 or key in canonical_names
+    ]
+    mechanical_aliases = [
+        {"metricCode": metric["code"], "alias": alias}
+        for metric in metrics
+        for alias in metric["aliases"]
+        if alias.endswith(MECHANICAL_ALIAS_SUFFIXES)
+    ]
+
+    unit_aggregation_issues: list[dict[str, Any]] = []
+    for metric in metrics:
+        expected_unit = infer_unit(metric["name"])
+        expected_aggregation = infer_aggregation(metric["name"], metric["metricType"])
+        if metric["unit"] != expected_unit or metric["aggregation"] != expected_aggregation:
+            unit_aggregation_issues.append(
+                {
+                    "metricCode": metric["code"],
+                    "name": metric["name"],
+                    "expectedUnit": expected_unit,
+                    "actualUnit": metric["unit"],
+                    "expectedAggregation": expected_aggregation,
+                    "actualAggregation": metric["aggregation"],
+                }
+            )
+
+    code_by_name = {metric["name"]: metric["code"] for metric in metrics}
+    formula_issues: list[dict[str, Any]] = []
+    for metric in metrics:
+        declared = DERIVED_FORMULAS.get(metric["name"])
+        formula = metric.get("formula")
+        if metric["metricType"] == "BASE":
+            if formula is not None:
+                formula_issues.append({"metricCode": metric["code"], "issue": "base_has_formula"})
+            continue
+        if not declared:
+            formula_issues.append({"metricCode": metric["code"], "issue": "missing_source_formula"})
+            continue
+        expected_operands = [code_by_name[name] for name in declared["operands"] if name in code_by_name]
+        expected_expression = " / ".join(declared["operands"]) + " * 100"
+        if (
+            not isinstance(formula, dict)
+            or formula.get("operation") != declared["operation"]
+            or formula.get("operands") != expected_operands
+            or formula.get("expression") != expected_expression
+        ):
+            formula_issues.append(
+                {
+                    "metricCode": metric["code"],
+                    "name": metric["name"],
+                    "expectedOperation": declared["operation"],
+                    "expectedOperands": expected_operands,
+                    "expectedExpression": expected_expression,
+                    "actualFormula": formula,
+                }
+            )
+
+    human_review_codes = [
+        metric["code"]
+        for metric in metrics
+        if metric.get("reviewStatus") == "CANDIDATE"
+        or metric.get("provenanceLevel") == "NEEDS_HUMAN_VERIFICATION"
+    ]
+    return {
+        "cleanupPolicyVersion": CLEANUP_POLICY_VERSION,
+        "status": "TECHNICALLY_CLEANED_CANDIDATE",
+        "metricCount": len(metrics),
+        "reviewedMetricCount": len(metrics),
+        "aliasCount": sum(len(metric["aliases"]) for metric in metrics),
+        "minimumAliasesPerMetric": min((len(metric["aliases"]) for metric in metrics), default=0),
+        "normalizedNameDuplicates": normalized_name_duplicates,
+        "aliasCollisions": alias_collisions,
+        "mechanicalAliasCount": len(mechanical_aliases),
+        "mechanicalAliases": mechanical_aliases,
+        "unitAggregationIssues": unit_aggregation_issues,
+        "formulaIssues": formula_issues,
+        "humanReviewRequiredCount": len(human_review_codes),
+        "humanReviewRequiredCodes": human_review_codes,
+        "humanReviewBoundary": "技术清理不替代银行业务专家对名称、口径、来源和公式的最终审核。",
+    }

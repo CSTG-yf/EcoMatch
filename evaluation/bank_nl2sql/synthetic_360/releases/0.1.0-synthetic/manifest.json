@@ -1,0 +1,43 @@
+{
+  "catalogVersion": "0.1.0-candidate",
+  "counts": {
+    "baseMetrics": 336,
+    "dates": 17,
+    "derivedMetrics": 24,
+    "facts": 79560,
+    "metrics": 360,
+    "organizations": 13
+  },
+  "dataOrigin": "SYNTHETIC",
+  "dateRange": {
+    "end": "2026-05-31",
+    "start": "2025-01-31"
+  },
+  "files": {
+    "bank-h2.sql": {
+      "bytes": 9854288,
+      "sha256": "1d206aa842feec0045a4e1efa5f2afb4cbf60400bdef964665c33a5386ff7323"
+    },
+    "bank.sqlite": {
+      "bytes": 9265152,
+      "sha256": "f01287d336a8bea01a06ddf41635d8c32248a84e07569ad371b4e002d7222958"
+    },
+    "facts.jsonl": {
+      "bytes": 12675219,
+      "sha256": "38d47f6a6515a623fd79f2106f72030e96583928350c4e11e8eaa664cfc5500c"
+    },
+    "metrics.jsonl": {
+      "bytes": 409885,
+      "sha256": "dcefcf851ab3212641433a9d91ceab63d9ce3596244e8526c1e72b648d6f5c92"
+    },
+    "organizations.json": {
+      "bytes": 926,
+      "sha256": "12be9281a4b14c3a0f2827a69d632a23fd8175b9c9b3247c829b3dafd5f95539"
+    }
+  },
+  "generatorVersion": "synthetic-360-v1",
+  "officialInputs": [],
+  "schemaVersion": "1.0.0",
+  "status": "SYNTHETIC_CANDIDATE",
+  "version": "0.1.0-synthetic"
+}
