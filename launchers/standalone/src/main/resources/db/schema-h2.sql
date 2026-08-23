@@ -218,6 +218,16 @@ create table IF NOT EXISTS s2_auth_groups
     config LONGVARCHAR,
     PRIMARY KEY (`group_id`)
 );
+-- Compatibility migration for databases created before fine-grained authorization was added.
+-- CREATE TABLE IF NOT EXISTS does not add newly declared columns to an existing H2 table.
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS model_id BIGINT;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS policy_code varchar(128);
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS enabled SMALLINT DEFAULT 1;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS policy_version BIGINT DEFAULT 1;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS valid_from TIMESTAMP;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS valid_to TIMESTAMP;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+ALTER TABLE s2_auth_groups ADD COLUMN IF NOT EXISTS updated_by varchar(128);
 CREATE INDEX IF NOT EXISTS idx_auth_group_model_enabled
     ON s2_auth_groups(model_id, enabled);
 

@@ -105,6 +105,23 @@ class NL2SQLParserTerminalBankPlanTest {
     }
 
     @Test
+    void terminalInfrastructureErrorSkipsAllFallbackAndPreservesSanitizedMessage() {
+        String userMessage = "查询服务内部配置异常（SYSTEM_TRANSLATION_FAILED），请联系管理员或稍后重试。";
+        ParseResp failed = new ParseResp("查询贷款余额");
+        failed.setState(ParseResp.ParseState.FAILED);
+        failed.setErrorMsg(userMessage);
+        failed.setTerminalError(true);
+        when(chatLayerService.parse(any(QueryNLReq.class))).thenReturn(failed);
+
+        new NL2SQLParser().parse(parseContext);
+
+        verify(chatLayerService, times(1)).parse(any(QueryNLReq.class));
+        assertEquals(ParseResp.ParseState.FAILED, parseContext.getResponse().getState());
+        assertEquals(userMessage, parseContext.getResponse().getErrorMsg());
+        assertTrue(parseContext.getResponse().isTerminalError());
+    }
+
+    @Test
     void nonTerminalFailureStillFallsBackToAllMapping() {
         ParseResp first = new ParseResp("查询贷款余额");
         first.setState(ParseResp.ParseState.FAILED);

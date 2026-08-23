@@ -136,6 +136,7 @@ public class ChatWorkflowEngine {
         List<SemanticParseInfo> semanticParseInfos = queryCtx.getCandidateQueries().stream()
                 .map(SemanticQuery::getParseInfo).collect(Collectors.toList());
         List<String> errorMsg = new ArrayList<>();
+        boolean[] internalTranslationFailure = {false};
         if (StringUtils.isNotBlank(parseResult.getErrorMsg())) {
             errorMsg.add(parseResult.getErrorMsg());
         }
@@ -179,10 +180,16 @@ public class ChatWorkflowEngine {
                         e.getClass().getSimpleName(), root.getClass().getSimpleName(),
                         StringUtils.left(String.valueOf(root.getMessage()), 800),
                         StringUtils.left(String.valueOf(e.getMessage()), 800));
-                errorMsg.add("Semantic query translation failed");
+                internalTranslationFailure[0] = true;
             }
         });
-        if (!errorMsg.isEmpty()) {
+        if (internalTranslationFailure[0]
+                && !ParseResp.ParseState.COMPLETED.equals(parseResult.getState())) {
+            parseResult.setState(ParseResp.ParseState.FAILED);
+            parseResult.setTerminalError(true);
+            parseResult.setErrorMsg(
+                    "查询服务内部配置异常（SYSTEM_TRANSLATION_FAILED），请联系管理员或稍后重试。");
+        } else if (!errorMsg.isEmpty()) {
             parseResult.setErrorMsg(String.join("\n", errorMsg));
         }
     }

@@ -51,6 +51,33 @@ class H2DistributionConfigTest {
     }
 
     @Test
+    void shouldUpgradeLegacyAuthGroupsSchemaWithoutLosingPolicies() throws Exception {
+        try (Connection connection = DriverManager.getConnection(
+                "jdbc:h2:mem:h2-auth-groups-upgrade;DATABASE_TO_UPPER=false", "root",
+                "semantic"); Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE s2_auth_groups (group_id INT PRIMARY KEY, config LONGVARCHAR)");
+            statement.execute("INSERT INTO s2_auth_groups (group_id, config) VALUES (1, 'legacy-policy')");
+
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("db/schema-h2.sql"));
+
+            try (ResultSet result = statement.executeQuery(
+                    "SELECT config, model_id, policy_code, enabled, policy_version, valid_from, "
+                            + "valid_to, updated_at, updated_by FROM s2_auth_groups WHERE group_id = 1")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("config")).isEqualTo("legacy-policy");
+                assertThat(result.getObject("model_id")).isNull();
+                assertThat(result.getObject("policy_code")).isNull();
+                assertThat(result.getInt("enabled")).isEqualTo(1);
+                assertThat(result.getLong("policy_version")).isEqualTo(1L);
+                assertThat(result.getObject("valid_from")).isNull();
+                assertThat(result.getObject("valid_to")).isNull();
+                assertThat(result.getObject("updated_at")).isNull();
+                assertThat(result.getObject("updated_by")).isNull();
+            }
+        }
+    }
+
+    @Test
     void shouldBackfillOnlyLegacyChatsWithOneHistoricalAgent() throws Exception {
         try (Connection connection = DriverManager.getConnection(
                 "jdbc:h2:mem:chat-agent-backfill;DATABASE_TO_UPPER=false", "root", "semantic");

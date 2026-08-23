@@ -1,6 +1,7 @@
 package com.tencent.supersonic.headless.api.pojo.response;
 
 import com.google.common.collect.Lists;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import lombok.Data;
@@ -15,6 +16,8 @@ public class ParseResp implements Serializable {
     private final String queryText;
     private ParseState state = ParseState.PENDING;
     private String errorMsg;
+    @JsonIgnore
+    private boolean terminalError;
     private List<SemanticParseInfo> selectedParses = Lists.newArrayList();
     private BankRoutingAttemptTelemetry bankRoutingAttemptTelemetry;
     private ParseTimeCostResp parseTimeCost = new ParseTimeCostResp();

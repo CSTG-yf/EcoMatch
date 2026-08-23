@@ -163,7 +163,11 @@ public class NL2SQLParser implements ChatQueryParser {
                 // try again with all semantic fields passed to LLM
                 if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
                     String errorMsg = parseContext.getResponse().getErrorMsg();
-                    if (BankNl2SqlError.isTerminalParserError(errorMsg)) {
+                    if (parseContext.getResponse().isTerminalError()) {
+                        // Infrastructure and translation failures already carry a sanitized,
+                        // stable message. Retrying with a broader map mode cannot repair them and
+                        // would allow downstream LLM rewriting to invent a business explanation.
+                    } else if (BankNl2SqlError.isTerminalParserError(errorMsg)) {
                         // fail-closed: a constrained bank plan failure is terminal, so never
                         // fall back to MapModeEnum.ALL; strip the internal parser prefix and
                         // surface only the user-facing message. Preserve the terminal marker on
@@ -219,6 +223,7 @@ public class NL2SQLParser implements ChatQueryParser {
         resp.setState(parseResp.getState());
         resp.setParseTimeCost(parseResp.getParseTimeCost());
         resp.setErrorMsg(parseResp.getErrorMsg());
+        resp.setTerminalError(parseResp.isTerminalError());
         resp.setBankRoutingAttemptTelemetry(parseResp.getBankRoutingAttemptTelemetry());
     }
 
