@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +28,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Model-owned constrained bank planning.
@@ -42,6 +45,7 @@ import java.util.Set;
 public class BankPlanGenStrategy extends SqlGenStrategy {
 
     public static final String APP_KEY = "BANK_CONSTRAINED_PLAN";
+    public static final String FEW_SHOT_ENABLE_PROPERTY = "s2.parser.bank.few-shot.enable";
 
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
     private static final int MAX_REQUIREMENT_ATTEMPTS = 3;
@@ -55,6 +59,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     + "return action=EXECUTE with every directly stated metric, organization, "
                     + "and date/range. Do not repeat a generic request for details, and do not "
                     + "treat a broad label beside explicit catalog metrics as missing information.";
+    private static final Pattern EXPLICIT_YEAR_END_RANGE = Pattern.compile(
+            "从\\s*(20\\d{2})年(?:末|底|年末|年底)\\s*(?:到|至)\\s*"
+                    + "(20\\d{2})[-/]([0-1]?\\d)[-/]([0-3]?\\d)");
 
     private final BankRequestContractResponseParser requestContractParser =
             new BankRequestContractResponseParser();
@@ -102,12 +109,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         String requirementsJson = JsonUtil.toString(requirements);
 
         boolean toolRepair = llmReq.getBankPlanToolResult() != null;
+        String planExamples = fewShotEnabled()
+                ? BankFewShotExemplarCatalog.renderPlanExamples(requirements) : null;
         String dynamicUser = toolRepair
                 ? BankPlanPromptComposer.buildToolRepairUserContent(llmReq.getQueryText(),
                         requirementsJson, llmReq.getPreviousBankQueryPlanJson(),
-                        llmReq.getBankPlanToolResult())
+                        llmReq.getBankPlanToolResult(), planExamples)
                 : BankPlanPromptComposer.buildPlanUserContent(llmReq.getQueryText(),
-                        requirementsJson);
+                        requirementsJson, planExamples);
         int candidateLimit =
                 toolRepair ? 1 : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
 
@@ -131,7 +140,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 candidates.add(BankPlanCandidateRanker.Candidate
                         .rejected("rejected-plan-" + candidateIndex, exception.getReason().name()));
                 PlanRepairAttempt repaired = repairPlan(llmReq, requirementsJson, candidate,
-                        exception, model, modelConfig, planHints, candidateIndex);
+                        exception, model, modelConfig, planHints, candidateIndex, planExamples);
                 candidates.addAll(repaired.candidates());
                 planRepairCodes.addAll(repaired.repairCodes());
                 lastCandidate = repaired.lastCandidate();
@@ -185,6 +194,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return llmReq.getSemanticIntentHints();
     }
 
+    private boolean fewShotEnabled() {
+        return Boolean.parseBoolean(System.getProperty(FEW_SHOT_ENABLE_PROPERTY, "false"));
+    }
+
     private ChatModelConfig configureModel(ChatModelConfig modelConfig) {
         if (modelConfig == null) {
             throw new IllegalArgumentException("bank chat model configuration is required");
@@ -196,7 +209,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             }
         } else {
             modelConfig.setJsonFormat(true);
-            modelConfig.setJsonFormatType("json_object");
+            modelConfig.setJsonFormatType("json_schema");
         }
         // Structured repair owns retries. Do not multiply a provider timeout underneath it.
         modelConfig.setMaxRetries(0);
@@ -213,14 +226,17 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankQueryPlanParseException lastError = null;
         List<String> repairReasons = new ArrayList<>();
         List<String> repairCodes = new ArrayList<>();
+        String requirementExamples = fewShotEnabled()
+                ? BankFewShotExemplarCatalog.renderRequirementsExamples(llmReq.getQueryText()) : null;
         int clarificationRechecks = 0;
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
-                    ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText())
+                    ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText(),
+                            requirementExamples)
                     : BankPlanPromptComposer.buildRequirementsRepairUserContent(
                             llmReq.getQueryText(), candidate,
                             lastError == null ? "requirements JSON is invalid"
-                                    : lastError.getMessage());
+                                    : lastError.getMessage(), requirementExamples);
             try {
                 candidate = prefixCache.generate(model, config,
                         BankPlanLlmPrefixCache.Stage.REQUIREMENTS, user, attempt == 0);
@@ -386,6 +402,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         validateMonthAndYearComparison(queryText, requirements);
+        validateExplicitYearEndRange(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
         validateProvinceWideInstitutionRanking(queryText, requirements);
         validateDaysAboveProvinceAverage(queryText, requirements);
@@ -404,6 +421,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         validateRankedChangeFamily(requirements, evidence);
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
+        validateSelectedOrganizationBestComparison(queryText, requirements);
         if (queryText.contains("全省均值") && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
             validateProvinceAverageComparison(queryText, requirements);
         }
@@ -621,6 +639,104 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", organizationCodes=" + actualOrganizations + ", metricCodes="
                         + actualMetrics + ". Regenerate the complete requirements JSON; do not "
                         + "rewrite the model plan in the backend.");
+    }
+
+    /**
+     * Validates the wording "from an explicit YYYY year end to an explicit date". An explicit
+     * year is not a relative "last year end" expression; this gate returns the exact repairable
+     * dates and never mutates the model contract.
+     */
+    private void validateExplicitYearEndRange(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null) {
+            return;
+        }
+        Matcher matcher = EXPLICIT_YEAR_END_RANGE.matcher(queryText);
+        if (!matcher.find()) {
+            return;
+        }
+        LocalDate expectedBaseline;
+        LocalDate expectedCurrent;
+        try {
+            expectedBaseline = LocalDate.of(Integer.parseInt(matcher.group(1)), 12, 31);
+            expectedCurrent = LocalDate.of(Integer.parseInt(matcher.group(2)),
+                    Integer.parseInt(matcher.group(3)), Integer.parseInt(matcher.group(4)));
+        } catch (DateTimeException | NumberFormatException invalidDate) {
+            return;
+        }
+        BankQueryPlan.TimeRange actual = requirements.getTime();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.CHANGE && actual != null
+                && actual.getStartDate() != null && actual.getEndDate() != null
+                && actual.getBaselineStartDate() != null && actual.getBaselineEndDate() != null
+                && actual.getStartDate().equals(expectedCurrent)
+                && actual.getEndDate().equals(expectedCurrent)
+                && actual.getBaselineStartDate().equals(expectedBaseline)
+                && actual.getBaselineEndDate().equals(expectedBaseline);
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "explicit_year_end_range_mismatch: an explicitly written YYYY year-end is that "
+                        + "year's 12-31, not the prior year's end; expected current="
+                        + expectedCurrent + ", baseline=" + expectedBaseline + "; model time="
+                        + actual + ". Regenerate the complete requirements JSON without changing "
+                        + "the user's explicit endpoints.");
+    }
+
+    /**
+     * Validates "which of these named institutions is best" as a full comparison. It is separate
+     * from the ranking validator because "最好/控制得最好" does not request a rank slice.
+     */
+    private void validateSelectedOrganizationBestComparison(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null
+                || !containsAny(queryText, "谁", "哪家", "哪个")
+                || !containsAny(queryText, "最好", "最优", "控制得最好", "表现最好")
+                || queryText.contains("全省均值")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getOrganizations().size() < 2 || evidence.getMetrics().size() != 1
+                || !evidence.getDerivedMetrics().isEmpty()) {
+            return;
+        }
+        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<BankRequestContract.AnswerFactType> expectedFacts =
+                List.of(BankRequestContract.AnswerFactType.VALUE,
+                        BankRequestContract.AnswerFactType.GAP_VALUE);
+        Set<String> actualOrganizations = new LinkedHashSet<>(
+                safeList(requirements.getOrganizationCodes()));
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        boolean hasRankFilter = safeList(requirements.getFilters()).stream().anyMatch(filter ->
+                filter != null && ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField())));
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.COMPARISON
+                && actualOrganizations.equals(expectedOrganizations)
+                && actualMetrics.equals(expectedMetrics)
+                && requirements.getRequiredLimit() == null && !hasRankFilter
+                && expectedFacts.equals(safeList(requirements.getAnswerFactTypes()));
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "selected_organization_best_comparison_mismatch: questions asking which of the "
+                        + "explicitly named institutions is best require intent=COMPARISON, all "
+                        + "named organizations, one metric, VALUE/GAP_VALUE, no rank filter and "
+                        + "requiredLimit=null; expected organizations=" + expectedOrganizations
+                        + ", metrics=" + expectedMetrics + "; model intent="
+                        + requirements.getIntent() + ", organizations=" + actualOrganizations
+                        + ", metrics=" + actualMetrics
+                        + ", answerFactTypes=" + safeList(requirements.getAnswerFactTypes())
+                        + ". Regenerate the complete requirements JSON; do not rewrite the model "
+                        + "plan in the backend.");
     }
 
     /** Validates an explicit two-institution value difference without changing model output. */
@@ -1118,7 +1234,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private PlanRepairAttempt repairPlan(LLMReq llmReq, String requirementsJson,
             String firstCandidate, BankQueryPlanParseException firstError, ChatLanguageModel model,
-            ChatModelConfig config, SemanticIntentHints planHints, int candidateIndex) {
+            ChatModelConfig config, SemanticIntentHints planHints, int candidateIndex,
+            String planExamples) {
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
         List<String> repairCodes = new ArrayList<>();
         String previous = firstCandidate;
@@ -1129,7 +1246,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         prefixCache.generate(model, config, BankPlanLlmPrefixCache.Stage.PLAN,
                                 BankPlanPromptComposer.buildPlanRepairUserContent(
                                         llmReq.getQueryText(), requirementsJson, previous,
-                                        lastError.getMessage()),
+                                        lastError.getMessage(), planExamples),
                                 false);
                 previous = repaired;
                 candidates.add(candidateRanker.evaluate(

@@ -3,13 +3,29 @@ package com.tencent.supersonic.headless.chat.parser.llm.bank;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LlamaCppPrefixChatClientTest {
+
+    @AfterEach
+    void clearJsonSchemaCapabilities() {
+        LlamaCppPrefixChatClient.clearJsonSchemaCapabilitiesForTests();
+    }
 
     @Test
     void stripThinkingRemovesThinkBlocks() {
@@ -29,10 +45,17 @@ class LlamaCppPrefixChatClientTest {
 
     @Test
     void warmupUsesMinimalCompletionWithoutChangingThinkingMode() {
-        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 1),
-                LlamaCppPrefixChatClient.ChatOptions.warmup(false));
-        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(true, 1024),
-                LlamaCppPrefixChatClient.ChatOptions.warmup(true));
+        LlamaCppPrefixChatClient.ChatOptions nonThinking =
+                LlamaCppPrefixChatClient.ChatOptions.warmup(false);
+        assertFalse(nonThinking.enableThinking());
+        assertEquals(1, nonThinking.maxTokens());
+        assertTrue(nonThinking.omitResponseFormat());
+
+        LlamaCppPrefixChatClient.ChatOptions thinking =
+                LlamaCppPrefixChatClient.ChatOptions.warmup(true);
+        assertTrue(thinking.enableThinking());
+        assertEquals(1024, thinking.maxTokens());
+        assertTrue(thinking.omitResponseFormat());
     }
 
     @Test
@@ -48,6 +71,106 @@ class LlamaCppPrefixChatClientTest {
         assertFalse(body.get("enable_thinking").asBoolean());
         assertFalse(body.path("chat_template_kwargs").get("enable_thinking").asBoolean());
         assertEquals("json_object", body.path("response_format").path("type").asText());
+    }
+
+    @Test
+    void jsonSchemaRequestsCarryTheNamedStrictSchemaInsteadOfBeingDowngraded() throws Exception {
+        ObjectNode body = new ObjectMapper().createObjectNode();
+        ChatModelConfig config = jsonSchemaConfig();
+
+        LlamaCppPrefixChatClient.applyThinkingOptions(body, config,
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                        BankRequestContract.JSON_SCHEMA));
+
+        assertEquals("json_schema", body.path("response_format").path("type").asText());
+        assertEquals("bank_request_contract", body.path("response_format").path("json_schema")
+                .path("name").asText());
+        assertFalse(body.path("response_format").path("json_schema").path("schema")
+                .path("additionalProperties").asBoolean(true));
+    }
+
+    @Test
+    void supportedServerReceivesOneSchemaProbeThenTheActualSchemaBoundRequest() throws Exception {
+        try (TestServer server = new TestServer(List.of(200, 200))) {
+            LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();
+            LlamaCppPrefixChatClient.ChatResult answer = client.chat(server.config(), "stable system", "real user request",
+                    LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                            BankRequestContract.JSON_SCHEMA));
+
+            assertEquals("{\"ok\":true}", answer.content());
+            assertEquals(2, server.requests.size());
+            assertEquals("json_schema", server.requests.get(0).path("response_format")
+                    .path("type").asText());
+            assertEquals("json_schema", server.requests.get(1).path("response_format")
+                    .path("type").asText());
+            assertFalse(server.requests.get(0).path("messages").get(1).path("content").asText()
+                    .contains("real user request"));
+            assertEquals("real user request", server.requests.get(1).path("messages").get(1)
+                    .path("content").asText());
+        }
+    }
+
+    @Test
+    void providerSchemaKeepsContractShapeButOmitsUnsupportedValidationKeywords() throws Exception {
+        try (TestServer server = new TestServer(List.of(200, 200))) {
+            LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();
+            client.chat(server.config(), "stable system", "real user request",
+                    LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                            BankRequestContract.JSON_SCHEMA));
+
+            var schema = server.requests.get(1).path("response_format").path("json_schema")
+                    .path("schema");
+            assertTrue(schema.path("required").toString().contains("metricCodes"));
+            assertTrue(schema.path("properties").path("metricCodes").path("items")
+                    .has("enum"));
+            assertTrue(schema.path("properties").path("time").path("type").isArray(),
+                    "nullable fields must retain their provider-supported type union");
+            assertFalse(schema.findValue("format") != null,
+                    "llama.cpp 66 rejects format when additionalProperties is false");
+            assertFalse(schema.findValue("pattern") != null,
+                    "llama.cpp 66 rejects pattern when additionalProperties is false");
+            assertFalse(schema.findValue("minimum") != null,
+                    "provider schema must leave numeric semantics to the local validator");
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {400, 501})
+    void unsupportedSchemaStatusFallsBackToJsonObjectAndCachesThatDecision(int unsupportedStatus)
+            throws Exception {
+        try (TestServer server = new TestServer(List.of(unsupportedStatus, 200, 200))) {
+            LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();
+            LlamaCppPrefixChatClient.ChatOptions options =
+                    LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_query_plan",
+                            BankQueryPlan.JSON_SCHEMA);
+
+            assertEquals("{\"ok\":true}", client.chat(server.config(), "stable system",
+                    "first user request", options).content());
+            assertEquals("{\"ok\":true}", client.chat(server.config(), "stable system",
+                    "second user request", options).content());
+
+            assertEquals(3, server.requests.size());
+            assertEquals("json_schema", server.requests.get(0).path("response_format")
+                    .path("type").asText());
+            assertEquals("json_object", server.requests.get(1).path("response_format")
+                    .path("type").asText());
+            assertEquals("json_object", server.requests.get(2).path("response_format")
+                    .path("type").asText());
+        }
+    }
+
+    @Test
+    void unexpectedSchemaProbeStatusFailsClosedWithoutLoggingTheResponseBody() throws Exception {
+        try (TestServer server = new TestServer(List.of(500))) {
+            LlamaCppPrefixChatClient.JsonSchemaCapabilityException exception = assertThrows(
+                    LlamaCppPrefixChatClient.JsonSchemaCapabilityException.class,
+                    () -> new LlamaCppPrefixChatClient().chat(server.config(), "system", "user",
+                            LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_query_plan",
+                                    BankQueryPlan.JSON_SCHEMA)));
+
+            assertTrue(exception.getMessage().contains("unexpected_status_500"));
+            assertFalse(exception.getMessage().contains("json schema unsupported"));
+        }
     }
 
     @Test
@@ -118,5 +241,54 @@ class LlamaCppPrefixChatClientTest {
 
         assertEquals(1024, capped.maxTokens());
         assertFalse(capped.enableThinking());
+    }
+
+    private static ChatModelConfig jsonSchemaConfig() {
+        ChatModelConfig config = new ChatModelConfig();
+        config.setJsonFormat(true);
+        config.setJsonFormatType("json_schema");
+        return config;
+    }
+
+    private static final class TestServer implements AutoCloseable {
+
+        private static final ObjectMapper MAPPER = new ObjectMapper();
+
+        private final List<Integer> statuses;
+        private final HttpServer server;
+        private final List<com.fasterxml.jackson.databind.JsonNode> requests = new ArrayList<>();
+
+        private TestServer(List<Integer> statuses) throws IOException {
+            this.statuses = statuses;
+            this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/v1/chat/completions", exchange -> {
+                try (exchange) {
+                    requests.add(MAPPER.readTree(exchange.getRequestBody().readAllBytes()));
+                    int index = requests.size() - 1;
+                    int status = statuses.get(Math.min(index, statuses.size() - 1));
+                    byte[] response = (status >= 200 && status < 300
+                            ? "{\"choices\":[{\"message\":{\"content\":\"{\\\"ok\\\":true}\"}}]}"
+                            : "{\"error\":\"json schema unsupported\"}")
+                                    .getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(status, response.length);
+                    exchange.getResponseBody().write(response);
+                }
+            });
+            server.start();
+        }
+
+        private ChatModelConfig config() {
+            ChatModelConfig config = jsonSchemaConfig();
+            config.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+            config.setModelName("test-bank-model");
+            config.setTimeOut(5L);
+            return config;
+        }
+
+        @Override
+        public void close() {
+            server.stop(0);
+        }
     }
 }

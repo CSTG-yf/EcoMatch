@@ -75,19 +75,18 @@ class ChatQueryServiceBankPlanRepairTest {
     }
 
     @Test
-    void stopsAfterThreeDistinctAttempts() {
+    void stopsAfterOneExecutionRepairEvenWhenTheNextFailureDiffers() {
         StubService service = new StubService(List.of(
                 failed(1, "trace-1", "fingerprint-1", "JDBC_GRAMMAR"),
-                failed(2, "trace-1", "fingerprint-2", "QUERY_GATEWAY"),
-                failed(3, "trace-1", "fingerprint-3", "SQL_SAFETY_POLICY"), succeeded()));
-        service.addRepairParse(parseResponse(20L, 1));
+                failed(2, "trace-1", "fingerprint-2", "QUERY_GATEWAY"), succeeded()));
         service.addRepairParse(parseResponse(20L, 1));
 
         QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
 
         assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
-        assertEquals(3, service.executeCount);
-        assertEquals(2, service.repairRequests.size());
+        assertEquals(2, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+        assertEquals(BankPlanTraceEvent.Action.STOPPED, trace(result).get(1).getAction());
     }
 
     @Test

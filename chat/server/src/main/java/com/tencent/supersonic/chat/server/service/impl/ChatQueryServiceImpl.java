@@ -95,7 +95,8 @@ import java.util.stream.Collectors;
 @Service
 public class ChatQueryServiceImpl implements ChatQueryService {
 
-    private static final int MAX_BANK_PLAN_ATTEMPTS = 3;
+    /** One execution failure may trigger at most one plan regeneration and re-execution. */
+    private static final int MAX_BANK_PLAN_ATTEMPTS = 2;
     private static final DateTimeFormatter MONTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM");
     private static final Set<String> REPAIRABLE_BANK_PLAN_ERRORS = Set.of("SQL_SAFETY_POLICY",

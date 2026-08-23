@@ -261,8 +261,6 @@ final class BankS2SqlTemplateFactory {
         String where = where(innerFilters, context.dateField(),
                 context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
         String orderBy = comparisonOrderBy(context.plan());
-        String limit =
-                context.plan().getLimit() == null ? "" : "\nLIMIT " + context.plan().getLimit();
         return """
                 WITH bank_comparison AS (
                   SELECT %s, SUM(%s) AS metric_value
@@ -272,10 +270,10 @@ final class BankS2SqlTemplateFactory {
                 )
                 SELECT %s, metric_value
                 FROM bank_comparison
-                WHERE %s%s%s
+                WHERE %s%s
                 """.formatted(groupColumns, context.metrics().get(0).identifier(),
                 context.dataSetName(), where, groupColumns, groupColumns,
-                filter(organizationFilter), orderBy, limit).trim();
+                filter(organizationFilter), orderBy).trim();
     }
 
     String compileProvinceAverageThreshold(TemplateContext context) {

@@ -163,6 +163,65 @@ class RunSuperSonicEvalTest(unittest.TestCase):
             item["bankRouting"]["candidateValidationErrorType"], "OUTPUT_ORDER_MISMATCH"
         )
 
+    def test_bank_routing_transmits_safe_bank_telemetry_from_selected_parse(self) -> None:
+        parse_response = {
+            "selectedParses": [
+                {
+                    "properties": {
+                        "bank.nl2sql.planSource": "MODEL",
+                        "bankTelemetry": {
+                            "generator": "BANK_PLAN_LLM",
+                            "planIntent": "RANKING",
+                            "timeComparison": "NONE",
+                            "calculationType": False,
+                            "route": "STRUCT",
+                            "templateCategory": "RANKING_DIRECT",
+                            "unknown": "must-not-leak",
+                            "nested": {"secret": "must-not-leak"},
+                        }
+                    }
+                }
+            ]
+        }
+
+        from run_supersonic_eval import _bank_routing_telemetry
+
+        self.assertEqual(
+            _bank_routing_telemetry(parse_response),
+            {
+                "planSource": "MODEL",
+                "bankTelemetry": {
+                    "generator": "BANK_PLAN_LLM",
+                    "planIntent": "RANKING",
+                    "timeComparison": "NONE",
+                    "route": "STRUCT",
+                    "templateCategory": "RANKING_DIRECT",
+                },
+            },
+        )
+
+    def test_bank_routing_keeps_bank_telemetry_without_attempt_telemetry(self) -> None:
+        parse_response = {
+            "selectedParses": [
+                {
+                    "properties": {
+                        "bank.nl2sql.planSource": "MODEL_COLD_REPLAN",
+                        "bankTelemetry": {"templateCategory": "CHANGE"},
+                    }
+                }
+            ]
+        }
+
+        from run_supersonic_eval import _bank_routing_telemetry
+
+        self.assertEqual(
+            _bank_routing_telemetry(parse_response),
+            {
+                "planSource": "MODEL_COLD_REPLAN",
+                "bankTelemetry": {"templateCategory": "CHANGE"},
+            },
+        )
+
     def test_warmup_uses_disposable_parse_only_chain_and_returns_separate_timing(self) -> None:
         requests: list[tuple[str, dict]] = []
 
@@ -231,6 +290,12 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                         "selectedParses": [
                             {
                                 "id": 1,
+                                "properties": {
+                                    "bankTelemetry": {
+                                        "generator": "BANK_PLAN_LLM",
+                                        "templateCategory": "POINT_QUERY",
+                                    }
+                                },
                                 "sqlInfo": {"correctedS2SQL": "SELECT metric_value FROM semantic_dataset"},
                             }
                         ],
@@ -353,6 +418,10 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                 "bankDatasetQualified": True,
                 "selectedSqlGenType": "ONE_PASS_SELF_CONSISTENCY",
                 "llmCandidateCreated": True,
+                "bankTelemetry": {
+                    "generator": "BANK_PLAN_LLM",
+                    "templateCategory": "POINT_QUERY",
+                },
             },
         )
         self.assertGreaterEqual(report["items"][0]["endToEndMs"], 0)

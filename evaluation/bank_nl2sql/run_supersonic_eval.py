@@ -205,15 +205,51 @@ def _bank_plan_source(parse_response: dict[str, Any]) -> str | None:
     return str(plan_source)
 
 
+_BANK_TELEMETRY_FIELDS = (
+    "generator",
+    "planIntent",
+    "timeComparison",
+    "calculationType",
+    "route",
+    "templateCategory",
+)
+
+
+def _selected_bank_telemetry(parse_response: dict[str, Any]) -> dict[str, str] | None:
+    """Extract only scalar bank routing fields attached to the selected parse."""
+
+    selected = parse_response.get("selectedParses")
+    if not isinstance(selected, list) or not selected or not isinstance(selected[0], dict):
+        return None
+    properties = selected[0].get("properties")
+    if not isinstance(properties, dict):
+        return None
+    raw = properties.get("bankTelemetry")
+    if not isinstance(raw, dict):
+        return None
+    safe = {
+        field: value
+        for field in _BANK_TELEMETRY_FIELDS
+        if isinstance(value := raw.get(field), str)
+    }
+    return safe or None
+
+
 def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | None:
     """Extract safe bank-routing telemetry from a parse response, if present."""
 
     raw = parse_response.get("bankRoutingAttemptTelemetry")
     plan_source = _bank_plan_source(parse_response)
+    bank_telemetry = _selected_bank_telemetry(parse_response)
     if not isinstance(raw, dict):
-        if plan_source is None:
+        if plan_source is None and bank_telemetry is None:
             return None
-        return {"planSource": plan_source}
+        telemetry: dict[str, Any] = {}
+        if plan_source is not None:
+            telemetry["planSource"] = plan_source
+        if bank_telemetry is not None:
+            telemetry["bankTelemetry"] = bank_telemetry
+        return telemetry
     selected = raw.get("selectedSqlGenType")
     telemetry: dict[str, Any] = {
         "bankConstrainedPlanEnabled": bool(raw.get("bankConstrainedPlanEnabled")),
@@ -232,6 +268,8 @@ def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | 
         telemetry["candidateCompilerReason"] = str(compiler_reason)
     if plan_source is not None:
         telemetry["planSource"] = plan_source
+    if bank_telemetry is not None:
+        telemetry["bankTelemetry"] = bank_telemetry
     # Surface multi-candidate diagnostics when the selected parse carries them.
     selected = parse_response.get("selectedParses")
     if isinstance(selected, list) and selected and isinstance(selected[0], dict):
