@@ -110,6 +110,30 @@ class LlamaCppPrefixChatClientTest {
         }
     }
 
+    @Test
+    void providerSchemaKeepsContractShapeButOmitsUnsupportedValidationKeywords() throws Exception {
+        try (TestServer server = new TestServer(List.of(200, 200))) {
+            LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();
+            client.chat(server.config(), "stable system", "real user request",
+                    LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                            BankRequestContract.JSON_SCHEMA));
+
+            var schema = server.requests.get(1).path("response_format").path("json_schema")
+                    .path("schema");
+            assertTrue(schema.path("required").toString().contains("metricCodes"));
+            assertTrue(schema.path("properties").path("metricCodes").path("items")
+                    .has("enum"));
+            assertTrue(schema.path("properties").path("time").path("type").isArray(),
+                    "nullable fields must retain their provider-supported type union");
+            assertFalse(schema.findValue("format") != null,
+                    "llama.cpp 66 rejects format when additionalProperties is false");
+            assertFalse(schema.findValue("pattern") != null,
+                    "llama.cpp 66 rejects pattern when additionalProperties is false");
+            assertFalse(schema.findValue("minimum") != null,
+                    "provider schema must leave numeric semantics to the local validator");
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {400, 501})
     void unsupportedSchemaStatusFallsBackToJsonObjectAndCachesThatDecision(int unsupportedStatus)

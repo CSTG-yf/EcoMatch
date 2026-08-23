@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -265,6 +266,7 @@ public class LlamaCppPrefixChatClient {
             body.put("max_tokens", options.maxTokens());
         }
         applyThinkingOptions(body, config, options, jsonSchemaSupported);
+        sanitizeProviderJsonSchema(body);
 
         ArrayNode messages = body.putArray("messages");
         ObjectNode system = messages.addObject();
@@ -274,6 +276,35 @@ public class LlamaCppPrefixChatClient {
         user.put("role", "user");
         user.put("content", userContent);
         return body;
+    }
+
+    /**
+     * llama.cpp accepts the structural subset of JSON Schema used for constrained decoding, but
+     * the Qwen endpoint rejects validation-only keywords such as {@code format}, {@code pattern}
+     * and numeric bounds when they are nested below a closed object. The local contract parser is
+     * still authoritative for those semantic checks, so keep the shape, required fields and
+     * enumerations while removing only provider-incompatible assertions from the wire payload.
+     */
+    private static void sanitizeProviderJsonSchema(ObjectNode body) {
+        JsonNode schema = body.path("response_format").path("json_schema").path("schema");
+        if (!schema.isMissingNode()) {
+            sanitizeProviderSchemaNode(schema);
+        }
+    }
+
+    private static void sanitizeProviderSchemaNode(JsonNode node) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            ObjectNode object = (ObjectNode) node;
+            object.remove(List.of("format", "pattern", "minimum", "maximum", "exclusiveMinimum",
+                    "exclusiveMaximum", "minLength", "maxLength", "minItems", "maxItems",
+                    "multipleOf"));
+            object.fields().forEachRemaining(entry -> sanitizeProviderSchemaNode(entry.getValue()));
+        } else if (node.isArray()) {
+            node.forEach(LlamaCppPrefixChatClient::sanitizeProviderSchemaNode);
+        }
     }
 
     private HttpResponse<String> post(ChatModelConfig config, String url, ObjectNode body,
