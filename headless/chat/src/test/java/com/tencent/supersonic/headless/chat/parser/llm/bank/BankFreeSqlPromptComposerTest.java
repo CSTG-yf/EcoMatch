@@ -124,4 +124,82 @@ class BankFreeSqlPromptComposerTest {
         assertFalse(BankFreeSqlPromptComposer.looksInvalidBankS2Sql(
                 "SELECT `各项存款余额` FROM `银行日指标数据集` WHERE `数据日期`='2025-06-15' AND `机构`='ORG001'"));
     }
+
+    @Test
+    void normalizesSynthetic360SingleMetricPointQuery() {
+        LLMReq.LLMSchema schema = syntheticSchema();
+        String sql = "SELECT `数据日期`, (`税前利润`), (`净利润`), (`利息收入`) "
+                + "FROM `synthetic_360 bank metrics` "
+                + "WHERE `指标` IN ('CNB067', 'CNB071', 'CNB074') "
+                + "AND `机构`='SYN-ORG-002' AND `数据日期` >= '2025-07-31' "
+                + "AND `数据日期` <= '2025-07-31' GROUP BY `数据日期`";
+
+        assertEquals(
+                "SELECT `税前利润` FROM `synthetic_360 bank metrics` "
+                        + "WHERE `数据日期` = '2025-07-31' AND `机构` = 'SYN-ORG-002'",
+                BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                        "查询合成机构02在2025-07-31的税前利润是多少？", sql, schema));
+    }
+
+    @Test
+    void normalizesSynthetic360RatioPointQueryUsingMetricAlias() {
+        LLMReq.LLMSchema schema = syntheticSchema();
+        String sql = "SELECT `数据日期`, (`前十大资金来源占比`), (`流动性覆盖率`) "
+                + "FROM `synthetic_360 bank metrics` "
+                + "WHERE `机构`='SYN-ORG-012' AND `数据日期`='2025-05-31'";
+
+        assertEquals(
+                "SELECT `前十大资金来源占比` FROM `synthetic_360 bank metrics` "
+                        + "WHERE `数据日期` = '2025-05-31' AND `机构` = 'SYN-ORG-012'",
+                BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                "查询合成机构12在2025-05-31的前十大资金来源比例是多少？", sql, schema));
+    }
+
+    @Test
+    void resolvesSyntheticMetricByFirstCodeWhenNamesAreAmbiguous() {
+        LLMReq.LLMSchema schema = syntheticSchema();
+        schema.setMetrics(List.of(
+                SchemaElement.builder().name("税前利润").bizName("CNB067").build(),
+                SchemaElement.builder().name("税前利润率").bizName("CNB068").build()));
+        String sql = "SELECT `数据日期`, (`税前利润`), (`税前利润率`) "
+                + "FROM `synthetic_360 bank metrics` "
+                + "WHERE `指标` IN ('CNB067', 'CNB068') AND `机构`='SYN-ORG-002' "
+                + "AND `数据日期`='2025-07-31'";
+
+        assertEquals(
+                "SELECT `税前利润` FROM `synthetic_360 bank metrics` "
+                        + "WHERE `数据日期` = '2025-07-31' AND `机构` = 'SYN-ORG-002'",
+                BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                        "查询合成机构02在2025-07-31的税前利润是多少？", sql, schema));
+    }
+
+    @Test
+    void leavesNonSyntheticAndExplicitMultiMetricQueriesUntouched() {
+        LLMReq.LLMSchema schema = syntheticSchema();
+        String sql = "SELECT `税前利润`, `净利润` FROM `synthetic_360 bank metrics` "
+                + "WHERE `数据日期`='2025-07-31' AND `机构`='SYN-ORG-002'";
+
+        assertEquals(sql, BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                "查询合成机构02在2025-07-31的税前利润和净利润", sql, schema));
+        schema.setDataSetName("银行指标数据集");
+        assertEquals(sql, BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                "查询合成机构02在2025-07-31的税前利润是多少？", sql, schema));
+    }
+
+    private LLMReq.LLMSchema syntheticSchema() {
+        LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
+        schema.setDataSetName("synthetic_360 bank metrics");
+        schema.setMetrics(List.of(
+                SchemaElement.builder().name("税前利润").bizName("CNB067")
+                        .alias(List.of("税前利润额", "税前盈利")).build(),
+                SchemaElement.builder().name("净利润").bizName("CNB071").build(),
+                SchemaElement.builder().name("利息收入").bizName("CNB074").build(),
+                SchemaElement.builder().name("前十大资金来源占比").bizName("CNB233")
+                        .alias(List.of("前十大资金来源比例", "前十大资金来源构成比")).build(),
+                SchemaElement.builder().name("流动性覆盖率").bizName("CNB234").build()));
+        schema.setDimensions(List.of(
+                SchemaElement.builder().name("机构").bizName("bank_organization").build(),
+                SchemaElement.builder().name("数据日期").bizName("bank_data_date").build()));
+        return schema;
+    }
 }

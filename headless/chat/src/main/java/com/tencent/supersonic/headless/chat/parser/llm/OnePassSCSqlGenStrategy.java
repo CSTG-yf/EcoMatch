@@ -173,6 +173,13 @@ public class OnePassSCSqlGenStrategy extends SqlGenStrategy {
             llmResp.setSqlRespMap(Map.of());
             return llmResp;
         }
+        String normalizedSql = BankFreeSqlPromptComposer.normalizeSynthetic360PointQuerySql(
+                llmReq.getQueryText(), sql, llmReq.getSchema());
+        if (!normalizedSql.equals(sql)) {
+            keyPipelineLog.info(
+                    "OnePassSCSqlGenStrategy normalized synthetic_360 single-metric point query from model over-expansion");
+            sql = normalizedSql;
+        }
         if (BankFreeSqlPromptComposer.looksInvalidBankS2Sql(sql)) {
             keyPipelineLog.warn(
                     "OnePassSCSqlGenStrategy bank S2SQL looks invalid (long-table/ZB-column style) sql=[{}]",

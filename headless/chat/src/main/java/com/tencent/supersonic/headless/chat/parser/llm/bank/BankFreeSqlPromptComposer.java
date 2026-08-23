@@ -7,10 +7,14 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -36,6 +40,14 @@ public final class BankFreeSqlPromptComposer {
 
     private static final Pattern FORBIDDEN_ZB_AS_COLUMN =
             Pattern.compile("(?i)(`?ZB\\d{3}`?\\s*[*+/]|\\bZB\\d{3}\\b\\s*[*+/]|`ZB\\d{3}`)");
+
+    private static final Pattern SYNTHETIC_DATE_LITERAL = Pattern.compile("\\b20\\d{2}-\\d{2}-\\d{2}\\b");
+
+    private static final Pattern SYNTHETIC_METRIC_CODE_FILTER = Pattern.compile(
+            "(?i)(?:`?指标`?|`?bank_indicator`?)\\s*(?:IN\\s*\\(\\s*'([^']+)'|=\\s*'([^']+)')");
+
+    private static final Pattern NON_POINT_QUERY = Pattern.compile(
+            "环比|同比|较上月|较去年|较年初|较上季|较同期|趋势|走势|变动|变化|增长|下降|排名|最高|最低|最多|最少|平均|合计|累计|区间");
 
     /**
      * Fixed system prefix (prefix-cached). No per-question placeholders.
@@ -319,6 +331,184 @@ public final class BankFreeSqlPromptComposer {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Repairs model over-expansion for a synthetic-360 single-metric point query.
+     *
+     * <p>The synthetic fact table is deliberately a wide semantic table. When a question names
+     * one metric, one organization, and one date, the result contract is one metric cell. This
+     * narrow normalizer removes model-added related metrics without changing official bank data,
+     * multi-metric questions, comparisons, or non-synthetic datasets.
+     */
+    public static String normalizeSynthetic360PointQuerySql(String question, String sql,
+            LLMReq.LLMSchema schema) {
+        if (sql == null || sql.isBlank() || !isSynthetic360Schema(schema)
+                || question == null || question.isBlank() || NON_POINT_QUERY.matcher(question).find()) {
+            return sql;
+        }
+        SchemaElement requestedMetric = resolveRequestedMetric(question, sql, schema.getMetrics());
+        if (requestedMetric == null) {
+            return sql;
+        }
+        Set<String> dates = findAll(SYNTHETIC_DATE_LITERAL, question);
+        if (dates.size() != 1) {
+            return sql;
+        }
+        SchemaElement organization = findDimension(schema, "bank_organization", "机构");
+        SchemaElement date = findDimension(schema, "bank_data_date", "数据日期");
+        if (organization == null || date == null || !containsIdentifier(sql, date.getName())) {
+            return sql;
+        }
+        Set<String> organizations = extractDimensionValues(sql, organization);
+        if (organizations.size() != 1) {
+            return sql;
+        }
+        return "SELECT " + quoteIdentifier(semanticMetricName(requestedMetric)) + " FROM "
+                + quoteIdentifier(schema.getDataSetName()) + " WHERE "
+                + quoteIdentifier(date.getName()) + " = '" + dates.iterator().next() + "' AND "
+                + quoteIdentifier(organization.getName()) + " = '" + organizations.iterator().next()
+                + "'";
+    }
+
+    private static boolean isSynthetic360Schema(LLMReq.LLMSchema schema) {
+        return schema != null && schema.getDataSetName() != null
+                && schema.getDataSetName().toLowerCase(Locale.ROOT).contains("synthetic_360");
+    }
+
+    private static List<SchemaElement> matchingMetrics(String question,
+            List<SchemaElement> metrics) {
+        if (metrics == null || metrics.isEmpty()) {
+            return List.of();
+        }
+        List<SchemaElement> matched = new ArrayList<>();
+        for (SchemaElement metric : metrics) {
+            if (metric == null || !hasMetricTerm(question, metric.getName())
+                    && (metric.getAlias() == null
+                            || metric.getAlias().stream().noneMatch(alias -> hasMetricTerm(question, alias)))) {
+                continue;
+            }
+            matched.add(metric);
+        }
+        return matched;
+    }
+
+    /** Resolve the requested metric from the model's first metric code when available. */
+    private static SchemaElement resolveRequestedMetric(String question, String sql,
+            List<SchemaElement> metrics) {
+        if (metrics == null || metrics.isEmpty()) {
+            return null;
+        }
+        Matcher codeMatcher = SYNTHETIC_METRIC_CODE_FILTER.matcher(sql);
+        if (codeMatcher.find()) {
+            String code = codeMatcher.group(1) != null ? codeMatcher.group(1) : codeMatcher.group(2);
+            for (SchemaElement metric : metrics) {
+                if (metric == null) {
+                    continue;
+                }
+                if (code.equalsIgnoreCase(metric.getBizName())
+                        || code.equalsIgnoreCase(metric.getName())) {
+                    return metric;
+                }
+            }
+        }
+        List<SchemaElement> matchedMetrics = matchingMetrics(question, metrics);
+        if (matchedMetrics.size() == 1) {
+            return matchedMetrics.get(0);
+        }
+        return matchedMetrics.stream().filter(metric -> hasExactMetricTerm(question, metric))
+                .findFirst().orElse(null);
+    }
+
+    private static boolean hasExactMetricTerm(String question, SchemaElement metric) {
+        if (metric == null) {
+            return false;
+        }
+        if (question.contains(metric.getName())) {
+            return true;
+        }
+        return metric.getAlias() != null && metric.getAlias().stream()
+                .anyMatch(alias -> question.contains(alias));
+    }
+
+    private static String semanticMetricName(SchemaElement metric) {
+        String name = metric.getName();
+        if (name == null || name.isBlank()) {
+            return metric.getBizName();
+        }
+        if (!name.matches("(?i)CNB\\d{3}") || metric.getBizName() == null
+                || metric.getBizName().isBlank()) {
+            return name;
+        }
+        return metric.getBizName();
+    }
+
+    private static boolean hasMetricTerm(String question, String term) {
+        return term != null && !term.isBlank() && question.contains(term.trim());
+    }
+
+    private static SchemaElement findDimension(LLMReq.LLMSchema schema, String... identifiers) {
+        if (schema.getDimensions() == null) {
+            return null;
+        }
+        for (SchemaElement dimension : schema.getDimensions()) {
+            if (dimension == null) {
+                continue;
+            }
+            for (String identifier : identifiers) {
+                if (identifier.equalsIgnoreCase(dimension.getName())
+                        || identifier.equalsIgnoreCase(dimension.getBizName())) {
+                    return dimension;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Set<String> extractDimensionValues(String sql, SchemaElement dimension) {
+        Set<String> values = new LinkedHashSet<>();
+        List<String> identifiers = new ArrayList<>();
+        identifiers.add(dimension.getName());
+        identifiers.add(dimension.getBizName());
+        for (String identifier : identifiers) {
+            if (identifier == null || identifier.isBlank()) {
+                continue;
+            }
+            String field = "(?:`" + Pattern.quote(identifier) + "`|" + Pattern.quote(identifier)
+                    + ")";
+            Matcher matcher = Pattern.compile("(?i)" + field
+                    + "\\s*(?:=\\s*'([^']+)'|IN\\s*\\(([^)]*)\\))").matcher(sql);
+            while (matcher.find()) {
+                if (matcher.group(1) != null) {
+                    values.add(matcher.group(1));
+                }
+                if (matcher.group(2) != null) {
+                    Matcher listValue = Pattern.compile("'([^']+)'").matcher(matcher.group(2));
+                    while (listValue.find()) {
+                        values.add(listValue.group(1));
+                    }
+                }
+            }
+        }
+        return values;
+    }
+
+    private static boolean containsIdentifier(String sql, String identifier) {
+        return identifier != null && !identifier.isBlank()
+                && (sql.contains("`" + identifier + "`") || sql.contains(identifier));
+    }
+
+    private static Set<String> findAll(Pattern pattern, String text) {
+        Set<String> matches = new LinkedHashSet<>();
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            matches.add(matcher.group());
+        }
+        return matches;
+    }
+
+    private static String quoteIdentifier(String identifier) {
+        return "`" + identifier.replace("`", "``") + "`";
     }
 
     /**
