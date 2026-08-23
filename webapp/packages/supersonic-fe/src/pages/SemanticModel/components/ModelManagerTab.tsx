@@ -1,19 +1,17 @@
-import { Tabs, Breadcrumb, Space, Radio } from 'antd';
-import React, { useRef, useEffect, useState } from 'react';
-import { history, useModel } from '@umijs/max';
+import { Tabs } from 'antd';
+import React, { useRef, useEffect } from 'react';
+import { useModel } from '@umijs/max';
 import ClassDimensionTable from './ClassDimensionTable';
 import ClassMetricTable from './ClassMetricTable';
-import PermissionSection from './Permission/PermissionSection';
-import TagObjectTable from '../Insights/components/TagObjectTable';
-import TermTable from '../components/Term/TermTable';
-import OverView from './OverView';
+import PermissionAdminForm from './Permission/PermissionAdminForm';
+import PermissionTable from './Permission/PermissionTable';
 import styles from './style.less';
-import { HomeOutlined, FundViewOutlined } from '@ant-design/icons';
 import { ISemantic } from '../data';
-import SemanticGraphCanvas from '../SemanticGraphCanvas';
-import Dimension from '../Dimension';
-import ModelMetric from '../components/ModelMetric';
-import View from '../View';
+import {
+  DATA_PERMISSION_SETTING_KEY,
+  MODEL_MEMBER_SETTING_KEY,
+  normalizeModelMenuKey,
+} from '../utils';
 
 type Props = {
   activeKey: string;
@@ -24,8 +22,10 @@ const ModelManagerTab: React.FC<Props> = ({ activeKey, onMenuChange }) => {
   const initState = useRef<boolean>(false);
   const defaultTabKey = 'metric';
   const modelModel = useModel('SemanticModel.modelData');
+  const { initialState } = useModel('@@initialState');
 
   const { selectModelId } = modelModel;
+  const isSuperAdmin = Boolean((initialState?.currentUser as any)?.superAdmin);
 
   useEffect(() => {
     initState.current = false;
@@ -35,7 +35,6 @@ const ModelManagerTab: React.FC<Props> = ({ activeKey, onMenuChange }) => {
     {
       label: '指标管理',
       key: 'metric',
-      // children: <ModelMetric />,
       children: (
         <ClassMetricTable
           onEmptyMetricData={() => {
@@ -51,19 +50,26 @@ const ModelManagerTab: React.FC<Props> = ({ activeKey, onMenuChange }) => {
       label: '维度管理',
       key: 'dimension',
       children: <ClassDimensionTable />,
-      // children: <Dimension />,
     },
     {
-      label: '权限管理',
-      key: 'permissonSetting',
-      children: <PermissionSection permissionTarget={'model'} />,
+      label: '模型成员与使用范围',
+      key: MODEL_MEMBER_SETTING_KEY,
+      children: <PermissionAdminForm permissionTarget="model" />,
     },
+    ...(isSuperAdmin
+      ? [
+          {
+            label: '细粒度数据授权组',
+            key: DATA_PERMISSION_SETTING_KEY,
+            children: <PermissionTable />,
+          },
+        ]
+      : []),
   ];
 
   const getActiveKey = () => {
-    const key = activeKey || defaultTabKey;
-    const tabItems = isModelItem;
-    const tabItemsKeys = tabItems.map((item) => item.key);
+    const key = normalizeModelMenuKey(activeKey || defaultTabKey);
+    const tabItemsKeys = isModelItem.map((item) => item.key);
     if (!tabItemsKeys.includes(key)) {
       return tabItemsKeys[0];
     }
@@ -78,7 +84,7 @@ const ModelManagerTab: React.FC<Props> = ({ activeKey, onMenuChange }) => {
         activeKey={getActiveKey()}
         size="large"
         onChange={(menuKey: string) => {
-          onMenuChange?.(menuKey);
+          onMenuChange?.(normalizeModelMenuKey(menuKey));
         }}
       />
     </div>

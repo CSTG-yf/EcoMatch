@@ -1,6 +1,7 @@
 package com.tencent.supersonic.chat.server.agent;
 
 import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.chat.server.memory.MemoryReviewTask;
 import com.tencent.supersonic.common.pojo.ChatApp;
@@ -41,6 +42,41 @@ public class Agent extends RecordInfo {
     private List<String> adminOrgs = Lists.newArrayList();
     private List<String> viewOrgs = Lists.newArrayList();
     private Integer isOpen = 0;
+    @JsonIgnore
+    private transient boolean adminsSpecified;
+    @JsonIgnore
+    private transient boolean viewersSpecified;
+    @JsonIgnore
+    private transient boolean adminOrgsSpecified;
+    @JsonIgnore
+    private transient boolean viewOrgsSpecified;
+    @JsonIgnore
+    private transient boolean isOpenSpecified;
+
+    public void setAdmins(List<String> admins) {
+        this.admins = admins == null ? Lists.newArrayList() : admins;
+        this.adminsSpecified = true;
+    }
+
+    public void setViewers(List<String> viewers) {
+        this.viewers = viewers == null ? Lists.newArrayList() : viewers;
+        this.viewersSpecified = true;
+    }
+
+    public void setAdminOrgs(List<String> adminOrgs) {
+        this.adminOrgs = adminOrgs == null ? Lists.newArrayList() : adminOrgs;
+        this.adminOrgsSpecified = true;
+    }
+
+    public void setViewOrgs(List<String> viewOrgs) {
+        this.viewOrgs = viewOrgs == null ? Lists.newArrayList() : viewOrgs;
+        this.viewOrgsSpecified = true;
+    }
+
+    public void setIsOpen(Integer isOpen) {
+        this.isOpen = isOpen;
+        this.isOpenSpecified = true;
+    }
 
     public List<String> getTools(AgentToolType type) {
         Map<String, Object> map = JSONObject.parseObject(toolConfig, Map.class);

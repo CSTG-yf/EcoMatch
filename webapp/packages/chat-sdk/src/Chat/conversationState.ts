@@ -1,14 +1,47 @@
-import { ConversationDetailType, MessageItem } from './type';
+import { DEFAULT_CONVERSATION_NAME } from './constants';
+import { AgentType, ConversationDetailType, MessageItem } from './type';
 
-export const selectInitialConversation = (
+export const findConversationByChatId = (
   conversations: ConversationDetailType[],
-  storedConversationId?: string | null
+  chatId?: number | string
 ) => {
-  if (!storedConversationId) {
-    return conversations[0];
+  const normalizedChatId = Number(chatId);
+  if (!Number.isFinite(normalizedChatId)) {
+    return undefined;
   }
-  const conversationId = Number(storedConversationId);
-  return conversations.find(item => item.chatId === conversationId) || conversations[0];
+  return conversations.find(item => item.chatId === normalizedChatId);
+};
+
+export const findConversationAgent = (
+  conversation: ConversationDetailType,
+  agentList: AgentType[]
+) => agentList.find(agent => agent.id === conversation.agentId);
+
+export const getConversationDisplayTitle = (
+  conversation: ConversationDetailType,
+  agentList: AgentType[]
+) => {
+  const agent = findConversationAgent(conversation, agentList);
+  return conversation.chatName === DEFAULT_CONVERSATION_NAME && agent
+    ? agent.name
+    : conversation.chatName;
+};
+
+export const matchesConversationSearch = (
+  conversation: ConversationDetailType,
+  agentList: AgentType[],
+  searchValue: string
+) => {
+  const keyword = searchValue.trim().toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+  const agentName = findConversationAgent(conversation, agentList)?.name || '';
+  return [
+    getConversationDisplayTitle(conversation, agentList),
+    agentName,
+    conversation.lastQuestion || '',
+  ].some(value => value.toLowerCase().includes(keyword));
 };
 
 export const mergeHistoryMessages = (

@@ -54,6 +54,8 @@ public interface ChatManageService {
 
     void checkChatAccess(Long chatId, User user);
 
+    ChatDO getAuthorizedChat(Long chatId, User user);
+
     void updateParseCostTime(ChatParseResp chatParseResp);
 
     List<ChatParseDO> batchAddParse(ChatParseReq chatParseReq, ChatParseResp chatParseResp);

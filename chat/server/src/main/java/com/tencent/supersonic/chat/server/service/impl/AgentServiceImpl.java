@@ -101,6 +101,7 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
     @Override
     public Agent updateAgent(Agent agent, User user) {
         Agent stored = getManageableAgent(agent == null ? null : agent.getId(), user);
+        preserveUnspecifiedPermissions(agent, stored);
         agent.setId(stored.getId());
         agent.setCreatedBy(stored.getCreatedBy());
         agent.setCreatedAt(stored.getCreatedAt());
@@ -110,6 +111,24 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
         Agent updated = convert(agentDO);
         executeAgentExamplesAsync(updated);
         return updated;
+    }
+
+    private void preserveUnspecifiedPermissions(Agent target, Agent stored) {
+        if (!target.isAdminsSpecified()) {
+            target.setAdmins(stored.getAdmins());
+        }
+        if (!target.isViewersSpecified()) {
+            target.setViewers(stored.getViewers());
+        }
+        if (!target.isAdminOrgsSpecified()) {
+            target.setAdminOrgs(stored.getAdminOrgs());
+        }
+        if (!target.isViewOrgsSpecified()) {
+            target.setViewOrgs(stored.getViewOrgs());
+        }
+        if (!target.isOpenSpecified()) {
+            target.setIsOpen(stored.getIsOpen());
+        }
     }
 
     @Override

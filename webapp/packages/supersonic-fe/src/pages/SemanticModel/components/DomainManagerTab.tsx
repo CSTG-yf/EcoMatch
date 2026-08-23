@@ -66,7 +66,7 @@ const DomainManagerTab: React.FC<Props> = ({ activeKey, onMenuChange }) => {
       children: <TermTable />,
     },
     {
-      label: '权限管理',
+      label: '主题域成员与管理员',
       key: 'permissonSetting',
       hidden: !!domainData?.parentId,
       children: <PermissionSection permissionTarget={'domain'} />,

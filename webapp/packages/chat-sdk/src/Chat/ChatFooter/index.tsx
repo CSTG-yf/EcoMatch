@@ -1,6 +1,7 @@
 import IconFont from '../../components/IconFont';
 import { getTextWidth, groupByColumn, isMobile } from '../../utils/utils';
-import { AutoComplete, Select, Tag } from 'antd';
+import { AutoComplete, Empty, Popover, Select, Spin, Tag } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import classNames from 'classnames';
 import { debounce } from 'lodash';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -16,13 +17,14 @@ type Props = {
   chatId?: number;
   currentAgent?: AgentType;
   agentList: AgentType[];
+  agentLoading?: boolean;
+  agentError?: string;
+  disabled?: boolean;
   onToggleHistoryVisible: () => void;
   onOpenAgents: () => void;
   onInputMsgChange: (value: string) => void;
   onSendMsg: (msg: string, dataSetId?: number) => void;
-  onAddConversation: (agent?: AgentType) => void;
   onSelectAgent: (agent: AgentType) => void;
-  onOpenShowcase: () => void;
 };
 
 const { OptGroup, Option } = Select;
@@ -43,13 +45,14 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
     chatId,
     currentAgent,
     agentList,
+    agentLoading,
+    agentError,
+    disabled,
     onToggleHistoryVisible,
     onOpenAgents,
     onInputMsgChange,
     onSendMsg,
-    onAddConversation,
     onSelectAgent,
-    onOpenShowcase,
   },
   ref
 ) => {
@@ -57,11 +60,14 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   const [stepOptions, setStepOptions] = useState<Record<string, any[]>>({});
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const inputRef = useRef<any>();
   const fetchRef = useRef(0);
 
   const inputFocus = () => {
-    inputRef.current?.focus();
+    if (!disabled) {
+      inputRef.current?.focus();
+    }
   };
 
   const inputBlur = () => {
@@ -71,12 +77,15 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   useImperativeHandle(ref, () => ({
     inputFocus,
     inputBlur,
+    openAgentSelector: () => setAgentSelectorOpen(true),
   }));
 
   const initEvents = () => {
     const autoCompleteEl = document.getElementById('chatInput');
-    autoCompleteEl!.addEventListener('compositionstart', compositionStartEvent);
-    autoCompleteEl!.addEventListener('compositionend', compositionEndEvent);
+    if (autoCompleteEl) {
+      autoCompleteEl.addEventListener('compositionstart', compositionStartEvent);
+      autoCompleteEl.addEventListener('compositionend', compositionEndEvent);
+    }
   };
 
   const removeEvents = () => {
@@ -149,6 +158,14 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   const [debounceGetWords] = useState<any>(debounceGetWordsFunc);
 
   useEffect(() => {
+    if (disabled) {
+      debounceGetWords.cancel();
+      fetchRef.current += 1;
+      setOpen(false);
+      setModelOptions([]);
+      setStepOptions({});
+      return;
+    }
     if (inputMsg.length === 1 && inputMsg[0] === '/') {
       setOpen(true);
       setModelOptions(agentList);
@@ -160,16 +177,17 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
         setModelOptions([]);
       }, 50);
     }
-    if (!isSelect) {
+    if (!isSelect && currentAgent && chatId) {
       debounceGetWords(inputMsg, chatId, currentAgent);
     } else {
       isSelect = false;
     }
     if (!inputMsg) {
+      debounceGetWords.cancel();
+      fetchRef.current += 1;
       setStepOptions({});
-      fetchRef.current = 0;
     }
-  }, [inputMsg]);
+  }, [inputMsg, disabled, chatId, currentAgent?.id]);
 
   useEffect(() => {
     if (!focused) {
@@ -195,6 +213,9 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   }, [stepOptions]);
 
   const sendMsg = (value: string) => {
+    if (disabled || !value.trim()) {
+      return;
+    }
     const option = Object.keys(stepOptions)
       .reduce((result: any[], item) => {
         result = result.concat(stepOptions[item]);
@@ -321,11 +342,37 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
   }, [modelOptionNodes.length, associateOptionNodes.length]);
 
   const { isComposing } = useComposing(document.getElementById('chatInput'));
+  const agentSelectorContent = (
+    <div className={styles.agentSelectorContent}>
+      {agentLoading ? (
+        <Spin size="small" />
+      ) : agentError ? (
+        <div className={styles.agentState}>{agentError}</div>
+      ) : agentList.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可用助理" />
+      ) : (
+        agentList.map(agent => (
+          <button
+            type="button"
+            key={agent.id}
+            className={classNames(styles.agentOption, {
+              [styles.agentOptionActive]: currentAgent?.id === agent.id,
+            })}
+            onClick={() => {
+              onSelectAgent(agent);
+              setAgentSelectorOpen(false);
+            }}
+          >
+            <strong>{agent.name}</strong>
+            {agent.description && <span>{agent.description}</span>}
+          </button>
+        ))
+      )}
+    </div>
+  );
 
   return (
     <div className={chatFooterClass}>
-      {/* 输入区保持最简：桌面端只保留输入框；移动端工具条保留历史对话/智能助理入口
-          （新建对话入口在历史面板内的 + 按钮）。 */}
       {isMobile && (
         <div className={styles.tools}>
           <button
@@ -338,39 +385,30 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
             <IconFont type="icon-lishi" className={styles.toolIcon} />
             <span className={styles.toolLabel}>历史对话</span>
           </button>
-          {agentList.length > 1 && (
-            <button
-              type="button"
-              className={styles.toolItem}
-              aria-label="智能助理"
-              title="智能助理"
-              onClick={onOpenAgents}
-            >
-              <IconFont type="icon-zhinengzhuli" className={styles.toolIcon} />
-              <span className={styles.toolLabel}>智能助理</span>
-            </button>
-          )}
+          <button
+            type="button"
+            className={styles.toolItem}
+            aria-label="智能助理"
+            title="智能助理"
+            onClick={onOpenAgents}
+          >
+            <IconFont type="icon-zhinengzhuli" className={styles.toolIcon} />
+            <span className={styles.toolLabel}>智能助理</span>
+          </button>
         </div>
       )}
       <div className={styles.composer}>
         <div className={styles.composerInputWrapper}>
           <AutoComplete
             className={styles.composerInput}
-            placeholder={
-              currentAgent
-                ? agentList.length > 1
-                  ? `【${currentAgent.name}】将与您对话，点击${
-                      !isMobile ? '左侧' : ''
-                    }【智能助理】${!isMobile ? '列表' : ''}可切换`
-                  : `【${currentAgent.name}】将与您对话，请输入您的问题`
-                : '请输入您的问题'
-            }
+            placeholder={disabled ? '请先选择助理' : '请输入您的问题'}
             value={inputMsg}
+            disabled={disabled}
             onChange={(value: string) => {
               onInputMsgChange(value);
             }}
             onSelect={onSelect}
-            autoFocus={!isMobile}
+            autoFocus={!isMobile && !disabled}
             ref={inputRef}
             id="chatInput"
             onKeyDown={e => {
@@ -380,9 +418,7 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
                   item => chatInputEl.value[0] === '/' && chatInputEl.value.includes(item.name)
                 );
                 if (agent) {
-                  if (agent.id !== currentAgent?.id) {
-                    onSelectAgent(agent);
-                  }
+                  onSelectAgent(agent);
                   onInputMsgChange('');
                   return;
                 }
@@ -401,22 +437,43 @@ const ChatFooter: ForwardRefRenderFunction<any, Props> = (
             dropdownClassName={autoCompleteDropdownClass}
             listHeight={500}
             allowClear
-            open={open}
+            open={!disabled && open}
             defaultActiveFirstOption={false}
             getPopupContainer={triggerNode => triggerNode.parentNode}
           >
             {modelOptions.length > 0 ? modelOptionNodes : associateOptionNodes}
           </AutoComplete>
-          <div
+          <div className={styles.composerActions}>
+            <Popover
+              content={agentSelectorContent}
+              title="选择助理"
+              trigger="click"
+              open={agentSelectorOpen}
+              onOpenChange={setAgentSelectorOpen}
+              placement="topLeft"
+            >
+              <button type="button" className={styles.agentSelector} aria-label="选择助理">
+                <PlusOutlined />
+                <span>选择助理</span>
+              </button>
+            </Popover>
+            <span className={styles.agentStatus}>
+              {currentAgent ? `【${currentAgent.name}】将与您对话` : '请选择助理后开始对话'}
+            </span>
+          </div>
+          <button
+            type="button"
+            aria-label="发送"
+            disabled={disabled || !inputMsg.trim()}
             className={classNames(styles.sendBtn, {
-              [styles.sendBtnActive]: inputMsg?.length > 0,
+              [styles.sendBtnActive]: !disabled && inputMsg.trim().length > 0,
             })}
             onClick={() => {
               sendMsg(inputMsg);
             }}
           >
             <IconFont type="icon-ios-send" />
-          </div>
+          </button>
         </div>
       </div>
     </div>

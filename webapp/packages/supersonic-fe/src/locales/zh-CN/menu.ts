@@ -7,7 +7,7 @@ export default {
   'menu.exception.not-permission': '403',
   'menu.exception.not-find': '404',
   'menu.exception.server-error': '500',
-  'menu.semanticModel': '语义模型',
+  'menu.semanticModel': '语义建模',
   'menu.metric': '指标知识库',
   'menu.governance': '指标治理',
   'menu.metric.metricDetail': '指标详情页',

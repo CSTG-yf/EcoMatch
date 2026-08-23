@@ -236,7 +236,11 @@ const System: React.FC = () => {
                   excuteDepConfig(valueKey, values);
                 }}
               >
-                <FormItem name="admins" label="管理员">
+                <FormItem
+                  name="admins"
+                  label="系统参数维护人"
+                  extra="本页用于系统参数维护，不负责用户账号、岗位角色或模型数据授权。"
+                >
                   <SelectTMEPerson placeholder="请邀请团队成员" />
                 </FormItem>
 

@@ -6,40 +6,50 @@ import {
   forwardRef,
   ForwardRefRenderFunction,
   useImperativeHandle,
-  memo,
   useRef,
 } from 'react';
 import ConversationModal from '../components/ConversationModal';
 import { deleteConversation, getAllConversations, saveConversation } from '../service';
 import styles from './style.module.less';
 import { AgentType, ConversationDetailType } from '../type';
-import { DEFAULT_CONVERSATION_NAME } from '../constants';
 import moment from 'moment';
 import { CloseOutlined, DeleteOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { selectInitialConversation } from '../conversationState';
+import {
+  findConversationAgent,
+  findConversationByChatId,
+  getConversationDisplayTitle,
+  matchesConversationSearch,
+} from '../conversationState';
 
 type Props = {
+  agentList: AgentType[];
   currentAgent?: AgentType;
   currentConversation?: ConversationDetailType;
   historyVisible?: boolean;
   closable?: boolean;
   onSelectConversation: (
     conversation: ConversationDetailType,
+    agent: AgentType,
     sendMsgParams?: any,
     isAdd?: boolean
   ) => void;
+  onRequestAgentSelection: () => void;
   onCloseConversation: () => void;
+  onConversationDeleted: (chatId: number) => void;
   onInitializationChange: (loading: boolean, error?: string) => void;
 };
 
 const Conversation: ForwardRefRenderFunction<any, Props> = (
   {
+    agentList,
     currentAgent,
     currentConversation,
     historyVisible,
     closable,
     onSelectConversation,
+    onRequestAgentSelection,
     onCloseConversation,
+    onConversationDeleted,
     onInitializationChange,
   },
   ref
@@ -52,24 +62,13 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   const [loadError, setLoadError] = useState('');
   const requestIdRef = useRef(0);
 
-  useImperativeHandle(ref, () => ({
-    updateData,
-    onAddConversation,
-    initData,
-  }));
-
-  const updateData = async (agentId?: number) => {
-    const resolvedAgentId = agentId || currentAgent?.id;
-    if (!resolvedAgentId) {
-      setConversations([]);
-      return [];
-    }
+  const updateData = async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setLoadError('');
     try {
-      const { data } = await getAllConversations(resolvedAgentId);
-      const conversationList = (data || []).slice(0, 200);
+      const { data } = await getAllConversations();
+      const conversationList = data || [];
       if (requestId === requestIdRef.current) {
         setConversations(conversationList);
       }
@@ -89,60 +88,63 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   const initData = async () => {
     onInitializationChange(true);
     try {
-      const data = await updateData();
-      if (data.length > 0) {
-        const conversation = selectInitialConversation(
-          data,
-          localStorage.getItem('CONVERSATION_ID')
-        );
-        if (conversation) {
-          onSelectConversation(conversation);
-        }
-      } else {
-        await onAddConversation();
-      }
+      await updateData();
+      onInitializationChange(false);
     } catch (error) {
-      onInitializationChange(false, '会话初始化失败，请重试');
+      onInitializationChange(false, '历史会话加载失败，请重试');
+    }
+  };
+
+  const createConversationForAgent = async (agent: AgentType, sendMsgParams?: any) => {
+    const response = await saveConversation(agent.name, agent.id);
+    const chatId = Number(response?.data ?? response);
+    const data = await updateData();
+    const conversation = findConversationByChatId(data, chatId);
+    if (!conversation) {
+      throw new Error('新会话创建成功，但未能加载该会话');
+    }
+    if (conversation.agentId !== agent.id) {
+      throw new Error('新会话绑定的助理不一致');
+    }
+    return {
+      ...conversation,
+      initialMsgParams: sendMsgParams,
+      isAdd: true,
+    };
+  };
+
+  const onAddConversation = async (sendMsgParams?: any) => {
+    if (!currentAgent) {
+      message.warning('请先选择一个智能助理');
+      onRequestAgentSelection();
       return;
     }
-    onInitializationChange(false);
+    try {
+      const conversation = await createConversationForAgent(currentAgent, sendMsgParams);
+      onSelectConversation(conversation, currentAgent, sendMsgParams, true);
+    } catch (error) {
+      message.error('新会话创建失败，请重试');
+    }
   };
+
+  useImperativeHandle(ref, () => ({
+    updateData,
+    onAddConversation,
+    initData,
+    createConversationForAgent,
+  }));
 
   useEffect(() => {
-    if (currentAgent) {
-      setConversations([]);
-      setSearchValue('');
-      if (currentAgent.initialSendMsgParams) {
-        onAddConversation(currentAgent.initialSendMsgParams);
-      } else {
-        initData();
-      }
-    }
-  }, [currentAgent]);
-
-  const addConversation = async (sendMsgParams?: any) => {
-    const agentId = sendMsgParams?.agentId || currentAgent?.id;
-    if (!agentId) {
-      message.warning('请先选择一个智能助理');
-      return [];
-    }
-    await saveConversation(DEFAULT_CONVERSATION_NAME, agentId);
-    return updateData(agentId);
-  };
+    initData();
+  }, []);
 
   const onDeleteConversation = async (id: number) => {
     try {
       await deleteConversation(id);
-      await initData();
+      onConversationDeleted(id);
+      await updateData();
     } catch (error) {
       message.error('删除会话失败，请重试');
-    }
-  };
-
-  const onAddConversation = async (sendMsgParams?: any) => {
-    const data = await addConversation(sendMsgParams);
-    if (data.length > 0) {
-      onSelectConversation(data[0], sendMsgParams, true);
     }
   };
 
@@ -235,12 +237,12 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史会话" />
             )}
             {conversations
-              .filter(
-                conversation =>
-                  searchValue === '' ||
-                  conversation.chatName.toLowerCase().includes(searchValue.toLowerCase())
+              .filter(conversation =>
+                matchesConversationSearch(conversation, agentList, searchValue)
               )
               .map(item => {
+                const itemAgent = findConversationAgent(item, agentList);
+                const displayTitle = getConversationDisplayTitle(item, agentList);
                 const conversationItemClass = classNames(styles.conversationItem, {
                   [styles.activeConversationItem]: currentConversation?.chatId === item.chatId,
                 });
@@ -263,13 +265,17 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
                     <div
                       className={conversationItemClass}
                       onClick={() => {
-                        onSelectConversation(item);
+                        if (!itemAgent) {
+                          message.error('该会话绑定的助理当前不可用');
+                          return;
+                        }
+                        onSelectConversation(item, itemAgent);
                       }}
                     >
                       <div className={styles.conversationContent}>
                         <div className={styles.topTitleBar}>
                           <div className={styles.conversationTitleBar}>
-                            <div className={styles.conversationName}>{item.chatName}</div>
+                            <div className={styles.conversationName}>{displayTitle}</div>
                           </div>
                           <div className={styles.conversationTime}>
                             {convertTime(item.lastTime || '')}
@@ -278,6 +284,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
                         <div className={styles.bottomSection}>
                           <div className={styles.subTitle}>{item.lastQuestion}</div>
                           <DeleteOutlined
+                            aria-label="删除会话"
                             className={styles.deleteIcon}
                             onClick={e => {
                               e.stopPropagation();
@@ -308,17 +315,4 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   );
 };
 
-function areEqual(prevProps: Props, nextProps: Props) {
-  if (
-    prevProps.currentAgent?.id === nextProps.currentAgent?.id &&
-    prevProps.currentConversation?.chatId === nextProps.currentConversation?.chatId &&
-    prevProps.historyVisible === nextProps.historyVisible &&
-    prevProps.closable === nextProps.closable &&
-    prevProps.onInitializationChange === nextProps.onInitializationChange
-  ) {
-    return true;
-  }
-  return false;
-}
-
-export default memo(forwardRef(Conversation), areEqual);
+export default forwardRef(Conversation);

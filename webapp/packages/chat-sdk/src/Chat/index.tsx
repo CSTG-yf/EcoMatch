@@ -21,7 +21,7 @@ import { HistoryMsgItemType, MsgDataType, SendMsgParamsType } from '../common/ty
 import { getHistoryMsg } from '../service';
 import ShowCase from '../ShowCase';
 import { jsonParse } from '../utils/utils';
-import { Alert, Button, ConfigProvider, Drawer, Modal, Spin } from 'antd';
+import { Alert, Button, ConfigProvider, Drawer, message, Modal, Spin } from 'antd';
 import { buildContinuationDraft, mergeHistoryMessages } from './conversationState';
 import locale from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
@@ -34,7 +34,6 @@ type Props = {
   token?: string;
   agentIds?: number[];
   initialAgentId?: number;
-  defaultAgentName?: string;
   chatVisible?: boolean;
   noInput?: boolean;
   isDeveloper?: boolean;
@@ -51,7 +50,6 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     token,
     agentIds,
     initialAgentId,
-    defaultAgentName,
     chatVisible,
     noInput,
     isDeveloper,
@@ -76,9 +74,11 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const [conversationInitializing, setConversationInitializing] = useState(false);
   const [conversationError, setConversationError] = useState('');
   const [mobileHistoryVisible, setMobileHistoryVisible] = useState(false);
-  // 桌面端固定展示；移动端由底部入口打开全屏历史面板。
   const historyVisible = !isMobile || mobileHistoryVisible;
   const [agentList, setAgentList] = useState<AgentType[]>([]);
+  const [agentLoading, setAgentLoading] = useState(true);
+  const [agentError, setAgentError] = useState('');
+  const [agentSwitching, setAgentSwitching] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<AgentType>();
   const [mobileAgentsVisible, setMobileAgentsVisible] = useState(false);
   const [showCaseVisible, setShowCaseVisible] = useState(false);
@@ -89,76 +89,130 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   const conversationRef = useRef<any>();
   const chatFooterRef = useRef<any>();
   const historyRequestRef = useRef(0);
+  const agentSelectionRequestRef = useRef(0);
+  const selectedAgentIdRef = useRef<number>();
+  const pendingCopilotParamsRef = useRef<SendMsgParamsType>();
+
+  const updateAgentConfigMode = (agent: AgentType) => {
+    const toolConfig = jsonParse(agent?.toolConfig, {});
+    const { simpleMode, debugMode } = toolConfig;
+    setIsSimpleMode(isBoolean(simpleMode) ? simpleMode : false);
+    setIsDebugMode(isBoolean(debugMode) ? debugMode : true);
+  };
+
+  const updateAgentIdInUrl = (agent: AgentType) => {
+    if (isCopilot) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('agentId', `${agent.id}`);
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const bindCurrentAgent = (agent: AgentType) => {
+    selectedAgentIdRef.current = agent.id;
+    setCurrentAgent(agent);
+    onCurrentAgentChange?.(agent);
+    updateAgentConfigMode(agent);
+    updateAgentIdInUrl(agent);
+  };
+
+  const clearConversationContext = () => {
+    historyRequestRef.current += 1;
+    setCurrentConversation(undefined);
+    setMessageList([]);
+    setInputMsg('');
+    setConversationError('');
+  };
+
+  const selectAgentAndCreateConversation = async (
+    agent: AgentType,
+    sendMsgParams?: SendMsgParamsType,
+    forceCreate = false
+  ) => {
+    if (!forceCreate && !sendMsgParams && agent.id === selectedAgentIdRef.current) {
+      return;
+    }
+    const requestId = ++agentSelectionRequestRef.current;
+    clearConversationContext();
+    bindCurrentAgent(agent);
+    setAgentSwitching(true);
+    try {
+      const conversation = await conversationRef.current?.createConversationForAgent(
+        agent,
+        sendMsgParams
+      );
+      if (!conversation) {
+        throw new Error('会话创建失败');
+      }
+      if (requestId !== agentSelectionRequestRef.current) {
+        return;
+      }
+      setCurrentConversation(conversation);
+      setMobileAgentsVisible(false);
+      updateMessageContainerScroll();
+    } catch (error) {
+      if (requestId === agentSelectionRequestRef.current) {
+        setConversationError('新会话创建失败，请重试');
+      }
+    } finally {
+      if (requestId === agentSelectionRequestRef.current) {
+        setAgentSwitching(false);
+      }
+    }
+  };
+
+  const sendCopilotMsg = (params: SendMsgParamsType) => {
+    const agent = agentList.find(item => item.id === params.agentId);
+    if (!agent) {
+      if (agentLoading) {
+        pendingCopilotParamsRef.current = params;
+      } else {
+        message.error('指定助理不可用或无访问权限');
+      }
+      return;
+    }
+    if (currentAgent?.id !== agent.id || !currentConversation) {
+      selectAgentAndCreateConversation(agent, params);
+      return;
+    }
+    onSendMsg(params.msg, messageList, params.modelId, params);
+  };
 
   useImperativeHandle(ref, () => ({
     sendCopilotMsg,
   }));
 
-  const sendCopilotMsg = (params: SendMsgParamsType) => {
-    const { agentId, msg, modelId } = params;
-    if (currentAgent?.id !== agentId) {
-      setMessageList([]);
-      const agent = agentList.find(item => item.id === agentId) || ({} as AgentType);
-      updateCurrentAgent({ ...agent, initialSendMsgParams: params });
-    } else {
-      onSendMsg(msg, messageList, modelId, params);
-    }
-  };
-
-  const updateAgentConfigMode = (agent: AgentType) => {
-    const toolConfig = jsonParse(agent?.toolConfig, {});
-    const { simpleMode, debugMode } = toolConfig;
-    if (isBoolean(simpleMode)) {
-      setIsSimpleMode(simpleMode);
-    } else {
-      setIsSimpleMode(false);
-    }
-    if (isBoolean(debugMode)) {
-      setIsDebugMode(debugMode);
-    } else {
-      setIsDebugMode(true);
-    }
-  };
-
-  const updateCurrentAgent = (agent?: AgentType) => {
-    historyRequestRef.current += 1;
-    setCurrentConversation(undefined);
-    setMessageList([]);
-    setConversationError('');
-    setCurrentAgent(agent);
-    onCurrentAgentChange?.(agent);
-    if (agent) {
-      updateAgentConfigMode(agent);
-    }
-    if (!isCopilot) {
-      // Copilot 浮窗是独立问数面，不得污染主对话页持久化的 agent 选择，
-      // 否则主对话页会被浮窗的默认选择（列表第一位）抢走。
-      localStorage.setItem('AGENT_ID', `${agent?.id}`);
-      window.history.replaceState({}, '', `${window.location.pathname}?agentId=${agent?.id}`);
-    }
-  };
-
   const initAgentList = async () => {
-    const res = await queryAgentList();
-    const agentListValue = (res.data || []).filter(
-      item => item.status === 1 && (agentIds === undefined || agentIds.includes(item.id))
-    );
-    setAgentList(agentListValue);
-    if (agentListValue.length > 0) {
-      const explicitAgent = initialAgentId
-        ? agentListValue.find(item => item.id === initialAgentId)
-        : undefined;
-      const preferredAgent = defaultAgentName
-        ? agentListValue.find(item => item.name === defaultAgentName)
-        : undefined;
-      const persistedAgentId = localStorage.getItem('AGENT_ID');
-      const persistedAgent = persistedAgentId
-        ? agentListValue.find(item => item.id === +persistedAgentId)
-        : undefined;
-
-      // 显式深链仍可用于兼容旧功能；普通入口始终优先进入银行问数基座，
-      // 旧版本遗留的 AGENT_ID 不得把用户带回闲聊或样例助理。
-      updateCurrentAgent(explicitAgent || preferredAgent || persistedAgent || agentListValue[0]);
+    setAgentLoading(true);
+    setAgentError('');
+    try {
+      const res = await queryAgentList();
+      const agentListValue = (res.data || []).filter(
+        item => item.status === 1 && (agentIds === undefined || agentIds.includes(item.id))
+      );
+      setAgentList(agentListValue);
+      const pendingParams = pendingCopilotParamsRef.current;
+      if (pendingParams) {
+        pendingCopilotParamsRef.current = undefined;
+        const pendingAgent = agentListValue.find(item => item.id === pendingParams.agentId);
+        if (pendingAgent) {
+          await selectAgentAndCreateConversation(pendingAgent, pendingParams);
+        } else {
+          message.error('指定助理不可用或无访问权限');
+        }
+      } else if (initialAgentId) {
+        const explicitAgent = agentListValue.find(item => item.id === initialAgentId);
+        if (explicitAgent) {
+          await selectAgentAndCreateConversation(explicitAgent);
+        } else {
+          message.error('指定助理不可用或无访问权限');
+        }
+      }
+    } catch (error) {
+      setAgentError('助理列表加载失败，请重试');
+    } finally {
+      setAgentLoading(false);
     }
   };
 
@@ -227,7 +281,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     ]);
   };
 
-  const convertHistoryMsg = (list: HistoryMsgItemType[]) => {
+  const convertHistoryMsg = (list: HistoryMsgItemType[]): MessageItem[] => {
     return list.map((item: HistoryMsgItemType) => ({
       id: item.questionId,
       questionId: item.questionId,
@@ -235,9 +289,9 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
       msg: item.queryText,
       parseInfos: item.parseInfos,
       parseTimeCost: item.parseTimeCost,
-      msgData: { ...(item.queryResult || {}), similarQueries: item.similarQueries },
+      msgData: { ...(item.queryResult || {}), similarQueries: item.similarQueries } as MsgDataType,
       score: item.score,
-      agentId: currentAgent?.id,
+      agentId: currentConversation?.agentId,
     }));
   };
 
@@ -322,30 +376,32 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     modelId?: number,
     sendMsgParams?: SendMsgParamsType
   ) => {
+    if (!currentAgent || !currentConversation || agentSwitching) {
+      return;
+    }
     const currentMsg = msg || inputMsg;
     if (currentMsg.trim() === '') {
       setInputMsg('');
       return;
     }
 
-    const msgAgent = agentList.find(item => currentMsg.indexOf(item.name) === 1);
-    const certainAgent = currentMsg[0] === '/' && msgAgent;
-    const agentIdValue = certainAgent ? msgAgent.id : undefined;
-    const agent = agentList.find(item => item.id === sendMsgParams?.agentId);
-
-    if (agent || certainAgent) {
-      updateCurrentAgent(agent || msgAgent);
+    const msgAgent = agentList.find(item => currentMsg.indexOf(`/${item.name}`) === 0);
+    if (msgAgent) {
+      setInputMsg('');
+      await selectAgentAndCreateConversation(msgAgent);
+      return;
+    }
+    if (sendMsgParams?.agentId && sendMsgParams.agentId !== currentAgent.id) {
+      return;
     }
     const msgs = [
       ...(list || messageList),
       {
         id: uuid(),
         msg: currentMsg,
-        msgValue: certainAgent
-          ? currentMsg.replace(`/${certainAgent.name}`, '').trim()
-          : currentMsg,
+        msgValue: currentMsg,
         modelId: modelId === -1 ? undefined : modelId,
-        agentId: agent?.id || agentIdValue || currentAgent?.id,
+        agentId: currentAgent.id,
         type: MessageTypeEnum.QUESTION,
         filters: sendMsgParams?.filters,
       },
@@ -360,27 +416,25 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     setInputMsg(inputMsgValue);
   };
 
-  const saveConversationToLocal = (conversation: ConversationDetailType) => {
-    if (conversation) {
-      if (conversation.chatId !== -1) {
-        localStorage.setItem('CONVERSATION_ID', `${conversation.chatId}`);
-      }
-    } else {
-      localStorage.removeItem('CONVERSATION_ID');
-    }
-  };
-
   const onSelectConversation = (
     conversation: ConversationDetailType,
+    agent: AgentType,
     sendMsgParams?: SendMsgParamsType,
     isAdd?: boolean
   ) => {
+    if (conversation.agentId !== agent.id) {
+      message.error('会话绑定的助理不一致，无法恢复');
+      return;
+    }
+    agentSelectionRequestRef.current += 1;
+    clearConversationContext();
+    bindCurrentAgent(agent);
+    setAgentSwitching(false);
     setCurrentConversation({
       ...conversation,
       initialMsgParams: sendMsgParams,
       isAdd,
     });
-    saveConversationToLocal(conversation);
     if (isMobile) {
       setMobileHistoryVisible(false);
     }
@@ -395,7 +449,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
   ) => {
     onReportMsgEvent?.(question, valid);
     if (!isMobile) {
-      conversationRef?.current?.updateData(currentAgent?.id);
+      conversationRef?.current?.updateData();
     }
     if (!data) {
       return;
@@ -411,20 +465,8 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
-  const onAddConversation = () => {
-    conversationRef.current?.onAddConversation();
-    inputFocus();
-  };
-
   const onSelectAgent = (agent: AgentType) => {
-    if (agent.id === currentAgent?.id) {
-      return;
-    }
-    if (messageList.length === 1 && messageList[0].type === MessageTypeEnum.AGENT_LIST) {
-      setMessageList([]);
-    }
-    updateCurrentAgent(agent);
-    updateMessageContainerScroll();
+    selectAgentAndCreateConversation(agent);
   };
 
   const sendMsg = (msg: string, modelId?: number) => {
@@ -440,6 +482,15 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
+  const onConversationDeleted = (chatId: number) => {
+    if (currentConversation?.chatId !== chatId) {
+      return;
+    }
+    agentSelectionRequestRef.current += 1;
+    clearConversationContext();
+    setAgentSwitching(false);
+  };
+
   const chatClass = classNames(styles.chat, {
     [styles.mobile]: isMobile,
     [styles.historyVisible]: historyVisible,
@@ -451,12 +502,22 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
         <div className={styles.chatSection}>
           {/* 桌面端固定展示，移动端通过底部入口打开全屏历史面板。 */}
           <Conversation
+            agentList={agentList}
             currentAgent={currentAgent}
             currentConversation={currentConversation}
             historyVisible={historyVisible}
             closable={!!isMobile}
             onSelectConversation={onSelectConversation}
+            onRequestAgentSelection={() => {
+              setMobileHistoryVisible(false);
+              if (isMobile) {
+                setMobileAgentsVisible(true);
+              } else {
+                chatFooterRef.current?.openAgentSelector();
+              }
+            }}
             onCloseConversation={onCloseConversation}
+            onConversationDeleted={onConversationDeleted}
             onInitializationChange={(loading, error) => {
               setConversationInitializing(loading);
               setConversationError(error || '');
@@ -464,33 +525,15 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
             ref={conversationRef}
           />
           <div className={styles.chatApp}>
-            {!currentConversation && (conversationInitializing || conversationError) && (
-              <div className={styles.conversationState}>
-                {conversationInitializing ? (
-                  <Spin tip="正在加载会话" />
-                ) : (
-                  <Alert
-                    type="error"
-                    showIcon
-                    message={conversationError}
-                    action={
-                      <Button size="small" onClick={() => conversationRef.current?.initData()}>
-                        重试
-                      </Button>
-                    }
-                  />
-                )}
-              </div>
-            )}
-            {currentConversation && (
-              <div className={styles.chatBody}>
-                <div className={styles.chatContent}>
+            <div className={styles.chatBody}>
+              <div className={styles.chatContent}>
+                {currentConversation ? (
                   <MessageContainer
                     id="messageContainer"
                     isSimpleMode={isSimpleMode}
                     isDebugMode={isDebugMode}
                     messageList={messageList}
-                    chatId={currentConversation?.chatId}
+                    chatId={currentConversation.chatId}
                     historyVisible={historyVisible}
                     historyLoading={historyLoading}
                     historyError={historyError}
@@ -515,33 +558,64 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                       updateMessageContainerScroll();
                     }}
                   />
-                  {!noInput && (
-                    <ChatFooter
-                      inputMsg={inputMsg}
-                      chatId={currentConversation?.chatId}
-                      agentList={agentList}
-                      currentAgent={currentAgent}
-                      onToggleHistoryVisible={() => {
-                        setMobileAgentsVisible(false);
-                        setMobileHistoryVisible(visible => !visible);
-                      }}
-                      onOpenAgents={() => {
-                        setMobileHistoryVisible(false);
-                        setMobileAgentsVisible(true);
-                      }}
-                      onInputMsgChange={onInputMsgChange}
-                      onSendMsg={sendMsg}
-                      onAddConversation={onAddConversation}
-                      onSelectAgent={onSelectAgent}
-                      onOpenShowcase={() => {
-                        setShowCaseVisible(!showCaseVisible);
-                      }}
-                      ref={chatFooterRef}
-                    />
-                  )}
-                </div>
+                ) : (
+                  <div className={styles.conversationState}>
+                    {agentLoading || agentSwitching || conversationInitializing ? (
+                      <Spin tip={agentLoading ? '正在加载助理' : '正在创建会话'} />
+                    ) : agentError || conversationError ? (
+                      <Alert
+                        type="error"
+                        showIcon
+                        message={agentError || conversationError}
+                        action={
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              if (agentError) {
+                                initAgentList();
+                              } else if (currentAgent) {
+                                selectAgentAndCreateConversation(currentAgent, undefined, true);
+                              } else {
+                                conversationRef.current?.initData();
+                              }
+                            }}
+                          >
+                            重试
+                          </Button>
+                        }
+                      />
+                    ) : agentList.length === 0 ? (
+                      <Alert type="info" showIcon message="暂无可用助理" />
+                    ) : (
+                      <div>请先选择助理，再开始对话</div>
+                    )}
+                  </div>
+                )}
+                {!noInput && (
+                  <ChatFooter
+                    inputMsg={inputMsg}
+                    chatId={currentConversation?.chatId}
+                    agentList={agentList}
+                    agentLoading={agentLoading}
+                    agentError={agentError}
+                    disabled={!currentAgent || !currentConversation || agentSwitching}
+                    currentAgent={currentAgent}
+                    onToggleHistoryVisible={() => {
+                      setMobileAgentsVisible(false);
+                      setMobileHistoryVisible(visible => !visible);
+                    }}
+                    onOpenAgents={() => {
+                      setMobileHistoryVisible(false);
+                      setMobileAgentsVisible(true);
+                    }}
+                    onInputMsgChange={onInputMsgChange}
+                    onSendMsg={sendMsg}
+                    onSelectAgent={onSelectAgent}
+                    ref={chatFooterRef}
+                  />
+                )}
               </div>
-            )}
+            </div>
           </div>
           {currentAgent &&
             (isMobile ? (
@@ -583,6 +657,8 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
           open={mobileAgentsVisible}
           agentList={agentList}
           currentAgent={currentAgent}
+          loading={agentLoading}
+          error={agentError}
           onSelectAgent={onSelectAgent}
           onClose={() => {
             setMobileAgentsVisible(false);

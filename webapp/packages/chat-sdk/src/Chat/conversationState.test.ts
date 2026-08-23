@@ -1,23 +1,46 @@
 import {
   buildContinuationDraft,
+  findConversationAgent,
+  findConversationByChatId,
+  getConversationDisplayTitle,
+  matchesConversationSearch,
   mergeHistoryMessages,
-  selectInitialConversation,
 } from './conversationState';
 import { MessageTypeEnum } from './type';
 
 describe('conversation state', () => {
+  const agents = [
+    { id: 1, name: '银行问数' },
+    { id: 2, name: '风险助理' },
+  ] as any[];
   const conversations = [
-    { chatId: 12, chatName: '最新会话' },
-    { chatId: 8, chatName: '历史会话' },
+    { chatId: 12, agentId: 1, chatName: '新问答对话', lastQuestion: '查询贷款余额' },
+    { chatId: 8, agentId: 2, chatName: '风险专题', lastQuestion: '不良率是多少' },
   ];
 
-  it('restores a stored conversation when it still belongs to the agent', () => {
-    expect(selectInitialConversation(conversations, '8')?.chatId).toBe(8);
+  it('selects a newly saved conversation by its returned chat id', () => {
+    expect(findConversationByChatId(conversations, 8)?.chatName).toBe('风险专题');
+    expect(findConversationByChatId(conversations, '12')?.agentId).toBe(1);
+    expect(findConversationByChatId(conversations, undefined)).toBeUndefined();
   });
 
-  it('falls back to the first conversation for stale or invalid storage', () => {
-    expect(selectInitialConversation(conversations, '99')?.chatId).toBe(12);
-    expect(selectInitialConversation(conversations, 'invalid')?.chatId).toBe(12);
+  it('binds historical conversations to their authorized agent', () => {
+    expect(findConversationAgent(conversations[1], agents)?.name).toBe('风险助理');
+    expect(
+      findConversationAgent({ chatId: 9, agentId: 99, chatName: '未知助理会话' }, agents)
+    ).toBeUndefined();
+  });
+
+  it('uses the agent name only for legacy default titles', () => {
+    expect(getConversationDisplayTitle(conversations[0], agents)).toBe('银行问数');
+    expect(getConversationDisplayTitle(conversations[1], agents)).toBe('风险专题');
+  });
+
+  it('searches display title, agent name and last question', () => {
+    expect(matchesConversationSearch(conversations[0], agents, '银行')).toBe(true);
+    expect(matchesConversationSearch(conversations[1], agents, '风险助理')).toBe(true);
+    expect(matchesConversationSearch(conversations[1], agents, '不良率')).toBe(true);
+    expect(matchesConversationSearch(conversations[1], agents, '贷款')).toBe(false);
   });
 
   it('replaces messages when the first history page is loaded', () => {

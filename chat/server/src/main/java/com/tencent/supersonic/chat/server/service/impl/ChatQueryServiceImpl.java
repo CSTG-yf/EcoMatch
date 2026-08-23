@@ -10,6 +10,7 @@ import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.executor.ChatQueryExecutor;
 import com.tencent.supersonic.chat.server.parser.ChatQueryParser;
+import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.pojo.ExecuteContext;
 import com.tencent.supersonic.chat.server.pojo.ParseContext;
@@ -434,7 +435,17 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     ChatQueryDO requireAuthorizedStoredQuery(Long queryId, User user) {
         ChatQueryDO storedQuery = requireStoredQuery(queryId);
-        chatManageService.checkChatAccess(storedQuery.getChatId(), user);
+        Long chatId = storedQuery.getChatId();
+        if (chatId != null && chatId > 0) {
+            ChatDO chat = chatManageService.getAuthorizedChat(chatId, user);
+            if (storedQuery.getAgentId() == null || chat.getAgentId() == null
+                    || !Objects.equals(storedQuery.getAgentId(), chat.getAgentId())) {
+                throw new InvalidPermissionException(
+                        "Persisted query agent does not match chat agent: " + queryId);
+            }
+        } else {
+            chatManageService.checkChatAccess(chatId, user);
+        }
         return storedQuery;
     }
 
