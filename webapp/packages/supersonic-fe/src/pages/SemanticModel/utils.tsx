@@ -10,6 +10,14 @@ import { isString, isBoolean } from 'lodash';
 import { ReactNode } from 'react';
 import { history } from '@umijs/max';
 import { openNewPage } from '@/utils/utils';
+import { buildModelManagerPath } from './modelNavigation';
+
+export {
+  DATA_PERMISSION_SETTING_KEY,
+  LEGACY_MODEL_PERMISSION_KEY,
+  MODEL_MEMBER_SETTING_KEY,
+  normalizeModelMenuKey,
+} from './modelNavigation';
 
 const FormItem = Form.Item;
 const { TextArea } = Input;
@@ -252,7 +260,7 @@ export const toDomainList = (domainId: number, menuKey: string) => {
 };
 
 export const toModelList = (domainId: number, modelId: number, menuKey?: string) => {
-  history.push(`/model/domain/manager/${domainId}/${modelId}${menuKey ? `/${menuKey}` : ''}`);
+  history.push(buildModelManagerPath(domainId, modelId, menuKey));
 };
 
 export const toMetricEditPage = (

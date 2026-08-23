@@ -17,10 +17,17 @@ const PermissionSection: React.FC<Props> = ({ permissionTarget }) => {
     <>
       <div>
         <Space direction="vertical" style={{ width: '100%' }} size={20}>
-          <ProCard title="邀请成员" bordered>
+          <ProCard
+            title={permissionTarget === 'model' ? '模型成员与使用范围' : '主题域成员与访问范围'}
+            bordered
+          >
             <PermissionAdminForm permissionTarget={permissionTarget} />
           </ProCard>
-          {permissionTarget === 'model' && isSuperAdmin && <PermissionTable />}
+          {permissionTarget === 'model' && isSuperAdmin && (
+            <ProCard title="细粒度数据授权组" bordered>
+              <PermissionTable />
+            </ProCard>
+          )}
         </Space>
       </div>
     </>

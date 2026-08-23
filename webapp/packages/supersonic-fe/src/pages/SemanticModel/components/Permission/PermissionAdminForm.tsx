@@ -91,13 +91,20 @@ const PermissionAdminForm: React.FC<Props> = ({ permissionTarget, onValuesChange
         <FormItem
           name="admins"
           label={
-            <FormItemTitle title={'管理员'} subTitle={'管理员将拥有主题域下所有编辑及访问权限'} />
+            <FormItemTitle
+              title={permissionTarget === 'model' ? '模型管理员' : '主题域管理员'}
+              subTitle={
+                permissionTarget === 'model'
+                  ? '管理员拥有模型范围内的编辑及访问权限。'
+                  : '管理员拥有主题域范围内的编辑及访问权限。'
+              }
+            />
           }
         >
           <SelectTMEPerson placeholder="请邀请团队成员" />
         </FormItem>
         {/* {APP_TARGET === 'inner'} */}
-        <FormItem name="adminOrgs" label="按组织">
+        <FormItem name="adminOrgs" label="管理员组织范围">
           <SelectPartner
             type="selectedDepartment"
             treeSelectProps={{
@@ -110,7 +117,9 @@ const PermissionAdminForm: React.FC<Props> = ({ permissionTarget, onValuesChange
             <FormItemTitle
               title={'设为公开'}
               subTitle={
-                '公开后,所有用户将可使用主题域下低/中敏感度资源，高敏感度资源需通过资源列表进行授权'
+                permissionTarget === 'model'
+                  ? '公开后，所有用户可使用模型范围内的低/中敏感度资源，高敏感度资源需通过细粒度数据授权组授权。'
+                  : '公开后，所有用户可访问主题域范围内的低/中敏感度资源，高敏感度资源仍按主题域成员与访问范围控制。'
               }
             />
           }
@@ -122,7 +131,7 @@ const PermissionAdminForm: React.FC<Props> = ({ permissionTarget, onValuesChange
         {!isOpenState && (
           <>
             {/* {APP_TARGET === 'inner' && } */}
-            <FormItem name="viewOrgs" label="按组织">
+            <FormItem name="viewOrgs" label="成员组织范围">
               <SelectPartner
                 type="selectedDepartment"
                 treeSelectProps={{
@@ -130,7 +139,7 @@ const PermissionAdminForm: React.FC<Props> = ({ permissionTarget, onValuesChange
                 }}
               />
             </FormItem>
-            <FormItem name="viewers" label="按个人">
+            <FormItem name="viewers" label="成员个人范围">
               <SelectTMEPerson placeholder="请选择需要授权的个人" />
             </FormItem>
           </>

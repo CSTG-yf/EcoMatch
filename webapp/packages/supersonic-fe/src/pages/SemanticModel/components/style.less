@@ -271,9 +271,11 @@
   }
 }
 
-.permissionDrawer {
+.permissionModal {
   :global {
-    .ant-drawer-body {
+    .ant-modal-body {
+      max-height: calc(100vh - 220px);
+      overflow-y: auto;
       background: #f8f9fb;
     }
   }

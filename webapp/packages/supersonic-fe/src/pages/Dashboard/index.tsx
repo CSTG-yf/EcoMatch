@@ -555,12 +555,16 @@ const DashboardPage = () => {
               <Form.Item name="description" label="描述">
                 <Input.TextArea maxLength={1000} rows={3} placeholder="说明看板用途和口径" />
               </Form.Item>
-              <Form.Item name="accessScope" label="访问范围">
+              <Form.Item
+                name="accessScope"
+                label="看板可见范围"
+                extra="看板可见范围不等于数据权限。组件每次刷新、导出或分享时，仍按当前用户的模型、机构、行、列和脱敏权限重新查询。"
+              >
                 <Select
                   options={[
-                    { label: '仅自己', value: 'PRIVATE' },
-                    { label: '本机构', value: 'ORGANIZATION' },
-                    { label: '主题域成员', value: 'DOMAIN' },
+                    { label: '仅自己可见', value: 'PRIVATE' },
+                    { label: '本机构成员可见', value: 'ORGANIZATION' },
+                    { label: '主题域成员可见', value: 'DOMAIN' },
                   ]}
                 />
               </Form.Item>

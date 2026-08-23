@@ -54,7 +54,12 @@ const PermissionSection: React.FC<Props> = ({ currentAgent, onSaveAgent }) => {
       <FormItem
         name="admins"
         label={
-          <FormItemTitle title={'管理员'} subTitle={'管理员将拥有主题域下所有编辑及访问权限'} />
+          <FormItemTitle
+            title={'管理员'}
+            subTitle={
+              '管理员将拥有 Agent 范围内所有编辑及访问权限。此处控制谁可以使用或管理 Agent，不配置指标字段、行权限或脱敏。'
+            }
+          />
         }
       >
         <SelectTMEPerson placeholder="请邀请团队成员" />

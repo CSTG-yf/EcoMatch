@@ -8,7 +8,6 @@ import { uuid, jsonParse } from '@/utils/utils';
 import ToolsSection from './ToolsSection';
 import globalStyles from '@/global.less';
 import { QuestionCircleOutlined } from '@ant-design/icons';
-import SelectTMEPerson from '@/components/SelectTMEPerson';
 import { getLlmModelAppList, getLlmList } from '../../services/system';
 import MemorySection from './MemorySection';
 import PermissionSection from './PermissionSection';
@@ -144,10 +143,16 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
     const values = await form.validateFields();
     setSaveLoading(true);
     const config = jsonParse(editAgent?.toolConfig, {});
+    const agentData: Record<string, any> = { ...(editAgent || {}) };
+    const editableValues: Record<string, any> = { ...values };
+    ['admins', 'viewers', 'adminOrgs', 'viewOrgs', 'isOpen'].forEach((field) => {
+      delete agentData[field];
+      delete editableValues[field];
+    });
     await onSaveAgent?.({
       id: editAgent?.id,
-      ...(editAgent || {}),
-      ...values,
+      ...agentData,
+      ...editableValues,
       toolConfig: JSON.stringify({
         ...config,
         ...values.toolConfig,
@@ -213,16 +218,6 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
             htmlFor=""
           >
             <Switch />
-          </FormItem>
-          <FormItem
-            name="admins"
-            label="管理员"
-            // rules={[{ required: true, message: '请设定数据库连接管理者' }]}
-          >
-            <SelectTMEPerson placeholder="请邀请团队成员" />
-          </FormItem>
-          <FormItem tooltip="选择用户后，该助理只对所选用户可见" name="viewers" label="使用者">
-            <SelectTMEPerson placeholder="请邀请团队成员" />
           </FormItem>
           <FormItem name="examples" label="示例问题">
             <div className={styles.paramsSection}>
@@ -358,7 +353,7 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
       children: <MemorySection agentId={editAgent?.id} />,
     },
     {
-      label: '权限管理',
+      label: '可见范围与管理员',
       key: 'permissonSetting',
       children: <PermissionSection currentAgent={editAgent} onSaveAgent={onSaveAgent} />,
     },

@@ -5,7 +5,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useModel } from '@umijs/max';
 import { getGroupAuthInfo, removeGroupAuth } from '../../service';
 import { getOrganizationTree } from '@/components/SelectPartner/service';
-import PermissionCreateDrawer from './PermissionCreateDrawer';
+import PermissionCreateModal from './PermissionCreateModal';
 import { findDepartmentTree } from '@/pages/SemanticModel/utils';
 
 type Props = {};
@@ -258,7 +258,7 @@ const PermissionTable: React.FC<Props> = ({}) => {
     <>
       <ProTable
         actionRef={actionRef}
-        headerTitle="资源列表"
+        headerTitle="细粒度数据授权组"
         rowKey="groupId"
         columns={columns}
         search={false}
@@ -288,7 +288,7 @@ const PermissionTable: React.FC<Props> = ({}) => {
         ]}
       />
       {createModalVisible && (
-        <PermissionCreateDrawer
+        <PermissionCreateModal
           visible={createModalVisible}
           permissonData={permissonData}
           onSubmit={() => {

@@ -156,10 +156,19 @@ const ModelTable: React.FC<Props> = ({ modelList, disabledEdit = false, onModelC
       title: '操作',
       dataIndex: 'x',
       valueType: 'option',
-      width: 150,
+      width: 210,
       render: (_, record) => {
         return (
           <Space className={styles.ctrlBtnContainer}>
+            <a
+              key="modelManageBtn"
+              onClick={() => {
+                setSelectModel(record);
+                toModelList(record.domainId, record.id);
+              }}
+            >
+              管理
+            </a>
             <a
               key="metricEditBtn"
               onClick={() => {
@@ -168,7 +177,7 @@ const ModelTable: React.FC<Props> = ({ modelList, disabledEdit = false, onModelC
                 setIsEditing(true);
               }}
             >
-              编辑
+              编辑信息
             </a>
             {record.status === StatusEnum.ONLINE ? (
               <Button
