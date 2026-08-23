@@ -4,7 +4,6 @@
   background-color: #fff;
   height: calc(100vh - 56px);
 
-
   .projectManger {
     border-top: 1px solid #eee;
     width: 100%;
@@ -17,15 +16,15 @@
       width: 250px;
       border-right: 5px solid #eee;
       position: relative;
-      transition: all 0.2s,background 0s;
+      transition: all 0.2s, background 0s;
       .treeContainer {
         width: 100%;
         opacity: 1;
-        transition: all 0.2s,background 0s;
+        transition: all 0.2s, background 0s;
       }
       &.siderCollapsed {
         width: 20px;
-        & .treeContainer{
+        & .treeContainer {
           opacity: 0;
         }
       }
@@ -47,7 +46,8 @@
         cursor: pointer;
         color: rgba(0, 0, 0, 0.25);
         background-color: #ffffff;
-        box-shadow: 0 2px 8px -2px rgba(0,0,0,0.05), 0 1px 4px -1px rgba(25,15,15,0.07), 0 0 1px 0 rgba(0,0,0,0.08);
+        box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -1px rgba(25, 15, 15, 0.07),
+          0 0 1px 0 rgba(0, 0, 0, 0.08);
         &:hover {
           color: rgba(0, 0, 0, 0.75);
         }
@@ -67,7 +67,7 @@
         font-size: 18px;
         margin-top: 18px;
         &:hover {
-          color: #296DF3;
+          color: #296df3;
         }
       }
       .treeTitle {
@@ -164,7 +164,6 @@
     //   }
     // }
     .tab {
-
       // margin-top: 10px;
       :global {
         .ant-tabs-tab-btn {
@@ -177,7 +176,7 @@
           margin-bottom: 0;
         }
         .ant-tabs-tab {
-          padding-bottom:15px;
+          padding-bottom: 15px;
           color: rgb(95, 116, 141);
           font-weight: 500;
         }
@@ -218,12 +217,8 @@
         padding: 0 !important;
       }
     }
-
-
   }
 }
-
-
 
 .domainList {
   display: flex;
@@ -232,14 +227,13 @@
   overflow: hidden;
   .searchContainer {
     width: 250px;
-    padding:3px 0;
+    padding: 3px 0;
     border-bottom: 1px solid #eee;
   }
 }
 
-
 .disabledSearchTable {
-  padding-top:20px;
+  padding-top: 20px;
 }
 
 .classTable {
@@ -281,7 +275,6 @@
   }
 }
 
-
 .domainSelector {
   :global {
     .ant-select-tree .ant-select-tree-treenode-active .ant-select-tree-node-content-wrapper {
@@ -290,8 +283,7 @@
   }
 }
 
-
-.infoTagList{
+.infoTagList {
   .siteTagPlus {
     background: #fff;
     border-style: dashed;
@@ -304,7 +296,7 @@
     margin-right: 8px;
     vertical-align: top;
   }
-  [data-theme="dark"] .siteTagPlus {
+  [data-theme='dark'] .siteTagPlus {
     background: transparent;
     border-style: dashed;
   }
@@ -312,7 +304,7 @@
 
 .semanticGraphCanvas {
   position: relative;
-  .toolbar{
+  .toolbar {
     position: absolute;
     width: 200px;
     z-index: 999;
@@ -327,7 +319,7 @@
 .taskStateRefreshIcon {
   cursor: pointer;
   &:hover {
-    color: #296DF3;
+    color: #296df3;
   }
 }
 
@@ -339,7 +331,7 @@
   }
 }
 
-.breadcrumb{
+.breadcrumb {
   font-size: 18px;
   height: 48px;
   line-height: 48px;
@@ -349,7 +341,7 @@
       height: 28px;
       color: #709bf1;
       cursor: pointer;
-      &:hover{
+      &:hover {
         color: #296df3;
       }
     }
@@ -361,7 +353,6 @@
         .ant-breadcrumb-link {
           color: #296df3;
         }
-
       }
     }
   }
@@ -369,7 +360,7 @@
 
 .classDataSourceTypeModal {
   :global {
-    .ant-modal-body{
+    .ant-modal-body {
       padding: 0px;
     }
   }
@@ -408,57 +399,54 @@
   }
 }
 
-
 .infoCard {
-    min-height: 100%;
-    background-color: rgb(255, 255, 255);
+  min-height: 100%;
+  background-color: rgb(255, 255, 255);
+  color: rgb(38, 38, 38);
+  transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+  position: relative;
+  border: 1px solid rgb(230, 235, 241);
+  border-radius: 4px;
+  box-shadow: inherit;
+  .infoCardTitle {
+    display: flex;
+    border-bottom: 1px solid #e6ebf1;
+    padding: 15px 20px;
+    align-items: center;
     color: rgb(38, 38, 38);
-    transition: box-shadow 300ms cubic-bezier(0.4, 0, 0.2, 1) 0ms;
-    position: relative;
-    border: 1px solid rgb(230, 235, 241);
-    border-radius: 4px;
-    box-shadow: inherit;
-    .infoCardTitle {
+    margin: 0px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.57;
+    font-family: 'tencentFont', sans-serif;
+  }
+  .infoCardContainer {
+    padding: 20px;
+    height: calc(100vh - 260px);
+    overflow: scroll;
+  }
+  .infoCardFooter {
+    border-top: 1px solid #e6ebf1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+    padding: 20px;
+    .infoCardFooterContainer {
+      box-sizing: border-box;
       display: flex;
-      border-bottom: 1px solid #e6ebf1;
-      padding: 15px 20px;
+      flex-flow: wrap;
+      // width: 100%;
+      justify-content: space-between;
       align-items: center;
-      color: rgb(38, 38, 38);
-      margin: 0px;
-      font-size: 16px;
-      font-weight: 600;
-      line-height: 1.57;
-      font-family: "tencentFont", sans-serif;
     }
-    .infoCardContainer {
-      padding: 20px;
-      height: calc(100vh - 260px);
-      overflow: scroll;
-    }
-    .infoCardFooter {
-      border-top: 1px solid #e6ebf1;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      flex: 0 0 auto;
-      padding: 20px;
-      .infoCardFooterContainer {
-        box-sizing: border-box;
-        display: flex;
-        flex-flow: wrap;
-        // width: 100%;
-        justify-content: space-between;
-        align-items: center;
-      }
-    }
+  }
 }
-
-
 
 .dimensionValueFilterTable {
   :global {
     .ant-pro-card-body {
-      padding:0
+      padding: 0;
     }
   }
 }

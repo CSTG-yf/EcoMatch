@@ -35,6 +35,7 @@ type Props = {
   ) => void;
   onRequestAgentSelection: () => void;
   onCloseConversation: () => void;
+  onConversationDeleted: (chatId: number) => void;
   onInitializationChange: (loading: boolean, error?: string) => void;
 };
 
@@ -48,6 +49,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
     onSelectConversation,
     onRequestAgentSelection,
     onCloseConversation,
+    onConversationDeleted,
     onInitializationChange,
   },
   ref
@@ -139,6 +141,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
   const onDeleteConversation = async (id: number) => {
     try {
       await deleteConversation(id);
+      onConversationDeleted(id);
       await updateData();
     } catch (error) {
       message.error('删除会话失败，请重试');
@@ -281,6 +284,7 @@ const Conversation: ForwardRefRenderFunction<any, Props> = (
                         <div className={styles.bottomSection}>
                           <div className={styles.subTitle}>{item.lastQuestion}</div>
                           <DeleteOutlined
+                            aria-label="删除会话"
                             className={styles.deleteIcon}
                             onClick={e => {
                               e.stopPropagation();

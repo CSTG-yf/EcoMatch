@@ -9,7 +9,7 @@ spring:
       continue-on-error: true
       mode: always
       schema-locations: classpath:db/schema-h2.sql,classpath:db/schema-h2-demo.sql
-      data-locations: classpath:db/data-h2.sql,classpath:db/data-h2-demo.sql
+      data-locations: classpath:db/data-h2.sql,classpath:db/data-h2-demo.sql,classpath:db/chat-agent-binding-backfill.sql
   h2:
     console:
       path: /h2-console/semantic

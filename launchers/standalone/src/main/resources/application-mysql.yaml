@@ -11,4 +11,4 @@ spring:
       username: ${S2_DB_USER:root}
       password: ${S2_DB_PASSWORD:}
       schema-locations: classpath:db/schema-mysql.sql,classpath:db/schema-mysql-demo.sql
-      data-locations: classpath:db/data-mysql.sql,classpath:db/data-mysql-demo.sql
+      data-locations: classpath:db/data-mysql.sql,classpath:db/data-mysql-demo.sql,classpath:db/chat-agent-binding-backfill.sql

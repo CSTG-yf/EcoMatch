@@ -1,5 +1,6 @@
 package com.tencent.supersonic.chat.server.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.supersonic.auth.api.authentication.service.UserService;
 import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.persistence.dataobject.AgentDO;
@@ -65,6 +66,51 @@ class AgentServiceAccessTest {
         assertEquals("alice", saved.getValue().getCreatedBy());
         assertEquals(stored.getCreatedAt(), saved.getValue().getCreatedAt());
         assertEquals("alice", updated.getCreatedBy());
+    }
+
+    @Test
+    void ownerUpdatePreservesPermissionFieldsThatAreOmittedFromJson() throws Exception {
+        AgentServiceImpl service = service();
+        AgentDO stored = agent(7, "alice", false);
+        stored.setAdmin("[\"carol\"]");
+        stored.setViewer("[\"dave\"]");
+        stored.setAdminOrg("[\"org-admin\"]");
+        stored.setViewOrg("[\"org-view\"]");
+        stored.setIsOpen(1);
+        doReturn(stored).when(service).getById(7);
+        doReturn(true).when(service).updateById(any(AgentDO.class));
+        Agent partialUpdate = new ObjectMapper().readValue(
+                "{\"id\":7,\"name\":\"updated\",\"toolConfig\":\"{}\"}", Agent.class);
+
+        service.updateAgent(partialUpdate, User.get(2L, "alice"));
+
+        ArgumentCaptor<AgentDO> saved = ArgumentCaptor.forClass(AgentDO.class);
+        verify(service).updateById(saved.capture());
+        assertEquals(stored.getAdmin(), saved.getValue().getAdmin());
+        assertEquals(stored.getViewer(), saved.getValue().getViewer());
+        assertEquals(stored.getAdminOrg(), saved.getValue().getAdminOrg());
+        assertEquals(stored.getViewOrg(), saved.getValue().getViewOrg());
+        assertEquals(stored.getIsOpen(), saved.getValue().getIsOpen());
+    }
+
+    @Test
+    void ownerUpdateCanExplicitlyClearPermissionFields() throws Exception {
+        AgentServiceImpl service = service();
+        AgentDO stored = agent(7, "alice", true);
+        stored.setAdmin("[\"carol\"]");
+        doReturn(stored).when(service).getById(7);
+        doReturn(true).when(service).updateById(any(AgentDO.class));
+        Agent explicitUpdate = new ObjectMapper().readValue(
+                "{\"id\":7,\"name\":\"updated\",\"toolConfig\":\"{}\","
+                        + "\"admins\":[],\"isOpen\":0}",
+                Agent.class);
+
+        service.updateAgent(explicitUpdate, User.get(2L, "alice"));
+
+        ArgumentCaptor<AgentDO> saved = ArgumentCaptor.forClass(AgentDO.class);
+        verify(service).updateById(saved.capture());
+        assertEquals("[]", saved.getValue().getAdmin());
+        assertEquals(0, saved.getValue().getIsOpen());
     }
 
     private AgentServiceImpl service() {

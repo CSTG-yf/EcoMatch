@@ -482,6 +482,15 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
     }
   };
 
+  const onConversationDeleted = (chatId: number) => {
+    if (currentConversation?.chatId !== chatId) {
+      return;
+    }
+    agentSelectionRequestRef.current += 1;
+    clearConversationContext();
+    setAgentSwitching(false);
+  };
+
   const chatClass = classNames(styles.chat, {
     [styles.mobile]: isMobile,
     [styles.historyVisible]: historyVisible,
@@ -508,6 +517,7 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
               }
             }}
             onCloseConversation={onCloseConversation}
+            onConversationDeleted={onConversationDeleted}
             onInitializationChange={(loading, error) => {
               setConversationInitializing(loading);
               setConversationError(error || '');
