@@ -101,6 +101,15 @@ public final class BankPlanPromptComposer {
                       REQUIREMENTS 的 intent=RANKING，保留题干列出的全部机构、单一指标，
                       并只在题干明确要求名次时加入 RANK；只问“谁最多/最少”时至少填写 VALUE。
                       不得把“谁最多”理解为 COMPARISON，也不得因为机构不是全省范围而澄清。
+                    - 题干明确写出的 YYYY年末/年底就是该年份的 12-31；例如“从2024年末到2025-05-31”必须
+                      将 baselineStartDate/baselineEndDate 都写为 2024-12-31，当前期 startDate/endDate 都写为
+                      2025-05-31。只有“较上年末/较去年末”这类相对表述才按当前期前一自然年年末解释，不能把
+                      已写出的 2024年末再向前减一年。
+                    - 已列出的多家机构中问“谁/哪家最好/最优/控制得最好/表现最好”表示这些机构之间的
+                      COMPARISON：保留题干列出的全部机构和一个指标，intent=COMPARISON，answerFactTypes 至少
+                      为 ["VALUE","GAP_VALUE"]，requiredLimit=null、不得添加 rank/rank_from_bottom 过滤，
+                      不得退化为 RANKING 或只返回一家的结果。只有题干明确使用最多/最少/最高/最低等排名词时，
+                      才使用前一条局部 RANKING 合同。
                     需求判定的执行边界：如果用户已经明确给出目录中的具体指标、合法日期或日期范围，
                     并且机构范围可以从题干直接确定（例如“全省”“各家银行”表示 organizationCodes=[]），
                     必须 action=EXECUTE；不要因为“全年”、跨年、相对当前日期、字母城市占位名或“哪家”而 action=CLARIFY。
@@ -497,10 +506,10 @@ public final class BankPlanPromptComposer {
             REQUIREMENTS_SYSTEM_PREFIX + "\n\n" + PLAN_STAGE_SECTION;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v54-stage-split";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v55-stage-split";
 
     /** Version of the REQUIREMENTS stage prefix; part of the stage cache key. */
-    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v4-stage-split";
+    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v5-stage-split";
 
     /** Version of the PLAN stage prefix; part of the stage cache key. */
     public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v53-stage-split";

@@ -20,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -27,6 +28,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Model-owned constrained bank planning.
@@ -55,6 +58,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     + "return action=EXECUTE with every directly stated metric, organization, "
                     + "and date/range. Do not repeat a generic request for details, and do not "
                     + "treat a broad label beside explicit catalog metrics as missing information.";
+    private static final Pattern EXPLICIT_YEAR_END_RANGE = Pattern.compile(
+            "从\\s*(20\\d{2})年(?:末|底|年末|年底)\\s*(?:到|至)\\s*"
+                    + "(20\\d{2})[-/]([0-1]?\\d)[-/]([0-3]?\\d)");
 
     private final BankRequestContractResponseParser requestContractParser =
             new BankRequestContractResponseParser();
@@ -386,6 +392,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         validateMonthAndYearComparison(queryText, requirements);
+        validateExplicitYearEndRange(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
         validateProvinceWideInstitutionRanking(queryText, requirements);
         validateDaysAboveProvinceAverage(queryText, requirements);
@@ -404,6 +411,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         validateRankedChangeFamily(requirements, evidence);
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
+        validateSelectedOrganizationBestComparison(queryText, requirements);
         if (queryText.contains("全省均值") && containsAny(queryText, "逐一对比", "逐项对比", "分别对比")) {
             validateProvinceAverageComparison(queryText, requirements);
         }
@@ -621,6 +629,104 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", organizationCodes=" + actualOrganizations + ", metricCodes="
                         + actualMetrics + ". Regenerate the complete requirements JSON; do not "
                         + "rewrite the model plan in the backend.");
+    }
+
+    /**
+     * Validates the wording "from an explicit YYYY year end to an explicit date". An explicit
+     * year is not a relative "last year end" expression; this gate returns the exact repairable
+     * dates and never mutates the model contract.
+     */
+    private void validateExplicitYearEndRange(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null) {
+            return;
+        }
+        Matcher matcher = EXPLICIT_YEAR_END_RANGE.matcher(queryText);
+        if (!matcher.find()) {
+            return;
+        }
+        LocalDate expectedBaseline;
+        LocalDate expectedCurrent;
+        try {
+            expectedBaseline = LocalDate.of(Integer.parseInt(matcher.group(1)), 12, 31);
+            expectedCurrent = LocalDate.of(Integer.parseInt(matcher.group(2)),
+                    Integer.parseInt(matcher.group(3)), Integer.parseInt(matcher.group(4)));
+        } catch (DateTimeException | NumberFormatException invalidDate) {
+            return;
+        }
+        BankQueryPlan.TimeRange actual = requirements.getTime();
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.CHANGE && actual != null
+                && actual.getStartDate() != null && actual.getEndDate() != null
+                && actual.getBaselineStartDate() != null && actual.getBaselineEndDate() != null
+                && actual.getStartDate().equals(expectedCurrent)
+                && actual.getEndDate().equals(expectedCurrent)
+                && actual.getBaselineStartDate().equals(expectedBaseline)
+                && actual.getBaselineEndDate().equals(expectedBaseline);
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "explicit_year_end_range_mismatch: an explicitly written YYYY year-end is that "
+                        + "year's 12-31, not the prior year's end; expected current="
+                        + expectedCurrent + ", baseline=" + expectedBaseline + "; model time="
+                        + actual + ". Regenerate the complete requirements JSON without changing "
+                        + "the user's explicit endpoints.");
+    }
+
+    /**
+     * Validates "which of these named institutions is best" as a full comparison. It is separate
+     * from the ranking validator because "最好/控制得最好" does not request a rank slice.
+     */
+    private void validateSelectedOrganizationBestComparison(String queryText,
+            BankRequestContract requirements) {
+        if (queryText == null || requirements == null
+                || !containsAny(queryText, "谁", "哪家", "哪个")
+                || !containsAny(queryText, "最好", "最优", "控制得最好", "表现最好")
+                || queryText.contains("全省均值")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getOrganizations().size() < 2 || evidence.getMetrics().size() != 1
+                || !evidence.getDerivedMetrics().isEmpty()) {
+            return;
+        }
+        Set<String> expectedOrganizations = evidence.getOrganizations().stream()
+                .map(BankIntentResult.OrganizationSlot::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> expectedMetrics = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<BankRequestContract.AnswerFactType> expectedFacts =
+                List.of(BankRequestContract.AnswerFactType.VALUE,
+                        BankRequestContract.AnswerFactType.GAP_VALUE);
+        Set<String> actualOrganizations = new LinkedHashSet<>(
+                safeList(requirements.getOrganizationCodes()));
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        boolean hasRankFilter = safeList(requirements.getFilters()).stream().anyMatch(filter ->
+                filter != null && ("rank".equals(filter.getField())
+                        || "rank_from_bottom".equals(filter.getField())));
+        boolean valid = requirements.getAction() == BankRequestContract.Action.EXECUTE
+                && requirements.getIntent() == BankIntentType.COMPARISON
+                && actualOrganizations.equals(expectedOrganizations)
+                && actualMetrics.equals(expectedMetrics)
+                && requirements.getRequiredLimit() == null && !hasRankFilter
+                && expectedFacts.equals(safeList(requirements.getAnswerFactTypes()));
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "selected_organization_best_comparison_mismatch: questions asking which of the "
+                        + "explicitly named institutions is best require intent=COMPARISON, all "
+                        + "named organizations, one metric, VALUE/GAP_VALUE, no rank filter and "
+                        + "requiredLimit=null; expected organizations=" + expectedOrganizations
+                        + ", metrics=" + expectedMetrics + "; model intent="
+                        + requirements.getIntent() + ", organizations=" + actualOrganizations
+                        + ", metrics=" + actualMetrics
+                        + ", answerFactTypes=" + safeList(requirements.getAnswerFactTypes())
+                        + ". Regenerate the complete requirements JSON; do not rewrite the model "
+                        + "plan in the backend.");
     }
 
     /** Validates an explicit two-institution value difference without changing model output. */

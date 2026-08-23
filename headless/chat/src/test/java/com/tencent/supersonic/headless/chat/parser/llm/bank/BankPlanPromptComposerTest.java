@@ -126,6 +126,18 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void requirementsPrefixDisambiguatesExplicitYearEndAndSelectedBestComparison() {
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        assertTrue(requirements.contains("明确写出的 YYYY年末/年底就是该年份的 12-31"));
+        assertTrue(requirements.contains("只有“较上年末/较去年末”这类相对表述才按前一自然年年末解释"));
+        assertTrue(requirements.contains("已列出的多家机构中谁/哪家最好/最优/控制得最好"));
+        assertTrue(requirements.contains("intent=COMPARISON"));
+        assertTrue(requirements.contains("VALUE/GAP_VALUE"));
+        assertTrue(requirements.contains("不得退化为 RANKING"));
+    }
+
+    @Test
     void systemPrefixMakesExecutableFormatsUnambiguousToTheModel() {
         String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
 

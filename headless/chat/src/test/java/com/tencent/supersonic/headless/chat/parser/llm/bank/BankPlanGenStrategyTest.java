@@ -230,6 +230,53 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void selectedInstitutionBestComparisonReturnsComparisonIntentToTheModelForRequirementsRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(selectedBestRequirementsJson("RANKING"),
+                selectedBestRequirementsJson("COMPARISON"), selectedBestComparisonPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText(
+                "2026年一季度末，江苏省B市农商行、江苏省F市农商行、江苏省J市农商行谁的不良率控制得最好？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.COMPARISON, response.getBankRequestContract().getIntent());
+        assertEquals(List.of("ORG002", "ORG006", "ORG010"),
+                response.getBankRequestContract().getOrganizationCodes());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
+                .contains("selected_organization_best_comparison_mismatch"));
+    }
+
+    @Test
+    void explicitYearEndRangeReturnsExactYearEndToTheModelForRequirementsRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(invalidExplicitYearEndRequirementsJson(),
+                validExplicitYearEndRequirementsJson(), explicitYearEndPlanJson());
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行的对公存款余额从2024年末到2025-05-31，增幅是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB003"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(LocalDate.of(2024, 12, 31),
+                response.getBankRequestContract().getTime().getBaselineStartDate());
+        assertEquals(LocalDate.of(2024, 12, 31),
+                response.getBankRequestContract().getTime().getBaselineEndDate());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("explicit_year_end_range_mismatch"));
+    }
+
+    @Test
     void organizationDifferenceReturnsPointIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(
@@ -1131,6 +1178,30 @@ class BankPlanGenStrategyTest {
                 .formatted(intent);
     }
 
+    private String selectedBestRequirementsJson(String intent) {
+        String answerFacts = "COMPARISON".equals(intent) ? "[\"VALUE\",\"GAP_VALUE\"]"
+                : "[\"VALUE\"]";
+        String requiredLimit = "COMPARISON".equals(intent) ? "null" : "1";
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"%s",
+                "metricCodes":["ZB013"],"derivedMetrics":[],"organizationCodes":["ORG002","ORG006","ORG010"],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":%s,"answerFactTypes":%s,"clarification":null}
+                """
+                .formatted(intent, requiredLimit, answerFacts);
+    }
+
+    private String selectedBestComparisonPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"COMPARISON",
+                "metrics":[{"bizName":"ZB013","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null},{"code":"ORG006","bizName":null},{"code":"ORG010","bizName":null}],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB013"],"orderSensitive":false,"aggregationMode":null}}
+                """;
+    }
+
     private String selectedRankingPlanJson() {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"RANKING",
@@ -1504,6 +1575,35 @@ class BankPlanGenStrategyTest {
                 "metricCodes":["ZB001"],"derivedMetrics":[],"organizationCodes":[],
                 "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
                 "filters":[],"requiredLimit":3,"answerFactTypes":["CHANGE_RATE"],"clarification":null}
+                """;
+    }
+
+    private String invalidExplicitYearEndRequirementsJson() {
+        return explicitYearEndRequirementsJson("2023-12-31");
+    }
+
+    private String validExplicitYearEndRequirementsJson() {
+        return explicitYearEndRequirementsJson("2024-12-31");
+    }
+
+    private String explicitYearEndRequirementsJson(String baselineDate) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB003"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2025-05-31","endDate":"2025-05-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"%s","baselineEndDate":"%s"},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["CHANGE_RATE"],"clarification":null}
+                """
+                .formatted(baselineDate, baselineDate);
+    }
+
+    private String explicitYearEndPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB003","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2025-05-31","endDate":"2025-05-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB003"],"orderSensitive":false,"aggregationMode":null}}
                 """;
     }
 
