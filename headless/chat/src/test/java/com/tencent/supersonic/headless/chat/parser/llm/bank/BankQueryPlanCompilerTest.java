@@ -270,6 +270,42 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldKeepAllOrganizationsForComparisonProjectionEvenWhenModelAddsTopOneLimit() {
+        BankQueryPlan plan = rankingPlan();
+        plan.setIntent(BankIntentType.COMPARISON);
+        plan.setMetrics(List.of(metric("ZB013")));
+        plan.setOrganizations(List.of(organization("ORG010"), organization("ORG012")));
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 2, 28))
+                .endDate(LocalDate.of(2026, 2, 28)).granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setOrderBy(List.of(BankQueryPlan.OrderBy.builder().field("ZB013")
+                .direction(BankQueryPlan.SortDirection.ASC).build()));
+        plan.setLimit(1);
+        plan.setOutput(BankQueryPlan.Output.builder()
+                .columns(List.of("bank_organization", "ZB013")).orderSensitive(true).build());
+
+        LLMReq.LLMSchema comparisonSchema = schema();
+        comparisonSchema.setMetrics(List.of(
+                SchemaElement.builder().name("不良贷款率").bizName("ZB013").defaultAgg("SUM")
+                        .build()));
+
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.COMPARISON).allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013"))
+                .requiredOrganizationCodes(Set.of("ORG010", "ORG012"))
+                .requiredStartDate(LocalDate.of(2026, 2, 28))
+                .requiredEndDate(LocalDate.of(2026, 2, 28)).maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, comparisonSchema);
+
+        assertTrue(compiled.getS2sql().contains("ORDER BY metric_value ASC"));
+        assertFalse(compiled.getS2sql().contains("LIMIT 1"));
+        assertEquals(BankResultProjector.ProjectionType.COMPARISON,
+                compiled.getResultContract().getType());
+    }
+
+    @Test
     void shouldCompileComparisonPlanToControlledSemanticS2Sql() {
         BankQueryPlanCompiler.CompiledQuery compiled =
                 compiler.compile(changePlan(), changeHints(), schema());
