@@ -18,8 +18,8 @@ export function deleteConversation(chatId: number) {
   return axios.post<any>(`${prefix}/chat/manage/delete?chatId=${chatId}`);
 }
 
-export function getAllConversations(agentId?: number) {
-  return axios.get<any>(`${prefix}/chat/manage/getAll`, { params: { agentId } });
+export function getAllConversations() {
+  return axios.get<any>(`${prefix}/chat/manage/getAll`);
 }
 
 export function getModelList() {

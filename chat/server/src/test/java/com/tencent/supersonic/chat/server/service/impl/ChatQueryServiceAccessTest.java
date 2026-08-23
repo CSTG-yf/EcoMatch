@@ -5,6 +5,7 @@ import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatQueryDataReq;
 import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
@@ -116,14 +117,50 @@ class ChatQueryServiceAccessTest {
         ChatQueryDO storedQuery = storedQuery();
         User user = User.get(2L, "alice");
         when(chatManageService.getChatQueryDO(storedQuery.getQuestionId())).thenReturn(storedQuery);
-        doThrow(new InvalidPermissionException("Chat access denied")).when(chatManageService)
-                .checkChatAccess(storedQuery.getChatId(), user);
+        when(chatManageService.getAuthorizedChat(storedQuery.getChatId(), user))
+                .thenThrow(new InvalidPermissionException("Chat access denied"));
 
         assertThrows(InvalidPermissionException.class,
                 () -> service.requireAuthorizedStoredQuery(storedQuery.getQuestionId(), user));
 
         verify(chatManageService).getChatQueryDO(storedQuery.getQuestionId());
-        verify(chatManageService).checkChatAccess(storedQuery.getChatId(), user);
+        verify(chatManageService).getAuthorizedChat(storedQuery.getChatId(), user);
+    }
+
+    @Test
+    void rejectsPersistedQueryWhoseAgentDoesNotMatchChat() {
+        ChatManageService chatManageService = mock(ChatManageService.class);
+        ChatQueryServiceImpl service = new ChatQueryServiceImpl();
+        ReflectionTestUtils.setField(service, "chatManageService", chatManageService);
+        ChatQueryDO storedQuery = storedQuery();
+        User user = User.get(2L, "alice");
+        ChatDO chat = new ChatDO();
+        chat.setChatId(storedQuery.getChatId());
+        chat.setAgentId(8);
+        when(chatManageService.getChatQueryDO(storedQuery.getQuestionId())).thenReturn(storedQuery);
+        when(chatManageService.getAuthorizedChat(storedQuery.getChatId(), user)).thenReturn(chat);
+
+        assertThrows(InvalidPermissionException.class,
+                () -> service.requireAuthorizedStoredQuery(storedQuery.getQuestionId(), user));
+
+        verify(chatManageService).getAuthorizedChat(storedQuery.getChatId(), user);
+    }
+
+    @Test
+    void acceptsPersistedQueryBoundToAuthorizedChatAgent() {
+        ChatManageService chatManageService = mock(ChatManageService.class);
+        ChatQueryServiceImpl service = new ChatQueryServiceImpl();
+        ReflectionTestUtils.setField(service, "chatManageService", chatManageService);
+        ChatQueryDO storedQuery = storedQuery();
+        User user = User.get(2L, "alice");
+        ChatDO chat = new ChatDO();
+        chat.setChatId(storedQuery.getChatId());
+        chat.setAgentId(storedQuery.getAgentId());
+        when(chatManageService.getChatQueryDO(storedQuery.getQuestionId())).thenReturn(storedQuery);
+        when(chatManageService.getAuthorizedChat(storedQuery.getChatId(), user)).thenReturn(chat);
+
+        assertEquals(storedQuery,
+                service.requireAuthorizedStoredQuery(storedQuery.getQuestionId(), user));
     }
 
     @Test

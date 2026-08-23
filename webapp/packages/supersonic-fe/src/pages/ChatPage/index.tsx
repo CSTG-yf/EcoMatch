@@ -12,6 +12,7 @@ const ChatPage = () => {
   const { initialState } = useModel('@@initialState');
   const query = queryString.parse(location.search) || {};
   const { agentId } = query;
+  const initialAgentId = Number(agentId);
 
   // 保存到看板只需要 domainId。两条路径都只使用 VIEWER 权限接口：
   //  1) 有 modelId：model -> domain（getModelListByIds）
@@ -60,8 +61,9 @@ const ChatPage = () => {
 
   return (
     <Chat
-      initialAgentId={agentId ? +agentId : undefined}
-      defaultAgentName="银行问数"
+      initialAgentId={
+        Number.isInteger(initialAgentId) && initialAgentId > 0 ? initialAgentId : undefined
+      }
       token={getToken() || ''}
       isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
       onSaveToDashboard={saveToDashboard}
