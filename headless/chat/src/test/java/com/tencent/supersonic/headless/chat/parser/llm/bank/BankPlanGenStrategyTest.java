@@ -29,6 +29,37 @@ import static org.mockito.Mockito.when;
 class BankPlanGenStrategyTest {
 
     @Test
+    void fewShotSwitchDefaultsOffAndOnlyAddsDynamicFamilyExamplesWhenEnabled() {
+        String property = BankPlanGenStrategy.FEW_SHOT_ENABLE_PROPERTY;
+        String previous = System.getProperty(property);
+        try {
+            System.clearProperty(property);
+            ChatLanguageModel disabledModel = mock(ChatLanguageModel.class);
+            when(disabledModel.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+            ArgumentCaptor<String> disabledPrompts = ArgumentCaptor.forClass(String.class);
+            new TestBankPlanGenStrategy(disabledModel).generate(request());
+            verify(disabledModel, times(2)).generate(disabledPrompts.capture());
+            assertTrue(disabledPrompts.getAllValues().stream()
+                    .noneMatch(prompt -> prompt.contains("<family_examples>")));
+
+            System.setProperty(property, "true");
+            ChatLanguageModel enabledModel = mock(ChatLanguageModel.class);
+            when(enabledModel.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+            ArgumentCaptor<String> enabledPrompts = ArgumentCaptor.forClass(String.class);
+            new TestBankPlanGenStrategy(enabledModel).generate(request());
+            verify(enabledModel, times(2)).generate(enabledPrompts.capture());
+            assertTrue(enabledPrompts.getAllValues().stream()
+                    .anyMatch(prompt -> prompt.contains("<family_examples>")));
+        } finally {
+            if (previous == null) {
+                System.clearProperty(property);
+            } else {
+                System.setProperty(property, previous);
+            }
+        }
+    }
+
+    @Test
     void modelGeneratesRequirementsThenAnExactPlanWithoutQuestionRuleRewriting() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());

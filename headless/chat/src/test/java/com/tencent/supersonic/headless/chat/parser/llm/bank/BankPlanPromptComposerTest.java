@@ -20,6 +20,25 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
+    void fewShotIsInjectedIntoDynamicContentOnlyWhenExplicitlyEnabled() {
+        String question = "请比较某机构某指标的环比和同比变化";
+        String examples = BankFewShotExemplarCatalog.renderRequirementsExamples(question);
+
+        String disabled = BankPlanPromptComposer.buildRequirementsUserContent(question, null);
+        String legacy = BankPlanPromptComposer.buildRequirementsUserContent(question);
+        String enabled = BankPlanPromptComposer.buildRequirementsUserContent(question, examples);
+
+        assertEquals(legacy, disabled);
+        assertTrue(enabled.contains("<family_examples>"));
+        assertFalse(BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX
+                .contains("<family_examples>"));
+        assertFalse(BankPlanPromptComposer.PLAN_SYSTEM_PREFIX
+                .contains("<family_examples>"));
+        assertTrue(enabled.indexOf("<family_examples>")
+                < enabled.indexOf("<stage>REQUIREMENTS</stage>"));
+    }
+
+    @Test
     void requirementsUserNamesTheStageWithoutRepeatingTheCatalog() {
         String content = BankPlanPromptComposer.buildRequirementsUserContent("存款是多少？");
 

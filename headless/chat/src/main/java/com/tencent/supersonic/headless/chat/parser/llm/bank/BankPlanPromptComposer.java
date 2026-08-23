@@ -517,36 +517,64 @@ public final class BankPlanPromptComposer {
     private BankPlanPromptComposer() {}
 
     public static String buildRequirementsUserContent(String queryText) {
-        return stageMessage(queryText, "REQUIREMENTS", "先输出完整 BankRequestContract JSON。", null);
+        return buildRequirementsUserContent(queryText, null);
+    }
+
+    public static String buildRequirementsUserContent(String queryText, String familyExamples) {
+        return stageMessage(queryText, "REQUIREMENTS", "先输出完整 BankRequestContract JSON。",
+                null, familyExamples);
     }
 
     public static String buildRequirementsRepairUserContent(String queryText,
             String previousCandidate, String validationMessage) {
-        return repairMessage(queryText, "REQUIREMENTS", null, previousCandidate, validationMessage,
+        return buildRequirementsRepairUserContent(queryText, previousCandidate, validationMessage,
                 null);
     }
 
+    public static String buildRequirementsRepairUserContent(String queryText,
+            String previousCandidate, String validationMessage, String familyExamples) {
+        return repairMessage(queryText, "REQUIREMENTS", null, previousCandidate, validationMessage,
+                null, familyExamples);
+    }
+
     public static String buildPlanUserContent(String queryText, String requirementsJson) {
+        return buildPlanUserContent(queryText, requirementsJson, null);
+    }
+
+    public static String buildPlanUserContent(String queryText, String requirementsJson,
+            String familyExamples) {
         requireContract(requirementsJson);
         return stageMessage(queryText, "PLAN", "依据 requirements_contract 输出完整 BankQueryPlan JSON。",
-                requirementsJson);
+                requirementsJson, familyExamples);
     }
 
     public static String buildPlanRepairUserContent(String queryText, String requirementsJson,
             String previousCandidate, String validationMessage) {
+        return buildPlanRepairUserContent(queryText, requirementsJson, previousCandidate,
+                validationMessage, null);
+    }
+
+    public static String buildPlanRepairUserContent(String queryText, String requirementsJson,
+            String previousCandidate, String validationMessage, String familyExamples) {
         requireContract(requirementsJson);
         return repairMessage(queryText, "PLAN", requirementsJson, previousCandidate,
-                validationMessage, null);
+                validationMessage, null, familyExamples);
     }
 
     public static String buildToolRepairUserContent(String queryText, String requirementsJson,
             String previousPlan, BankPlanToolResult toolResult) {
+        return buildToolRepairUserContent(queryText, requirementsJson, previousPlan, toolResult,
+                null);
+    }
+
+    public static String buildToolRepairUserContent(String queryText, String requirementsJson,
+            String previousPlan, BankPlanToolResult toolResult, String familyExamples) {
         if (toolResult == null || toolResult.getStatus() != BankPlanToolResult.Status.FAILED) {
             throw new IllegalArgumentException("a failed bank plan tool result is required");
         }
         requireContract(requirementsJson);
         return repairMessage(queryText, "PLAN", requirementsJson, previousPlan,
-                toolResult.toRepairFeedback(), "tool_result");
+                toolResult.toRepairFeedback(), "tool_result", familyExamples);
     }
 
     /** Kept for callers/tests that only need the raw user question. */
@@ -561,8 +589,14 @@ public final class BankPlanPromptComposer {
 
     private static String stageMessage(String queryText, String stage, String instruction,
             String requirementsJson) {
-        String content = "%s\n\n<stage>%s</stage>\n%s%s".formatted(
-                buildDynamicUserContent(queryText), stage, instruction,
+        return stageMessage(queryText, stage, instruction, requirementsJson, null);
+    }
+
+    private static String stageMessage(String queryText, String stage, String instruction,
+            String requirementsJson, String familyExamples) {
+        String content = "%s%s\n\n<stage>%s</stage>\n%s%s".formatted(
+                buildDynamicUserContent(queryText), renderFamilyExamples(familyExamples), stage,
+                instruction,
                 requirementsJson == null ? ""
                         : "\n<requirements_contract>\n" + requirementsJson.strip()
                                 + "\n</requirements_contract>");
@@ -572,23 +606,37 @@ public final class BankPlanPromptComposer {
 
     private static String repairMessage(String queryText, String stage, String requirementsJson,
             String previousCandidate, String validationMessage, String errorTag) {
+        return repairMessage(queryText, stage, requirementsJson, previousCandidate,
+                validationMessage, errorTag, null);
+    }
+
+    private static String repairMessage(String queryText, String stage, String requirementsJson,
+            String previousCandidate, String validationMessage, String errorTag,
+            String familyExamples) {
         String error = validationMessage == null ? "" : validationMessage.strip();
         if (looksLikeCatalogDump(error)) {
             error = "contract validation failed; output one complete JSON object for the current stage";
         }
         String repairTag = errorTag == null ? "error" : errorTag;
         String clarificationRecheck = buildClarificationRecheck(stage, error);
-        String content = "%s\n\n<stage>%s</stage>%s\n<repair>\n<%s>%s</%s>\n"
+        String content = "%s%s\n\n<stage>%s</stage>%s\n<repair>\n<%s>%s</%s>\n"
                 + "<previous_candidate>\n%s\n</previous_candidate>\n" + "%s"
                 + "<instruction>只输出修正后的完整当前阶段 JSON；不输出解释、补丁或 SQL。</instruction>\n</repair>";
         String requirements = requirementsJson == null ? ""
                 : "\n<requirements_contract>\n" + requirementsJson.strip()
                         + "\n</requirements_contract>";
-        String result = content.formatted(buildDynamicUserContent(queryText), stage, requirements,
-                repairTag, error, repairTag,
+        String result = content.formatted(buildDynamicUserContent(queryText),
+                renderFamilyExamples(familyExamples), stage, requirements, repairTag, error, repairTag,
                 previousCandidate == null ? "" : previousCandidate.strip(), clarificationRecheck);
         assertQuestionOnlyUserContent(result, stage + " repair user");
         return result;
+    }
+
+    private static String renderFamilyExamples(String familyExamples) {
+        if (familyExamples == null || familyExamples.isBlank()) {
+            return "";
+        }
+        return "\n<family_examples>\n" + familyExamples.strip() + "\n</family_examples>";
     }
 
     private static String buildClarificationRecheck(String stage, String error) {

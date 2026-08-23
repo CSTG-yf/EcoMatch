@@ -45,6 +45,7 @@ import java.util.regex.Pattern;
 public class BankPlanGenStrategy extends SqlGenStrategy {
 
     public static final String APP_KEY = "BANK_CONSTRAINED_PLAN";
+    public static final String FEW_SHOT_ENABLE_PROPERTY = "s2.parser.bank.few-shot.enable";
 
     private static final Logger KEY_PIPELINE_LOG = LoggerFactory.getLogger("keyPipeline");
     private static final int MAX_REQUIREMENT_ATTEMPTS = 3;
@@ -108,12 +109,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         String requirementsJson = JsonUtil.toString(requirements);
 
         boolean toolRepair = llmReq.getBankPlanToolResult() != null;
+        String planExamples = fewShotEnabled()
+                ? BankFewShotExemplarCatalog.renderPlanExamples(requirements) : null;
         String dynamicUser = toolRepair
                 ? BankPlanPromptComposer.buildToolRepairUserContent(llmReq.getQueryText(),
                         requirementsJson, llmReq.getPreviousBankQueryPlanJson(),
-                        llmReq.getBankPlanToolResult())
+                        llmReq.getBankPlanToolResult(), planExamples)
                 : BankPlanPromptComposer.buildPlanUserContent(llmReq.getQueryText(),
-                        requirementsJson);
+                        requirementsJson, planExamples);
         int candidateLimit =
                 toolRepair ? 1 : Math.max(1, Math.min(3, llmReq.getBankMaxCandidates()));
 
@@ -137,7 +140,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 candidates.add(BankPlanCandidateRanker.Candidate
                         .rejected("rejected-plan-" + candidateIndex, exception.getReason().name()));
                 PlanRepairAttempt repaired = repairPlan(llmReq, requirementsJson, candidate,
-                        exception, model, modelConfig, planHints, candidateIndex);
+                        exception, model, modelConfig, planHints, candidateIndex, planExamples);
                 candidates.addAll(repaired.candidates());
                 planRepairCodes.addAll(repaired.repairCodes());
                 lastCandidate = repaired.lastCandidate();
@@ -191,6 +194,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return llmReq.getSemanticIntentHints();
     }
 
+    private boolean fewShotEnabled() {
+        return Boolean.parseBoolean(System.getProperty(FEW_SHOT_ENABLE_PROPERTY, "false"));
+    }
+
     private ChatModelConfig configureModel(ChatModelConfig modelConfig) {
         if (modelConfig == null) {
             throw new IllegalArgumentException("bank chat model configuration is required");
@@ -219,14 +226,17 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankQueryPlanParseException lastError = null;
         List<String> repairReasons = new ArrayList<>();
         List<String> repairCodes = new ArrayList<>();
+        String requirementExamples = fewShotEnabled()
+                ? BankFewShotExemplarCatalog.renderRequirementsExamples(llmReq.getQueryText()) : null;
         int clarificationRechecks = 0;
         for (int attempt = 0; attempt < MAX_REQUIREMENT_ATTEMPTS; attempt++) {
             String user = attempt == 0
-                    ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText())
+                    ? BankPlanPromptComposer.buildRequirementsUserContent(llmReq.getQueryText(),
+                            requirementExamples)
                     : BankPlanPromptComposer.buildRequirementsRepairUserContent(
                             llmReq.getQueryText(), candidate,
                             lastError == null ? "requirements JSON is invalid"
-                                    : lastError.getMessage());
+                                    : lastError.getMessage(), requirementExamples);
             try {
                 candidate = prefixCache.generate(model, config,
                         BankPlanLlmPrefixCache.Stage.REQUIREMENTS, user, attempt == 0);
@@ -1224,7 +1234,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private PlanRepairAttempt repairPlan(LLMReq llmReq, String requirementsJson,
             String firstCandidate, BankQueryPlanParseException firstError, ChatLanguageModel model,
-            ChatModelConfig config, SemanticIntentHints planHints, int candidateIndex) {
+            ChatModelConfig config, SemanticIntentHints planHints, int candidateIndex,
+            String planExamples) {
         List<BankPlanCandidateRanker.Candidate> candidates = new ArrayList<>();
         List<String> repairCodes = new ArrayList<>();
         String previous = firstCandidate;
@@ -1235,7 +1246,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         prefixCache.generate(model, config, BankPlanLlmPrefixCache.Stage.PLAN,
                                 BankPlanPromptComposer.buildPlanRepairUserContent(
                                         llmReq.getQueryText(), requirementsJson, previous,
-                                        lastError.getMessage()),
+                                        lastError.getMessage(), planExamples),
                                 false);
                 previous = repaired;
                 candidates.add(candidateRanker.evaluate(
