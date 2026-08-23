@@ -108,6 +108,27 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
     }
 
     @Override
+    public Long getDataSetDomainId(Long id, User user) {
+        if (!isAuthenticatedUser(user)) {
+            throw new InvalidPermissionException("User identity is required");
+        }
+        DataSetDO dataSetDO = getRequiredDataSetDO(id);
+        Long domainId = dataSetDO.getDomainId();
+        if (domainId == null || domainId <= 0) {
+            throw new InvalidArgumentException("Data set domain id must be positive");
+        }
+        if (user.isSuperAdmin() || hasDataSetDirectPermission(dataSetDO, user)) {
+            return domainId;
+        }
+        Set<DomainResp> viewerDomains = domainService.getDomainAuthSet(user, AuthType.VIEWER);
+        if (viewerDomains != null
+                && viewerDomains.stream().map(DomainResp::getId).anyMatch(domainId::equals)) {
+            return domainId;
+        }
+        throw new InvalidPermissionException("No permission to view data set domain");
+    }
+
+    @Override
     public List<DataSetResp> getDataSetList(MetaFilter metaFilter) {
         QueryWrapper<DataSetDO> wrapper = new QueryWrapper<>();
         if (metaFilter.getDomainId() != null) {
@@ -268,6 +289,13 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
         String userName = user.getName();
         return StringUtils.isNotBlank(userName) && ((admins != null && admins.contains(userName))
                 || userName.equals(dataSetResp.getCreatedBy()));
+    }
+
+    private boolean hasDataSetDirectPermission(DataSetDO dataSetDO, User user) {
+        String userName = user.getName();
+        return userName.equals(dataSetDO.getCreatedBy())
+                || (!StringUtils.isBlank(dataSetDO.getAdmin())
+                        && Arrays.asList(dataSetDO.getAdmin().split(",")).contains(userName));
     }
 
     private DataSetDO getRequiredDataSetDO(Long id) {

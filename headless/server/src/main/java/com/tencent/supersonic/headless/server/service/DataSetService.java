@@ -20,6 +20,8 @@ public interface DataSetService {
 
     DataSetResp getDataSet(Long id, User user);
 
+    Long getDataSetDomainId(Long id, User user);
+
     List<DataSetResp> getDataSetList(MetaFilter metaFilter);
 
     List<DataSetResp> getDataSetList(Long domainId, List<Integer> statuCodesList);

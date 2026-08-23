@@ -2,12 +2,16 @@ package com.tencent.supersonic.headless.server.facade.service.impl;
 
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.headless.api.pojo.QueryStat;
+import com.tencent.supersonic.headless.api.pojo.SqlInfo;
 import com.tencent.supersonic.common.pojo.enums.TaskStatusEnum;
 import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
+import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
 import com.tencent.supersonic.headless.chat.knowledge.KnowledgeBaseService;
 import com.tencent.supersonic.headless.core.cache.QueryCache;
+import com.tencent.supersonic.headless.core.pojo.QueryStatement;
 import com.tencent.supersonic.headless.core.translator.SemanticTranslator;
 import com.tencent.supersonic.headless.core.translator.TranslatorConfig;
 import com.tencent.supersonic.headless.server.manager.SemanticSchemaManager;
@@ -32,10 +36,12 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -46,6 +52,8 @@ class S2SemanticLayerServiceAuditTest {
     private StatUtils statUtils;
     private AuditEventPublisher auditEventPublisher;
     private QueryCache queryCache;
+    private SemanticTranslator semanticTranslator;
+    private TranslatorConfig translatorConfig;
     private S2SemanticLayerService service;
 
     @BeforeEach
@@ -53,13 +61,17 @@ class S2SemanticLayerServiceAuditTest {
         statUtils = mock(StatUtils.class);
         auditEventPublisher = mock(AuditEventPublisher.class);
         queryCache = mock(QueryCache.class);
+        semanticTranslator = mock(SemanticTranslator.class);
+        translatorConfig = mock(TranslatorConfig.class);
+        when(translatorConfig.getParameterValue(TranslatorConfig.TRANSLATOR_RESULT_LIMIT))
+                .thenReturn("1000");
         service = new S2SemanticLayerService(statUtils, mock(QueryUtils.class),
                 mock(SemanticSchemaManager.class), mock(DataSetService.class),
-                mock(SchemaService.class), mock(SemanticTranslator.class),
+                mock(SchemaService.class), semanticTranslator,
                 mock(MetricDrillDownChecker.class), mock(KnowledgeBaseService.class),
                 mock(MetricService.class), mock(DimensionService.class), mock(DomainService.class),
-                mock(TranslatorConfig.class), mock(DataMaskingService.class), auditEventPublisher,
-                queryCache, List.of());
+                translatorConfig, mock(DataMaskingService.class), auditEventPublisher, queryCache,
+                List.of());
     }
 
     @Test
@@ -106,6 +118,102 @@ class S2SemanticLayerServiceAuditTest {
         assertEquals("IllegalStateException", failed.getMetadata().get("exceptionType"));
         assertEquals(request.getSql(), failed.getRawSql());
         verify(statUtils).statInfo2DbAsync(TaskStatusEnum.ERROR);
+    }
+
+    @Test
+    void shouldNotOverrideWithUntrustedStoredPhysicalSql() throws Exception {
+        QuerySqlReq request = modelScopedRequest();
+        translateToScopeSql();
+
+        SemanticTranslateResp response = service.translate(request, User.get(7L, "alice"));
+
+        assertEquals(request.getSql(), response.getQuerySQL());
+        verify(semanticTranslator).translate(any(QueryStatement.class));
+    }
+
+    @Test
+    void shouldNotOverrideRowPermissionSqlWithAnyStoredPhysicalSql() throws Exception {
+        QuerySqlReq request = modelScopedRequest();
+        request.setTrustedCompiledSql(true);
+        request.setRowPermissionApplied(true);
+        request.getSqlInfo().setCorrectedQuerySQL("SELECT repaired FROM physical_account");
+        translateToScopeSql();
+
+        SemanticTranslateResp response = service.translate(request, User.get(7L, "alice"));
+
+        assertEquals(request.getSql(), response.getQuerySQL());
+        verify(semanticTranslator).translate(any(QueryStatement.class));
+    }
+
+    @Test
+    void shouldReuseTrustedStoredPhysicalSqlWithoutRowPermission() throws Exception {
+        QuerySqlReq request = modelScopedRequest();
+        request.setTrustedCompiledSql(true);
+
+        SemanticTranslateResp response = service.translate(request, User.get(7L, "alice"));
+
+        assertEquals(request.getSqlInfo().getQuerySQL(), response.getQuerySQL());
+    }
+
+    @Test
+    void shouldExecuteCorrectedPhysicalSqlAsUntrusted() throws Exception {
+        QuerySqlReq request = modelScopedRequest();
+        request.setTrustedCompiledSql(true);
+        request.getSqlInfo().setCorrectedQuerySQL("SELECT repaired FROM physical_account");
+
+        SemanticTranslateResp response = service.translate(request, User.get(7L, "alice"));
+
+        ArgumentCaptor<QueryStatement> statementCaptor =
+                ArgumentCaptor.forClass(QueryStatement.class);
+        verify(semanticTranslator).translate(statementCaptor.capture());
+        assertEquals(request.getSqlInfo().getCorrectedQuerySQL(), response.getQuerySQL());
+        assertFalse(statementCaptor.getValue().isTrustedCompiledSql());
+        assertTrue(statementCaptor.getValue().isTranslated());
+    }
+
+    @Test
+    void shouldAuditNoQueryExecutorOnlyOnce() throws Exception {
+        User user = User.get(7L, "alice");
+        QuerySqlReq request = modelScopedRequest();
+        request.getSqlInfo().setQuerySQL(null);
+        when(queryCache.getCacheKey(request, user)).thenReturn("cache-key");
+        doAnswer(invocation -> {
+            QueryStatement statement = invocation.getArgument(0);
+            statement.setSql(statement.getSqlQuery().getSql());
+            statement.setIsTranslated(true);
+            return null;
+        }).when(semanticTranslator).translate(any(QueryStatement.class));
+        StatUtils.set(new QueryStat());
+
+        assertThrows(IllegalStateException.class, () -> service.queryByReq(request, user));
+
+        ArgumentCaptor<AuditEvent> events = ArgumentCaptor.forClass(AuditEvent.class);
+        verify(auditEventPublisher, times(2)).publishBestEffort(events.capture(), eq(user));
+        List<AuditEvent> failedEvents = events.getAllValues().stream()
+                .filter(event -> event.getEventType() == AuditEventType.QUERY_FAILED).toList();
+        assertEquals(1, failedEvents.size());
+        assertEquals("NO_QUERY_EXECUTOR", failedEvents.get(0).getReasonCode());
+        verify(statUtils).statInfo2DbAsync(TaskStatusEnum.ERROR);
+        StatUtils.remove();
+    }
+
+    private void translateToScopeSql() throws Exception {
+        doAnswer(invocation -> {
+            QueryStatement statement = invocation.getArgument(0);
+            statement.setSql(statement.getSqlQuery().getSql());
+            statement.setIsTranslated(true);
+            return null;
+        }).when(semanticTranslator).translate(any(QueryStatement.class));
+    }
+
+    private QuerySqlReq modelScopedRequest() {
+        QuerySqlReq request = new QuerySqlReq();
+        request.setSql("SELECT revenue FROM account WHERE branch_id = '001'");
+        request.setModelIds(Set.of(3L));
+        SqlInfo sqlInfo = new SqlInfo();
+        sqlInfo.setQuerySQL("WITH ranked AS (SELECT revenue FROM physical_account) SELECT * FROM ranked");
+        request.setSqlInfo(sqlInfo);
+        return request;
     }
 
     private QuerySqlReq queryRequest() {

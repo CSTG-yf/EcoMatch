@@ -51,6 +51,13 @@ public class DataSetController {
         return dataSetService.getDataSet(id, user);
     }
 
+    @GetMapping("/{id}/domain")
+    public Long getDataSetDomainId(@PathVariable("id") Long id, HttpServletRequest request,
+            HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return dataSetService.getDataSetDomainId(id, user);
+    }
+
     @GetMapping("/getDataSetList")
     public List<DataSetResp> getDataSetList(@RequestParam("domainId") Long domainId,
             HttpServletRequest request, HttpServletResponse response) {

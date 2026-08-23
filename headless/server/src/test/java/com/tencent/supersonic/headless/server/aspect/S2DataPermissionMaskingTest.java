@@ -10,6 +10,7 @@ import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.enums.SensitiveLevelEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
+import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.response.DimSchemaResp;
 import com.tencent.supersonic.headless.api.pojo.response.ModelResp;
@@ -180,6 +181,28 @@ class S2DataPermissionMaskingTest {
     }
 
     @Test
+    void marksSqlOnlyAfterRowPermissionIsApplied() throws Throwable {
+        QuerySqlReq request = authorizedSqlRequest("SELECT revenue FROM account");
+        when(joinPoint.proceed()).thenReturn("ok");
+
+        assertEquals("ok", aspect.doAround(joinPoint));
+
+        assertTrue(request.isRowPermissionApplied());
+        assertTrue(request.getSql().contains("branch_id = '001'"));
+    }
+
+    @Test
+    void deniesSqlWhenEffectiveRowPermissionCannotBeApplied() throws Throwable {
+        QuerySqlReq request = authorizedSqlRequest(
+                "SELECT revenue FROM account UNION ALL SELECT revenue FROM archive");
+
+        assertThrows(InvalidPermissionException.class, () -> aspect.doAround(joinPoint));
+
+        assertTrue(!request.isRowPermissionApplied());
+        verify(joinPoint, never()).proceed();
+    }
+
+    @Test
     void doesNotReuseSensitiveColumnGrantAcrossModels() throws Throwable {
         QueryStructReq request = new QueryStructReq();
         request.setNeedAuth(true);
@@ -331,6 +354,23 @@ class S2DataPermissionMaskingTest {
         assertNull(denied.getRawQuestion());
         assertNull(denied.getRawSql());
         assertNull(denied.getMetadata());
+    }
+
+    private QuerySqlReq authorizedSqlRequest(String sql) {
+        QuerySqlReq request = new QuerySqlReq();
+        request.setSql(sql);
+        request.setNeedAuth(true);
+        when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
+        when(queryStructUtils.getModelIdFromSql(eq(request), any())).thenReturn(Set.of(1L));
+        when(queryStructUtils.getBizNameFromSql(eq(request), any())).thenReturn(Set.of());
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.ADMIN)))
+                .thenReturn(List.of());
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.VIEWER)))
+                .thenReturn(List.of(model(1L)));
+        AuthorizedResourceResp authorization = new AuthorizedResourceResp();
+        authorization.setFilters(List.of(filter(1L, "branch_id = '001'")));
+        when(authService.queryAuthorizedResources(any(), eq(analyst))).thenReturn(authorization);
+        return request;
     }
 
     private QueryStructReq authorizedPolicyRequest() {

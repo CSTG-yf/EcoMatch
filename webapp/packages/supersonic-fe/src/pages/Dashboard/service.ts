@@ -74,5 +74,10 @@ export const getDashboardModel = (modelId: number) =>
     method: 'GET',
   });
 
+export const getDashboardDataSetDomain = (dataSetId: number) =>
+  request<Result<number>>(`${process.env.API_BASE_URL}dataSet/${dataSetId}/domain`, {
+    method: 'GET',
+  });
+
 export const getDashboardDomains = () =>
   request(`${process.env.API_BASE_URL}domain/getDomainList`, { method: 'GET' });

@@ -31,7 +31,7 @@
 
         .newConversation {
           color: var(--text-color);
-          font-size: 14px;
+          font-size: 16px;
           cursor: pointer;
 
           &:hover {
@@ -95,7 +95,7 @@
         display: flex;
         align-items: center;
         padding: 8px 12px;
-        border: 1px solid #efefef;
+        // 条目之间不加边框外盒，当前对话仅以灰色底纹区分
         border-radius: 8px;
         cursor: pointer;
 
@@ -123,14 +123,6 @@
                 font-size: 14px;
                 white-space: nowrap;
                 text-overflow: ellipsis;
-              }
-
-              .currentConversation {
-                padding: 0 4px;
-                color: var(--chat-blue);
-                font-size: 12px;
-                background-color: var(--light-blue-background);
-                border-radius: 4px;
               }
             }
 
@@ -177,8 +169,9 @@
   }
 
   &.historyVisible {
-    flex: 0 0 248px;
-    width: 248px;
+    // 与 ProLayout 侧边栏同宽（siderWidth 200），使顶栏 logo 区、侧栏、历史面板右缘对齐
+    flex: 0 0 200px;
+    width: 200px;
     padding: 10px 16px;
     border-right: 1px solid #f1f1f1;
     z-index: 99;

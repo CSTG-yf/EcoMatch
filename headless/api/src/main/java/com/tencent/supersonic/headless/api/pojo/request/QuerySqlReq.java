@@ -1,5 +1,6 @@
 package com.tencent.supersonic.headless.api.pojo.request;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +19,10 @@ public class QuerySqlReq extends SemanticQueryReq {
 
     private String sql;
     private Integer limit = 1000;
+
+    /** Set only after the server successfully adds row-permission predicates to this SQL. */
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private boolean rowPermissionApplied = false;
 
     @Override
     public String toCustomizedString() {

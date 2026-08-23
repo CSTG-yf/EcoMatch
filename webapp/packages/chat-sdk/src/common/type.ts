@@ -148,6 +148,7 @@ export type ChatContextType = {
   queryMode: string;
   queryType: ChatContextTypeQueryTypeEnum;
   dimensionFilters: FilterItemType[];
+  metricFilters?: FilterItemType[];
   properties: any;
   sqlInfo: SqlInfoType;
   sqlEvaluation?: SqlEvaluationType;
@@ -217,6 +218,7 @@ export type DashboardSemanticQuery = {
   metrics?: FieldType[];
   dateInfo?: DateInfoType;
   dimensionFilters?: FilterItemType[];
+  metricFilters?: FilterItemType[];
 };
 
 export type DashboardQuerySource = {
