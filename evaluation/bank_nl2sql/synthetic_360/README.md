@@ -21,6 +21,23 @@ python evaluation/bank_nl2sql/synthetic_360/validate_synthetic_facts.py `
 
 预期规模为 360 项指标、13 家虚拟机构、17 个日期和 79,560 条事实。SQLite 仅供本地测试使用；没有接入真实银行生产库。
 
+## 运行时导入与数据库绑定
+
+`bank-h2.sql` 必须先由部署者加载到一个独立的 H2 数据库；导入脚本不会覆盖或复制
+SuperSonic 的物理数据库。随后确认已有语义模型的 `modelId` 确实绑定该数据库，运行：
+
+```powershell
+python evaluation/bank_nl2sql/synthetic_360/bootstrap_synthetic_agent.py `
+  evaluation/bank_nl2sql/synthetic_360/releases/0.1.0-synthetic `
+  --model-id <SYNTHETIC_MODEL_ID> --database-id <SYNTHETIC_DATABASE_ID> `
+  --chat-model-id <CHAT_MODEL_ID> --base-url http://127.0.0.1:9080 `
+  --output .local-dev/synthetic-360-runtime-receipt.json
+```
+
+该命令会校验模型与数据库绑定，生成并导入 360 指标语义工作簿，创建/更新独立的
+`银行问数-SYNTHETIC-360` Agent，并输出不含凭据的运行回执。回执只证明导入计数和
+绑定元数据，不把合成数据当成官方成绩。
+
 ## Agent 评测入口
 
 `run_eval.py` 复用工程中已有的 SuperSonic parse/execute 对话链，但数据域独立于官方 21 项。
@@ -33,8 +50,12 @@ python evaluation/bank_nl2sql/synthetic_360/validate_synthetic_facts.py `
 python evaluation/bank_nl2sql/synthetic_360/run_eval.py `
   --release-dir evaluation/bank_nl2sql/synthetic_360/releases/0.1.0-synthetic `
   --split dev --max-records 5 --agent-id <已配置的Agent ID> `
+  --runtime-receipt .local-dev/synthetic-360-runtime-receipt.json `
   --base-url http://127.0.0.1:9080 --output .local-dev/synthetic-360-smoke.json
 ```
+
+非 dry-run 必须提供与当前 release、Agent、模型和数据库绑定一致的运行回执；这样不会
+误把官方 Agent 或旧数据库当成 360 指标评测结果。`--dry-run` 只检查盲题字段，不访问服务。
 
 运行成功后再用 `--split dev` 跑 72 题，确认错误分类后再跑 `--split test`。结构化结果评分：
 

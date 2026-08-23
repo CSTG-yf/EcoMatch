@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
 
-from evaluation.bank_nl2sql.synthetic_360.validate_synthetic_facts import validate_release
+from evaluation.bank_nl2sql.synthetic_360.build_synthetic_facts import _write_h2
+from evaluation.bank_nl2sql.synthetic_360.validate_synthetic_facts import (
+    _write_report,
+    validate_release,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,3 +41,19 @@ class SyntheticFactsTest(unittest.TestCase):
         manifest = json.loads((RELEASE / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual([], manifest["officialInputs"])
         self.assertEqual("SYNTHETIC_CANDIDATE", manifest["status"])
+
+    def test_h2_generator_uses_canonical_lf_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "bank-h2.sql"
+            _write_h2(path, [], [])
+            content = path.read_bytes()
+        self.assertNotIn(b"\r\n", content)
+        self.assertTrue(content.endswith(b"\n"))
+
+    def test_validation_report_uses_canonical_lf_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "report.json"
+            _write_report(path, {"status": "VALID"})
+            content = path.read_bytes()
+        self.assertNotIn(b"\r\n", content)
+        self.assertTrue(content.endswith(b"\n"))

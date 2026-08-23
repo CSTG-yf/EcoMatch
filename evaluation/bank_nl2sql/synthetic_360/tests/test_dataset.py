@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
-from evaluation.bank_nl2sql.synthetic_360.validate_dataset import validate_dataset
+from evaluation.bank_nl2sql.synthetic_360.validate_dataset import _write_report, validate_dataset
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,3 +32,11 @@ class SyntheticDatasetTest(unittest.TestCase):
         manifest = json.loads((RELEASE / "dataset-manifest.json").read_text(encoding="utf-8"))
         self.assertFalse(manifest["officialEligible"])
         self.assertEqual([], manifest["officialInputs"])
+
+    def test_validation_report_uses_canonical_lf_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "report.json"
+            _write_report(path, {"status": "VALID"})
+            content = path.read_bytes()
+        self.assertNotIn(b"\r\n", content)
+        self.assertTrue(content.endswith(b"\n"))

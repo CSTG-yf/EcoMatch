@@ -1,9 +1,24 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from evaluation.bank_nl2sql.synthetic_360.evaluate_results import evaluate_capture
-from evaluation.bank_nl2sql.synthetic_360.run_eval import build_blind_split
+from evaluation.bank_nl2sql.synthetic_360.run_eval import (
+    SyntheticRunError,
+    build_blind_split,
+    verify_runtime_receipt,
+)
+
+
+RELEASE = Path(__file__).resolve().parents[1] / "releases" / "0.1.0-synthetic"
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class Synthetic360EvalContractTest(unittest.TestCase):
@@ -60,6 +75,50 @@ class Synthetic360EvalContractTest(unittest.TestCase):
         self.assertEqual(1.0, report["sqlExecutionSuccessRate"])
         self.assertEqual(1.0, report["resultAccuracy"])
         self.assertEqual(1200.0, report["latencyMs"]["mean"])
+
+    def test_runtime_receipt_binds_agent_to_exact_release(self) -> None:
+        manifest = json.loads((RELEASE / "manifest.json").read_text(encoding="utf-8"))
+        receipt = {
+            "receiptSchemaVersion": "1.0",
+            "dataOrigin": "SYNTHETIC",
+            "datasetVersion": manifest["version"],
+            "manifestSha256": _sha256(RELEASE / "manifest.json"),
+            "agentId": 33,
+            "dataSetId": 101,
+            "modelId": 202,
+            "databaseId": 303,
+            "modelBinding": {"modelId": 202, "databaseId": 303},
+            "semanticImport": {"organizations": 13, "indicators": 360, "factsValidated": 79560},
+            "packageFiles": {
+                name: {
+                    "bytes": manifest["files"][name]["bytes"],
+                    "sha256": manifest["files"][name]["sha256"],
+                }
+                for name in ("bank.sqlite", "bank-h2.sql")
+            },
+            "counts": {"metrics": 360, "organizations": 13, "dates": 17, "facts": 79560},
+            "physicalDatabaseLoad": "PRELOADED_BY_CALLER",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt_path = Path(temp_dir) / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            verified = verify_runtime_receipt(RELEASE, receipt_path, agent_id=33)
+        self.assertEqual(303, verified["databaseId"])
+
+    def test_runtime_receipt_rejects_wrong_agent(self) -> None:
+        manifest = json.loads((RELEASE / "manifest.json").read_text(encoding="utf-8"))
+        receipt = {
+            "receiptSchemaVersion": "1.0",
+            "dataOrigin": "SYNTHETIC",
+            "datasetVersion": manifest["version"],
+            "manifestSha256": _sha256(RELEASE / "manifest.json"),
+            "agentId": 33,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            receipt_path = Path(temp_dir) / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            with self.assertRaises(SyntheticRunError):
+                verify_runtime_receipt(RELEASE, receipt_path, agent_id=34)
 
     def test_wrong_metric_and_result_are_classified(self) -> None:
         capture = {
