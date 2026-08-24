@@ -727,6 +727,33 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void explicitIsoQuarterRangeIsReturnedToTheModelBeforePlanGeneration() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String validRequirements = quarterlyTrendRequirementsJson()
+                .replace("2025-12-31", "2026-03-31");
+        String invalidRequirements = validRequirements.replace("\"startDate\":\"2025-03-31\"",
+                "\"startDate\":\"2026-03-31\"");
+        String validPlan = quarterlyTrendPlanJson().replace("2025-12-31", "2026-03-31");
+        when(model.generate(anyString())).thenReturn(invalidRequirements, validRequirements, validPlan);
+
+        LLMReq request = request();
+        request.setQueryText("分析江苏省D市农商行各项存款余额从2025Q1末到2026Q1末的逐季变化");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.TREND, response.getBankRequestContract().getIntent());
+        assertEquals(java.time.LocalDate.of(2025, 3, 31),
+                response.getBankQueryPlan().getTime().getStartDate());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("explicit_series_time_range_mismatch"));
+        assertTrue(prompts.getAllValues().get(1).contains("2025-03-31"));
+    }
+
+    @Test
     void provinceAverageComparisonReturnsUnsupportedIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(requirementsJson()

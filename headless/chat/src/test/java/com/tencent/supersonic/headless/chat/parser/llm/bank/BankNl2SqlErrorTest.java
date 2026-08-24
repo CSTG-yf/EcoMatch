@@ -27,4 +27,24 @@ class BankNl2SqlErrorTest {
         assertTrue(BankNl2SqlError.isTerminalParserError(parserError));
         assertEquals("银行指标查询服务暂时不可用，请稍后重试。", BankNl2SqlError.toUserMessage(parserError));
     }
+
+    @Test
+    void classifiesProviderTimeoutAsARetryableSanitizedFailure() {
+        BankNl2SqlError error =
+                BankNl2SqlError.modelFailure(new RuntimeException("connection timeout"));
+
+        assertTrue(error.isRetryable());
+        assertEquals(BankNl2SqlError.ProviderFailureClass.TIMEOUT,
+                error.getProviderFailureClass());
+        assertEquals("model_timeout", error.getStableRepairCode());
+    }
+
+    @Test
+    void preservesTheGenerationStageForSafeFailureTelemetry() {
+        BankNl2SqlError error = BankNl2SqlError.modelFailure(
+                BankNl2SqlError.Stage.REQUIREMENTS, new RuntimeException("connection timeout"));
+
+        assertEquals(BankNl2SqlError.Stage.REQUIREMENTS, error.getStage());
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, error.getCategory());
+    }
 }

@@ -62,6 +62,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     private static final Pattern EXPLICIT_YEAR_END_RANGE = Pattern.compile(
             "从\\s*(20\\d{2})年(?:末|底|年末|年底)\\s*(?:到|至)\\s*"
                     + "(20\\d{2})[-/]([0-1]?\\d)[-/]([0-3]?\\d)");
+    private static final Pattern EXPLICIT_YEAR_TOKEN = Pattern.compile("20\\d{2}");
 
     private final BankRequestContractResponseParser requestContractParser =
             new BankRequestContractResponseParser();
@@ -178,7 +179,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             return planResponse(llmReq, requirements, selection.getSelected().getPlan(),
                     diagnostics);
         } catch (IllegalArgumentException noCandidate) {
-            throw BankNl2SqlError.afterSingleRepair(lastPlanError == null
+            throw BankNl2SqlError.afterPlanRepair(lastPlanError == null
                     ? new BankQueryPlanParseException(
                             BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                             "no model plan candidate passed the requirements contract")
@@ -262,11 +263,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 repairCodes.add(repairErrorCode(exception));
                 logRepair("REQUIREMENTS", attempt + 1, repairErrorCode(exception), exception);
             } catch (RuntimeException exception) {
-                throw BankNl2SqlError.modelFailure(exception);
+                throw BankNl2SqlError.modelFailure(BankNl2SqlError.Stage.REQUIREMENTS,
+                        exception);
             }
         }
         throw BankNl2SqlError
-                .afterSingleRepair(lastError == null
+                .afterRequirementsRepair(lastError == null
                         ? new BankQueryPlanParseException(
                                 BankQueryPlanParseException.Reason.VALIDATION_FAILED,
                                 "model did not return an executable requirements contract")
@@ -401,6 +403,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // complete requirements contract and executable plan.
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        validateExplicitSeriesTimeRange(queryText, requirements, evidence);
         validateMonthAndYearComparison(queryText, requirements);
         validateExplicitYearEndRange(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
@@ -439,6 +442,47 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     List.of("ZB014", "ZB002"), Set.of(), false);
         }
         validateMetricPairGapQuery(queryText, requirements, evidence);
+    }
+
+    /**
+     * Validates an explicit series range before plan generation. A series question names every
+     * endpoint in the user turn, so accepting a shortened model requirement would make a valid
+     * plan compile to an incomplete result. The model receives this as repair feedback and still
+     * owns the replacement requirements JSON.
+     */
+    private void validateExplicitSeriesTimeRange(String queryText,
+            BankRequestContract requirements, BankIntentResult evidence) {
+        if (requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || !containsAny(queryText, "逐季", "逐季度", "逐月", "逐日", "趋势", "走势", "序列")
+                || explicitYearTokenCount(queryText) < 2
+                || evidence.getTime() == null || evidence.getTime().isAmbiguous()
+                || evidence.getTime().getStartDate() == null || evidence.getTime().getEndDate() == null) {
+            return;
+        }
+        BankQueryPlan.TimeRange actual = requirements.getTime();
+        boolean valid = requirements.getIntent() == BankIntentType.TREND && actual != null
+                && evidence.getTime().getStartDate().equals(actual.getStartDate())
+                && evidence.getTime().getEndDate().equals(actual.getEndDate())
+                && actual.getComparison() == BankQueryPlan.TimeComparison.NONE
+                && actual.getBaselineStartDate() == null && actual.getBaselineEndDate() == null;
+        if (!valid) {
+            throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "explicit_series_time_range_mismatch: expected intent=TREND, startDate="
+                            + evidence.getTime().getStartDate() + ", endDate="
+                            + evidence.getTime().getEndDate()
+                            + ", comparison=NONE, baselineStartDate=null, baselineEndDate=null; "
+                            + "regenerate the complete requirements JSON without shortening the "
+                            + "explicit user time range");
+        }
+    }
+
+    private int explicitYearTokenCount(String queryText) {
+        Matcher matcher = EXPLICIT_YEAR_TOKEN.matcher(queryText);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
     }
 
     /**

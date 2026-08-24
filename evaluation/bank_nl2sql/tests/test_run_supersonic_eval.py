@@ -140,6 +140,10 @@ class RunSuperSonicEvalTest(unittest.TestCase):
                             "llmCandidateCreated": True,
                             "candidateRejectionState": "VALIDATION_REJECTED",
                             "candidateValidationErrorType": "OUTPUT_ORDER_MISMATCH",
+                            "failureStage": "PLAN",
+                            "failureCategory": "VALIDATION_FAILED",
+                            "stableRepairCode": "output_order_mismatch",
+                            "providerFailureClass": "NONE",
                         },
                     },
                 }
@@ -162,6 +166,10 @@ class RunSuperSonicEvalTest(unittest.TestCase):
         self.assertEqual(
             item["bankRouting"]["candidateValidationErrorType"], "OUTPUT_ORDER_MISMATCH"
         )
+        self.assertEqual(item["bankRouting"]["failureStage"], "PLAN")
+        self.assertEqual(item["bankRouting"]["failureCategory"], "VALIDATION_FAILED")
+        self.assertEqual(item["bankRouting"]["stableRepairCode"], "output_order_mismatch")
+        self.assertEqual(item["bankRouting"]["providerFailureClass"], "NONE")
 
     def test_bank_routing_transmits_safe_bank_telemetry_from_selected_parse(self) -> None:
         parse_response = {

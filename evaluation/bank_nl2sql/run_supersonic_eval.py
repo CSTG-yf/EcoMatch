@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 import time
 import uuid
@@ -266,6 +267,36 @@ def _bank_routing_telemetry(parse_response: dict[str, Any]) -> dict[str, Any] | 
     compiler_reason = raw.get("candidateCompilerReason")
     if compiler_reason is not None:
         telemetry["candidateCompilerReason"] = str(compiler_reason)
+    safe_failure_values = {
+        "failureStage": {"REQUIREMENTS", "PLAN", "COMPILATION"},
+        "failureCategory": {
+            "MALFORMED_JSON",
+            "SCHEMA_VIOLATION",
+            "VALIDATION_FAILED",
+            "MODEL_FAILURE",
+            "COMPILATION_FAILURE",
+            "CLARIFICATION_REQUIRED",
+        },
+        "providerFailureClass": {
+            "NONE",
+            "TIMEOUT",
+            "HTTP_RATE_LIMIT",
+            "HTTP_5XX",
+            "TRANSPORT",
+            "EMPTY_RESPONSE",
+            "NON_RETRYABLE",
+        },
+    }
+    for field, allowed_values in safe_failure_values.items():
+        value = raw.get(field)
+        if isinstance(value, str) and value in allowed_values:
+            telemetry[field] = value
+    stable_repair_code = raw.get("stableRepairCode")
+    if (
+        isinstance(stable_repair_code, str)
+        and re.fullmatch(r"[a-z][a-z0-9_]{2,63}", stable_repair_code)
+    ):
+        telemetry["stableRepairCode"] = stable_repair_code
     if plan_source is not None:
         telemetry["planSource"] = plan_source
     if bank_telemetry is not None:

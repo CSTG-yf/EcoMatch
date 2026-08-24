@@ -200,11 +200,16 @@ public class LLMSqlParser implements SemanticParser {
         ParseResp.BankCandidateRejectionState candidateRejectionState = null;
         SqlErrorType candidateValidationErrorType = null;
         ParseResp.BankCandidateCompilerReason candidateCompilerReason = null;
+        BankNl2SqlError lastBankFailure = null;
         while (currentRetry <= maxRetries) {
             log.info("currentRetryRound:{}, start runText2SQL", currentRetry);
             try {
                 LLMResp llmResp = requestService.runText2SQL(llmReq);
                 if (Objects.nonNull(llmResp)) {
+                    // A response reached the constrained route. A prior transient provider
+                    // failure must not be reported as the terminal cause if this response is
+                    // subsequently rejected by validation or compilation.
+                    lastBankFailure = null;
                     dropUnconstrainedSqlWhenPlanMissing(llmResp, bankConstrainedPlan);
                     if (bankConstrainedPlan && llmResp.getBankQueryPlan() != null) {
                         previousBankPlanJson = JsonUtil.toString(llmResp.getBankQueryPlan());
@@ -247,6 +252,7 @@ public class LLMSqlParser implements SemanticParser {
                         break;
                     }
                 } else if (bankConstrainedPlan) {
+                    lastBankFailure = null;
                     candidateRejectionState = ParseResp.BankCandidateRejectionState.NO_RESPONSE;
                     candidateValidationErrorType = null;
                     candidateCompilerReason = null;
@@ -259,6 +265,7 @@ public class LLMSqlParser implements SemanticParser {
                     candidateRejectionState = bankCandidateRejectionState(e);
                     candidateValidationErrorType = null;
                     candidateCompilerReason = bankCandidateCompilerReason(e);
+                    lastBankFailure = e instanceof BankNl2SqlError bankError ? bankError : null;
                 }
                 BankPlanCompilationException compilationException =
                         bankPlanCompilationException(e);
@@ -277,13 +284,13 @@ public class LLMSqlParser implements SemanticParser {
                     } else {
                         publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
                                 candidateRejectionState, candidateValidationErrorType,
-                                candidateCompilerReason);
+                                candidateCompilerReason, lastBankFailure);
                         throw BankNl2SqlError.compilationFailure(e);
                     }
                 } else if (bankConstrainedPlan && !BankNl2SqlError.allowsParserRetry(e)) {
                     publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
                             candidateRejectionState, candidateValidationErrorType,
-                            candidateCompilerReason);
+                            candidateCompilerReason, lastBankFailure);
                     if (e instanceof BankNl2SqlError bankError) {
                         throw bankError;
                     }
@@ -312,9 +319,12 @@ public class LLMSqlParser implements SemanticParser {
                         candidateRejectionState == null
                                 ? ParseResp.BankCandidateRejectionState.NO_CANDIDATE
                                 : candidateRejectionState, candidateValidationErrorType,
-                        candidateCompilerReason);
+                        candidateCompilerReason, lastBankFailure);
                 // Fail closed: never leave an empty bank attempt for rule/free SQL parsers to
                 // silently replace with unconstrained S2SQL on the same request.
+                if (lastBankFailure != null) {
+                    throw lastBankFailure;
+                }
                 throw BankNl2SqlError.noCandidate(candidateRejectionState, candidateCompilerReason);
             }
             return;
@@ -347,6 +357,16 @@ public class LLMSqlParser implements SemanticParser {
             ParseResp.BankCandidateRejectionState candidateRejectionState,
             SqlErrorType candidateValidationErrorType,
             ParseResp.BankCandidateCompilerReason candidateCompilerReason) {
+        publishBankRoutingAttemptTelemetry(parseResp, llmReq, llmCandidateCreated,
+                candidateRejectionState, candidateValidationErrorType, candidateCompilerReason, null);
+    }
+
+    static void publishBankRoutingAttemptTelemetry(ParseResp parseResp, LLMReq llmReq,
+            boolean llmCandidateCreated,
+            ParseResp.BankCandidateRejectionState candidateRejectionState,
+            SqlErrorType candidateValidationErrorType,
+            ParseResp.BankCandidateCompilerReason candidateCompilerReason,
+            BankNl2SqlError bankFailure) {
         if (parseResp == null || llmReq == null || llmReq.getSqlGenType() == null) {
             return;
         }
@@ -363,7 +383,32 @@ public class LLMSqlParser implements SemanticParser {
         parseResp.setBankRoutingAttemptTelemetry(new ParseResp.BankRoutingAttemptTelemetry(
                 enabled, qualified, bankRoutingSqlGenType(llmReq.getSqlGenType()),
                 llmCandidateCreated, candidateRejectionState, candidateValidationErrorType,
-                candidateCompilerReason));
+                candidateCompilerReason, bankFailureStage(bankFailure),
+                bankFailureCategory(bankFailure),
+                bankFailure == null ? null : bankFailure.getStableRepairCode(),
+                bankProviderFailureClass(bankFailure)));
+    }
+
+    private static ParseResp.BankFailureStage bankFailureStage(BankNl2SqlError error) {
+        if (error == null || error.getStage() == null) {
+            return null;
+        }
+        return ParseResp.BankFailureStage.valueOf(error.getStage().name());
+    }
+
+    private static ParseResp.BankFailureCategory bankFailureCategory(BankNl2SqlError error) {
+        if (error == null || error.getCategory() == null) {
+            return null;
+        }
+        return ParseResp.BankFailureCategory.valueOf(error.getCategory().name());
+    }
+
+    private static ParseResp.BankProviderFailureClass bankProviderFailureClass(
+            BankNl2SqlError error) {
+        if (error == null || error.getProviderFailureClass() == null) {
+            return null;
+        }
+        return ParseResp.BankProviderFailureClass.valueOf(error.getProviderFailureClass().name());
     }
 
     static ParseResp.BankCandidateRejectionState bankCandidateRejectionState(

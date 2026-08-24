@@ -35,6 +35,10 @@ public class ParseResp implements Serializable {
         private final BankCandidateRejectionState candidateRejectionState;
         private final SqlErrorType candidateValidationErrorType;
         private final BankCandidateCompilerReason candidateCompilerReason;
+        private final BankFailureStage failureStage;
+        private final BankFailureCategory failureCategory;
+        private final String stableRepairCode;
+        private final BankProviderFailureClass providerFailureClass;
 
         public BankRoutingAttemptTelemetry(boolean bankConstrainedPlanEnabled,
                 boolean bankDatasetQualified, BankRoutingSqlGenType selectedSqlGenType,
@@ -57,6 +61,18 @@ public class ParseResp implements Serializable {
                 boolean llmCandidateCreated, BankCandidateRejectionState candidateRejectionState,
                 SqlErrorType candidateValidationErrorType,
                 BankCandidateCompilerReason candidateCompilerReason) {
+            this(bankConstrainedPlanEnabled, bankDatasetQualified, selectedSqlGenType,
+                    llmCandidateCreated, candidateRejectionState, candidateValidationErrorType,
+                    candidateCompilerReason, null, null, null, null);
+        }
+
+        public BankRoutingAttemptTelemetry(boolean bankConstrainedPlanEnabled,
+                boolean bankDatasetQualified, BankRoutingSqlGenType selectedSqlGenType,
+                boolean llmCandidateCreated, BankCandidateRejectionState candidateRejectionState,
+                SqlErrorType candidateValidationErrorType,
+                BankCandidateCompilerReason candidateCompilerReason, BankFailureStage failureStage,
+                BankFailureCategory failureCategory, String stableRepairCode,
+                BankProviderFailureClass providerFailureClass) {
             this.bankConstrainedPlanEnabled = bankConstrainedPlanEnabled;
             this.bankDatasetQualified = bankDatasetQualified;
             this.selectedSqlGenType = selectedSqlGenType;
@@ -68,6 +84,11 @@ public class ParseResp implements Serializable {
             this.candidateCompilerReason = !llmCandidateCreated
                     && candidateRejectionState == BankCandidateRejectionState.COMPILER_EXCEPTION
                     ? candidateCompilerReason : null;
+            this.failureStage = llmCandidateCreated ? null : failureStage;
+            this.failureCategory = llmCandidateCreated ? null : failureCategory;
+            this.stableRepairCode = !llmCandidateCreated && stableRepairCode != null
+                    && stableRepairCode.matches("[a-z][a-z0-9_]{2,63}") ? stableRepairCode : null;
+            this.providerFailureClass = llmCandidateCreated ? null : providerFailureClass;
         }
     }
 
@@ -93,6 +114,22 @@ public class ParseResp implements Serializable {
         UNSUPPORTED_FILTER,
         UNSUPPORTED_CALCULATION,
         S2SQL_RENDER_FAILED
+    }
+
+    /** Safe failure location; no model output, SQL, prompt, or result value is exposed. */
+    public enum BankFailureStage {
+        REQUIREMENTS, PLAN, COMPILATION
+    }
+
+    /** Safe bank-route failure category for runtime evaluation diagnostics. */
+    public enum BankFailureCategory {
+        MALFORMED_JSON, SCHEMA_VIOLATION, VALIDATION_FAILED, MODEL_FAILURE,
+        COMPILATION_FAILURE, CLARIFICATION_REQUIRED
+    }
+
+    /** Coarse provider outcome used to distinguish transient capacity issues from contract errors. */
+    public enum BankProviderFailureClass {
+        NONE, TIMEOUT, HTTP_RATE_LIMIT, HTTP_5XX, TRANSPORT, EMPTY_RESPONSE, NON_RETRYABLE
     }
 
     public ParseResp(String queryText) {

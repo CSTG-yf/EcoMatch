@@ -181,6 +181,48 @@ class LLMSqlParserTest {
         assertTrue(BankNl2SqlError.isTerminalParserError(parseResp.getErrorMsg()));
     }
 
+    @Test
+    void transientBankModelFailureUsesOnlyTheBoundedParserRetryAndPublishesSafeCause() {
+        LLMRequestService requestService = mock(LLMRequestService.class);
+        LLMResponseService responseService = mock(LLMResponseService.class);
+        LLMParserConfig parserConfig = new LLMParserConfig();
+        parserConfig.setRecallMaxRetries(1);
+
+        ChatQueryContext queryCtx = new ChatQueryContext(new QueryNLReq());
+        ParseResp parseResp = new ParseResp("query");
+        queryCtx.setParseResp(parseResp);
+
+        LLMReq llmReq = new LLMReq();
+        llmReq.setSqlGenType(LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN);
+        llmReq.setBankRoutingTelemetry(Map.of("bankConstrainedPlanEnabled", true,
+                "bankDatasetQualified", true));
+        when(requestService.getDataSetId(queryCtx)).thenReturn(33L);
+        when(requestService.getLlmReq(queryCtx, 33L)).thenReturn(llmReq);
+        when(requestService.runText2SQL(llmReq)).thenThrow(BankNl2SqlError
+                .modelFailure(new RuntimeException("connection timeout")));
+
+        try (MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(LLMRequestService.class))
+                    .thenReturn(requestService);
+            contextUtils.when(() -> ContextUtils.getBean(LLMResponseService.class))
+                    .thenReturn(responseService);
+            contextUtils.when(() -> ContextUtils.getBean(LLMParserConfig.class))
+                    .thenReturn(parserConfig);
+
+            new LLMSqlParser().parse(queryCtx);
+        }
+
+        verify(requestService, times(3)).runText2SQL(llmReq);
+        ParseResp.BankRoutingAttemptTelemetry telemetry =
+                parseResp.getBankRoutingAttemptTelemetry();
+        assertEquals(ParseResp.BankFailureStage.PLAN, telemetry.getFailureStage());
+        assertEquals(ParseResp.BankFailureCategory.MODEL_FAILURE,
+                telemetry.getFailureCategory());
+        assertEquals("model_timeout", telemetry.getStableRepairCode());
+        assertEquals(ParseResp.BankProviderFailureClass.TIMEOUT,
+                telemetry.getProviderFailureClass());
+    }
+
     private static LLMResp freeSqlResponse() {
         LLMResp llmResp = new LLMResp();
         llmResp.setSqlOutput("SELECT 1 FROM free_sql");
