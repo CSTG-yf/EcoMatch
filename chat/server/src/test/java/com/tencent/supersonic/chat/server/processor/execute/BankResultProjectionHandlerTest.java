@@ -107,6 +107,26 @@ class BankResultProjectionHandlerTest {
     }
 
     @Test
+    void shouldRetainTrendColumnTypesForEmptyResults() {
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.TREND).timeColumn("bank_data_date")
+                .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("zb018").metricCode("ZB018").build()))
+                .build();
+        parseInfo.getProperties().put(BankResultProjector.CONTRACT_PROPERTY,
+                JsonUtil.objectToMap(contract));
+        QueryResult result = new QueryResult();
+        result.setChatContext(parseInfo);
+        result.setQueryResults(List.of());
+
+        assertTrue(new BankResultProjectionHandler().apply(result));
+
+        assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
+                .map(column -> column.getShowType()).toList());
+    }
+
+    @Test
     void shouldRecordResultSemanticFailureWithoutChangingTheFailedProjection() {
         SemanticParseInfo parseInfo = new SemanticParseInfo();
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
