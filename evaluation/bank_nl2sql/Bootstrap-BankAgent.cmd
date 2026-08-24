@@ -16,9 +16,19 @@ if not exist "%PYTHON_EXE%" (
 )
 
 if not defined ECOMATCH_ADMIN_PASSWORD set "ECOMATCH_ADMIN_PASSWORD=123456"
+if not defined ECOMATCH_BANK_DATABASE_ID (
+  echo ECOMATCH_BANK_DATABASE_ID is required.
+  echo Set it to the verified official bank fact database ID before bootstrap.
+  pause
+  exit /b 2
+)
 if not exist "%RECEIPT_DIR%" mkdir "%RECEIPT_DIR%"
 
-"%PYTHON_EXE%" "%BOOTSTRAP%" "%REPO_ROOT%\evaluation\bank_nl2sql" --output "%RECEIPT%" %*
+set "BOOTSTRAP_ARGS=--database-id %ECOMATCH_BANK_DATABASE_ID%"
+if defined ECOMATCH_BANK_MODEL_ID set "BOOTSTRAP_ARGS=%BOOTSTRAP_ARGS% --model-id %ECOMATCH_BANK_MODEL_ID%"
+if defined ECOMATCH_BANK_CHAT_MODEL_ID set "BOOTSTRAP_ARGS=%BOOTSTRAP_ARGS% --chat-model-id %ECOMATCH_BANK_CHAT_MODEL_ID%"
+
+"%PYTHON_EXE%" "%BOOTSTRAP%" "%REPO_ROOT%\evaluation\bank_nl2sql" %BOOTSTRAP_ARGS% --output "%RECEIPT%" %*
 set "RESULT=%ERRORLEVEL%"
 set "ECOMATCH_ADMIN_PASSWORD="
 set "ECOMATCH_AUTH_TOKEN="

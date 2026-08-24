@@ -297,39 +297,89 @@ def ensure_domain(client: "ApiClient", admin_name: str) -> tuple[int, bool]:
 
 
 def select_database(client: "ApiClient", database_id: int | None = None) -> int:
+    if database_id is None:
+        raise BankAgentBootstrapError(
+            "bank database id is required; refusing automatic H2 selection. "
+            "Pass --database-id for the verified official bank fact source."
+        )
     databases = client.json("GET", "/api/semantic/database/getDatabaseList")
     if not isinstance(databases, list):
         raise BankAgentBootstrapError("database list response must be a list")
-    if database_id is not None:
-        database = _find_unique(databases, "id", database_id, "database")
-        if database is None:
-            raise BankAgentBootstrapError(f"database id {database_id} was not found")
-        return database_id
-    h2_databases = [
-        item
-        for item in databases
-        if isinstance(item, dict)
-        and (
-            str(item.get("type") or "").upper() == "H2"
-            or str(item.get("url") or "").lower().startswith("jdbc:h2:")
+    database = _find_unique(databases, "id", database_id, "database")
+    if database is None:
+        raise BankAgentBootstrapError(f"bank database id {database_id} was not found")
+    return database_id
+
+
+def _verify_model_fields(
+    client: "ApiClient",
+    model: dict[str, Any],
+    *,
+    required_fields: set[str],
+) -> dict[str, Any]:
+    model_id = _positive_id(model.get("id"), "model id")
+    missing = required_fields - _model_field_names(model)
+    if missing:
+        detail = client.json("GET", f"/api/semantic/model/getModel/{model_id}")
+        if not isinstance(detail, dict):
+            raise BankAgentBootstrapError(f"bank model {model_id} detail is invalid")
+        model = detail
+        missing = required_fields - _model_field_names(model)
+    if missing:
+        raise BankAgentBootstrapError(
+            f"bank model {model_id} is missing physical fields: " + ", ".join(sorted(missing))
         )
-    ]
-    candidates = h2_databases or [item for item in databases if isinstance(item, dict)]
-    if len(candidates) == 1:
-        return _positive_id(candidates[0].get("id"), "database id")
-    preferred = [
-        item
-        for item in candidates
-        if item.get("name") in {"S2数据库DEMO", "银行问数数据库"}
-    ]
-    if len(preferred) == 1:
-        return _positive_id(preferred[0].get("id"), "database id")
-    choices = ", ".join(
-        f"{item.get('id')}:{item.get('name')}" for item in candidates[:10]
-    )
-    raise BankAgentBootstrapError(
-        "cannot uniquely select a database; pass --database-id. Candidates: " + choices
-    )
+    return model
+
+
+def find_existing_bank_model(
+    client: "ApiClient",
+    *,
+    database_id: int,
+    required_fields: set[str],
+) -> dict[str, Any] | None:
+    """Find the one compatible bank model for an explicitly selected fact source.
+
+    Models are scoped to domains, while the fact-source identity is global.  Scan
+    all existing domains before creating anything so a portable bootstrap cannot
+    fork a second bank semantic model for the same official database.
+    """
+
+    domains = client.json("GET", "/api/semantic/domain/getDomainList")
+    if not isinstance(domains, list):
+        raise BankAgentBootstrapError("domain list response must be a list")
+    matches: list[dict[str, Any]] = []
+    for domain in domains:
+        if not isinstance(domain, dict):
+            continue
+        domain_id = _positive_id(domain.get("id"), "domain id")
+        models = client.json("GET", f"/api/semantic/model/getModelList/{domain_id}")
+        if not isinstance(models, list):
+            raise BankAgentBootstrapError(f"model list for domain {domain_id} must be a list")
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            if model.get("bizName") != DEFAULT_MODEL_BIZ_NAME and model.get("name") != DEFAULT_MODEL_NAME:
+                continue
+            detail = model
+            if "databaseId" not in detail:
+                model_id = _positive_id(model.get("id"), "model id")
+                detail = client.json("GET", f"/api/semantic/model/getModel/{model_id}")
+                if not isinstance(detail, dict):
+                    raise BankAgentBootstrapError(f"bank model {model_id} detail is invalid")
+            if _positive_id(detail.get("databaseId"), "bank model database id") != database_id:
+                continue
+            detail = _verify_model_fields(client, detail, required_fields=required_fields)
+            if "domainId" not in detail:
+                detail = {**detail, "domainId": domain_id}
+            matches.append(detail)
+    if len(matches) > 1:
+        ids = ", ".join(str(item["id"]) for item in matches)
+        raise BankAgentBootstrapError(
+            f"multiple bank semantic models reference database {database_id}: {ids}; "
+            "pass --model-id to select the reviewed canonical model"
+        )
+    return matches[0] if matches else None
 
 
 def build_bank_model_payload(
@@ -442,17 +492,14 @@ def ensure_semantic_model(
     if model is None:
         model = _find_unique(models, "name", DEFAULT_MODEL_NAME, "model")
     if model is not None:
-        missing = required_fields - _model_field_names(model)
-        if missing:
-            model_id = _positive_id(model.get("id"), "model id")
-            detail = client.json("GET", f"/api/semantic/model/getModel/{model_id}")
-            if isinstance(detail, dict):
-                model = detail
-                missing = required_fields - _model_field_names(model)
-            if missing:
-                raise BankAgentBootstrapError(
-                    "existing bank model is missing physical fields: " + ", ".join(sorted(missing))
-                )
+        model = _verify_model_fields(client, model, required_fields=required_fields)
+        model_id = _positive_id(model.get("id"), "model id")
+        actual_database_id = _positive_id(model.get("databaseId"), "existing bank model database id")
+        if actual_database_id != database_id:
+            raise BankAgentBootstrapError(
+                f"existing bank model {model_id} belongs to database {actual_database_id}, "
+                f"not requested database {database_id}"
+            )
         return _positive_id(model.get("id"), "model id"), False
     payload = build_bank_model_payload(
         database_id=database_id,
@@ -469,6 +516,12 @@ def ensure_semantic_model(
     model = _find_unique(models, "bizName", DEFAULT_MODEL_BIZ_NAME, "model")
     if model is None:
         raise BankAgentBootstrapError("bank semantic model was not found after creation")
+    model = _verify_model_fields(client, model, required_fields=required_fields)
+    actual_database_id = _positive_id(model.get("databaseId"), "created bank model database id")
+    if actual_database_id != database_id:
+        raise BankAgentBootstrapError(
+            f"created bank model belongs to database {actual_database_id}, not requested database {database_id}"
+        )
     return _positive_id(model.get("id"), "model id"), True
 
 
@@ -512,21 +565,52 @@ def ensure_runtime_resources(
     resolved_database_id: int | None = None
     created_domain = False
     created_model = False
-    if model_id is None:
-        domain_id, created_domain = ensure_domain(client, admin_name)
-        resolved_database_id = select_database(client, database_id)
-        model_id, created_model = ensure_semantic_model(
+    required_fields = {
+        date_field,
+        organization_field,
+        indicator_code_field,
+        indicator_value_field,
+    }
+    # A model id is not a fact-source declaration. Require the reviewed database
+    # identity on every path, then prove that an explicit model belongs to it.
+    # This prevents a stale or similarly named semantic model from silently
+    # selecting a different H2 file.
+    resolved_database_id = select_database(client, database_id)
+    if model_id is not None:
+        explicit_model_id = _positive_id(model_id, "model id")
+        detail = client.json("GET", f"/api/semantic/model/getModel/{explicit_model_id}")
+        if not isinstance(detail, dict):
+            raise BankAgentBootstrapError(f"bank model {explicit_model_id} detail is invalid")
+        detail = _verify_model_fields(client, detail, required_fields=required_fields)
+        model_database_id = _positive_id(detail.get("databaseId"), "bank model database id")
+        if model_database_id != resolved_database_id:
+            raise BankAgentBootstrapError(
+                f"bank model {explicit_model_id} belongs to database {model_database_id}, "
+                f"not requested database {resolved_database_id}"
+            )
+        model_id = explicit_model_id
+        domain_id = _positive_id(detail.get("domainId"), "bank model domain id")
+    else:
+        existing_model = find_existing_bank_model(
             client,
             database_id=resolved_database_id,
-            domain_id=domain_id,
-            admin_name=admin_name,
-            date_field=date_field,
-            organization_field=organization_field,
-            indicator_code_field=indicator_code_field,
-            indicator_value_field=indicator_value_field,
+            required_fields=required_fields,
         )
-    else:
-        _positive_id(model_id, "model id")
+        if existing_model is not None:
+            model_id = _positive_id(existing_model.get("id"), "model id")
+            domain_id = _positive_id(existing_model.get("domainId"), "bank model domain id")
+        else:
+            domain_id, created_domain = ensure_domain(client, admin_name)
+            model_id, created_model = ensure_semantic_model(
+                client,
+                database_id=resolved_database_id,
+                domain_id=domain_id,
+                admin_name=admin_name,
+                date_field=date_field,
+                organization_field=organization_field,
+                indicator_code_field=indicator_code_field,
+                indicator_value_field=indicator_value_field,
+            )
     resolved_chat_model_id = None
     if chat_model_id is not None or chat_model_name:
         resolved_chat_model_id = select_chat_model(

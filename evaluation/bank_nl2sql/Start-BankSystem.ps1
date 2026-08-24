@@ -25,6 +25,9 @@
 param(
     [string]$BaseUrl = "http://127.0.0.1:9080",
     [string]$MetadataDatabase,
+    [int]$BankDatabaseId,
+    [int]$BankModelId,
+    [int]$ChatModelId,
     [string]$ReleaseVersion = "2.0.6",
     [int]$WaitSeconds = 180,
     [switch]$SkipBuild
@@ -140,6 +143,9 @@ function Test-MetadataDatabasePresent {
 
 Assert-File $ImportEntry "official H2 import entry point"
 Assert-File $BootstrapEntry "HTTP Agent bootstrap script"
+if ($BankDatabaseId -le 0) {
+    throw "BankDatabaseId is required. Refusing to guess a data source; pass the verified official bank fact database ID."
+}
 Ensure-PythonEnvironment
 
 $env:S2_METADATA_DB_PATH = $MetadataDatabase
@@ -172,9 +178,19 @@ if (-not $serviceReady) {
 
 New-Item -ItemType Directory -Path $ReceiptDirectory -Force | Out-Null
 Write-Host "Applying the bank Agent through the HTTP bootstrap API..."
-& $PythonEntry $BootstrapEntry $DatasetDirectory `
-    --base-url $BaseUrl `
-    --output $ReceiptPath
+$BootstrapArgs = @(
+    $DatasetDirectory,
+    "--base-url", $BaseUrl,
+    "--database-id", "$BankDatabaseId",
+    "--output", $ReceiptPath
+)
+if ($BankModelId -gt 0) {
+    $BootstrapArgs += @("--model-id", "$BankModelId")
+}
+if ($ChatModelId -gt 0) {
+    $BootstrapArgs += @("--chat-model-id", "$ChatModelId")
+}
+& $PythonEntry $BootstrapEntry @BootstrapArgs
 if ($LASTEXITCODE -ne 0) {
     throw "HTTP bank Agent bootstrap failed with exit code $LASTEXITCODE"
 }

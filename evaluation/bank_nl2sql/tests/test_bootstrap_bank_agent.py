@@ -54,7 +54,7 @@ class BootstrapBankAgentTest(unittest.TestCase):
             {"data_date", "org_code", "metric_code", "metric_value"},
         )
 
-    def test_resource_bootstrap_discovers_database_and_chat_model_without_ids(self) -> None:
+    def test_resource_bootstrap_uses_explicit_database_and_chat_model_without_model_id(self) -> None:
         class FakeClient:
             def __init__(self) -> None:
                 self.calls = []
@@ -79,6 +79,7 @@ class BootstrapBankAgentTest(unittest.TestCase):
                         {
                             "id": 14,
                             "bizName": "bank_metric_daily",
+                            "databaseId": 12,
                             "modelDetail": {
                                 "fields": [
                                     {"fieldName": "data_date"},
@@ -94,7 +95,7 @@ class BootstrapBankAgentTest(unittest.TestCase):
         client = FakeClient()
         resources = ensure_runtime_resources(
             client,
-            database_id=None,
+            database_id=12,
             model_id=None,
             chat_model_id=None,
             chat_model_name=None,
@@ -112,16 +113,214 @@ class BootstrapBankAgentTest(unittest.TestCase):
         self.assertTrue(resources["createdModel"])
         self.assertIn(("GET", "/api/semantic/database/getDatabaseList", None), client.calls)
 
-    def test_resource_selection_rejects_ambiguous_database(self) -> None:
+    def test_resource_bootstrap_rejects_same_domain_model_on_another_database(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def json(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                responses = {
+                    "GET /api/semantic/database/getDatabaseList": [
+                        {"id": 1, "name": "S2数据库DEMO", "type": "H2"},
+                        {"id": 2, "name": "银行NL2SQL标准库", "type": "H2"},
+                    ],
+                    "GET /api/semantic/domain/getDomainList": [
+                        {"id": 4, "bizName": "bank_question", "name": "银行问数"},
+                    ],
+                    "GET /api/semantic/model/getModelList/4": [
+                        {
+                            "id": 33,
+                            "bizName": "bank_metric_daily",
+                            "databaseId": 1,
+                            "modelDetail": {
+                                "fields": [
+                                    {"fieldName": "data_date"},
+                                    {"fieldName": "org_code"},
+                                    {"fieldName": "metric_code"},
+                                    {"fieldName": "metric_value"},
+                                ]
+                            },
+                        }
+                    ],
+                }
+                return responses[f"{method} {path}"]
+
+        client = FakeClient()
+        with self.assertRaisesRegex(BankAgentBootstrapError, "belongs to database 1, not requested database 2"):
+            ensure_runtime_resources(
+                client,
+                database_id=2,
+                model_id=None,
+                chat_model_id=None,
+                chat_model_name=None,
+                admin_name="admin",
+                date_field="data_date",
+                organization_field="org_code",
+                indicator_code_field="metric_code",
+                indicator_value_field="metric_value",
+            )
+        self.assertFalse(any(method == "POST" for method, _path, _payload in client.calls))
+
+    def test_resource_selection_requires_an_explicit_bank_database(self) -> None:
         class FakeClient:
             def json(self, method, path, payload=None):
                 return [
-                    {"id": 1, "name": "one", "type": "H2"},
-                    {"id": 2, "name": "two", "type": "H2"},
+                    {"id": 1, "name": "S2数据库DEMO", "type": "H2"},
+                    {"id": 2, "name": "银行NL2SQL标准库", "type": "H2"},
                 ]
 
-        with self.assertRaisesRegex(BankAgentBootstrapError, "cannot uniquely select a database"):
+        with self.assertRaisesRegex(BankAgentBootstrapError, "bank database id is required"):
             select_database(FakeClient())
+
+    def test_resource_bootstrap_refuses_to_create_any_resource_without_database_id(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def json(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                raise AssertionError("no API call is allowed before the database identity is supplied")
+
+        client = FakeClient()
+        with self.assertRaisesRegex(BankAgentBootstrapError, "bank database id is required"):
+            ensure_runtime_resources(
+                client,
+                database_id=None,
+                model_id=None,
+                chat_model_id=None,
+                chat_model_name=None,
+                admin_name="admin",
+                date_field="data_date",
+                organization_field="org_code",
+                indicator_code_field="metric_code",
+                indicator_value_field="metric_value",
+            )
+        self.assertEqual(client.calls, [])
+
+    def test_resource_bootstrap_requires_database_id_even_with_an_explicit_model(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def json(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                raise AssertionError("model identity must not bypass the fact-source requirement")
+
+        client = FakeClient()
+        with self.assertRaisesRegex(BankAgentBootstrapError, "bank database id is required"):
+            ensure_runtime_resources(
+                client,
+                database_id=None,
+                model_id=8,
+                chat_model_id=None,
+                chat_model_name=None,
+                admin_name="admin",
+                date_field="data_date",
+                organization_field="org_code",
+                indicator_code_field="metric_code",
+                indicator_value_field="metric_value",
+            )
+        self.assertEqual(client.calls, [])
+
+    def test_explicit_model_must_belong_to_the_explicit_bank_database(self) -> None:
+        class FakeClient:
+            def json(self, method, path, payload=None):
+                responses = {
+                    "GET /api/semantic/database/getDatabaseList": [
+                        {"id": 1, "name": "S2数据库DEMO", "type": "H2"},
+                        {"id": 2, "name": "银行NL2SQL标准库", "type": "H2"},
+                    ],
+                    "GET /api/semantic/model/getModel/8": {
+                        "id": 8,
+                        "domainId": 4,
+                        "databaseId": 1,
+                        "modelDetail": {
+                            "fields": [
+                                {"fieldName": "data_date"},
+                                {"fieldName": "org_code"},
+                                {"fieldName": "metric_code"},
+                                {"fieldName": "metric_value"},
+                            ]
+                        },
+                    },
+                }
+                return responses[f"{method} {path}"]
+
+        with self.assertRaisesRegex(BankAgentBootstrapError, "belongs to database 1, not requested database 2"):
+            ensure_runtime_resources(
+                FakeClient(),
+                database_id=2,
+                model_id=8,
+                chat_model_id=None,
+                chat_model_name=None,
+                admin_name="admin",
+                date_field="data_date",
+                organization_field="org_code",
+                indicator_code_field="metric_code",
+                indicator_value_field="metric_value",
+            )
+
+    def test_resource_bootstrap_reuses_existing_model_on_explicit_database(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def json(self, method, path, payload=None):
+                self.calls.append((method, path, payload))
+                responses = {
+                    "GET /api/semantic/database/getDatabaseList": [
+                        {"id": 1, "name": "S2数据库DEMO", "type": "H2"},
+                        {"id": 2, "name": "银行NL2SQL标准库", "type": "H2"},
+                    ],
+                    "GET /api/semantic/domain/getDomainList": [
+                        {"id": 4, "bizName": "bank_nl2sql", "name": "银行NL2SQL"},
+                    ],
+                    "GET /api/semantic/model/getModelList/4": [
+                        {
+                            "id": 1,
+                            "bizName": "bank_metric_daily",
+                            "databaseId": 1,
+                            "modelDetail": {"fields": []},
+                        },
+                        {
+                            "id": 8,
+                            "bizName": "bank_metric_daily",
+                            "databaseId": 2,
+                            "modelDetail": {
+                                "fields": [
+                                    {"fieldName": "data_date"},
+                                    {"fieldName": "org_code"},
+                                    {"fieldName": "metric_code"},
+                                    {"fieldName": "metric_value"},
+                                ]
+                            },
+                        }
+                    ],
+                }
+                return responses[f"{method} {path}"]
+
+        client = FakeClient()
+        resources = ensure_runtime_resources(
+            client,
+            database_id=2,
+            model_id=None,
+            chat_model_id=None,
+            chat_model_name=None,
+            admin_name="admin",
+            date_field="data_date",
+            organization_field="org_code",
+            indicator_code_field="metric_code",
+            indicator_value_field="metric_value",
+        )
+
+        self.assertEqual(resources["databaseId"], 2)
+        self.assertEqual(resources["modelId"], 8)
+        self.assertFalse(resources["createdDomain"])
+        self.assertFalse(resources["createdModel"])
+        self.assertNotIn(("POST", "/api/semantic/domain/createDomain", None), client.calls)
+        self.assertNotIn(("POST", "/api/semantic/model/createModel", None), client.calls)
+        self.assertNotIn(("GET", "/api/semantic/model/getModel/1", None), client.calls)
 
     def test_chat_model_selection_is_only_used_when_explicitly_requested(self) -> None:
         class FakeClient:
@@ -240,6 +439,8 @@ class BootstrapBankAgentTest(unittest.TestCase):
 
         self.assertIn(r"evaluation\.venv\Scripts\python.exe", launcher)
         self.assertIn('set "ECOMATCH_AUTH_TOKEN="', launcher)
+        self.assertIn("ECOMATCH_BANK_DATABASE_ID", launcher)
+        self.assertIn("--database-id", launcher)
         self.assertIn("--output", launcher)
         self.assertIn("bootstrap-receipt.json", launcher)
         self.assertNotIn("local-no-key", launcher)
@@ -262,6 +463,8 @@ class BootstrapBankAgentTest(unittest.TestCase):
         self.assertIn("Import-OfficialBankData.ps1", launcher)
         self.assertIn("bootstrap_bank_agent.py", launcher)
         self.assertIn("--base-url", launcher)
+        self.assertIn("BankDatabaseId", launcher)
+        self.assertIn("--database-id", launcher)
         self.assertIn("--output", launcher)
         self.assertIn("S2_METADATA_DB_PATH", launcher)
         self.assertIn("-m venv", launcher)

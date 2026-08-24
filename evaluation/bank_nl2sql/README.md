@@ -171,11 +171,13 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/db/build_database.py 
 ## 一键启动银行问数系统
 
 对新环境或日常开发，使用下面这个入口即可完成构建、官方银行数据导入、服务启动和
-「银行问数」Agent 配置。它会自动发现或创建银行主题域、银行语义模型、数据集和唯一
-银行 Agent；重复执行时按稳定业务键更新，不会创建第二个 Agent。
+「银行问数」Agent 配置。必须显式传入已核验的**官方银行事实数据库 ID**；启动器绝不
+猜测 H2 数据源、不会回退到 Demo 库。它会先复用该数据库上的唯一兼容银行语义模型，只有
+在该数据库上不存在模型时才创建资源；重复执行不会创建第二个 Agent。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem.ps1
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem.ps1 `
+  -BankDatabaseId <官方银行事实数据库ID>
 ```
 
 Windows 也可以双击：
@@ -185,8 +187,9 @@ evaluation/bank_nl2sql/Start-BankSystem.cmd
 ```
 
 默认登录账号是 `admin / 123456`。可以通过 `ECOMATCH_ADMIN_PASSWORD` 覆盖默认密码，
-或通过 `ECOMATCH_AUTH_TOKEN` 提供已有管理员 Token；正常启动不需要输入模型 ID、Agent ID
-或 Token。首轮启动会在 standalone 未构建时调用项目已有构建入口，之后直接复用发布目录。
+或通过 `ECOMATCH_AUTH_TOKEN` 提供已有管理员 Token；正常启动必须输入已核验的业务数据库
+ID，但不需要输入模型 ID、Agent ID 或 Token。首轮启动会在 standalone 未构建时调用项目已有
+构建入口，之后直接复用发布目录。
 
 推理服务由项目外部提供，可以是本地服务，也可以是云端服务。启动器不会安装、启动、停止
 或探测推理服务，也不会在启动时读取推理服务环境变量或写入聊天模型配置。启动完成后，由
@@ -203,11 +206,13 @@ Agent 的「大模型配置」中选择连接并保存。模型配置属于平�
 
 ```powershell
 # 服务已构建时跳过构建；重复执行仍会通过 HTTP 更新 Agent
-powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem.ps1 -SkipBuild
+powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem.ps1 `
+  -SkipBuild -BankDatabaseId <官方银行事实数据库ID>
 
 # 使用另一份本地 H2 元数据文件
 powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem.ps1 `
-  -MetadataDatabase .local-dev/state/semantic-team
+  -MetadataDatabase .local-dev/state/semantic-team `
+  -BankDatabaseId <官方银行事实数据库ID>
 ```
 
 启动顺序为：服务未运行时先导入停止状态 H2 数据，再启动 standalone；服务已运行时跳过
@@ -223,15 +228,16 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Start-BankSystem
 训练题示例或 gold 内容，模型和数据集 ID 都由目标环境显式指定/动态发现。
 
 该章节只用于已自行管理服务生命周期的高级调试场景。普通启动不要手工创建模型、数据集或
-Agent，也不要把运行时 H2 文件复制到仓库。脚本会通过 HTTP API 自动发现或创建语义资源，
-并且通过稳定名称更新唯一的「银行问数」Agent。管理员 Token 只通过环境变量读取，不会写入
-文件或报告。
+Agent，也不要把运行时 H2 文件复制到仓库。脚本会通过 HTTP API 验证显式数据库 ID，并且
+通过稳定名称更新唯一的「银行问数」Agent；多个 H2、缺少数据库 ID 或模型/数据库不匹配时
+一律失败，不会退回 Demo 库。管理员 Token 只通过环境变量读取，不会写入文件或报告。
 
 先做零写入检查：
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
-  evaluation/bank_nl2sql --model-id 1 --chat-model-id 1 --dry-run
+  evaluation/bank_nl2sql --database-id <官方银行事实数据库ID> `
+  --model-id <已核验银行语义模型ID> --chat-model-id 1 --dry-run
 ```
 
 手工 HTTP bootstrap（仅调试）：
@@ -240,13 +246,15 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.
 $env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
   evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
-  --model-id 1 --chat-model-id 1
+  --database-id <官方银行事实数据库ID> `
+  --model-id <已核验银行语义模型ID> --chat-model-id 1
 Remove-Item Env:ECOMATCH_AUTH_TOKEN
 ```
 
-Windows 队友也可以直接双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`。它默认使用
-项目虚拟环境、自动登录 `admin / 123456`，不再要求输入语义模型 ID、聊天模型 ID 或 Token；
-需要覆盖时再通过环境变量传入。
+Windows 队友也可以直接双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`。先设置
+`ECOMATCH_BANK_DATABASE_ID=<官方银行事实数据库ID>`；可选设置
+`ECOMATCH_BANK_MODEL_ID` 与 `ECOMATCH_BANK_CHAT_MODEL_ID`。它默认使用项目虚拟环境、自动
+登录 `admin / 123456`，但不会猜测业务数据库。
 
 导入是幂等的：语义资源按稳定业务键更新，Agent 按名称更新；目标环境生成的 Agent ID
 不要求等于本机历史 ID 33。命令输出最终 `modelId`、`dataSetId`、`agentId`、正式版本和
