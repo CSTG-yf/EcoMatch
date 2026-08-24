@@ -9,14 +9,19 @@ import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.Set;
 
 /** Applies a bank-specific presentation contract after semantic execution has completed. */
 public class BankResultProjectionHandler implements ExecuteResultProcessor {
+
+    private static final Set<String> NUMERIC_COLUMNS = Set.of("absolute_change", "absolute_gap",
+            "aggregate_value", "baseline_value", "current_value", "daily_average",
+            "days_above_average", "denominator_value", "deposit_per_outlet_wanyuan",
+            "deposit_value", "gap_value", "max_value", "metric_value", "min_value",
+            "numerator_value", "observation_count", "outlet_count", "percent_change",
+            "provincial_average", "quarter_change", "rank_position", "ratio_percent",
+            "total_days", "value_difference");
 
     private final BankResultProjector projector = new BankResultProjector();
 
@@ -43,8 +48,7 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
             failResultSemantic(queryResult.getChatContext());
             return false;
         }
-        List<QueryColumn> columns = projection.getColumns().stream()
-                .map(column -> projectedColumn(column, projection.getRows())).toList();
+        List<QueryColumn> columns = projection.getColumns().stream().map(this::projectedColumn).toList();
         queryResult.setQueryColumns(columns);
         queryResult.setQueryResults(projection.getRows());
         queryResult.setTextResult(ResultFormatter.transform2TextNew(columns, projection.getRows()));
@@ -52,27 +56,16 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
         return true;
     }
 
-    private QueryColumn projectedColumn(String name, List<Map<String, Object>> rows) {
+    private QueryColumn projectedColumn(String name) {
         QueryColumn column = new QueryColumn(name, "STRING", name);
-        if (name.toLowerCase(Locale.ROOT).contains("date") || rows.stream()
-                .map(row -> row.get(name)).filter(String.class::isInstance).map(String.class::cast)
-                .anyMatch(this::isIsoDate)) {
+        if ("data_date".equals(name)) {
             column.setType("DATE");
             column.setShowType("DATE");
-        } else if (rows.stream().map(row -> row.get(name)).anyMatch(Number.class::isInstance)) {
+        } else if (NUMERIC_COLUMNS.contains(name)) {
             column.setType("NUMBER");
             column.setShowType("NUMBER");
         }
         return column;
-    }
-
-    private boolean isIsoDate(String value) {
-        try {
-            LocalDate.parse(value);
-            return true;
-        } catch (DateTimeParseException exception) {
-            return false;
-        }
     }
 
     private void failResultSemantic(SemanticParseInfo parseInfo) {
