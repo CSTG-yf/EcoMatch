@@ -9,7 +9,11 @@ import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /** Applies a bank-specific presentation contract after semantic execution has completed. */
 public class BankResultProjectionHandler implements ExecuteResultProcessor {
@@ -40,12 +44,35 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
             return false;
         }
         List<QueryColumn> columns = projection.getColumns().stream()
-                .map(column -> new QueryColumn(column, "STRING", column)).toList();
+                .map(column -> projectedColumn(column, projection.getRows())).toList();
         queryResult.setQueryColumns(columns);
         queryResult.setQueryResults(projection.getRows());
         queryResult.setTextResult(ResultFormatter.transform2TextNew(columns, projection.getRows()));
         completeToolResult(queryResult.getChatContext(), projection);
         return true;
+    }
+
+    private QueryColumn projectedColumn(String name, List<Map<String, Object>> rows) {
+        QueryColumn column = new QueryColumn(name, "STRING", name);
+        if (name.toLowerCase(Locale.ROOT).contains("date") || rows.stream()
+                .map(row -> row.get(name)).filter(String.class::isInstance).map(String.class::cast)
+                .anyMatch(this::isIsoDate)) {
+            column.setType("DATE");
+            column.setShowType("DATE");
+        } else if (rows.stream().map(row -> row.get(name)).anyMatch(Number.class::isInstance)) {
+            column.setType("NUMBER");
+            column.setShowType("NUMBER");
+        }
+        return column;
+    }
+
+    private boolean isIsoDate(String value) {
+        try {
+            LocalDate.parse(value);
+            return true;
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
     }
 
     private void failResultSemantic(SemanticParseInfo parseInfo) {

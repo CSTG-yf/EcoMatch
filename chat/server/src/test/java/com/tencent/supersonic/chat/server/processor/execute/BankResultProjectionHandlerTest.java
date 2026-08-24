@@ -41,6 +41,8 @@ class BankResultProjectionHandlerTest {
         assertTrue(applied);
         assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value"),
                 result.getQueryColumns().stream().map(column -> column.getBizName()).toList());
+        assertEquals(List.of("CATEGORY", "CATEGORY", "CATEGORY", "NUMBER"), result.getQueryColumns()
+                .stream().map(column -> column.getShowType()).toList());
         assertEquals(List.of(row("org_code", "ORG008", "org_name", "江苏省H市农商行", "metric_code",
                 "ZB010", "metric_value", new BigDecimal("60.28"))), result.getQueryResults());
         assertTrue(result.getTextResult().contains("| metric_value |"));
@@ -79,6 +81,29 @@ class BankResultProjectionHandlerTest {
                 new BigDecimal("25.75"), "denominator_value", new BigDecimal("48.50"),
                 "ratio_percent", new BigDecimal("53.0928"))), result.getQueryResults());
         assertTrue(result.getTextResult().contains("| ratio_percent |"));
+    }
+
+    @Test
+    void shouldMarkTrendDatesAndMetricsForChartCompatibility() {
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.TREND).timeColumn("bank_data_date")
+                .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("zb018").metricCode("ZB018").build()))
+                .build();
+        parseInfo.getProperties().put(BankResultProjector.CONTRACT_PROPERTY,
+                JsonUtil.objectToMap(contract));
+        QueryResult result = new QueryResult();
+        result.setChatContext(parseInfo);
+        result.setQueryResults(List.of(row("bank_data_date", "2026-01-31", "zb018", 274),
+                row("bank_data_date", "2026-02-28", "zb018", 276)));
+
+        assertTrue(new BankResultProjectionHandler().apply(result));
+
+        assertEquals(List.of("data_date", "metric_value", "quarter_change"), result.getQueryColumns()
+                .stream().map(column -> column.getBizName()).toList());
+        assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
+                .map(column -> column.getShowType()).toList());
     }
 
     @Test
