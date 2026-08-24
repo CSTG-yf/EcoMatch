@@ -68,6 +68,9 @@ public class DataMaskingService {
         }
         requireMaskingMetadata(response, schema);
         Set<String> sensitiveFields = getSensitiveFields(schema);
+        if (!requiresMasking(sensitiveFields, policy, resourcePermissions)) {
+            return;
+        }
         Set<String> schemaFields = getSchemaFields(schema);
 
         Set<String> maskedColumns =
@@ -128,6 +131,17 @@ public class DataMaskingService {
         maskUndeclaredResultKeys(response, declaredResultKeys, maskedColumns);
         response.setDataMasked(!maskedColumns.isEmpty());
         response.setMaskedColumns(maskedColumns);
+    }
+
+    private boolean requiresMasking(Set<String> sensitiveFields, MaskingPolicy policy,
+            Collection<ResourcePermission> resourcePermissions) {
+        if (!sensitiveFields.isEmpty() || !policy.fieldStrategies.isEmpty()) {
+            return true;
+        }
+        return resourcePermissions != null && resourcePermissions.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ResourcePermission::getAccessMode)
+                .anyMatch(mode -> mode == ColumnAccessMode.MASKED || mode == ColumnAccessMode.DENY);
     }
 
     private void maskUndeclaredResultKeys(SemanticQueryResp response,

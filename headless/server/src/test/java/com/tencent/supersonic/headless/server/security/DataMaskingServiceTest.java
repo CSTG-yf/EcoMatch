@@ -118,6 +118,31 @@ class DataMaskingServiceTest {
     }
 
     @Test
+    void keepsDerivedBankFactsRawWhenTheSchemaHasNoMaskingPolicy() {
+        DataMaskingService service = new DataMaskingService("", "");
+        QueryColumn column = new QueryColumn("current_value", "DECIMAL", "current_value");
+        SemanticQueryResp response = new SemanticQueryResp();
+        response.setColumns(List.of(column));
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("current_value", 41.96D);
+        row.put("absolute_change", -0.18D);
+        response.setResultList(List.of(row));
+
+        DimSchemaResp metric = new DimSchemaResp();
+        metric.setName("指标值");
+        metric.setBizName("metric_value");
+        metric.setSensitiveLevel(SensitiveLevelEnum.LOW.getCode());
+        SemanticSchemaResp schema = new SemanticSchemaResp();
+        schema.setDimensions(List.of(metric));
+
+        service.mask(response, schema, User.get(2L, "analyst"));
+
+        assertEquals(41.96D, row.get("current_value"));
+        assertEquals(-0.18D, row.get("absolute_change"));
+        assertFalse(response.isDataMasked());
+    }
+
+    @Test
     void rejectsInvalidFieldStrategyConfiguration() {
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
                 () -> new DataMaskingService("", "", "account_no=UNKNOWN"));

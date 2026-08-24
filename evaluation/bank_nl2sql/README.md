@@ -305,6 +305,12 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/freeze_dataset.py `
 
 ## 官方运行时评测（唯一入口）
 
+### 评测结果与脱敏边界
+
+官方银行评测比较数据库返回的结果事实。银行标准库的 21 个指标和评测派生列均为非敏感数据：未配置中/高敏感字段、`MASKED`/`DENY` 列权限或字段脱敏策略时，结果不得被替换为 `****`。若出现该值，应视为运行时字段血缘或配置缺陷，不能作为模型失败计分。
+
+部署到真实敏感数据源时，仍须按机构、岗位、行列权限和敏感等级配置脱敏；上述评测规则不关闭真实环境的安全控制。
+
 所有成员只能通过 `Run-OfficialBankEvaluation.ps1` 产出可比较的成绩。它使用
 `official_runtime_evaluation_v3.json` 固定：v2.0.6 数据库包、Fact v3 评分、独立会话、
 串行执行、结果-only 执行模式、固定 smoke 和完整分母。它仍按前端真实顺序调用：新建会话
