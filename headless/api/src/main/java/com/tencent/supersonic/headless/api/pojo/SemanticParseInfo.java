@@ -67,7 +67,7 @@ public class SemanticParseInfo implements Serializable {
 
             double difference = mr1.getMaxDatesetSimilarity() - mr2.getMaxDatesetSimilarity();
             if (Math.abs(difference) < 0.0005) { // 看完全匹配的个数，实践证明，可以用户输入规范后，该逻辑具有优势
-                if (!o1.getDataSetId().equals(o2.getDataSetId())) {
+                if (!Objects.equals(o1.getDataSetId(), o2.getDataSetId())) {
                     List<SchemaElementMatch> elementMatches1 = o1.getElementMatches().stream()
                             .filter(e -> e.getSimilarity() == 1).collect(Collectors.toList());
                     List<SchemaElementMatch> elementMatches2 = o2.getElementMatches().stream()
@@ -86,7 +86,13 @@ public class SemanticParseInfo implements Serializable {
                     difference = mr1.getMaxMetricUseCnt() - mr2.getMaxMetricUseCnt();
                 }
             }
-            return difference >= 0 ? -1 : 1;
+            if (Math.abs(difference) < 0.0005) {
+                difference = o1.getScore() - o2.getScore();
+            }
+            if (Math.abs(difference) < 0.0005) {
+                return 0;
+            }
+            return difference > 0 ? -1 : 1;
         }
 
         private DataSetMatchResult getDataSetMatchResult(List<SchemaElementMatch> elementMatches) {
@@ -108,7 +114,7 @@ public class SemanticParseInfo implements Serializable {
             }
             return DataSetMatchResult.builder().maxMetricSimilarity(maxMetricSimilarity)
                     .maxDatesetSimilarity(maxDatasetSimilarity).totalSimilarity(totalSimilarity)
-                    .build();
+                    .maxMetricUseCnt(maxMetricUseCnt).build();
         }
     }
 

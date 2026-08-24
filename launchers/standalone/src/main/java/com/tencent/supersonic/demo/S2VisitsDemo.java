@@ -5,6 +5,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.tencent.supersonic.auth.api.authorization.pojo.AuthGroup;
 import com.tencent.supersonic.auth.api.authorization.pojo.AuthRule;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.agent.AgentToolType;
 import com.tencent.supersonic.chat.server.agent.DatasetTool;
@@ -81,8 +82,6 @@ public class S2VisitsDemo extends S2BaseDemo {
             // create agent
             Integer agentId = addAgent(s2DataSet.getId());
             addSampleChats(agentId);
-            updateQueryScore(1L);
-            updateQueryScore(4L);
         } catch (Exception e) {
             log.error("Failed to add S2Visits demo data", e);
         }
@@ -102,9 +101,13 @@ public class S2VisitsDemo extends S2BaseDemo {
 
     private void addSampleChats(Integer agentId) {
         Long chatId = chatManageService.addChat(defaultUser, "样例对话1", agentId);
-        submitText(chatId.intValue(), agentId, "访问过超音数的部门有哪些");
-        submitText(chatId.intValue(), agentId, "按部门统计近7天访问次数");
-        submitText(chatId.intValue(), agentId, "alice 停留时长");
+        for (String sampleQuery : List.of("访问过超音数的部门有哪些", "按部门统计近7天访问次数",
+                "alice 停留时长")) {
+            QueryResult result = submitText(chatId.intValue(), agentId, sampleQuery);
+            if (result != null && result.getQueryId() != null) {
+                updateQueryScore(result.getQueryId());
+            }
+        }
     }
 
     private Integer addAgent(long dataSetId) {
@@ -402,6 +405,9 @@ public class S2VisitsDemo extends S2BaseDemo {
         authGroupReq.setName("tom_row_permission");
 
         List<AuthRule> authRules = new ArrayList<>();
+        AuthRule rowFilterScope = new AuthRule();
+        rowFilterScope.setDimensions(Collections.singletonList("user_name"));
+        authRules.add(rowFilterScope);
         authGroupReq.setAuthRules(authRules);
         authGroupReq.setDimensionFilters(Collections.singletonList("user_name = 'tom'"));
         authGroupReq.setAuthorizedUsers(Collections.singletonList("tom"));

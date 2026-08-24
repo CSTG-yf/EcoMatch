@@ -84,6 +84,9 @@ public class BaseTest extends BaseApplication {
         querySqlCmd.setSql(sql);
         querySqlCmd.getSqlInfo().setCorrectedS2SQL(sql);
         querySqlCmd.setModelIds(DataUtils.getMetricAgentIModelIds());
+        // Direct service-level integration tests represent server-originated semantic SQL. The
+        // compiler output must use the trusted compiled-SQL safety path, as it does at runtime.
+        querySqlCmd.setTrustedCompiledSql(true);
         return querySqlCmd;
     }
 
@@ -97,6 +100,7 @@ public class BaseTest extends BaseApplication {
             queryStructReq.addModelId(modelId);
         }
         queryStructReq.setQueryType(queryType);
+        queryStructReq.setTrustedCompiledSql(true);
         Aggregator aggregator = new Aggregator();
         aggregator.setFunc(AggOperatorEnum.SUM);
         aggregator.setColumn("stay_hours");
@@ -127,6 +131,7 @@ public class BaseTest extends BaseApplication {
             queryStructReq.addModelId(modelId);
         }
         queryStructReq.setQueryType(QueryType.AGGREGATE);
+        queryStructReq.setTrustedCompiledSql(true);
         queryStructReq.setAggregators(Arrays.asList(aggregator));
 
         if (CollectionUtils.isNotEmpty(groups)) {

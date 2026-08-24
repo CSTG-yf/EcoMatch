@@ -3,8 +3,13 @@ package com.tencent.supersonic.headless;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.demo.S2VisitsDemo;
 import com.tencent.supersonic.headless.api.pojo.response.DataSetResp;
+import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
 import com.tencent.supersonic.headless.chat.utils.QueryReqBuilder;
+import com.tencent.supersonic.headless.core.gateway.QueryExecutionGateway;
+import com.tencent.supersonic.headless.core.utils.SqlUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junitpioneer.jupiter.SetSystemProperty;
@@ -20,6 +25,9 @@ import static org.junit.Assert.assertTrue;
 public class TranslatorTest extends BaseTest {
 
     private DataSetResp dataSet;
+
+    @Autowired private QueryExecutionGateway queryExecutionGateway;
+    @Autowired private SqlUtils sqlUtils;
 
     @BeforeEach
     public void init() {
@@ -40,7 +48,7 @@ public class TranslatorTest extends BaseTest {
         assertNotNull(explain);
         assertNotNull(explain.getQuerySQL());
         assertTrue(explain.getQuerySQL().contains("count(1)"));
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -52,7 +60,7 @@ public class TranslatorTest extends BaseTest {
         assertNotNull(explain.getQuerySQL());
         assertTrue(explain.getQuerySQL().contains("department"));
         assertTrue(explain.getQuerySQL().contains("count(1)"));
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -66,7 +74,7 @@ public class TranslatorTest extends BaseTest {
         assertNotNull(explain.getQuerySQL());
         assertTrue(explain.getQuerySQL().toLowerCase().contains("department"));
         assertTrue(explain.getQuerySQL().toLowerCase().contains("count(1)"));
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -80,7 +88,7 @@ public class TranslatorTest extends BaseTest {
         assertNotNull(explain.getQuerySQL());
         assertTrue(explain.getQuerySQL().toLowerCase().contains("department"));
         assertTrue(explain.getQuerySQL().toLowerCase().contains("count(1)"));
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -96,7 +104,7 @@ public class TranslatorTest extends BaseTest {
         assertNotNull(explain.getQuerySQL());
         assertTrue(explain.getQuerySQL().contains("user_name"));
         assertTrue(explain.getQuerySQL().contains("pv"));
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -110,7 +118,7 @@ public class TranslatorTest extends BaseTest {
                 .translate(QueryReqBuilder.buildS2SQLReq(sql, dataSet), User.getDefaultUser());
         assertNotNull(explain);
         assertNotNull(explain.getQuerySQL());
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
     }
 
     @Test
@@ -124,7 +132,19 @@ public class TranslatorTest extends BaseTest {
                 .translate(QueryReqBuilder.buildS2SQLReq(sql, dataSet), User.getDefaultUser());
         assertNotNull(explain);
         assertNotNull(explain.getQuerySQL());
-        executeSql(explain.getQuerySQL());
+        assertExecutable(explain.getQuerySQL());
+    }
+
+    private void assertExecutable(String physicalSql) {
+        SemanticQueryResp response = new SemanticQueryResp();
+        queryExecutionGateway.executeTrustedCompiledSql(physicalSql, () -> {
+            sqlUtils.init(databaseService.getDatabase(1L)).queryInternal(physicalSql, response);
+            return response;
+        });
+        assertNotNull(response);
+        assertTrue(response.getErrorMsg() + "; sql=" + physicalSql,
+                StringUtils.isBlank(response.getErrorMsg()));
+        assertNotNull(response.getResultList());
     }
 
 }

@@ -1,17 +1,31 @@
 spring:
   datasource:
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:semantic;DATABASE_TO_UPPER=false;QUERY_TIMEOUT=30
+    # Keep one stable process-local URL. Spring's ${random.uuid} is resolved independently when
+    # the primary DataSource and the persisted demo DatabaseResp are created, which silently
+    # points semantic execution at a second, empty H2 database.
+    url: jdbc:h2:mem:semantic-test;DATABASE_TO_UPPER=false;QUERY_TIMEOUT=30000
     username: root
     password: semantic
   sql:
     init:
+      mode: always
       schema-locations: classpath:db/schema-h2.sql,classpath:db/schema-h2-demo.sql
       data-locations: classpath:db/data-h2.sql,classpath:db/data-h2-demo.sql
   h2:
     console:
       path: /h2-console/semantic
       enabled: true
+
+s2:
+  demo:
+    # Generic standalone integration tests still exercise the upstream demo domains. Keep these
+    # fixtures test-only; the production bank profile intentionally leaves demo.names empty.
+    names:
+      - S2VisitsDemo
+      - S2CompanyDemo
+      - S2SingerDemo
+    enableLLM: false
 
 ## Comment out following lines if using MySQL
 #spring:

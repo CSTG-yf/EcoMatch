@@ -3,6 +3,7 @@ package com.tencent.supersonic.demo;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.auth.api.authorization.service.AuthService;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
+import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.chat.server.service.ChatQueryService;
@@ -211,8 +212,8 @@ public abstract class S2BaseDemo implements CommandLineRunner {
                 .type(TypeEnums.DIMENSION).build(), defaultUser);
     }
 
-    protected void submitText(int chatId, int agentId, String queryText) {
-        chatQueryService.parseAndExecute(ChatParseReq.builder().chatId(chatId).agentId(agentId)
+    protected QueryResult submitText(int chatId, int agentId, String queryText) {
+        return chatQueryService.parseAndExecute(ChatParseReq.builder().chatId(chatId).agentId(agentId)
                 .queryText(queryText).user(defaultUser).disableLLM(true).build());
     }
 

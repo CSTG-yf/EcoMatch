@@ -8,6 +8,7 @@ import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.service.AgentService;
+import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.chat.server.service.ChatQueryService;
 import com.tencent.supersonic.common.pojo.enums.DatePeriodEnum;
 import com.tencent.supersonic.common.service.ChatModelService;
@@ -41,6 +42,8 @@ public class BaseTest extends BaseApplication {
     @Autowired
     protected ChatQueryService chatQueryService;
     @Autowired
+    protected ChatManageService chatManageService;
+    @Autowired
     protected AgentService agentService;
     @Autowired
     protected ChatModelService chatModelService;
@@ -60,7 +63,8 @@ public class BaseTest extends BaseApplication {
     }
 
     protected QueryResult submitNewChat(String queryText, Integer agentId) throws Exception {
-        int chatId = DataUtils.ONE_TURNS_CHAT_ID;
+        int chatId = chatManageService.addChat(DataUtils.getUser(), "integration-test", agentId)
+                .intValue();
         ChatParseResp parseResp = submitParse(queryText, agentId, chatId);
 
         SemanticParseInfo parseInfo = parseResp.getSelectedParses().get(0);

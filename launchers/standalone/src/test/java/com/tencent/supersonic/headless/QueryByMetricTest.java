@@ -4,6 +4,7 @@ import com.tencent.supersonic.common.pojo.Filter;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.enums.FilterOperatorEnum;
 import com.tencent.supersonic.headless.api.pojo.request.QueryMetricReq;
+import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.server.service.MetricService;
@@ -77,6 +78,8 @@ public class QueryByMetricTest extends BaseTest {
     private SemanticQueryResp queryByMetric(QueryMetricReq queryMetricReq, User user)
             throws Exception {
         QueryStructReq convert = metricService.convert(queryMetricReq);
-        return semanticLayerService.queryByReq(convert.convert(), user);
+        QuerySqlReq request = convert.convert();
+        request.setTrustedCompiledSql(true);
+        return semanticLayerService.queryByReq(request, user);
     }
 }

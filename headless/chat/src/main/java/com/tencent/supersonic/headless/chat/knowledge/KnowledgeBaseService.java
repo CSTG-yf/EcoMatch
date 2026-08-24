@@ -132,18 +132,18 @@ public class KnowledgeBaseService {
      * @param natures all words to load
      */
     public void reloadAllData(List<DictWord> natures) {
-        // 1. reload custom knowledge (executed outside lock to avoid long blocking)
-        try {
-            HanlpHelper.reloadCustomDictionary();
-        } catch (Exception e) {
-            log.error("Custom dictionary reload failed: type={}, error=[{}]",
-                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
-        }
-
-        // 2. acquire write lock, clear trie and rebuild (short operation)
         lock.writeLock().lock();
         try {
+            // The dictionary reload also repopulates SearchService. Clear first; clearing after the
+            // reload silently removes persisted dimension values from prefix/suffix matching while
+            // leaving them visible to HanLP segmentation.
             SearchService.clear();
+            try {
+                HanlpHelper.reloadCustomDictionary();
+            } catch (Exception e) {
+                log.error("Custom dictionary reload failed: type={}, error=[{}]",
+                        e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
+            }
 
             if (CollectionUtils.isNotEmpty(dimValueAliasMap)) {
                 for (Long dimId : dimValueAliasMap.keySet()) {
