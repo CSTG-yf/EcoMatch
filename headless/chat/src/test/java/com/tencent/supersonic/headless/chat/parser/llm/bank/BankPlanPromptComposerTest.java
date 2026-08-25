@@ -69,11 +69,11 @@ class BankPlanPromptComposerTest {
     void systemPrefixStatesBothExactOutputFormatsWithoutHiddenBusinessRecipes() {
         String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
 
-        assertTrue(sys.contains("第一阶段：REQUIREMENTS 的精确输出格式"));
+        assertTrue(sys.contains("唯一正常阶段：SINGLE_PASS"));
+        assertTrue(sys.contains("不得等待第二次调用"));
         assertTrue(sys.contains("BankRequestContract"));
         assertTrue(sys.contains("metricCodes"));
         assertTrue(sys.contains("answerFactTypes"));
-        assertTrue(sys.contains("第二阶段：PLAN 的精确输出格式"));
         assertTrue(sys.contains("BankQueryPlan"));
         assertTrue(sys.contains("\"action\":\"EXECUTE\""));
         assertTrue(sys.contains("YYYY-MM-DD"));
@@ -240,7 +240,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("某机构在YYYY-MM-DD的存贷比是多少"));
         assertTrue(sys.contains("必须 action=EXECUTE 且 intent=RATIO"));
         assertTrue(sys.contains("answerFactTypes=[\"RATIO_VALUE\"]"));
-        assertTrue(sys.contains("requirements_contract.organizationCodes 非空"));
+        assertTrue(sys.contains("requirements.organizationCodes 非空"));
         assertTrue(sys.contains("organizations 必须逐项保留这些机构"));
         assertTrue(sys.contains("output.columns"));
         assertTrue(sys.contains("禁止返回通用澄清文案"));
@@ -348,7 +348,7 @@ class BankPlanPromptComposerTest {
         assertFalse(sys.contains("封闭指标清单"));
         assertFalse(sys.contains("封闭映射"));
         assertFalse(sys.contains("澄清"), "PLAN must not carry CLARIFY guidance");
-        assertTrue(sys.contains("requirements_contract"), "PLAN reads the validated contract");
+        assertTrue(sys.contains("requirements"), "PLAN reads the validated contract");
     }
 
     @Test
@@ -407,14 +407,27 @@ class BankPlanPromptComposerTest {
     }
 
     @Test
-    void legacyCombinedPrefixStillExposesEveryStageContract() {
+    void singlePassPrefixExposesBothNestedContractsWithoutASecondNormalCall() {
         String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
 
-        assertTrue(sys.contains("第一阶段：REQUIREMENTS 的精确输出格式"));
-        assertTrue(sys.contains("第二阶段：PLAN 的精确输出格式"));
+        assertTrue(sys.contains("唯一正常阶段：SINGLE_PASS"));
+        assertTrue(sys.contains("不得等待第二次调用"));
+        assertTrue(sys.contains("完整 BankPlanningResponse"));
+        assertFalse(sys.contains("仍只输出当前阶段要求的一份完整 BankRequestContract"));
+        assertFalse(sys.contains("仍只输出当前阶段要求的一份完整 BankQueryPlan"));
         assertTrue(sys.contains(BankSemanticRegistry.sharedCatalog()));
         assertTrue(sys.contains(BankSemanticRegistry.planCapabilityCatalog()));
         assertTrue(sys.contains("BankRequestContract"));
         assertTrue(sys.contains("BankQueryPlan"));
+    }
+
+    @Test
+    void singlePassRepairAlwaysRequestsTheCompleteEnvelope() {
+        String repair = BankPlanPromptComposer.buildSinglePassRepairUserContent("存款是多少？",
+                "{\"requirements\":{},\"plan\":{}}", "required_metrics_missing: ZB001", null);
+
+        assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
+        assertTrue(repair.contains("只输出修正后的完整 BankPlanningResponse JSON"));
+        assertFalse(repair.contains("只输出修正后的完整当前阶段 JSON"));
     }
 }

@@ -50,6 +50,19 @@ class BankContractJsonSchemaTest {
                 .path("filters").path("items").path("properties").path("field").path("enum")));
     }
 
+    @Test
+    void singlePassSchemaPublishesBothStrictNestedContracts() throws Exception {
+        JsonNode schema = MAPPER.readTree(BankPlanningResponse.JSON_SCHEMA);
+
+        assertFalse(schema.path("additionalProperties").asBoolean(true));
+        assertEquals(Set.of("requirements", "plan"), textSet(schema.path("required")));
+        assertEquals(Set.of("object", "null"), textSet(schema.path("properties").path("plan")
+                .path("type")));
+        assertEquals(BankSemanticRegistry.metricCodes(), textSet(schema.path("properties")
+                .path("requirements").path("properties").path("metricCodes").path("items")
+                .path("enum")));
+    }
+
     private static Set<String> textSet(JsonNode values) {
         return StreamSupport.stream(values.spliterator(), false).map(JsonNode::asText)
                 .collect(Collectors.toSet());
