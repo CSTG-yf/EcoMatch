@@ -600,8 +600,8 @@ public class LlamaCppPrefixChatClient {
         int cacheN = numberAsInt(timings.get("cache_n"));
         int promptN = numberAsInt(timings.get("prompt_n"));
         KEY_PIPELINE.info(
-                "LlamaCppPrefixChatClient response cache_prompt=true thinking={} cache_n={} prompt_n={} reasoningChars={} timings={}",
-                thinkingEnabled, cacheN, promptN, reasoningChars, timings);
+                "LlamaCppPrefixChatClient response cache_prompt={} thinking={} cache_n={} prompt_n={} reasoningChars={} timings={}",
+                cachePromptEnabled, thinkingEnabled, cacheN, promptN, reasoningChars, timings);
         if (cacheN > 0) {
             KEY_PIPELINE.info("LlamaCppPrefixChatClient REAL prefix/KV hit cache_n={}", cacheN);
         } else {
