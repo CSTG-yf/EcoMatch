@@ -277,7 +277,11 @@ public class LlamaCppPrefixChatClient {
             body.put("max_tokens", options.maxTokens());
         }
         applyThinkingOptions(body, config, options, jsonSchemaSupported, llamaCppExtensions);
-        sanitizeProviderJsonSchema(body);
+        if (llamaCppExtensions) {
+            sanitizeProviderJsonSchema(body);
+        } else {
+            sanitizeOpenAiJsonSchema(body);
+        }
 
         ArrayNode messages = body.putArray("messages");
         ObjectNode system = messages.addObject();
@@ -301,6 +305,84 @@ public class LlamaCppPrefixChatClient {
         if (!schema.isMissingNode()) {
             sanitizeProviderSchemaNode(schema);
         }
+    }
+
+    /**
+     * OpenAI-compatible strict decoding requires every property of every object to be listed in
+     * {@code required}. The bank contract intentionally keeps nullable fields optional for the
+     * local llama.cpp path, so normalize only public OpenAI-compatible requests and leave the
+     * local schema unchanged. Nullable types still preserve the semantic optionality by requiring
+     * the model to emit {@code null} for an unused field.
+     */
+    private static void sanitizeOpenAiJsonSchema(ObjectNode body) {
+        sanitizeProviderJsonSchema(body);
+        JsonNode jsonSchema = body.path("response_format").path("json_schema");
+        if (!jsonSchema.isObject()) {
+            return;
+        }
+        ((ObjectNode) jsonSchema).put("strict", true);
+        normalizeStrictSchema(jsonSchema.path("schema"));
+    }
+
+    private static void normalizeStrictSchema(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isObject()) {
+            ObjectNode object = (ObjectNode) node;
+            normalizeStrictScalarSchema(object);
+            JsonNode properties = object.path("properties");
+            if (properties.isObject()) {
+                ArrayNode required = object.putArray("required");
+                properties.fieldNames().forEachRemaining(required::add);
+            }
+            node.fields().forEachRemaining(entry -> normalizeStrictSchema(entry.getValue()));
+        } else if (node.isArray()) {
+            node.forEach(LlamaCppPrefixChatClient::normalizeStrictSchema);
+        }
+    }
+
+    /** OpenAI's strict subset requires a type on scalar enum/const nodes. */
+    private static void normalizeStrictScalarSchema(ObjectNode object) {
+        if (object.has("const") && !object.has("enum")) {
+            ArrayNode values = object.putArray("enum");
+            values.add(object.get("const"));
+            object.remove("const");
+        }
+        if (object.has("type") || !object.path("enum").isArray()
+                || object.path("enum").isEmpty()) {
+            return;
+        }
+        java.util.LinkedHashSet<String> types = new java.util.LinkedHashSet<>();
+        object.path("enum").forEach(value -> types.add(jsonSchemaType(value)));
+        if (types.size() == 1) {
+            object.put("type", types.iterator().next());
+        } else {
+            ArrayNode typeArray = object.putArray("type");
+            types.forEach(typeArray::add);
+        }
+    }
+
+    private static String jsonSchemaType(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return "null";
+        }
+        if (value.isBoolean()) {
+            return "boolean";
+        }
+        if (value.isIntegralNumber()) {
+            return "integer";
+        }
+        if (value.isFloatingPointNumber()) {
+            return "number";
+        }
+        if (value.isArray()) {
+            return "array";
+        }
+        if (value.isObject()) {
+            return "object";
+        }
+        return "string";
     }
 
     private static void sanitizeProviderSchemaNode(JsonNode node) {
