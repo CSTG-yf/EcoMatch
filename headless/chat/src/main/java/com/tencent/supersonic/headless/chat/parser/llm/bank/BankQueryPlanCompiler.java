@@ -962,13 +962,19 @@ public class BankQueryPlanCompiler {
         Set<String> explicit = plan.getOrganizations().stream()
                 .map(BankQueryPlan.Organization::getBizName).filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (explicit.size() > 1) {
+        // Organization.bizName is an optional model-side display label. The organization code is
+        // the value used for filtering; only a value that is itself a live semantic dimension may
+        // select the dimension. Models commonly echo the institution's Chinese display name in
+        // this field, which must not be mistaken for a dimension identifier.
+        Set<String> dimensionCandidates = explicit.stream().filter(index::hasDimension)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (dimensionCandidates.size() > 1) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,
                     "organizations must use one semantic organization dimension");
         }
-        String identifier =
-                explicit.isEmpty() ? ORGANIZATION_DIMENSION : explicit.iterator().next();
+        String identifier = dimensionCandidates.isEmpty() ? ORGANIZATION_DIMENSION
+                : dimensionCandidates.iterator().next();
         if (!index.hasDimension(identifier)) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,

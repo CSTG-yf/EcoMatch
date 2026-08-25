@@ -57,6 +57,19 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldUseCanonicalOrganizationDimensionWhenModelAddsOrganizationDisplayName() {
+        BankQueryPlan plan = rankingPlan();
+        plan.getOrganizations().get(0).setBizName("江苏省D市农商行");
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, rankingHints(), schema());
+
+        assertEquals("bank_organization", compiled.getResultContract().getOrganizationColumn());
+        assertEquals(List.of("ORG004"),
+                compiled.getResultContract().getSelectedOrganizationCodes());
+    }
+
+    @Test
     void shouldCanonicalizeOutputColumnsWhenModelUsesEquivalentOrder() {
         BankQueryPlan plan = rankingPlan();
         plan.getOutput().setColumns(List.of("ZB001", "bank_organization"));
