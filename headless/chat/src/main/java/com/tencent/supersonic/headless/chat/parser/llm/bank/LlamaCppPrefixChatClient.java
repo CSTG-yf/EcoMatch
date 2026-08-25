@@ -136,6 +136,7 @@ public class LlamaCppPrefixChatClient {
         }
 
         String url = resolveChatCompletionsUrl(config.getBaseUrl());
+        boolean llamaCppExtensions = usesLlamaCppExtensions(config.getBaseUrl());
         try {
             boolean schemaSupported = !isJsonSchemaRequest(config, opts)
                     || resolveJsonSchemaCapability(config, url) == JsonSchemaCapability.SUPPORTED;
@@ -145,7 +146,7 @@ public class LlamaCppPrefixChatClient {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw failedResponse(response);
             }
-            return parseResponse(response.body(), opts.enableThinking());
+            return parseResponse(response.body(), opts.enableThinking(), llamaCppExtensions);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("llama.cpp chat interrupted", e);
@@ -168,11 +169,18 @@ public class LlamaCppPrefixChatClient {
 
     private static void applyThinkingOptions(ObjectNode body, ChatModelConfig config,
             ChatOptions options, boolean jsonSchemaSupported) {
+        applyThinkingOptions(body, config, options, jsonSchemaSupported, true);
+    }
+
+    private static void applyThinkingOptions(ObjectNode body, ChatModelConfig config,
+            ChatOptions options, boolean jsonSchemaSupported, boolean llamaCppExtensions) {
         ChatOptions opts = options == null ? ChatOptions.defaults() : options;
-        ObjectNode templateKwargs = body.putObject("chat_template_kwargs");
-        templateKwargs.put("enable_thinking", opts.enableThinking());
-        // Some llama.cpp builds only inspect the top-level flag.
-        body.put("enable_thinking", opts.enableThinking());
+        if (llamaCppExtensions) {
+            ObjectNode templateKwargs = body.putObject("chat_template_kwargs");
+            templateKwargs.put("enable_thinking", opts.enableThinking());
+            // Some llama.cpp builds only inspect the top-level flag.
+            body.put("enable_thinking", opts.enableThinking());
+        }
         if (!opts.enableThinking() && Boolean.TRUE.equals(config.getJsonFormat())) {
             if (opts.omitResponseFormat()) {
                 return;
@@ -248,11 +256,14 @@ public class LlamaCppPrefixChatClient {
         }
     }
 
-    private ObjectNode createRequestBody(ChatModelConfig config, String systemPrefix,
+    ObjectNode createRequestBody(ChatModelConfig config, String systemPrefix,
             String userContent, ChatOptions options, boolean jsonSchemaSupported) {
         ObjectNode body = MAPPER.createObjectNode();
         body.put("model", StringUtils.defaultIfBlank(config.getModelName(), "local"));
-        body.put("cache_prompt", true);
+        boolean llamaCppExtensions = usesLlamaCppExtensions(config.getBaseUrl());
+        if (llamaCppExtensions) {
+            body.put("cache_prompt", true);
+        }
         body.put("stream", false);
         if (config.getTemperature() != null) {
             body.put("temperature", config.getTemperature());
@@ -265,7 +276,7 @@ public class LlamaCppPrefixChatClient {
         if (options.maxTokens() > 0) {
             body.put("max_tokens", options.maxTokens());
         }
-        applyThinkingOptions(body, config, options, jsonSchemaSupported);
+        applyThinkingOptions(body, config, options, jsonSchemaSupported, llamaCppExtensions);
         sanitizeProviderJsonSchema(body);
 
         ArrayNode messages = body.putArray("messages");
@@ -367,6 +378,39 @@ public class LlamaCppPrefixChatClient {
         return root + "/v1/chat/completions";
     }
 
+    /** Only loopback and RFC1918 endpoints receive llama.cpp-specific request extensions. */
+    static boolean usesLlamaCppExtensions(String baseUrl) {
+        if (StringUtils.isBlank(baseUrl)) {
+            return true;
+        }
+        String host;
+        try {
+            host = URI.create(baseUrl.trim()).getHost();
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        if (StringUtils.isBlank(host)) {
+            return false;
+        }
+        String normalized = host.toLowerCase(java.util.Locale.ROOT);
+        if ("localhost".equals(normalized) || "::1".equals(normalized)
+                || normalized.startsWith("127.")) {
+            return true;
+        }
+        String[] octets = normalized.split("\\.");
+        if (octets.length != 4) {
+            return false;
+        }
+        try {
+            int first = Integer.parseInt(octets[0]);
+            int second = Integer.parseInt(octets[1]);
+            return first == 10 || (first == 172 && second >= 16 && second <= 31)
+                    || (first == 192 && second == 168);
+        } catch (NumberFormatException exception) {
+            return false;
+        }
+    }
+
     /**
      * Strip model thinking wrappers so downstream SQL extractors see only the final answer.
      */
@@ -412,6 +456,11 @@ public class LlamaCppPrefixChatClient {
             "predicted_per_token_ms", "prompt_tokens", "completion_tokens");
 
     ChatResult parseResponse(String body, boolean thinkingEnabled) throws Exception {
+        return parseResponse(body, thinkingEnabled, true);
+    }
+
+    private ChatResult parseResponse(String body, boolean thinkingEnabled,
+            boolean cachePromptEnabled) throws Exception {
         JsonNode root = MAPPER.readTree(body);
         String content = null;
         String reasoning = null;
@@ -476,7 +525,8 @@ public class LlamaCppPrefixChatClient {
         } else {
             LOG.debug("llama.cpp timings without cache_n (server may omit stats): {}", timings);
         }
-        return new ChatResult(finalContent, timings, true, thinkingEnabled, reasoningChars);
+        return new ChatResult(finalContent, timings, cachePromptEnabled, thinkingEnabled,
+                reasoningChars);
     }
 
     private static int numberAsInt(Object value) {

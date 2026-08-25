@@ -90,6 +90,24 @@ class LlamaCppPrefixChatClientTest {
     }
 
     @Test
+    void publicOpenAiEndpointOmitsLlamaCppOnlyRequestFields() {
+        ChatModelConfig config = jsonSchemaConfig();
+        config.setBaseUrl("https://www.autodl.art/api/v1");
+        config.setModelName("gpt-5.6-luna");
+
+        ObjectNode body = new LlamaCppPrefixChatClient().createRequestBody(config,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                        BankRequestContract.JSON_SCHEMA),
+                true);
+
+        assertFalse(body.has("cache_prompt"));
+        assertFalse(body.has("enable_thinking"));
+        assertFalse(body.has("chat_template_kwargs"));
+        assertEquals("json_schema", body.path("response_format").path("type").asText());
+    }
+
+    @Test
     void supportedServerReceivesOneSchemaProbeThenTheActualSchemaBoundRequest() throws Exception {
         try (TestServer server = new TestServer(List.of(200, 200))) {
             LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();
