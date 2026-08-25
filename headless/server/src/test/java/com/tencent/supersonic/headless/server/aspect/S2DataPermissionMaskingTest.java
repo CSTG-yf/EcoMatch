@@ -72,7 +72,7 @@ class S2DataPermissionMaskingTest {
     }
 
     @Test
-    void masksEvenWhenAuthorizationChecksAreDisabled() throws Throwable {
+    void returnsRawDataWhenAuthorizationChecksAreDisabled() throws Throwable {
         QueryStructReq request = new QueryStructReq();
         request.setNeedAuth(false);
         when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
@@ -80,21 +80,48 @@ class S2DataPermissionMaskingTest {
 
         SemanticQueryResp result = (SemanticQueryResp) aspect.doAround(joinPoint);
 
-        assertEquals("138****5678", result.getResultList().get(0).get("mobile"));
-        List<AuditEvent> events = capturedEvents(2);
+        assertEquals("13812345678", result.getResultList().get(0).get("mobile"));
+        List<AuditEvent> events = capturedEvents(1);
         assertSingleAuthorizationDecision(events, AuditEventType.AUTH_ALLOWED, "AUTH_NOT_REQUIRED");
-        assertSingleMaskEvent(events);
     }
 
     @Test
-    void deniesResultWhenSemanticSchemaIsUnavailable() throws Throwable {
+    void returnsRawProjectedNumericFactsWhenAuthorizationChecksAreDisabled() throws Throwable {
+        QueryStructReq request = new QueryStructReq();
+        request.setNeedAuth(false);
+        when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
+
+        SemanticQueryResp response = new SemanticQueryResp();
+        response.setColumns(List.of(
+                new QueryColumn("current_value", "DOUBLE", "current_value"),
+                new QueryColumn("absolute_change", "DOUBLE", "absolute_change")));
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("current_value", 41.96D);
+        row.put("absolute_change", 0.2D);
+        response.setResultList(List.of(row));
+        when(joinPoint.proceed()).thenReturn(response);
+
+        SemanticQueryResp result = (SemanticQueryResp) aspect.doAround(joinPoint);
+
+        assertEquals(41.96D, result.getResultList().get(0).get("current_value"));
+        assertEquals(0.2D, result.getResultList().get(0).get("absolute_change"));
+        List<AuditEvent> events = capturedEvents(1);
+        assertSingleAuthorizationDecision(events, AuditEventType.AUTH_ALLOWED, "AUTH_NOT_REQUIRED");
+    }
+
+    @Test
+    void returnsRawDataWithoutSemanticSchemaWhenAuthorizationChecksAreDisabled() throws Throwable {
         QueryStructReq request = new QueryStructReq();
         request.setNeedAuth(false);
         when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
         when(joinPoint.proceed()).thenReturn(response());
         when(schemaService.fetchSemanticSchema(any())).thenReturn(null);
 
-        assertThrows(InvalidPermissionException.class, () -> aspect.doAround(joinPoint));
+        SemanticQueryResp result = (SemanticQueryResp) aspect.doAround(joinPoint);
+
+        assertEquals("13812345678", result.getResultList().get(0).get("mobile"));
+        List<AuditEvent> events = capturedEvents(1);
+        assertSingleAuthorizationDecision(events, AuditEventType.AUTH_ALLOWED, "AUTH_NOT_REQUIRED");
     }
 
     @Test
@@ -308,9 +335,14 @@ class S2DataPermissionMaskingTest {
     @Test
     void maskingAuditFailurePreventsMaskedResultFromBeingReturned() throws Throwable {
         QueryStructReq request = new QueryStructReq();
-        request.setNeedAuth(false);
+        request.setNeedAuth(true);
         when(joinPoint.getArgs()).thenReturn(new Object[] {request, analyst});
         when(joinPoint.proceed()).thenReturn(response());
+        when(queryStructUtils.getModelIdsFromStruct(eq(request), any())).thenReturn(Set.of(1L));
+        ModelResp model = new ModelResp();
+        model.setId(1L);
+        when(modelService.getModelListWithAuth(eq(analyst), isNull(), eq(AuthType.ADMIN)))
+                .thenReturn(List.of(model));
         RuntimeException auditFailure = new RuntimeException("audit unavailable");
         when(auditEventPublisher.publishRequired(any(), eq(analyst))).thenReturn("auth-event")
                 .thenThrow(auditFailure);
