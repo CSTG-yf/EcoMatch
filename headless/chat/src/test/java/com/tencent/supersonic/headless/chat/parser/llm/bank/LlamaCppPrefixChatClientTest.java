@@ -90,6 +90,62 @@ class LlamaCppPrefixChatClientTest {
     }
 
     @Test
+    void publicOpenAiEndpointOmitsLlamaCppOnlyRequestFields() {
+        ChatModelConfig config = jsonSchemaConfig();
+        config.setBaseUrl("https://www.autodl.art/api/v1");
+        config.setModelName("gpt-5.6-luna");
+
+        ObjectNode body = new LlamaCppPrefixChatClient().createRequestBody(config,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_request_contract",
+                        BankRequestContract.JSON_SCHEMA),
+                true);
+
+        assertFalse(body.has("cache_prompt"));
+        assertFalse(body.has("enable_thinking"));
+        assertFalse(body.has("chat_template_kwargs"));
+        assertEquals("json_schema", body.path("response_format").path("type").asText());
+    }
+
+    @Test
+    void publicOpenAiEndpointUsesStrictSchemaWithEveryPropertyRequired() {
+        ChatModelConfig config = jsonSchemaConfig();
+        config.setBaseUrl("https://www.autodl.art/api/v1");
+        config.setModelName("gpt-5.6-luna");
+
+        ObjectNode body = new LlamaCppPrefixChatClient().createRequestBody(config,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_planning_response",
+                        BankPlanningResponse.JSON_SCHEMA), true);
+
+        assertTrue(body.path("response_format").path("json_schema").path("strict").asBoolean());
+        var schema = body.path("response_format").path("json_schema").path("schema");
+        assertStrictObjectPropertiesRequired(schema);
+        assertEquals("string", schema.path("properties").path("plan").path("properties")
+                .path("version").path("type").asText());
+        assertFalse(schema.path("properties").path("plan").path("properties").path("version")
+                .has("const"));
+    }
+
+    private static void assertStrictObjectPropertiesRequired(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isObject()) {
+            var properties = node.path("properties");
+            if (properties.isObject()) {
+                var required = new java.util.HashSet<String>();
+                node.path("required").forEach(value -> required.add(value.asText()));
+                properties.fieldNames().forEachRemaining(name ->
+                        assertTrue(required.contains(name), "missing required property: " + name));
+            }
+            node.fields().forEachRemaining(entry -> assertStrictObjectPropertiesRequired(entry.getValue()));
+        } else if (node.isArray()) {
+            node.forEach(LlamaCppPrefixChatClientTest::assertStrictObjectPropertiesRequired);
+        }
+    }
+
+    @Test
     void supportedServerReceivesOneSchemaProbeThenTheActualSchemaBoundRequest() throws Exception {
         try (TestServer server = new TestServer(List.of(200, 200))) {
             LlamaCppPrefixChatClient client = new LlamaCppPrefixChatClient();

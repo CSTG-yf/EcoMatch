@@ -121,17 +121,16 @@ public class S2DataPermissionAspect {
                 user = (User) objects[1];
             }
 
-            denialReasonCode = "AUTH_SCHEMA_UNAVAILABLE";
-            semanticSchemaResp = getSemanticSchemaResp(queryReq);
             if (!queryReq.isNeedAuth()) {
                 log.info(
-                        "needAuth is false, authorization checks are skipped but masking remains.");
+                        "needAuth is false, authorization and result masking are skipped.");
                 authorizationDecisionFinalized = true;
                 publishAuthorizationDecision(queryReq, modelIds, user, true, "AUTH_NOT_REQUIRED",
                         null);
-                return proceedAndMask(joinPoint, semanticSchemaResp, queryReq, modelIds, user,
-                        null);
+                return joinPoint.proceed();
             }
+            denialReasonCode = "AUTH_SCHEMA_UNAVAILABLE";
+            semanticSchemaResp = getSemanticSchemaResp(queryReq);
             denialReasonCode = "AUTH_USER_MISSING";
             if (Objects.isNull(user) || StringUtils.isEmpty(user.getName())) {
                 throw new RuntimeException("please provide user information");

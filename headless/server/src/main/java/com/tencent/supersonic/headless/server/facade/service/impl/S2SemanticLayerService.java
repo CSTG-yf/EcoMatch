@@ -237,6 +237,12 @@ public class S2SemanticLayerService implements SemanticLayerService {
 
     private void maskBeforeCache(SemanticQueryReq queryReq, SemanticQueryResp queryResp,
             User user) {
+        if (!queryReq.isNeedAuth()) {
+            queryResp.setDataMasked(false);
+            queryResp.setMaskedColumns(Set.of());
+            queryResp.setMaskingPolicyVersion(0L);
+            return;
+        }
         SchemaFilterReq filter = new SchemaFilterReq();
         filter.setModelIds(queryReq.getModelIds());
         filter.setDataSetId(queryReq.getDataSetId());

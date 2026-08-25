@@ -91,6 +91,7 @@ class SqlExecutorTest {
         assertEquals(correctedS2Sql, scopeRequest.getSql());
         assertSame(sqlInfo, scopeRequest.getSqlInfo());
         assertEquals(physicalSql, scopeRequest.getSqlInfo().getQuerySQL());
+        assertTrue(scopeRequest.isNeedAuth());
         assertTrue(scopeRequest.isTrustedCompiledSql());
         BankPlanToolResult toolResult =
                 (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
@@ -101,6 +102,33 @@ class SqlExecutorTest {
                 toolResult.getStageResults().stream().map(BankPlanToolResult.StageResult::getStage)
                         .filter(stage -> stage.ordinal() >= BankPlanToolResult.Stage.SQL_SAFETY.ordinal())
                         .toList());
+    }
+
+    @Test
+    void disablesAuthorizationAndMaskingOnlyForResultOnlyExecution() throws Exception {
+        SemanticLayerService semanticLayer = mock(SemanticLayerService.class);
+        ChatContextService chatContextService = mock(ChatContextService.class);
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBean(SemanticLayerService.class)).thenReturn(semanticLayer);
+        when(applicationContext.getBean(ChatContextService.class)).thenReturn(chatContextService);
+        new ContextUtils().setApplicationContext(applicationContext);
+
+        User user = User.get(1L, "tester");
+        when(chatContextService.getOrCreateContext(7)).thenReturn(new ChatContext());
+        when(semanticLayer.queryByReq(any(SemanticQueryReq.class), eq(user)))
+                .thenReturn(new SemanticQueryResp());
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT deposit_balance FROM bank_metric");
+        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder().user(user)
+                .chatId(7).queryId(9L).resultOnly(true).build());
+        executeContext.setParseInfo(parseInfo);
+
+        new SqlExecutor().execute(executeContext);
+
+        ArgumentCaptor<SemanticQueryReq> requestCaptor =
+                ArgumentCaptor.forClass(SemanticQueryReq.class);
+        verify(semanticLayer).queryByReq(requestCaptor.capture(), eq(user));
+        assertFalse(requestCaptor.getValue().isNeedAuth());
     }
 
     @Test

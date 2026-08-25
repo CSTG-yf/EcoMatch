@@ -28,6 +28,11 @@ import static org.mockito.Mockito.when;
 
 class BankPlanGenStrategyTest {
 
+    private String planningResponse(String requirements, String plan) {
+        return "{\"requirements\":" + requirements.strip() + ",\"plan\":"
+                + (plan == null ? "null" : plan.strip()) + "}";
+    }
+
     @Test
     void fewShotSwitchDefaultsOffAndOnlyAddsDynamicFamilyExamplesWhenEnabled() {
         String property = BankPlanGenStrategy.FEW_SHOT_ENABLE_PROPERTY;
@@ -35,19 +40,19 @@ class BankPlanGenStrategyTest {
         try {
             System.clearProperty(property);
             ChatLanguageModel disabledModel = mock(ChatLanguageModel.class);
-            when(disabledModel.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+        when(disabledModel.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson()));
             ArgumentCaptor<String> disabledPrompts = ArgumentCaptor.forClass(String.class);
             new TestBankPlanGenStrategy(disabledModel).generate(request());
-            verify(disabledModel, times(2)).generate(disabledPrompts.capture());
+            verify(disabledModel, times(1)).generate(disabledPrompts.capture());
             assertTrue(disabledPrompts.getAllValues().stream()
                     .noneMatch(prompt -> prompt.contains("<family_examples>")));
 
             System.setProperty(property, "true");
             ChatLanguageModel enabledModel = mock(ChatLanguageModel.class);
-            when(enabledModel.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+        when(enabledModel.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson()));
             ArgumentCaptor<String> enabledPrompts = ArgumentCaptor.forClass(String.class);
             new TestBankPlanGenStrategy(enabledModel).generate(request());
-            verify(enabledModel, times(2)).generate(enabledPrompts.capture());
+            verify(enabledModel, times(1)).generate(enabledPrompts.capture());
             assertTrue(enabledPrompts.getAllValues().stream()
                     .anyMatch(prompt -> prompt.contains("<family_examples>")));
         } finally {
@@ -62,7 +67,7 @@ class BankPlanGenStrategyTest {
     @Test
     void modelGeneratesRequirementsThenAnExactPlanWithoutQuestionRuleRewriting() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson()));
 
         LLMReq request = request();
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
@@ -75,10 +80,10 @@ class BankPlanGenStrategyTest {
         assertEquals(Set.of("ZB001", "ZB002"),
                 request.getSemanticIntentHints().getRequiredMetrics());
         assertEquals(1,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         assertEquals(List.of(), response.getBankCandidateDiagnostics()
                 .get("bank.nl2sql.requirementsRepairReasons"));
-        verify(model, times(2)).generate(anyString());
+        verify(model, times(1)).generate(anyString());
         assertEquals("json_schema", request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
                 .getChatModelConfig().getJsonFormatType());
         assertEquals(0, request.getChatAppConfig().get(BankPlanGenStrategy.APP_KEY)
@@ -88,35 +93,33 @@ class BankPlanGenStrategyTest {
     @Test
     void missingMetricIsReturnedToTheModelAsARepairableRequirementsError() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(requirementsJson(),
-                validPlanJson().replace(
-                        "{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\",\"alias\":null},", ""),
-                validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson().replace(
+                        "{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\",\"alias\":null},", "")),
+                planningResponse(requirementsJson(), validPlanJson()));
         LLMReq request = request();
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
         assertNotNull(response.getBankQueryPlan());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
-        String repair = prompts.getAllValues().get(2);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("required_metrics_missing: ZB001"));
-        assertTrue(repair.contains("<requirements_contract>"));
-        assertTrue(repair.contains("<stage>PLAN</stage>"));
+        assertTrue(repair.contains("<previous_candidate>"));
+        assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertFalse(repair.contains("SELECT "));
     }
 
     @Test
     void invalidRequirementIdentifiersAreRepairedByTheModelInsteadOfCanonicalizedByBackend() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(
-                requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"zb001\",\"ZB002\""),
-                requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"zb001\",\"ZB002\""), validPlanJson()),
+                planningResponse(requirementsJson(), validPlanJson()));
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertNotNull(response.getBankQueryPlan());
-        verify(model, times(3)).generate(anyString());
+        verify(model, times(2)).generate(anyString());
     }
 
     @Test
@@ -124,8 +127,8 @@ class BankPlanGenStrategyTest {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         String expandedRequirements =
                 requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"ZB001\",\"ZB002\",\"ZB003\"");
-        when(model.generate(anyString())).thenReturn(expandedRequirements, requirementsJson(),
-                validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(expandedRequirements, validPlanJson()),
+                planningResponse(requirementsJson(), validPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("请比较江苏省D市农商行在2025-07-31的指标。" + "待评价指标集合：\n各项存款余额、各项贷款余额。");
@@ -139,21 +142,21 @@ class BankPlanGenStrategyTest {
         assertEquals(Set.of("ZB001", "ZB002"), response.getBankRequestContract().getMetricCodes()
                 .stream().collect(java.util.stream.Collectors.toSet()));
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("explicit_closed_metric_list_mismatch"));
         assertTrue(repair.contains("unexpected=[ZB003]"));
-        assertTrue(repair.contains("Regenerate the complete requirements JSON"));
+        assertTrue(repair.contains("previous_candidate"));
         assertFalse(repair.contains("SELECT "));
     }
 
     @Test
     void depositStructureShareReturnsMissingPartToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(incompleteDepositShareRequirementsJson(),
-                depositShareRequirementsJson(), depositSharePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(incompleteDepositShareRequirementsJson(), depositSharePlanJson()),
+                planningResponse(depositShareRequirementsJson(), depositSharePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("请计算江苏省I市农商行在2026-02-28的对公与个人存款构成比例。");
@@ -167,9 +170,9 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ZB003", "ZB004", "ZB001"),
                 response.getBankRequestContract().getMetricCodes());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("deposit_structure_share_mismatch"));
         assertTrue(repair.contains("missing=[ZB004]"));
@@ -179,8 +182,8 @@ class BankPlanGenStrategyTest {
     @Test
     void perCapitaProfitReturnsMissingDenominatorToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(incompletePerCapitaRequirementsJson(),
-                perCapitaRequirementsJson(), perCapitaPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(incompletePerCapitaRequirementsJson(), perCapitaPlanJson()),
+                planningResponse(perCapitaRequirementsJson(), perCapitaPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("请计算江苏省J市农商行2026-01-31的人均利润。");
@@ -192,9 +195,9 @@ class BankPlanGenStrategyTest {
 
         assertEquals(List.of("ZB011", "ZB018"), response.getBankRequestContract().getMetricCodes());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("per_capita_profit_mismatch"));
         assertTrue(repair.contains("missing=[ZB018]"));
@@ -204,8 +207,7 @@ class BankPlanGenStrategyTest {
     @Test
     void riskRatePairAcceptsEquivalentMetricOrderFromTheModel() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(reversedRiskRateRequirementsJson(),
-                reversedRiskRatePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(reversedRiskRateRequirementsJson(), reversedRiskRatePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省B市农商行在2025-09-30，逾期贷款率相较不良贷款率相差多少？");
@@ -216,14 +218,14 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
         assertEquals(List.of("ZB017", "ZB013"), response.getBankRequestContract().getMetricCodes());
-        verify(model, times(2)).generate(anyString());
+        verify(model, times(1)).generate(anyString());
     }
 
     @Test
     void explicitProvinceRankReturnsPointIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(pointRankRequirementsJson(),
-                rankingRequirementsJson(), rankingPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(pointRankRequirementsJson(), rankingPlanJson()),
+                planningResponse(rankingRequirementsJson(), rankingPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省H市农商行的成本收入比在2026-04-30是多少？全省排第几？");
@@ -235,15 +237,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("explicit_province_ranking_mismatch"));
     }
 
     @Test
     void selectedInstitutionWinnerReturnsComparisonIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(selectedRankingRequirementsJson("COMPARISON"),
-                selectedRankingRequirementsJson("RANKING"), selectedRankingPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(selectedRankingRequirementsJson("COMPARISON"), selectedRankingPlanJson()),
+                planningResponse(selectedRankingRequirementsJson("RANKING"), selectedRankingPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年底，江苏省A市农商行、江苏省E市农商行、江苏省I市农商行三家谁存款最多？");
@@ -255,7 +257,7 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(
                 prompts.getAllValues().get(1).contains("selected_organization_ranking_mismatch"));
     }
@@ -263,8 +265,8 @@ class BankPlanGenStrategyTest {
     @Test
     void selectedInstitutionBestComparisonReturnsComparisonIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(selectedBestRequirementsJson("RANKING"),
-                selectedBestRequirementsJson("COMPARISON"), selectedBestComparisonPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(selectedBestRequirementsJson("RANKING"), selectedBestComparisonPlanJson()),
+                planningResponse(selectedBestRequirementsJson("COMPARISON"), selectedBestComparisonPlanJson()));
 
         LLMReq request = request();
         request.setQueryText(
@@ -279,7 +281,7 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ORG002", "ORG006", "ORG010"),
                 response.getBankRequestContract().getOrganizationCodes());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1)
                 .contains("selected_organization_best_comparison_mismatch"));
     }
@@ -287,8 +289,8 @@ class BankPlanGenStrategyTest {
     @Test
     void explicitYearEndRangeReturnsExactYearEndToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(invalidExplicitYearEndRequirementsJson(),
-                validExplicitYearEndRequirementsJson(), explicitYearEndPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(invalidExplicitYearEndRequirementsJson(), explicitYearEndPlanJson()),
+                planningResponse(validExplicitYearEndRequirementsJson(), explicitYearEndPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省B市农商行的对公存款余额从2024年末到2025-05-31，增幅是多少？");
@@ -303,17 +305,15 @@ class BankPlanGenStrategyTest {
         assertEquals(LocalDate.of(2024, 12, 31),
                 response.getBankRequestContract().getTime().getBaselineEndDate());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("explicit_year_end_range_mismatch"));
     }
 
     @Test
     void organizationDifferenceReturnsPointIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(
-                organizationComparisonRequirementsJson("POINT_QUERY"),
-                organizationComparisonRequirementsJson("COMPARISON"),
-                organizationComparisonPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(organizationComparisonRequirementsJson("POINT_QUERY"), organizationComparisonPlanJson()),
+                planningResponse(organizationComparisonRequirementsJson("COMPARISON"), organizationComparisonPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年6月末，江苏省C市农商行比江苏省G市农商行的存款多多少？");
@@ -325,15 +325,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.COMPARISON, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("organization_comparison_mismatch"));
     }
 
     @Test
     void daysAboveProvinceAverageReturnsClarificationToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(daysAboveRequirementsJson("THRESHOLD"),
-                daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(daysAboveRequirementsJson("THRESHOLD"), daysAbovePlanJson()),
+                planningResponse(daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年全年，江苏省B市农商行的不良贷款率有多少天高于全省均值？");
@@ -345,15 +345,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.AGGREGATION, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("days_above_province_average_mismatch"));
     }
 
     @Test
     void daysAboveProvinceAverageRepairsAnInitialClarifyBeforeTheGenericClarifyExit() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(),
-                daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年全年，江苏省B市农商行的不良贷款率有多少天高于全省均值？");
@@ -365,15 +365,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.AGGREGATION, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("days_above_province_average_mismatch"));
     }
 
     @Test
     void monthAndYearComparisonRepairsAnInitialClarifyWithTheExactContract() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(),
-                monthAndYearRequirementsJson(), monthAndYearPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(monthAndYearRequirementsJson(), monthAndYearPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("分析江苏省F市农商行在2026-04-30的各项贷款余额环比（较上月）和同比（较去年同期）的变化情况。");
@@ -386,15 +386,15 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.TimeComparison.MOM_AND_YOY,
                 response.getBankRequestContract().getTime().getComparison());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("mom_and_yoy_requirements_mismatch"));
     }
 
     @Test
     void provinceBottomRankingRepairsAnInitialClarifyWithoutInventingAnOrganization() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(),
-                provinceBottomRequirementsJson(), provinceBottomPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(provinceBottomRequirementsJson(), provinceBottomPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年8月末，全省净利润排最后一名的是哪家？");
@@ -406,7 +406,7 @@ class BankPlanGenStrategyTest {
 
         assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1)
                 .contains("explicit_province_bottom_ranking_mismatch"));
     }
@@ -414,10 +414,8 @@ class BankPlanGenStrategyTest {
     @Test
     void wholePopulationTopRankingRejectsAnArbitraryOrganization() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(
-                provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "POINT_QUERY", true),
-                provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "RANKING", false),
-                provinceWideRankingPlanJson("ZB001", "2025-12-31", "DESC"));
+        when(model.generate(anyString())).thenReturn(planningResponse(provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "POINT_QUERY", true), provinceWideRankingPlanJson("ZB001", "2025-12-31", "DESC")),
+                planningResponse(provinceWideRankingRequirementsJson("ZB001", "2025-12-31", "RANKING", false), provinceWideRankingPlanJson("ZB001", "2025-12-31", "DESC")));
 
         LLMReq request = request();
         request.setQueryText("2025年12月31日，13家农商行中谁的存款规模排第一？");
@@ -430,7 +428,7 @@ class BankPlanGenStrategyTest {
         assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
         assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1)
                 .contains("province_wide_institution_ranking_mismatch"));
     }
@@ -438,10 +436,8 @@ class BankPlanGenStrategyTest {
     @Test
     void wholePopulationLowestRankingKeepsTheOrganizationScopeEmpty() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(
-                provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", true),
-                provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", false),
-                provinceWideRankingPlanJson("ZB013", "2026-03-31", "ASC"));
+        when(model.generate(anyString())).thenReturn(planningResponse(provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", true), provinceWideRankingPlanJson("ZB013", "2026-03-31", "ASC")),
+                planningResponse(provinceWideRankingRequirementsJson("ZB013", "2026-03-31", "RANKING", false), provinceWideRankingPlanJson("ZB013", "2026-03-31", "ASC")));
 
         LLMReq request = request();
         request.setQueryText("2026年3月末，哪家农商行的不良贷款率最低？");
@@ -454,7 +450,7 @@ class BankPlanGenStrategyTest {
         assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
         assertTrue(response.getBankRequestContract().getOrganizationCodes().isEmpty());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1)
                 .contains("province_wide_institution_ranking_mismatch"));
     }
@@ -462,8 +458,8 @@ class BankPlanGenStrategyTest {
     @Test
     void depositStructureEqualityRepairsComparisonIntoPointQuery() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(depositEqualityRequirementsJson("COMPARISON"),
-                depositEqualityRequirementsJson("POINT_QUERY"), depositEqualityPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(depositEqualityRequirementsJson("COMPARISON"), depositEqualityPlanJson()),
+                planningResponse(depositEqualityRequirementsJson("POINT_QUERY"), depositEqualityPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年12月末，江苏省C市农商行的对公存款加个人存款是不是等于各项存款？差额多少？");
@@ -478,15 +474,15 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ZB003", "ZB004", "ZB001"),
                 response.getBankRequestContract().getMetricCodes());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("deposit_structure_equality_mismatch"));
     }
 
     @Test
     void daysAboveProvinceAverageRejectsASeparateMetricDirectionFilter() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(daysAboveRequirementsWithDirectionFilterJson(),
-                daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(daysAboveRequirementsWithDirectionFilterJson(), daysAbovePlanJson()),
+                planningResponse(daysAboveRequirementsJson("AGGREGATION"), daysAbovePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2025年全年，江苏省B市农商行的不良贷款率有多少天高于全省均值？");
@@ -497,7 +493,7 @@ class BankPlanGenStrategyTest {
         new TestBankPlanGenStrategy(model).generate(request);
 
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1)
                 .contains("days_above_province_average_metric_filter_forbidden"));
     }
@@ -505,7 +501,7 @@ class BankPlanGenStrategyTest {
     @Test
     void namedOrganizationRankQuestionDoesNotUseProvinceWideBottomSelectorContract() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(rankingRequirementsJson(), rankingPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(rankingRequirementsJson(), rankingPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省H市农商行的成本收入比在2026-04-30是否全省排名最后？");
@@ -516,14 +512,14 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
         assertEquals(List.of("ORG008"), response.getBankRequestContract().getOrganizationCodes());
-        verify(model, times(2)).generate(anyString());
+        verify(model, times(1)).generate(anyString());
     }
 
     @Test
     void loanStructureShareReturnsRatioIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(loanStructureShareRequirementsJson("RATIO"),
-                loanStructureShareRequirementsJson("POINT_QUERY"), loanStructureSharePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(loanStructureShareRequirementsJson("RATIO"), loanStructureSharePlanJson()),
+                planningResponse(loanStructureShareRequirementsJson("POINT_QUERY"), loanStructureSharePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2026年3月末，江苏省G市农商行的个人贷款和对公贷款分别占各项贷款的比例？");
@@ -536,15 +532,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("loan_structure_share_mismatch"));
     }
 
     @Test
     void aliasParaphraseDepositStructureShareReachesTheSameCompositionContract() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(incompleteDepositShareRequirementsJson(),
-                depositShareRequirementsJson(), depositSharePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(incompleteDepositShareRequirementsJson(), depositSharePlanJson()),
+                planningResponse(depositShareRequirementsJson(), depositSharePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2026年2月末，江苏省I市农商行的储蓄存款和公司存款在存款总额中的占比情况如何？");
@@ -558,7 +554,7 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ZB003", "ZB004", "ZB001"),
                 response.getBankRequestContract().getMetricCodes());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("deposit_structure_share_mismatch"));
         assertTrue(prompts.getAllValues().get(1).contains("missing=[ZB004]"));
     }
@@ -566,8 +562,8 @@ class BankPlanGenStrategyTest {
     @Test
     void aliasParaphraseLoanStructureShareReachesTheSameCompositionContract() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(loanStructureShareRequirementsJson("RATIO"),
-                loanStructureShareRequirementsJson("POINT_QUERY"), loanStructureSharePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(loanStructureShareRequirementsJson("RATIO"), loanStructureSharePlanJson()),
+                planningResponse(loanStructureShareRequirementsJson("POINT_QUERY"), loanStructureSharePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省G市农商行2026年3月末的零售贷款与对公贷款占各项贷款余额的比重。");
@@ -581,15 +577,15 @@ class BankPlanGenStrategyTest {
         assertEquals(List.of("ZB006", "ZB005", "ZB002"),
                 response.getBankRequestContract().getMetricCodes());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("loan_structure_share_mismatch"));
     }
 
     @Test
     void derivedLoanToDepositRatioReturnsBothOperandsForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(incompleteLoanToDepositRatioRequirementsJson(),
-                loanToDepositRatioRequirementsJson(), loanToDepositRatioPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(incompleteLoanToDepositRatioRequirementsJson(), loanToDepositRatioPlanJson()),
+                planningResponse(loanToDepositRatioRequirementsJson(), loanToDepositRatioPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
@@ -601,7 +597,7 @@ class BankPlanGenStrategyTest {
 
         assertEquals(List.of("ZB002", "ZB001"), response.getBankRequestContract().getMetricCodes());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("derived_point_ratio_mismatch"));
         assertTrue(prompts.getAllValues().get(1).contains("DERIVED_ZB002_DIV_ZB001"));
     }
@@ -609,8 +605,8 @@ class BankPlanGenStrategyTest {
     @Test
     void metricPairGapGeneralizesBeyondTheRiskRatePair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(coveragePairRequirementsJson("COMPARISON"),
-                coveragePairRequirementsJson("POINT_QUERY"), coveragePairPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(coveragePairRequirementsJson("COMPARISON"), coveragePairPlanJson()),
+                planningResponse(coveragePairRequirementsJson("POINT_QUERY"), coveragePairPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省F市农商行在2026年1月末，拨备覆盖率相较资本充足率相差多少？");
@@ -622,15 +618,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("metric_pair_gap_mismatch"));
     }
 
     @Test
     void provinceRankParaphraseKeepsTheRankingIntent() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(pointRankRequirementsJson(),
-                rankingRequirementsJson(), rankingPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(pointRankRequirementsJson(), rankingPlanJson()),
+                planningResponse(rankingRequirementsJson(), rankingPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省H市农商行的资本充足率在2026-04-30于全省排名第几？");
@@ -642,15 +638,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("explicit_province_ranking_mismatch"));
     }
 
     @Test
     void explicitLoanShareReturnsPointIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(loanShareRequirementsJson("POINT_QUERY"),
-                loanShareRequirementsJson("RATIO"), loanSharePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(loanShareRequirementsJson("POINT_QUERY"), loanSharePlanJson()),
+                planningResponse(loanShareRequirementsJson("RATIO"), loanSharePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("某机构在指定日的不良贷款余额占贷款总额的比例是多少？");
@@ -662,15 +658,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.RATIO, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("loan_share_ratio_mismatch"));
     }
 
     @Test
     void genericPointRatioClarificationIsReturnedToTheModelWithCatalogOperands() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(),
-                genericPointRatioRequirementsJson("RATIO"), genericPointRatioPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(genericPointRatioRequirementsJson("RATIO"), genericPointRatioPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("江苏省A市农商行在2026-04-30的净利息收入占营业收入的比重有多大？");
@@ -682,7 +678,7 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.RATIO, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("generic_point_ratio_mismatch"));
         assertTrue(prompts.getAllValues().get(1).contains("ZB008"));
     }
@@ -690,8 +686,8 @@ class BankPlanGenStrategyTest {
     @Test
     void endpointDirectionReturnsIntentMismatchToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(endpointChangeRequirementsJson("TREND"),
-                endpointChangeRequirementsJson("CHANGE"), endpointChangePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(endpointChangeRequirementsJson("TREND"), endpointChangePlanJson()),
+                planningResponse(endpointChangeRequirementsJson("CHANGE"), endpointChangePlanJson()));
 
         LLMReq request = request();
         request.setQueryText("某机构从年中期末到年末，存款、贷款、风险率和利润的变动方向分别是什么？");
@@ -704,15 +700,14 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.CHANGE, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("endpoint_change_direction_mismatch"));
     }
 
     @Test
     void quarterlyDirectionKeepsTrendIntentWithoutEndpointRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(quarterlyTrendRequirementsJson(),
-                quarterlyTrendPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(quarterlyTrendRequirementsJson(), quarterlyTrendPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("某农商行从2025年一季度末到四季度末，逐季度存款变化方向如何？");
@@ -723,15 +718,15 @@ class BankPlanGenStrategyTest {
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
 
         assertEquals(BankIntentType.TREND, response.getBankRequestContract().getIntent());
-        verify(model, times(2)).generate(anyString());
+        verify(model, times(1)).generate(anyString());
     }
 
     @Test
     void provinceAverageComparisonReturnsUnsupportedIntentToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(requirementsJson()
-                .replace("\"intent\":\"COMPARISON\"", "\"intent\":\"POINT_QUERY\""),
-                requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson()
+                .replace("\"intent\":\"COMPARISON\"", "\"intent\":\"POINT_QUERY\""), validPlanJson()),
+                planningResponse(requirementsJson(), validPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("请把某机构指定日的存款、贷款与全省均值逐项对比。");
@@ -740,15 +735,15 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.COMPARISON, response.getBankRequestContract().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("province_average_comparison_mismatch"));
     }
 
     @Test
     void multiOrganizationTotalReturnsMissingOrganizationDimensionToTheModelForPlanRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(multiOrganizationTotalRequirementsJson(),
-                multiOrganizationTotalPlanJson(false), multiOrganizationTotalPlanJson(true));
+        when(model.generate(anyString())).thenReturn(planningResponse(multiOrganizationTotalRequirementsJson(), multiOrganizationTotalPlanJson(false)),
+                planningResponse(multiOrganizationTotalRequirementsJson(), multiOrganizationTotalPlanJson(true)));
 
         LLMReq request = request();
         request.setQueryText("两个指定机构的期末存款合计是多少？请保留逐机构核验依据。");
@@ -760,16 +755,16 @@ class BankPlanGenStrategyTest {
 
         assertEquals(List.of("bank_organization"), response.getBankQueryPlan().getDimensions());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
-        assertTrue(prompts.getAllValues().get(2)
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1)
                 .contains("multi_organization_total_dimension_mismatch"));
     }
 
     @Test
     void dailyAverageOnlyModeIsReturnedToTheModelForPlanRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(dailyAverageRequirementsJson(),
-                dailyAveragePlanJson(null), dailyAveragePlanJson("AVERAGE_ONLY"));
+        when(model.generate(anyString())).thenReturn(planningResponse(dailyAverageRequirementsJson(), dailyAveragePlanJson(null)),
+                planningResponse(dailyAverageRequirementsJson(), dailyAveragePlanJson("AVERAGE_ONLY")));
 
         LLMReq request = request();
         request.setQueryText("请给出江苏省I市农商行2026全年的日均各项贷款余额。");
@@ -782,34 +777,34 @@ class BankPlanGenStrategyTest {
         assertEquals(BankQueryPlan.AggregationResultMode.AVERAGE_ONLY,
                 response.getBankQueryPlan().getOutput().getAggregationMode());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
-        assertTrue(prompts.getAllValues().get(2).contains("daily_average_output_mode_mismatch"));
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("daily_average_output_mode_mismatch"));
     }
 
     @Test
     void invalidComparisonRangeIsReturnedToTheModelBeforePlanGeneration() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(invalidChangeRequirementsJson(),
-                validChangeRequirementsJson(), validChangePlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(invalidChangeRequirementsJson(), validChangePlanJson()),
+                planningResponse(validChangeRequirementsJson(), validChangePlanJson()));
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("baselineEndDate < startDate"));
-        assertTrue(repair.contains("<stage>REQUIREMENTS</stage>"));
+        assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertFalse(repair.contains("SELECT "));
     }
 
     @Test
     void rankedGrowthOverPopulationKeepsTheRankingIntentContract() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(rankedGrowthRequirementsJson("RANKING"),
-                rankedGrowthRequirementsJson("CHANGE"), rankedGrowthPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(rankedGrowthRequirementsJson("RANKING"), rankedGrowthPlanJson()),
+                planningResponse(rankedGrowthRequirementsJson("CHANGE"), rankedGrowthPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("2024年12月末至2026年4月末期间，各家农商行净利润增长最快的前三家是谁？增幅分别是多少？");
@@ -821,28 +816,28 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankIntentType.CHANGE, response.getBankRequestContract().getIntent());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("ranked_change_family_mismatch"));
     }
 
     @Test
     void invalidStartOfYearBaselineIsReturnedToTheModelBeforePlanGeneration() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(invalidStartOfYearRequirementsJson(),
-                validStartOfYearRequirementsJson(), validStartOfYearPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(invalidStartOfYearRequirementsJson(), validStartOfYearPlanJson()),
+                planningResponse(validStartOfYearRequirementsJson(), validStartOfYearPlanJson()));
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("prior calendar year end"));
-        assertTrue(repair.contains("<stage>REQUIREMENTS</stage>"));
+        assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertFalse(repair.contains("SELECT "));
     }
 
@@ -850,29 +845,30 @@ class BankPlanGenStrategyTest {
     void unsupportedAnswerFactTypeIsReturnedToTheModelBeforePlanGeneration() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString()))
-                .thenReturn(
-                        requirementsJson().replace("\"VALUE\",\"PROVINCE_AVERAGE\",\"GAP_VALUE\"",
+                .thenReturn(planningResponse(
+                        requirementsJson().replace(
+                                "\"VALUE\",\"PROVINCE_AVERAGE\",\"GAP_VALUE\"",
                                 "\"VALUE\",\"MINIMUM_VALUE\""),
-                        requirementsJson(), validPlanJson());
+                        validPlanJson()), planningResponse(requirementsJson(), validPlanJson()));
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
         assertNotNull(response.getBankQueryPlan());
         assertEquals(2,
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsAttempts"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("MINIMUM_VALUE"));
-        assertTrue(repair.contains("<stage>REQUIREMENTS</stage>"));
+        assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertFalse(repair.contains("SELECT "));
     }
 
     @Test
     void oneClarificationIsRecheckedByTheModelBeforeBeingReturnedToTheUser() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(), requirementsJson(),
-                validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(requirementsJson(), validPlanJson()));
 
         LLMReq request = request();
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
@@ -880,30 +876,29 @@ class BankPlanGenStrategyTest {
         assertNotNull(response.getBankQueryPlan());
         assertEquals(List.of("CLARIFICATION_RECHECK"), request.getBankRequirementsRepairReasons());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("model selected CLARIFY"));
     }
 
     @Test
-    void repeatedClarificationIsRecheckedUntilTheBoundedRequirementAttemptLimit() {
+    void repeatedFalseClarificationStopsAfterTheSingleRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(), clarificationJson(),
-                requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(clarificationJson(), null));
 
         LLMReq request = request();
-        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
 
-        assertNotNull(response.getBankQueryPlan());
-        assertEquals(List.of("CLARIFICATION_RECHECK", "CLARIFICATION_RECHECK"),
-                request.getBankRequirementsRepairReasons());
-        verify(model, times(4)).generate(anyString());
+        assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, error.getCategory());
+        verify(model, times(2)).generate(anyString());
     }
 
     @Test
     void clarificationRepairReturnsExactCatalogEvidenceWithoutReplacingTheModelPlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(clarificationJson(), ratioRequirementsJson(),
-                ratioPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(clarificationJson(), null),
+                planningResponse(ratioRequirementsJson(), ratioPlanJson()));
         LLMReq request = request();
         request.setQueryText("江苏省L市农商行2026-02-28的存贷比请帮我查一下。");
 
@@ -912,7 +907,7 @@ class BankPlanGenStrategyTest {
         assertEquals("MODEL", response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
         assertEquals(BankIntentType.RATIO, response.getBankQueryPlan().getIntent());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(3)).generate(prompts.capture());
+        verify(model, times(2)).generate(prompts.capture());
         String repair = prompts.getAllValues().get(1);
         assertTrue(repair.contains("organizationCodes=[ORG012(江苏省L市农商行)]"));
         assertTrue(repair.contains("metricCodes=[ZB002(各项贷款余额), ZB001(各项存款余额)]"));
@@ -937,7 +932,7 @@ class BankPlanGenStrategyTest {
     @Test
     void toolRepairKeepsModelRequirementsAndReturnsACompleteReplacementPlan() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson()));
         LLMReq request = request();
         request.setBankRequestContract(new BankRequestContractResponseParser()
                 .parse(requirementsJson(), request.getSemanticIntentHints()));
@@ -952,21 +947,44 @@ class BankPlanGenStrategyTest {
                 response.getBankCandidateDiagnostics().get("bank.nl2sql.planSource"));
         verify(model).generate(org.mockito.ArgumentMatchers
                 .<String>argThat(prompt -> prompt.contains("<tool_result>")
-                        && prompt.contains("<requirements_contract>")
+                        && prompt.contains("<previous_candidate>")
                         && prompt.contains("UNSUPPORTED_PLAN_COMBINATION")));
+    }
+
+    @Test
+    void invalidToolRepairResponseFailsWithoutAnotherModelCall() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String invalidPlan = validPlanJson().replace(
+                "{\"bizName\":\"ZB001\",\"aggregation\":\"DEFAULT\",\"alias\":null},",
+                "");
+        when(model.generate(anyString()))
+                .thenReturn(planningResponse(requirementsJson(), invalidPlan));
+        LLMReq request = request();
+        request.setBankRequestContract(new BankRequestContractResponseParser()
+                .parse(requirementsJson(), request.getSemanticIntentHints()));
+        request.setPreviousBankQueryPlanJson(validPlanJson());
+        request.setBankPlanToolResult(BankPlanToolResult.failed(1, "trace-1", "fingerprint-1",
+                BankPlanToolResult.Stage.COMPILE, "UNSUPPORTED_PLAN_COMBINATION", Map.of(),
+                List.of("根据错误码修正计划")));
+
+        assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+        verify(model, times(1)).generate(anyString());
     }
 
     @Test
     void modelCanRequestAUserClarificationInsteadOfGuessingAnIdentifier() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn("""
+        when(model.generate(anyString())).thenReturn(planningResponse("""
                 {"version":"1.0","action":"CLARIFY","intent":null,"metricCodes":[],
                 "derivedMetrics":[],"organizationCodes":[],"time":null,"filters":[],
                 "requiredLimit":null,"answerFactTypes":[],"clarification":"请明确要查询的具体指标。"}
-                """);
+                """, null));
 
+        LLMReq ambiguousRequest = request();
+        ambiguousRequest.setQueryText("请帮我查一下。");
         BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
-                () -> new TestBankPlanGenStrategy(model).generate(request()));
+                () -> new TestBankPlanGenStrategy(model).generate(ambiguousRequest));
 
         assertEquals(BankNl2SqlError.Category.CLARIFICATION_REQUIRED, error.getCategory());
         assertEquals("请明确要查询的具体指标。",
@@ -976,9 +994,8 @@ class BankPlanGenStrategyTest {
     @Test
     void repairDiagnosticsCarryStableErrorCodesForBothStages() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(
-                requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"ZB001\",\"ZB002\",\"ZB003\""),
-                requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson().replace("\"ZB001\",\"ZB002\"", "\"ZB001\",\"ZB002\",\"ZB003\""), validPlanJson()),
+                planningResponse(requirementsJson(), validPlanJson()));
 
         LLMReq request = request();
         request.setQueryText("请比较江苏省D市农商行在2025-07-31的指标。" + "待评价指标集合：\n各项存款余额、各项贷款余额。");
@@ -991,16 +1008,14 @@ class BankPlanGenStrategyTest {
 
         assertNotNull(response.getBankQueryPlan());
         assertEquals(List.of("explicit_closed_metric_list_mismatch"),
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsRepairCodes"));
-        assertEquals(List.of(),
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.planRepairCodes"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.repairCodes"));
     }
 
     @Test
     void planRepairDiagnosticsCarryStableErrorCodes() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(dailyAverageRequirementsJson(),
-                dailyAveragePlanJson(null), dailyAveragePlanJson("AVERAGE_ONLY"));
+        when(model.generate(anyString())).thenReturn(planningResponse(dailyAverageRequirementsJson(), dailyAveragePlanJson(null)),
+                planningResponse(dailyAverageRequirementsJson(), dailyAveragePlanJson("AVERAGE_ONLY")));
 
         LLMReq request = request();
         request.setQueryText("请给出江苏省I市农商行2026全年的日均各项贷款余额。");
@@ -1012,16 +1027,14 @@ class BankPlanGenStrategyTest {
 
         assertEquals(BankQueryPlan.AggregationResultMode.AVERAGE_ONLY,
                 response.getBankQueryPlan().getOutput().getAggregationMode());
-        assertEquals(List.of(),
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.requirementsRepairCodes"));
         assertEquals(List.of("daily_average_output_mode_mismatch"),
-                response.getBankCandidateDiagnostics().get("bank.nl2sql.planRepairCodes"));
+                response.getBankCandidateDiagnostics().get("bank.nl2sql.repairCodes"));
     }
 
     @Test
     void stageDiagnosticsExposePerStageCacheCounters() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn(requirementsJson(), validPlanJson());
+        when(model.generate(anyString())).thenReturn(planningResponse(requirementsJson(), validPlanJson()));
 
         LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
 
@@ -1029,15 +1042,11 @@ class BankPlanGenStrategyTest {
         Map<String, Object> prefixCache = (Map<String, Object>) response
                 .getBankCandidateDiagnostics().get("bankPlanPrefixCache");
         assertNotNull(prefixCache);
-        assertTrue(prefixCache.containsKey("requirements"));
-        assertTrue(prefixCache.containsKey("plan"));
+        assertTrue(prefixCache.containsKey("singlePass"));
         @SuppressWarnings("unchecked")
-        Map<String, Object> requirementsStats =
-                (Map<String, Object>) prefixCache.get("requirements");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> planStats = (Map<String, Object>) prefixCache.get("plan");
-        assertEquals(1L, requirementsStats.get("modelCalls"));
-        assertEquals(1L, planStats.get("modelCalls"));
+        Map<String, Object> singlePassStats =
+                (Map<String, Object>) prefixCache.get("singlePass");
+        assertEquals(1L, singlePassStats.get("modelCalls"));
     }
 
     private LLMReq request() {

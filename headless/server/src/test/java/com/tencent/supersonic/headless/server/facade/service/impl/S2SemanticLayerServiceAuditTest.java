@@ -30,6 +30,7 @@ import com.tencent.supersonic.headless.server.utils.StatUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,6 +44,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,6 +56,8 @@ class S2SemanticLayerServiceAuditTest {
     private QueryCache queryCache;
     private SemanticTranslator semanticTranslator;
     private TranslatorConfig translatorConfig;
+    private SchemaService schemaService;
+    private DataMaskingService dataMaskingService;
     private S2SemanticLayerService service;
 
     @BeforeEach
@@ -63,14 +67,16 @@ class S2SemanticLayerServiceAuditTest {
         queryCache = mock(QueryCache.class);
         semanticTranslator = mock(SemanticTranslator.class);
         translatorConfig = mock(TranslatorConfig.class);
+        schemaService = mock(SchemaService.class);
+        dataMaskingService = mock(DataMaskingService.class);
         when(translatorConfig.getParameterValue(TranslatorConfig.TRANSLATOR_RESULT_LIMIT))
                 .thenReturn("1000");
         service = new S2SemanticLayerService(statUtils, mock(QueryUtils.class),
                 mock(SemanticSchemaManager.class), mock(DataSetService.class),
-                mock(SchemaService.class), semanticTranslator,
+                schemaService, semanticTranslator,
                 mock(MetricDrillDownChecker.class), mock(KnowledgeBaseService.class),
                 mock(MetricService.class), mock(DimensionService.class), mock(DomainService.class),
-                translatorConfig, mock(DataMaskingService.class), auditEventPublisher, queryCache,
+                translatorConfig, dataMaskingService, auditEventPublisher, queryCache,
                 List.of());
     }
 
@@ -118,6 +124,22 @@ class S2SemanticLayerServiceAuditTest {
         assertEquals("IllegalStateException", failed.getMetadata().get("exceptionType"));
         assertEquals(request.getSql(), failed.getRawSql());
         verify(statUtils).statInfo2DbAsync(TaskStatusEnum.ERROR);
+    }
+
+    @Test
+    void shouldNotMaskTrustedResultOnlyFactsBeforeCaching() {
+        User user = User.get(7L, "alice");
+        QuerySqlReq request = queryRequest();
+        request.setNeedAuth(false);
+        SemanticQueryResp response = queryResponse();
+        response.getResultList().get(0).put("revenue", 41.96D);
+        response.setDataMasked(false);
+        response.setMaskedColumns(Set.of());
+
+        ReflectionTestUtils.invokeMethod(service, "maskBeforeCache", request, response, user);
+
+        assertEquals(41.96D, response.getResultList().get(0).get("revenue"));
+        verify(dataMaskingService, never()).mask(any(), any(), eq(user), any());
     }
 
     @Test

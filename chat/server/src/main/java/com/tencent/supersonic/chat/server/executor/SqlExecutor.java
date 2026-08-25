@@ -94,6 +94,9 @@ public class SqlExecutor implements ChatQueryExecutor {
         QuerySqlReq sqlReq = QuerySqlReq.builder().sql(scopeSql).build();
         sqlReq.setSqlInfo(parseInfo.getSqlInfo());
         sqlReq.setDataSetId(parseInfo.getDataSetId());
+        // resultOnly is the trusted, server-side official evaluation mode. It must capture the
+        // actual typed facts rather than an authorization-masked presentation response.
+        sqlReq.setNeedAuth(!executeContext.getRequest().isResultOnly());
         sqlReq.setTrustedCompiledSql(StringUtils
                 .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
 

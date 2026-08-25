@@ -326,8 +326,13 @@ public class FixedSystemPrefixLlmCache {
                 || !"json_schema".equalsIgnoreCase(config.getJsonFormatType())) {
             return options;
         }
+        if ("SINGLE_PASS".equalsIgnoreCase(stageLabel)) {
+            return options.withJsonSchema("bank_planning_response",
+                    BankPlanningResponse.JSON_SCHEMA);
+        }
         if ("REQUIREMENTS".equalsIgnoreCase(stageLabel)) {
-            return options.withJsonSchema("bank_request_contract", BankRequestContract.JSON_SCHEMA);
+            return options.withJsonSchema("bank_request_contract",
+                    BankRequestContract.JSON_SCHEMA);
         }
         if ("PLAN".equalsIgnoreCase(stageLabel)) {
             return options.withJsonSchema("bank_query_plan", BankQueryPlan.JSON_SCHEMA);

@@ -93,6 +93,23 @@ public final class BankFewShotExemplarCatalog {
         return render(familyForContract(contract), true);
     }
 
+    /** Returns one complete one-pass response example selected only from the abstract query family. */
+    public static String renderSinglePassExamples(String queryText) {
+        QueryFamily family = familyForQuestion(queryText);
+        if (family == null) {
+            return "";
+        }
+        Exemplar exemplar = EXEMPLARS.stream().filter(item -> item.family() == family).findFirst()
+                .orElse(null);
+        if (exemplar == null) {
+            return "";
+        }
+        return "family=" + family.name() + "\n问句：" + exemplar.question().strip()
+                + "\nBankPlanningResponse 契约形态：\n{\"requirements\":"
+                + exemplar.requirementsJson().strip() + ",\"plan\":"
+                + exemplar.planJson().strip() + "}";
+    }
+
     private static String render(QueryFamily family, boolean includePlan) {
         if (family == null) {
             return "";

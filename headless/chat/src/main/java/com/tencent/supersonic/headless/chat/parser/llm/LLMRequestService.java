@@ -277,7 +277,10 @@ public class LLMRequestService {
             return dimensions;
         }
         available.stream().filter(Objects::nonNull)
-                .filter(dimension -> Objects.equals(dataSetId, dimension.getDataSetId()))
+                // SemanticSchema may expose shared dimensions without a dataset id. This is the
+                // same ownership rule used by bank routing: null means the catalog entry is
+                // globally available, while a non-null id must match the requested dataset.
+                .filter(dimension -> belongsToDataSet(dimension, dataSetId))
                 .filter(dimension -> BANK_ORGANIZATION_DIMENSION
                         .equalsIgnoreCase(dimension.getBizName()))
                 .findFirst().ifPresent(dimensions::add);

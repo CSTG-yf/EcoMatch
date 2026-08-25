@@ -187,7 +187,9 @@ public class LLMSqlParser implements SemanticParser {
         boolean bankConstrainedPlan =
                 LLMReq.SqlGenType.BANK_CONSTRAINED_PLAN.equals(llmReq.getSqlGenType());
         if (bankConstrainedPlan) {
-            maxRetries = Math.max(maxRetries, 3);
+            // One initial parser round plus one execution/tool-repair round. Structured planning
+            // already owns its single validation repair and must not be multiplied here.
+            maxRetries = 2;
         }
 
         int currentRetry = 1;
