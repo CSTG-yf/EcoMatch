@@ -382,7 +382,12 @@ public final class BankPlanPromptComposer {
                         derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，dimensions 必须包含
                         bank_organization，output.columns 先列机构再列两个基础指标；编译器会计算 RATIO_VALUE。
                         不得把这类明确比重问题改成 POINT_QUERY 或 DIRECT。
-                    3f. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
+                    3f. 直接指标的 RANKING 必须填写一个合法的 orderBy：field 只能精确填写本计划
+                        metrics[].bizName 中已选的 ZB### 代码，或 dimensions 中已选维度；direction 只能为 ASC 或 DESC。
+                        最高/最多/前N通常使用 DESC，最低/最少/后N通常使用 ASC。绝不可填写中文指标名、
+                        metric_value、aggregate_value、rank、percent_change 或其他结果列/物理字段。含 derivedMetrics
+                        的排名保持 orderBy=[]，由编译器按目录方向排序。
+                    3g. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
                         dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
                         返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
@@ -436,8 +441,9 @@ public final class BankPlanPromptComposer {
                        若题干是“全省/全部机构中哪家排最后/倒数第N”，organizations 必须为 []，dimensions
                        必须为 ["bank_organization"]；不得虚构一个目标机构，也不得把“哪家”当作缺槽位。
                        对“哪家农商行/机构最高、最低、最多、最少、排第一”也一样：organizations=[]，
-                       dimensions=["bank_organization"]，只保留唯一 rank/LTE/1（不是机构过滤）；排序方向由
-                       指标目录和编译器决定，模型不要手填物理字段或改写排名结果。
+                       dimensions=["bank_organization"]，只保留唯一 rank/LTE/1（不是机构过滤）；同时对直接指标
+                       用该指标的 ZB### 代码填写 orderBy，不能手填物理字段或结果别名；只有派生指标排名才由编译器
+                       决定 orderBy=[]。
                     10b. “对公存款+个人存款是否等于各项存款/差额多少”是 POINT_QUERY 的三指标事实核对，
                          metrics 按 [ZB003,ZB004,ZB001]、organizations 只含题干机构、DAY/NONE 时间、
                          filters=[]、calculation.type=DIRECT，output.columns=["bank_organization","ZB003",
@@ -537,7 +543,7 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v56-single-pass";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v57-single-pass";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;

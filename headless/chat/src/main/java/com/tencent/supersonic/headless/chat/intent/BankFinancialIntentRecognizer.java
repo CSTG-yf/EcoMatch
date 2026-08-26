@@ -153,13 +153,12 @@ public class BankFinancialIntentRecognizer {
     }
 
     private void addCompositeMetrics(String text, Map<String, MetricCandidate> matches) {
-        if (text.contains("净利润率")) {
-            addMetric(matches, "ZB011", "净利润率分子");
-            addMetric(matches, "ZB009", "净利润率分母");
-        }
-        if (text.contains("存贷比")) {
-            addMetric(matches, "ZB002", "存贷比贷款口径");
-            addMetric(matches, "ZB001", "存贷比存款口径");
+        for (DerivedMetricDefinition derived : BankFinancialLexicon.derivedMetrics().values()) {
+            boolean matched = derived.getAliases().stream().anyMatch(text::contains);
+            if (matched) {
+                addMetric(matches, derived.getNumerator(), derived.getName() + "分子");
+                addMetric(matches, derived.getDenominator(), derived.getName() + "分母");
+            }
         }
         if (text.contains("风险指标")) {
             for (String code : List.of("ZB013", "ZB015", "ZB017", "ZB016")) {

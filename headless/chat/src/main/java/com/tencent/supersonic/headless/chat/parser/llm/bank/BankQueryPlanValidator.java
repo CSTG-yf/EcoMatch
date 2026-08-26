@@ -558,8 +558,9 @@ public class BankQueryPlanValidator {
      * Fail-closed gate for the runtime derived metric contract (e.g. 存贷比 =
      * DERIVED_ZB002_DIV_ZB001). A derived metric is only accepted when the code equals
      * DERIVED_&lt;numerator&gt;_DIV_&lt;denominator&gt;, the operands are distinct legal ZB### base
-     * metrics also selected as direct metrics, the plan is RANKING with a DIRECT calculation, and
-     * the plan derived metrics match the mapper evidence exactly in content and order. Missing,
+     * metrics also selected as direct metrics, the plan is either a RANKING with a DIRECT
+     * calculation or a point RATIO with a RATIO calculation, and the plan derived metrics match
+     * the mapper evidence exactly in content and order. Missing,
      * duplicate, extra, reordered or illegal entries are all rejected.
      */
     private void validateDerivedMetrics(BankQueryPlan plan, SemanticIntentHints hints,
@@ -579,14 +580,15 @@ public class BankQueryPlanValidator {
                     "plan contains a derived metric outside mapper evidence"));
             return;
         }
-        if (plan.getIntent() != BankIntentType.RANKING) {
+        boolean rankingDirect = plan.getIntent() == BankIntentType.RANKING
+                && plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.DIRECT;
+        boolean pointRatio = plan.getIntent() == BankIntentType.RATIO
+                && plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RATIO;
+        if (!rankingDirect && !pointRatio) {
             errors.add(error("DERIVED_METRIC_INTENT_REQUIRED",
-                    "derived metrics currently require ranking intent"));
-        }
-        if (plan.getCalculation() == null
-                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT) {
-            errors.add(error("DERIVED_METRIC_CALCULATION_REQUIRED",
-                    "derived metrics currently require a DIRECT calculation"));
+                    "derived metrics require RANKING/DIRECT or RATIO/RATIO"));
         }
         Set<String> seen = new LinkedHashSet<>();
         for (BankQueryPlan.DerivedMetric item : derived) {
@@ -784,18 +786,28 @@ public class BankQueryPlanValidator {
                     "CHANGE result ordering is compiler-owned; set orderBy to [] and do not use "
                             + "percent_change, current_value, baseline_value, or absolute_change"));
         }
-        Set<String> fields = Stream
-                .concat(hints.getAllowedMetrics().stream(), hints.getAllowedDimensions().stream())
+        if (plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RATIO
+                && !orderBy.isEmpty()) {
+            errors.add(error("RATIO_RESULT_ORDER_FORBIDDEN",
+                    "RATIO result ordering is compiler-owned; set orderBy to []"));
+        }
+        Set<String> selectedFields = Stream
+                .concat(selectedMetricCodes(plan).stream(), selectedDimensions(plan).stream())
                 .collect(Collectors.toSet());
         if (plan.getIntent() != BankIntentType.CHANGE) {
             for (BankQueryPlan.OrderBy order : orderBy) {
                 if (StringUtils.isBlank(order.getField()) || order.getDirection() == null
                         || (!BankSemanticRegistry.metricCodes().contains(order.getField())
                                 && !BankSemanticRegistry.dimensions().contains(order.getField()))
-                        || (!fields.isEmpty() && !metricAllowed(fields, order.getField())
-                                && !dimensionAllowed(fields, order.getField()))) {
+                        || !selectedFields.contains(order.getField())) {
                     errors.add(error("INVALID_ORDER_BY",
-                            "order field and direction must be semantic identifiers"));
+                            "orderBy.field must be one selected metric code "
+                                    + selectedMetricCodes(plan)
+                                    + " or one selected dimension "
+                                    + selectedDimensions(plan)
+                                    + "; do not use display names, metric_value, aggregate_value, "
+                                    + "rank, or other result/physical fields; direction must be ASC or DESC"));
                 }
             }
         }
@@ -836,6 +848,15 @@ public class BankQueryPlanValidator {
     private boolean usesCompilerOwnedRankingOrder(BankQueryPlan plan) {
         return plan.getIntent() == BankIntentType.RANKING
                 && safe(plan.getDerivedMetrics()).findAny().isPresent();
+    }
+
+    private List<String> selectedMetricCodes(BankQueryPlan plan) {
+        return safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).toList();
+    }
+
+    private List<String> selectedDimensions(BankQueryPlan plan) {
+        return safe(plan.getDimensions()).filter(StringUtils::isNotBlank).toList();
     }
 
     /**

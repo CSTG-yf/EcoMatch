@@ -90,6 +90,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("aggregation\":\"AVG\""));
         assertTrue(sys.contains("rank_from_bottom"));
         assertTrue(sys.contains("哪家农商行/机构的某指标最高、最低、最多、最少"));
+        assertTrue(sys.contains("直接指标的 RANKING 必须填写一个合法的 orderBy"));
         assertTrue(sys.contains("limit 设为 2*N"));
         assertTrue(sys.contains("单日最高值和单日最低值出现在哪家"));
         assertTrue(sys.contains("AGGREGATION"));

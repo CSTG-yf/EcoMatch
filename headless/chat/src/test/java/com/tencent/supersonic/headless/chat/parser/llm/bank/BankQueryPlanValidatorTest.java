@@ -165,6 +165,59 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void allowsDerivedMetricPointRatioToUseTheRatioCalculationContract() {
+        BankQueryPlan plan = derivedMetricRankingPlan();
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setFilters(new ArrayList<>());
+        plan.setLimit(null);
+        plan.setMetrics(new ArrayList<>(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.getOutput().setColumns(new ArrayList<>(
+                List.of("bank_organization", "ZB002", "ZB001")));
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build());
+
+        SemanticIntentHints requirements = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build();
+
+        assertTrue(validator.validate(plan, requirements).isValid());
+    }
+
+    @Test
+    void rejectsOrderByForARatioBecauseTheRatioCompilerOwnsResultOrdering() {
+        BankQueryPlan plan = validPlan();
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setFilters(new ArrayList<>());
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB002").build());
+        plan.setOrderBy(new ArrayList<>(List.of(BankQueryPlan.OrderBy.builder().field("ZB001")
+                .direction(BankQueryPlan.SortDirection.DESC).build())));
+
+        SemanticIntentHints requirements = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RATIO).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001", "ZB002"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, requirements);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("RATIO_RESULT_ORDER_FORBIDDEN"));
+    }
+
+    @Test
     void rejectsCurrentYearFirstDayAsTheStartOfYearPlanBaseline() {
         BankQueryPlan plan = provinceWideChangeTopNPlan();
         plan.setDimensions(List.of("bank_organization"));
@@ -299,6 +352,64 @@ class BankQueryPlanValidatorTest {
         plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011")));
 
         assertTrue(validator.validate(plan, bottomRankingRequirements()).isValid());
+    }
+
+    @Test
+    void explainsTheExactOrderByChoicesForAnInvalidDirectMetricRanking() {
+        BankQueryPlan plan = derivedMetricRankingPlan();
+        plan.setDerivedMetrics(new ArrayList<>());
+        plan.setMetrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder()
+                .bizName("ZB011").aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.setOrganizations(new ArrayList<>());
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 8, 31))
+                .endDate(LocalDate.of(2025, 8, 31))
+                .granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("rank").operator("LTE").value("1").values(new ArrayList<>()).build())));
+        plan.setOrderBy(new ArrayList<>(List.of(BankQueryPlan.OrderBy.builder()
+                .field("metric_value").direction(BankQueryPlan.SortDirection.DESC).build())));
+        plan.setLimit(1);
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011")));
+
+        String summary = validator.validate(plan, bottomRankingRequirements()).summary();
+
+        assertTrue(summary.contains("INVALID_ORDER_BY"));
+        assertTrue(summary.contains("[ZB011]"));
+        assertTrue(summary.contains("ASC or DESC"));
+        assertTrue(summary.contains("metric_value"));
+    }
+
+    @Test
+    void rejectsOrderByForAnAllowedButUnselectedMetric() {
+        BankQueryPlan plan = derivedMetricRankingPlan();
+        plan.setDerivedMetrics(new ArrayList<>());
+        plan.setMetrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder()
+                .bizName("ZB011").aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.setOrganizations(new ArrayList<>());
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 8, 31))
+                .endDate(LocalDate.of(2025, 8, 31))
+                .granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("rank").operator("LTE").value("1").values(new ArrayList<>()).build())));
+        plan.setOrderBy(new ArrayList<>(List.of(BankQueryPlan.OrderBy.builder()
+                .field("ZB001").direction(BankQueryPlan.SortDirection.DESC).build())));
+        plan.setLimit(1);
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011")));
+
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING).allowedMetrics(Set.of("ZB001", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2025, 8, 31))
+                .requiredEndDate(LocalDate.of(2025, 8, 31)).requiredLimit(1).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, hints);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("INVALID_ORDER_BY"));
+        assertTrue(result.summary().contains("[ZB011]"));
     }
 
     @Test
