@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -68,21 +69,31 @@ public class BankQueryPlanValidator {
     private void validateVersion(BankQueryPlan plan, List<ValidationError> errors) {
         if (!BankQueryPlan.CURRENT_VERSION.equals(plan.getVersion())) {
             errors.add(error("UNSUPPORTED_PLAN_VERSION",
-                    "plan version must be " + BankQueryPlan.CURRENT_VERSION));
+                    "plan.version must be " + BankQueryPlan.CURRENT_VERSION
+                            + ", got=" + plan.getVersion()));
         }
     }
 
     private void validateAction(BankQueryPlan plan, List<ValidationError> errors) {
         if (plan.getAction() != BankQueryPlan.PlanAction.EXECUTE) {
-            errors.add(error("PLAN_ACTION_REQUIRED", "execution plans must set action to EXECUTE"));
+            errors.add(error("PLAN_ACTION_REQUIRED",
+                    "plan.action must be EXECUTE for executable plans, got="
+                            + (plan.getAction() == null ? "null" : plan.getAction().name())));
         }
     }
 
     private void validateForbiddenTokens(BankQueryPlan plan, List<ValidationError> errors) {
-        if (strings(plan).filter(StringUtils::isNotBlank)
-                .anyMatch(value -> FORBIDDEN_SQL.matcher(value).find())) {
+        Optional<String> offending = strings(plan).filter(StringUtils::isNotBlank)
+                .filter(value -> FORBIDDEN_SQL.matcher(value).find()).findFirst();
+        if (offending.isPresent()) {
+            String snippet = offending.get();
+            int maxForbiddenSnippetLength = 40;
+            if (snippet.length() > maxForbiddenSnippetLength) {
+                snippet = snippet.substring(0, maxForbiddenSnippetLength);
+            }
             errors.add(error("FORBIDDEN_SQL_TOKEN",
-                    "plan must not contain SQL syntax or executable fragments"));
+                    "plan must not contain SQL syntax or executable fragments; remove the value \""
+                            + snippet + "\" from every string slot"));
         }
     }
 
@@ -112,7 +123,8 @@ public class BankQueryPlanValidator {
                 && hints.getExpectedIntent() != BankIntentType.UNKNOWN
                 && plan.getIntent() != hints.getExpectedIntent()) {
             errors.add(error("INTENT_MISMATCH",
-                    "plan intent must equal the model requirements contract"));
+                    "plan.intent must equal the requirements contract intent; expected_intent="
+                            + hints.getExpectedIntent() + ", plan_intent=" + plan.getIntent()));
         }
     }
 
@@ -194,8 +206,11 @@ public class BankQueryPlanValidator {
                 .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         if (!BankSemanticRegistry.organizationCodes().containsAll(planOrganizations)) {
+            Set<String> unknown = new LinkedHashSet<>(planOrganizations);
+            unknown.removeAll(BankSemanticRegistry.organizationCodes());
             errors.add(error("UNKNOWN_ORGANIZATION",
-                    "plan contains an organization outside the official bank registry"));
+                    "plan.organizations contains codes outside the official bank registry: "
+                            + String.join(",", unknown)));
         }
         if (!planOrganizations.containsAll(hints.getRequiredOrganizationCodes())) {
             Set<String> missing = new LinkedHashSet<>(hints.getRequiredOrganizationCodes());
@@ -218,7 +233,9 @@ public class BankQueryPlanValidator {
             return;
         }
         if (time.getStartDate().isAfter(time.getEndDate())) {
-            errors.add(error("TIME_RANGE_INVALID", "start date must not be after end date"));
+            errors.add(error("TIME_RANGE_INVALID",
+                    "time.startDate must not be after time.endDate; startDate=" + time.getStartDate()
+                            + ", endDate=" + time.getEndDate()));
         }
         if (time.getGranularity() == null) {
             errors.add(error("TIME_GRANULARITY_REQUIRED",
@@ -233,20 +250,29 @@ public class BankQueryPlanValidator {
                     "change queries require an explicit non-NONE baseline comparison"));
         }
         if (!matchesRecognizedTimeRange(time, hints)) {
-            errors.add(
-                    error("TIME_RANGE_MISMATCH", "plan must preserve the recognized time range"));
+            errors.add(error("TIME_RANGE_MISMATCH",
+                    "plan must preserve the recognized time range; expected startDate="
+                            + hints.getRequiredStartDate() + ", endDate=" + hints.getRequiredEndDate()
+                            + "; plan startDate=" + time.getStartDate() + ", endDate="
+                            + time.getEndDate()));
         }
         if (hints.getRequiredTimeComparison() != null
                 && time.getComparison() != hints.getRequiredTimeComparison()) {
             errors.add(error("TIME_COMPARISON_MISMATCH",
-                    "plan must preserve the model requirements time comparison"));
+                    "time.comparison must equal the requirements contract; expected_comparison="
+                            + hints.getRequiredTimeComparison() + ", plan_comparison="
+                            + time.getComparison()));
         }
         if ((hints.getRequiredBaselineStartDate() != null && !Objects
                 .equals(hints.getRequiredBaselineStartDate(), time.getBaselineStartDate()))
                 || (hints.getRequiredBaselineEndDate() != null && !Objects
                         .equals(hints.getRequiredBaselineEndDate(), time.getBaselineEndDate()))) {
             errors.add(error("COMPARISON_BASELINE_MISMATCH",
-                    "plan must preserve the model requirements baseline range"));
+                    "baseline dates must equal the requirements contract; expected baselineStartDate="
+                            + hints.getRequiredBaselineStartDate() + ", baselineEndDate="
+                            + hints.getRequiredBaselineEndDate() + "; plan baselineStartDate="
+                            + time.getBaselineStartDate() + ", baselineEndDate="
+                            + time.getBaselineEndDate()));
         }
         if (time.getComparison() != null
                 && time.getComparison() != BankQueryPlan.TimeComparison.NONE
@@ -262,7 +288,10 @@ public class BankQueryPlanValidator {
                 && (time.getBaselineStartDate().isAfter(time.getBaselineEndDate())
                         || !time.getBaselineEndDate().isBefore(time.getStartDate()))) {
             errors.add(error("COMPARISON_BASELINE_INVALID",
-                    "comparison baseline must be a complete range earlier than the query range"));
+                    "baseline window must satisfy baselineStartDate<=baselineEndDate<startDate"
+                            + "（基期只写较早期的两点，不是“从基期到当前期”）；plan baselineStartDate="
+                            + time.getBaselineStartDate() + ", baselineEndDate="
+                            + time.getBaselineEndDate() + ", startDate=" + time.getStartDate()));
         }
         if (time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
                 && time.getBaselineStartDate() != null && time.getBaselineEndDate() != null) {

@@ -16,6 +16,7 @@ import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
@@ -206,7 +207,16 @@ public class SqlExecutor implements ChatQueryExecutor {
         if (stage.ordinal() > BankPlanToolResult.Stage.DATABASE_PREPARE.ordinal()) {
             toolResult.succeed(BankPlanToolResult.Stage.DATABASE_PREPARE);
         }
-        String errorCode = failureLayer == null ? "DATABASE_EXECUTION_FAILED" : failureLayer;
+        // Unclassified failures are checked for provider/infra outage signatures first: those get
+        // ENVIRONMENT_FAULT, which is intentionally absent from the repair whitelist, so the loop
+        // stops instead of spending another model round on a dead endpoint.
+        String rawErrorMsg = queryResp == null ? null : queryResp.getErrorMsg();
+        String errorCode = failureLayer;
+        if (errorCode == null) {
+            errorCode = BankEnvironmentFaultClassifier.isEnvironmentFault(null, rawErrorMsg)
+                    ? BankEnvironmentFaultClassifier.CODE
+                    : "DATABASE_EXECUTION_FAILED";
+        }
         toolResult.fail(stage, errorCode, Map.of(), correctionHints(stage));
         parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
     }

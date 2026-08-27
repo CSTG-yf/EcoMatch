@@ -49,6 +49,7 @@ import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SearchResult;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticTranslateResp;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankRequestContract;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanTraceEvent;
@@ -100,8 +101,9 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     private static final int MAX_BANK_PLAN_ATTEMPTS = 2;
     private static final DateTimeFormatter MONTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM");
+    /** TRANSLATION_FAILED re-enters the full parse+tool-repair path; ENVIRONMENT_FAULT never does. */
     private static final Set<String> REPAIRABLE_BANK_PLAN_ERRORS = Set.of("SQL_SAFETY_POLICY",
-            "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH");
+            "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH", "TRANSLATION_FAILED");
 
     @Autowired
     private ChatManageService chatManageService;
@@ -246,6 +248,18 @@ public class ChatQueryServiceImpl implements ChatQueryService {
             if (!traceEvents.isEmpty()) {
                 attachBankPlanTrace(lastResult, traceEvents);
             }
+            if (toolResult != null && toolResult.getStatus() == BankPlanToolResult.Status.FAILED
+                    && BankEnvironmentFaultClassifier.isEnvironmentFault(toolResult.getErrorCode(),
+                            toolResult.getMessage())) {
+                // Provider/infra outage: repairing cannot help. Terminate immediately without
+                // burning another model round (2026-08-27 cloud key-death lesson).
+                if (traceEvent != null) {
+                    traceEvent.markStopped("ENVIRONMENT_FAULT");
+                }
+                log.warn("Bank plan environment fault detected: errorCode=[{}], stop repair loop",
+                        toolResult.getErrorCode());
+                return lastResult;
+            }
             if (!shouldRepairBankPlan(toolResult)) {
                 return lastResult;
             }
@@ -276,9 +290,12 @@ public class ChatQueryServiceImpl implements ChatQueryService {
                 }
                 parseOverride = repairResponse.getSelectedParses().get(0);
             } catch (RuntimeException exception) {
-                traceEvent.markStopped("REPAIR_MODEL_UNAVAILABLE");
-                log.warn("Bank plan repair stopped: type={}",
-                        exception.getClass().getSimpleName());
+                boolean environmentFault = BankEnvironmentFaultClassifier.isEnvironmentFault(
+                        exception);
+                traceEvent.markStopped(environmentFault ? "ENVIRONMENT_FAULT"
+                        : "REPAIR_MODEL_UNAVAILABLE");
+                log.warn("Bank plan repair stopped: type={}, environmentFault={}",
+                        exception.getClass().getSimpleName(), environmentFault);
                 return lastResult;
             }
         }
