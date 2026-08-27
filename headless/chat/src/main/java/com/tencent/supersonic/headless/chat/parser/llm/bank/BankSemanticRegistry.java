@@ -319,6 +319,12 @@ public final class BankSemanticRegistry {
                 plan fields（类型/必填/默认值/允许值/示例）：
                 %s
 
+                limit 与 aggregationMode 语义补充（解释性质，合法取值仍以上方目录为准）：
+                - limit 只服务排名切片：单侧「前N / 后N」填 N；「前N和后N」双侧切片填 2*N；
+                  非排名查询族一律为 null，禁止把机构总数当作 limit。
+                - output.aggregationMode 表示是否顺带输出极值：只问均值/日均值等平均口径时填
+                  AVERAGE_ONLY；同时要求最高值与最低值时填 WITH_EXTREMA；都不是则保持 null。
+
                 aggregation: %s
                 dimensions: %s
                 calculation type: %s
@@ -351,6 +357,16 @@ public final class BankSemanticRegistry {
                 - COMPARE 仅与 benchmark 搭配：value=PROVINCE_AVERAGE、values=[]
                 - metric_value 与 GT/GTE/LT/LTE 且 value=PROVINCE_AVERAGE 表示高于/低于全省均值的方向，
                   需同时声明上面的 benchmark 过滤项
+                非 EQ 运算符的使用场景（示例仅示意写法，具体取值以题干为准）：
+                - NE 排除单一取值，如 {"field":"bank_organization","operator":"NE",
+                  "value":"ORG005","values":[]}
+                - IN 命中列表内任一值，如 {"field":"bank_organization","operator":"IN",
+                  "value":null,"values":["ORG001","ORG002"]}
+                - NOT_IN 排除列表内全部值，如 {"field":"bank_organization","operator":"NOT_IN",
+                  "value":null,"values":["ORG003","ORG004"]}
+                - CONTAINS 名称包含匹配，如 {"field":"bank_organization","operator":"CONTAINS",
+                  "value":"农商行","values":[]}
+                全部样例 filters 中的 values 数组按上述规则填数；无列表运算时保持 values=[]。
                 """.formatted(filterFields(), FILTER_OPERATORS).strip();
     }
 

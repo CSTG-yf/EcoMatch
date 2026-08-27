@@ -161,6 +161,10 @@ class BankSemanticRegistryTest {
         assertTrue(capabilities.contains("sort direction"));
         assertTrue(capabilities.contains("filter field/operator/value contract"));
         assertTrue(capabilities.contains("benchmark + COMPARE 仅允许 value=PROVINCE_AVERAGE"));
+        assertTrue(capabilities.contains("limit 与 aggregationMode 语义补充"),
+                "display-only limit/aggregationMode explanation must ship with plan fields");
+        assertTrue(capabilities.contains("禁止把机构总数当作 limit"));
+        assertTrue(capabilities.contains("AVERAGE_ONLY；同时要求最高值与最低值时填"));
         assertFalse(capabilities.contains("unit=亿元"),
                 "metric units stay in the shared catalog only");
     }
@@ -171,6 +175,13 @@ class BankSemanticRegistryTest {
 
         assertTrue(contract.contains("field categories"));
         assertTrue(contract.contains("operators"));
+        assertTrue(contract.contains("非 EQ 运算符的使用场景"),
+                "operator usage scenarios are part of the contract");
+        assertTrue(contract.contains("IN 命中列表内任一值"));
+        assertTrue(contract.contains("NOT_IN 排除列表内全部值"));
+        assertTrue(contract.contains("CONTAINS 名称包含匹配"));
+        assertTrue(contract.contains("\"values\":[\"ORG001\",\"ORG002\"]"),
+                "list operators need a synthetic non-empty values example");
         BankSemanticRegistry.filterOperators().forEach(
                 operator -> assertTrue(contract.contains(operator), operator + " missing"));
         BankSemanticRegistry.filterFields()

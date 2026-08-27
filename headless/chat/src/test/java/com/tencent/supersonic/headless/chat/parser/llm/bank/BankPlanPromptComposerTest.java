@@ -234,7 +234,9 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("确定性点值比率例外"));
         assertTrue(sys.contains("metrics 必须按“分子、分母”"));
         assertTrue(sys.contains("calculation.type=RATIO"));
-        assertTrue(sys.contains("某机构在全省13家里排第几"));
+        assertTrue(sys.contains("某机构在全省里排第几"));
+        assertTrue(sys.contains("limit 填全省机构总数"),
+                "province rank position uses the catalog organization count, not a hardcoded 13");
         assertTrue(sys.contains("不得在修复时删除目标机构"));
         assertTrue(sys.contains("截至YYYY-MM-DD"));
         assertTrue(sys.contains("不得截断成 YYYY-MM"));
@@ -430,5 +432,83 @@ class BankPlanPromptComposerTest {
         assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertTrue(repair.contains("只输出修正后的完整 BankPlanningResponse JSON"));
         assertFalse(repair.contains("只输出修正后的完整当前阶段 JSON"));
+    }
+
+    @Test
+    void systemPrefixCarriesSharedDateBaselineRulesInBothStageContexts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("环比基期与同比基期全部由编译器派生，禁止自行填写"),
+                "MOM_AND_YOY baseline exemption must be stated first");
+        assertTrue(sys.contains("baselineEndDate 必须早于 startDate"));
+        assertTrue(sys.contains("绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期"));
+        assertTrue(sys.contains("当年 01-01 不是“较年初”基期"));
+        int firstInjection = sys.indexOf("重要豁免先记住：time.comparison=MOM_AND_YOY");
+        int secondInjection = sys.indexOf("重要豁免先记住：time.comparison=MOM_AND_YOY",
+                firstInjection + 1);
+        assertTrue(firstInjection >= 0 && secondInjection > firstInjection,
+                "shared date/baseline rules must render into both REQUIREMENTS and PLAN sections");
+    }
+
+    @Test
+    void systemPrefixLocksSliceLimitAggregationModeAndGranularityContracts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("limit 的唯一合法取值来源是排名切片条款"));
+        assertTrue(sys.contains("plan.limit=2*N"));
+        assertTrue(sys.contains("禁止把机构总数当成 limit 填写"));
+        assertTrue(sys.contains("必须填 \"AVERAGE_ONLY\""));
+        assertTrue(sys.contains("必须填 \"WITH_EXTREMA\""));
+        assertTrue(sys.contains("校验器按上述规则逐条核对"));
+        assertTrue(sys.contains("否则一律 DAY（聚合周期语义不属于 granularity）"));
+        assertTrue(sys.contains("逐字照抄权威目录中的中文名称，禁止自造别名"));
+    }
+
+    @Test
+    void singlePassResponseSectionMapsEveryConsistencySlotBetweenContracts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("REQUIREMENTS↔PLAN 一致性映射表"));
+        assertTrue(sys.contains("metricCodes ⇔ plan.metrics 的 bizName 集合，顺序一致"));
+        assertTrue(sys.contains("answerFactTypes 含 CHANGE_VALUE 或 CHANGE_RATE ⇔ calculation.type=CHANGE"));
+        assertTrue(sys.contains("organizations 非空时 dimensions 必须包含"));
+        assertTrue(sys.contains("THRESHOLD 计数、全省 RANKING、省均值多机构比较必须包含"));
+        assertTrue(sys.contains("rank/rank_from_bottom 只允许"));
+        assertTrue(sys.contains("benchmark=COMPARE/PROVINCE_AVERAGE 对象必须原样同时存在于两个合同"));
+        assertTrue(sys.contains("数量槽位映射见 PLAN 规则 15"));
+    }
+
+    @Test
+    void toolResultRepairExplainsFeedbackFieldsBeforeStageGuidance() {
+        BankPlanToolResult failed = BankPlanToolResult.failed(1, "trace-tool-result", null,
+                BankPlanToolResult.Stage.COMPILE, "JDBC_GRAMMAR",
+                Map.of("calculation", List.of("DIRECT", "CHANGE")),
+                List.of("把较早日期移入 baselineStartDate/baselineEndDate，而不是扩大 startDate。"));
+        String content = BankPlanPromptComposer.buildSinglePassToolRepairUserContent(
+                "存款是多少？", "{\"requirements\":{},\"plan\":{}}", failed, null);
+
+        assertTrue(content.contains("<tool_result>"));
+        assertTrue(content.contains("</tool_result>"));
+        assertTrue(content.contains("failedStage 标明失败阶段（VALIDATION/COMPILE/TRANSLATE/"));
+        assertTrue(content.contains("allowedValues 列出该槽位的合法取值集合"));
+        assertTrue(content.contains("JDBC_GRAMMAR"));
+
+        String plainRepair = BankPlanPromptComposer.buildSinglePassRepairUserContent(
+                "存款是多少？", "{\"requirements\":{},\"plan\":{}}", "boom", null);
+        assertFalse(plainRepair.contains("<tool_result>"), "plain errors keep the <error> tag");
+        assertFalse(plainRepair.contains("failedStage 标明失败阶段"),
+                "field legend is exclusive to tool_result repairs");
+    }
+
+    @Test
+    void catalogLeakSanitizerKeepsDiagnosisAndStripsOnlyTheCatalogTail() {
+        String leaked = "intent 非法值 RATIO_X；可填写值目录（只能从下列内容中选择）：\n"
+                + "- intent: [POINT_QUERY, AGGREGATION]\n- metrics: [ZB001]";
+        assertEquals("intent 非法值 RATIO_X；",
+                BankPlanPromptComposer.sanitizeCatalogLeak(leaked));
+        assertEquals(
+                "contract validation failed; output one complete JSON object for the current stage",
+                BankPlanPromptComposer.sanitizeCatalogLeak("【语义目录】\n指标代码清单……"));
+        assertEquals("plain failure", BankPlanPromptComposer.sanitizeCatalogLeak("plain failure"));
     }
 }
