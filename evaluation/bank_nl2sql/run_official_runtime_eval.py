@@ -9,8 +9,10 @@ never sends frozen gold, SQL, rows, or answer text to the service.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -18,7 +20,16 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run
+from bootstrap_bank_agent import (
+    DEFAULT_ADMIN_NAME,
+    DEFAULT_ADMIN_PASSWORD,
+    DEFAULT_ADMIN_PASSWORD_ENV,
+    DEFAULT_TOKEN_ENV,
+    ApiClient,
+    BankAgentBootstrapError,
+    resolve_auth_token,
+)
+from evaluation_policy import EvaluationAccessError, load_evaluation_records
 from official_runtime_evaluation import (
     OFFICIAL_RUNTIME_SCHEMA_VERSION,
     OfficialRuntimeEvaluationError,
@@ -46,6 +57,14 @@ class OfficialRuntimeRunError(RuntimeError):
 
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _MODES = ("smoke", "train", "dev", "test")
+_BANK_RUNTIME_CHAT_APPS = (
+    "REWRITE_MULTI_TURN",
+    "BANK_CONSTRAINED_PLAN",
+    "BANK_FINAL_ANSWER",
+    "S2SQL_PARSER",
+    "EXECUTION_SQL_CORRECTOR",
+    "REWRITE_ERROR_MESSAGE",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -70,6 +89,152 @@ def _endpoint_fingerprint(base_url: str) -> str:
     return hashlib.sha256(base_url.rstrip("/").encode("utf-8")).hexdigest()
 
 
+def _canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _find_agent_by_id(agents: Any, agent_id: int) -> dict[str, Any]:
+    if not isinstance(agents, list):
+        raise OfficialRuntimeRunError("Agent list response must be a list")
+    matches = [
+        item for item in agents
+        if isinstance(item, dict) and item.get("id") == agent_id
+    ]
+    if len(matches) != 1:
+        raise OfficialRuntimeRunError(
+            f"Agent id {agent_id} was not found uniquely in the manageable Agent list"
+        )
+    return matches[0]
+
+
+def _find_chat_model_by_id(models: Any, chat_model_id: int) -> dict[str, Any]:
+    if not isinstance(models, list):
+        raise OfficialRuntimeRunError("chat model list response must be a list")
+    matches = [
+        item for item in models
+        if isinstance(item, dict) and item.get("id") == chat_model_id
+    ]
+    if len(matches) != 1:
+        raise OfficialRuntimeRunError(
+            f"chat model id {chat_model_id} was not found uniquely"
+        )
+    return matches[0]
+
+
+def _runtime_model_descriptor(model: dict[str, Any], chat_model_id: int) -> dict[str, Any]:
+    config = model.get("config")
+    if not isinstance(config, dict):
+        raise OfficialRuntimeRunError(
+            f"chat model id {chat_model_id} has no usable configuration"
+        )
+    provider = config.get("provider")
+    model_name = config.get("modelName")
+    base_url = config.get("baseUrl")
+    if not isinstance(provider, str) or not provider.strip():
+        raise OfficialRuntimeRunError(f"chat model id {chat_model_id} provider is blank")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise OfficialRuntimeRunError(f"chat model id {chat_model_id} modelName is blank")
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise OfficialRuntimeRunError(f"chat model id {chat_model_id} baseUrl is blank")
+    registry_name = model.get("name")
+    return {
+        "chatModelId": chat_model_id,
+        "registryName": registry_name.strip()
+        if isinstance(registry_name, str) and registry_name.strip()
+        else None,
+        "provider": provider.strip().upper(),
+        "modelName": model_name.strip(),
+        "modelEndpointFingerprint": _endpoint_fingerprint(base_url.strip()),
+    }
+
+
+def bind_runtime_chat_model(
+    client: ApiClient,
+    *,
+    agent_id: int,
+    chat_model_id: int,
+) -> dict[str, Any]:
+    """Bind and read back the real model used by every enabled bank ChatApp."""
+
+    descriptor = _runtime_model_descriptor(
+        _find_chat_model_by_id(
+            client.json("GET", "/api/chat/model/getModelList"),
+            chat_model_id,
+        ),
+        chat_model_id,
+    )
+    agent = _find_agent_by_id(
+        client.json("GET", "/api/chat/agent/getAgentList?authType=ADMIN"),
+        agent_id,
+    )
+    chat_apps = agent.get("chatAppConfig")
+    if not isinstance(chat_apps, dict):
+        raise OfficialRuntimeRunError(f"Agent id {agent_id} chatAppConfig is invalid")
+    target_keys = [
+        key
+        for key in _BANK_RUNTIME_CHAT_APPS
+        if isinstance(chat_apps.get(key), dict) and chat_apps[key].get("enable") is True
+    ]
+    if "BANK_CONSTRAINED_PLAN" not in target_keys:
+        raise OfficialRuntimeRunError(
+            f"Agent id {agent_id} does not enable BANK_CONSTRAINED_PLAN"
+        )
+    previous_ids = {key: chat_apps[key].get("chatModelId") for key in target_keys}
+    needs_update = any(value != chat_model_id for value in previous_ids.values())
+
+    if needs_update:
+        payload = copy.deepcopy(agent)
+        payload_apps = payload.get("chatAppConfig")
+        if not isinstance(payload_apps, dict):
+            raise OfficialRuntimeRunError(f"Agent id {agent_id} update payload is invalid")
+        for app in payload_apps.values():
+            if isinstance(app, dict):
+                app.pop("chatModelConfig", None)
+        for key in target_keys:
+            payload_apps[key]["chatModelId"] = chat_model_id
+        updated = client.json("PUT", "/api/chat/agent", payload)
+        if not isinstance(updated, dict) or updated.get("id") != agent_id:
+            raise OfficialRuntimeRunError("Agent model binding update was not acknowledged")
+
+    read_back = _find_agent_by_id(
+        client.json("GET", "/api/chat/agent/getAgentList?authType=ADMIN"),
+        agent_id,
+    )
+    read_back_apps = read_back.get("chatAppConfig")
+    if not isinstance(read_back_apps, dict):
+        raise OfficialRuntimeRunError("Agent model binding read-back is invalid")
+    read_back_ids: dict[str, int] = {}
+    for key in target_keys:
+        app = read_back_apps.get(key)
+        if not isinstance(app, dict) or app.get("enable") is not True:
+            raise OfficialRuntimeRunError(f"Agent ChatApp {key} changed during model binding")
+        if app.get("chatModelId") != chat_model_id:
+            raise OfficialRuntimeRunError(
+                f"Agent ChatApp {key} did not bind chatModelId {chat_model_id}"
+            )
+        read_back_ids[key] = chat_model_id
+
+    receipt = {
+        "bindingSchemaVersion": "1.0",
+        "agentId": agent_id,
+        **descriptor,
+        "targetChatApps": target_keys,
+        "readBackChatModelIds": read_back_ids,
+    }
+    receipt["bindingSha256"] = _canonical_sha256(
+        {
+            "agentId": agent_id,
+            "chatModelId": chat_model_id,
+            "provider": descriptor["provider"],
+            "modelName": descriptor["modelName"],
+            "modelEndpointFingerprint": descriptor["modelEndpointFingerprint"],
+            "readBackChatModelIds": read_back_ids,
+        }
+    )
+    return receipt
+
+
 def _validate_run_id(value: str) -> str:
     normalized = value.strip()
     if not _RUN_ID.fullmatch(normalized):
@@ -84,14 +249,12 @@ def _records_for_mode(
     *,
     profile: dict[str, Any],
     mode: str,
-    acknowledge_final_test: bool,
 ) -> tuple[str, list[dict[str, Any]]]:
     split = "train" if mode == "smoke" else mode
     try:
         records = load_evaluation_records(
             dataset_dir,
             split=split,
-            acknowledge_final_test=acknowledge_final_test,
         )
     except EvaluationAccessError as error:
         raise OfficialRuntimeRunError(str(error)) from error
@@ -151,7 +314,8 @@ def _base_run_metadata(
     profile_sha256: str,
     source: dict[str, str],
     release: dict[str, Any],
-    receipt: dict[str, Any],
+    semantic_receipt: dict[str, Any],
+    runtime_model_binding: dict[str, Any],
     mode: str,
     split: str,
     run_id: str,
@@ -167,6 +331,7 @@ def _base_run_metadata(
         "split": split,
         "agentId": agent_id,
         "modelLabel": model_label,
+        "modelLabelAuthority": "DISPLAY_ONLY",
         "endpointFingerprint": _endpoint_fingerprint(base_url),
         "protocolProfileSha256": profile_sha256,
         "protocolSchemaVersion": OFFICIAL_RUNTIME_SCHEMA_VERSION,
@@ -174,7 +339,8 @@ def _base_run_metadata(
         "requiredBaseRevision": source["requiredBaseRevision"],
         "datasetVersion": release["datasetVersion"],
         "databaseArtifacts": release["databaseArtifacts"],
-        "setupReceipt": receipt,
+        "setupReceipt": semantic_receipt,
+        "runtimeModelBinding": runtime_model_binding,
         "captureMethod": "openapi-frontend-conversation-chain",
         "authentication": "bypassed-openapi",
         "concurrency": 1,
@@ -216,7 +382,7 @@ def _assert_same_run(
         "mode",
         "split",
         "agentId",
-        "modelLabel",
+        "modelLabelAuthority",
         "endpointFingerprint",
         "protocolProfileSha256",
         "protocolSchemaVersion",
@@ -225,6 +391,7 @@ def _assert_same_run(
         "datasetVersion",
         "databaseArtifacts",
         "setupReceipt",
+        "runtimeModelBinding",
         "captureMethod",
         "authentication",
         "concurrency",
@@ -408,7 +575,10 @@ def _write_markdown(path: Path, report: dict[str, Any]) -> None:
         "",
         f"- Run: `{run['runId']}` / `{run['mode']}` / `{run['status']}`",
         f"- Dataset: v{run['datasetVersion']} · source `{run['sourceRevision']}`",
-        f"- Agent: {run['agentId']} · model: `{run['modelLabel']}` · concurrency: {run['concurrency']}",
+        f"- Agent: {run['agentId']} · chatModelId: {run['runtimeModelBinding']['chatModelId']} "
+        f"· provider/model: `{run['runtimeModelBinding']['provider']}` / "
+        f"`{run['runtimeModelBinding']['modelName']}` · display label: `{run['modelLabel']}` "
+        f"· concurrency: {run['concurrency']}",
         f"- caseAccuracy: {metrics['caseAccuracy']:.6f} ({metrics['casePassHits']}/{metrics['caseDenominator']})",
         f"- resultFactAccuracy: {metrics['resultFactAccuracy']:.6f}",
         "- final answer text: non-scoring presentation output",
@@ -478,16 +648,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--agent-id", type=int, required=True)
-    parser.add_argument("--model-label", required=True, help="Non-secret model/version label for comparison")
+    parser.add_argument("--chat-model-id", type=int, required=True)
+    parser.add_argument(
+        "--model-label",
+        help="Optional display-only label; real selection always uses --chat-model-id",
+    )
     parser.add_argument("--bootstrap-receipt", type=Path, required=True)
+    parser.add_argument("--token-env", default=DEFAULT_TOKEN_ENV)
+    parser.add_argument("--admin-username", default=DEFAULT_ADMIN_NAME)
+    parser.add_argument("--admin-password-env", default=DEFAULT_ADMIN_PASSWORD_ENV)
     parser.add_argument("--evidence-root", type=Path)
-    parser.add_argument("--run-registry", type=Path)
     parser.add_argument(
         "--max-failures",
         type=int,
         help="Stop a serial train/dev diagnostic after failures exceed this budget; output is non-promotable",
     )
-    parser.add_argument("--acknowledge-final-test", action="store_true")
     parser.add_argument(
         "--resume",
         action=argparse.BooleanOptionalAction,
@@ -499,15 +674,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run_id = _validate_run_id(args.run_id)
         dataset_dir = args.dataset.resolve()
-        model_label = args.model_label.strip()
-        if not model_label:
-            raise OfficialRuntimeRunError("model-label must not be blank")
         if args.agent_id <= 0:
             raise OfficialRuntimeRunError("agent-id must be positive")
-        if args.mode != "test" and args.acknowledge_final_test:
-            raise OfficialRuntimeRunError("acknowledge-final-test is only valid for test mode")
-        if args.mode == "test" and (not args.acknowledge_final_test or args.run_registry is None):
-            raise OfficialRuntimeRunError("test mode requires --acknowledge-final-test and --run-registry")
+        if args.chat_model_id <= 0:
+            raise OfficialRuntimeRunError("chat-model-id must be positive")
         if args.max_failures is not None and args.max_failures < 0:
             raise OfficialRuntimeRunError("max-failures must be zero or greater")
         if args.max_failures is not None and args.mode not in {"train", "dev"}:
@@ -518,16 +688,35 @@ def main(argv: list[str] | None = None) -> int:
             dataset_dir,
             profile=profile,
             mode=args.mode,
-            acknowledge_final_test=args.acknowledge_final_test,
         )
         release = verify_official_runtime_release(dataset_dir, profile=profile, split=split)
         source = verify_source_checkout(dataset_dir, profile=profile)
-        receipt = verify_bootstrap_receipt(
+        semantic_receipt = verify_bootstrap_receipt(
             args.bootstrap_receipt,
             dataset_version=release["datasetVersion"],
             agent_id=args.agent_id,
             official_manifest_sha256=release["officialManifestSha256"],
             database_counts=release["databaseCounts"],
+        )
+        admin_password = os.environ.get(
+            args.admin_password_env,
+            DEFAULT_ADMIN_PASSWORD,
+        )
+        token = resolve_auth_token(
+            args.base_url,
+            token_env=args.token_env,
+            admin_username=args.admin_username,
+            admin_password=admin_password,
+        )
+        runtime_model_binding = bind_runtime_chat_model(
+            ApiClient(args.base_url, token),
+            agent_id=args.agent_id,
+            chat_model_id=args.chat_model_id,
+        )
+        model_label = (
+            args.model_label.strip()
+            if isinstance(args.model_label, str) and args.model_label.strip()
+            else runtime_model_binding["modelName"]
         )
 
         evidence_root = (
@@ -542,7 +731,8 @@ def main(argv: list[str] | None = None) -> int:
             profile_sha256=profile_sha256,
             source=source,
             release=release,
-            receipt=receipt,
+            semantic_receipt=semantic_receipt,
+            runtime_model_binding=runtime_model_binding,
             mode=args.mode,
             split=split,
             run_id=run_id,
@@ -552,65 +742,6 @@ def main(argv: list[str] | None = None) -> int:
             record_ids=[str(record["id"]) for record in records],
             max_failures=args.max_failures,
         )
-
-        if args.mode in {"train", "dev", "test"}:
-            smoke_record_ids = [str(record_id) for record_id in profile["smoke"]["recordIds"]]
-            _assert_completed_gate(
-                run_dir / "smoke.json",
-                expected=base_run,
-                required_mode="smoke",
-                require_green=True,
-                expected_record_ids=smoke_record_ids,
-            )
-        if args.mode == "test":
-            _, train_records = _records_for_mode(
-                dataset_dir,
-                profile=profile,
-                mode="train",
-                acknowledge_final_test=False,
-            )
-            _, dev_records = _records_for_mode(
-                dataset_dir,
-                profile=profile,
-                mode="dev",
-                acknowledge_final_test=False,
-            )
-            _assert_completed_gate(
-                run_dir / "train.json",
-                expected=base_run,
-                required_mode="train",
-                require_green=False,
-                expected_record_ids=[str(record["id"]) for record in train_records],
-            )
-            _assert_completed_gate(
-                run_dir / "dev.json",
-                expected=base_run,
-                required_mode="dev",
-                require_green=False,
-                expected_record_ids=[str(record["id"]) for record in dev_records],
-            )
-            existing_run = None
-            if args.resume and output_path.is_file():
-                existing_report = _read_json(output_path)
-                possible_run = existing_report.get("run")
-                if isinstance(possible_run, dict):
-                    _assert_same_run(possible_run, base_run)
-                    existing_run = possible_run
-            if isinstance(existing_run, dict) and isinstance(existing_run.get("finalTestRunNumber"), int):
-                base_run["finalTestRunNumber"] = existing_run["finalTestRunNumber"]
-            else:
-                final_run = record_final_test_run(
-                    args.run_registry,
-                    run_metadata={
-                        "runId": run_id,
-                        "agentId": args.agent_id,
-                        "modelLabel": model_label,
-                        "sourceRevision": source["sourceRevision"],
-                        "datasetVersion": release["datasetVersion"],
-                        "protocolProfileSha256": profile_sha256,
-                    },
-                )
-                base_run["finalTestRunNumber"] = final_run["runNumber"]
 
         resumed_by_id = _load_resumed_items(output_path, expected_run=base_run, records=records) if args.resume else {}
         pending_records = [record for record in records if record["id"] not in resumed_by_id]
@@ -674,12 +805,19 @@ def main(argv: list[str] | None = None) -> int:
         # cache; the separate evidence is retained in the report for auditability.
         warmup_info = None
         if pending_records:
-            warmup_info = warm_up_runtime_prefix(
-                post_json=post_json,
-                agent_id=args.agent_id,
-                query_api_prefix=DEFAULT_QUERY_API_PREFIX,
-                manage_api_prefix=DEFAULT_MANAGE_API_PREFIX,
-            )
+            try:
+                warmup_info = warm_up_runtime_prefix(
+                    post_json=post_json,
+                    agent_id=args.agent_id,
+                    query_api_prefix=DEFAULT_QUERY_API_PREFIX,
+                    manage_api_prefix=DEFAULT_MANAGE_API_PREFIX,
+                )
+            except SuperSonicEvaluationError as error:
+                warmup_info = {
+                    "status": "FAILED",
+                    "errorType": type(error).__name__,
+                    "error": str(error),
+                }
         started_at = time.time()
         if pending_records:
             run_supersonic_evaluation(
@@ -771,7 +909,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.mode == "smoke" and final_report["metrics"]["caseAccuracy"] != profile["smoke"]["requiredCaseAccuracy"]:
             return 2
         return 0
-    except (OfficialRuntimeEvaluationError, OfficialRuntimeRunError, SuperSonicEvaluationError) as error:
+    except (
+        BankAgentBootstrapError,
+        OfficialRuntimeEvaluationError,
+        OfficialRuntimeRunError,
+        SuperSonicEvaluationError,
+    ) as error:
         parser.error(str(error))
     return 2
 

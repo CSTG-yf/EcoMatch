@@ -190,6 +190,7 @@ def main() -> int:
     print(
         "powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 "
         f"-Mode smoke -RunId <RUN_ID> -BaseUrl http://127.0.0.1:9080 -AgentId {agent_id} "
+        "-ChatModelId <CHAT_MODEL_ID> "
         "-ModelLabel '<MODEL_LABEL>' "
         "-BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json"
     )

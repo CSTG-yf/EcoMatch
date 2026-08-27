@@ -14,15 +14,11 @@
     "note": "Local bank 问数 agent; chat apps must enable BANK_CONSTRAINED_PLAN."
   },
   "systemParameters": {
-    "s2.parser.bank.constrained-plan.enable": "true",
     "s2.parser.bank.max-candidates": "1",
-    "s2.parser.bank.plan.thinking.enable": "false",
-    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false",
-    "s2.parser.bank.free-sql.thinking.enable": "true"
+    "s2.parser.bank.plan.thinking.enable": "false"
   },
   "jvmSystemProperties": {
-    "s2.parser.bank.plan.thinking.enable": "false",
-    "s2.parser.bank.plan.deterministic-short-circuit.enable": "false"
+    "s2.parser.bank.plan.thinking.enable": "false"
   },
   "agentChatApps": {
     "BANK_CONSTRAINED_PLAN": { "enable": true },
@@ -47,8 +43,7 @@
     "requiredForNewClaim": "A fresh official Fact v3 run with bootstrap receipt and v2.0.6 package verification."
   },
   "notRecommended": {
-    "s2.parser.bank.plan.deterministic-short-circuit.enable": "true",
     "s2.parser.bank.max-candidates": "2",
-    "why": "Use only as engineering comparison cells; promote no configuration without a fresh official Fact v3 run. The removed soft-fallback key is not a valid comparison cell."
+    "why": "Use only as an engineering comparison cell; promote no configuration without a fresh official Fact v3 run."
   }
 }

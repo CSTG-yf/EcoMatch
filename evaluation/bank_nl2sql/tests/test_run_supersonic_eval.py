@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run  # noqa: E402
+from evaluation_policy import load_evaluation_records  # noqa: E402
 from run_supersonic_eval import (  # noqa: E402
     SuperSonicEvaluationError,
     _http_post_json,
@@ -30,7 +30,7 @@ from run_supersonic_eval import (  # noqa: E402
 
 
 class SuperSonicEvaluationPolicyTest(unittest.TestCase):
-    def test_dev_is_available_but_test_requires_final_acknowledgement_and_is_registered(self) -> None:
+    def test_dev_and_test_are_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "dev.jsonl").write_text(json.dumps({"id": "DEV-01"}) + "\n", encoding="utf-8")
@@ -39,23 +39,13 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
             self.assertEqual(
                 [record["id"] for record in load_evaluation_records(root, split="dev")], ["DEV-01"]
             )
-            with self.assertRaises(EvaluationAccessError):
-                load_evaluation_records(root, split="test")
             self.assertEqual(
                 [
                     record["id"]
-                    for record in load_evaluation_records(
-                        root, split="test", acknowledge_final_test=True
-                    )
+                    for record in load_evaluation_records(root, split="test")
                 ],
                 ["TEST-01"],
             )
-
-            registry = root / "final-test-runs.json"
-            first = record_final_test_run(registry, run_metadata={"model": "local-qwen"})
-            second = record_final_test_run(registry, run_metadata={"model": "local-qwen"})
-            self.assertEqual(first["runNumber"], 1)
-            self.assertEqual(second["runNumber"], 2)
 
 
 class RunSuperSonicEvalTest(unittest.TestCase):

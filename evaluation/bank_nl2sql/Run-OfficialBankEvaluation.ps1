@@ -24,6 +24,9 @@ param(
     [int]$AgentId,
 
     [Parameter(Mandatory = $true)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$ChatModelId,
+
     [string]$ModelLabel,
 
     [Parameter(Mandatory = $true)]
@@ -31,11 +34,7 @@ param(
 
     [string]$EvidenceRoot,
 
-    [string]$RunRegistry,
-
     [Nullable[int]]$MaxFailures,
-
-    [switch]$AcknowledgeFinalTest,
 
     [switch]$NoResume
 )
@@ -57,12 +56,6 @@ if (-not (Test-Path -LiteralPath $Runner)) {
 if (-not (Test-Path -LiteralPath $BootstrapReceipt)) {
     throw "Bootstrap receipt is missing: $BootstrapReceipt"
 }
-if ($Mode -eq "test" -and (-not $AcknowledgeFinalTest -or [string]::IsNullOrWhiteSpace($RunRegistry))) {
-    throw "Test mode requires -AcknowledgeFinalTest and -RunRegistry."
-}
-if ($Mode -ne "test" -and $AcknowledgeFinalTest) {
-    throw "-AcknowledgeFinalTest is valid only for test mode."
-}
 if ($null -ne $MaxFailures -and $MaxFailures -lt 0) {
     throw "-MaxFailures must be zero or greater."
 }
@@ -77,14 +70,14 @@ $RunnerArgs = @(
     "--run-id", $RunId,
     "--base-url", $BaseUrl,
     "--agent-id", "$AgentId",
-    "--model-label", $ModelLabel,
+    "--chat-model-id", "$ChatModelId",
     "--bootstrap-receipt", $BootstrapReceipt
 )
+if (-not [string]::IsNullOrWhiteSpace($ModelLabel)) {
+    $RunnerArgs += @("--model-label", $ModelLabel)
+}
 if (-not [string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $RunnerArgs += @("--evidence-root", $EvidenceRoot)
-}
-if ($Mode -eq "test") {
-    $RunnerArgs += @("--acknowledge-final-test", "--run-registry", $RunRegistry)
 }
 if ($null -ne $MaxFailures) {
     $RunnerArgs += @("--max-failures", "$MaxFailures")

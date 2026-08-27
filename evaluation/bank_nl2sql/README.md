@@ -231,7 +231,7 @@ Agent，也不要把运行时 H2 文件复制到仓库。脚本会通过 HTTP AP
 
 ```powershell
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
-  evaluation/bank_nl2sql --model-id 1 --chat-model-id 1 --dry-run
+  evaluation/bank_nl2sql --model-id 1 --dry-run
 ```
 
 手工 HTTP bootstrap（仅调试）：
@@ -240,7 +240,7 @@ evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.
 $env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
   evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
-  --model-id 1 --chat-model-id 1
+  --model-id 1
 Remove-Item Env:ECOMATCH_AUTH_TOKEN
 ```
 
@@ -331,31 +331,32 @@ HTTP bootstrap。只有在服务由其他方式管理时，才按以下步骤手
 $env:ECOMATCH_AUTH_TOKEN = '<管理员 Token>'
 evaluation\.venv\Scripts\python.exe evaluation/bank_nl2sql/bootstrap_bank_agent.py `
   evaluation/bank_nl2sql --base-url http://127.0.0.1:9080 `
-  --model-id 1 --chat-model-id 1 `
+  --model-id 1 `
   --output .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 Remove-Item Env:ECOMATCH_AUTH_TOKEN
 ```
 
 也可以双击 `evaluation/bank_nl2sql/Bootstrap-BankAgent.cmd`；成功后它会在相同位置生成
-`bootstrap-receipt.json`。回执只记录 Agent、模型 ID 和配置指纹，不含 Token、模型地址或
-密钥。正式评测会将该回执与当前官方 manifest 及导入计数（13 家机构、21 个指标、132678 条
-事实）逐项校验；不一致时拒绝运行。
+`bootstrap-receipt.json`。该回执证明 Agent 与语义数据的初始化状态；其中的历史
+`chatModelId` 不作为本次评测的模型绑定证据。正式评测会单独按 `-ChatModelId` 更新银行链路
+中所有启用的 ChatApp，并在运行前重新读取确认。两类回执都不包含 Token、模型地址或密钥。
 
 ### 1. 固定 smoke
 
-使用干净、且包含正式评测基线的 Git 工作树。`RunId` 在同一轮 smoke、train、dev、test 中
-必须保持相同，模型标签也必须保持相同。
+使用干净、且包含正式评测基线的 Git 工作树。恢复同一个 `RunId` 时必须使用相同的
+`ChatModelId`；`ModelLabel` 只是可选展示文本，不负责选择模型。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
   -Mode smoke -RunId qwen66-20260810 `
   -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ChatModelId 1 `
   -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
   -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 ```
 
-smoke 固定为 5 道分层 train 题，并强制 `caseAccuracy = 1.0`。未全绿时命令以非零退出，
-不会允许随后运行 train、dev 或 test。
+smoke 固定为 5 道分层 train 题，并强制 `caseAccuracy = 1.0`。各分割互相独立；运行 test
+不会隐式要求先运行 smoke、train 或 dev。
 
 ### 2. Train 与 Dev
 
@@ -363,12 +364,14 @@ smoke 固定为 5 道分层 train 题，并强制 `caseAccuracy = 1.0`。未全�
 powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
   -Mode train -RunId qwen66-20260810 `
   -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ChatModelId 1 `
   -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
   -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 
 powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
   -Mode dev -RunId qwen66-20260810 `
   -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ChatModelId 1 `
   -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
   -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 ```
@@ -379,23 +382,23 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBank
 
 ### 3. 冻结 Test
 
-Test 只能在 smoke 全绿、train 和 dev 已完成后显式运行；它必须写入本地运行登记：
+Test 可独立显式运行，只读取 test 分割：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBankEvaluation.ps1 `
   -Mode test -RunId qwen66-20260810 `
   -BaseUrl http://127.0.0.1:9080 -AgentId 33 `
+  -ChatModelId 1 `
   -ModelLabel 'Qwen3.6@192.168.20.66:8080' `
-  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json `
-  -AcknowledgeFinalTest `
-  -RunRegistry .local-dev/bank-nl2sql/official-v3/final-test-runs.json
+  -BootstrapReceipt .local-dev/bank-nl2sql/official-v3/bootstrap-receipt.json
 ```
 
 ### 4. 唯一报告格式
 
 输出固定在 `.local-dev/bank-nl2sql/official-v3/<RunId>/`，每个模式同时生成 JSON 与 Markdown。
-报告必须记录代码提交、数据版本与哈希、数据库包哈希、Agent 配置指纹、模型标签、端点指纹、
-串行策略和完整题目清单。正式计分只包含 `caseAccuracy` 和与其等价的结果事实准确率；最终回答
+报告必须记录代码提交、数据版本与哈希、数据库包哈希、语义初始化回执、真实
+`chatModelId`、Provider、模型名、脱敏模型端点指纹、ChatApp 读回绑定、模型展示标签、串行策略
+和完整题目清单。正式计分只包含 `caseAccuracy` 和与其等价的结果事实准确率；最终回答
 处理状态只能进入非计分运行时诊断，不得输出旧的最终回答准确率。页面采集、离线实验和消融
 工具只能用于排障，不能产出或替代正式成绩。
 仓库内既有 `reports/` 快照仅作历史排障留档，标准运行器不会读取或续跑其中任何文件。
