@@ -24,7 +24,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Direct llama.cpp OpenAI-compatible chat client with true prompt/prefix caching.
+ * Direct OpenAI-compatible chat client with optional llama.cpp prompt/prefix caching.
  *
  * <p>
  * llama-server reuses KV tokens for the longest common token prefix when {@code cache_prompt=true}.
@@ -235,12 +235,12 @@ public class LlamaCppPrefixChatClient {
                     JSON_SCHEMA_PROBE_USER, options, true);
             HttpResponse<String> response = post(config, url, body, options);
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                LOG.info("llama.cpp json_schema capability supported endpoint={} model={}", url,
+                LOG.info("OpenAI-compatible json_schema capability supported endpoint={} model={}", url,
                         StringUtils.defaultIfBlank(config.getModelName(), "local"));
                 return JsonSchemaCapability.SUPPORTED;
             }
             if (response.statusCode() == 400 || response.statusCode() == 501) {
-                LOG.warn("llama.cpp json_schema capability unsupported endpoint={} model={} status={}; falling back to json_object",
+                LOG.warn("OpenAI-compatible json_schema capability unsupported endpoint={} model={} status={}; falling back to json_object",
                         url, StringUtils.defaultIfBlank(config.getModelName(), "local"),
                         response.statusCode());
                 return JsonSchemaCapability.UNSUPPORTED;
@@ -308,11 +308,11 @@ public class LlamaCppPrefixChatClient {
     }
 
     /**
-     * OpenAI-compatible strict decoding requires every property of every object to be listed in
-     * {@code required}. The bank contract intentionally keeps nullable fields optional for the
-     * local llama.cpp path, so normalize only public OpenAI-compatible requests and leave the
-     * local schema unchanged. Nullable types still preserve the semantic optionality by requiring
-     * the model to emit {@code null} for an unused field.
+     * Adapt the authored contract to the strict structured-output subset used by public
+     * OpenAI-compatible endpoints. Strict providers require every declared property to appear in
+     * {@code required}; fields that were optional in the authored contract are therefore made
+     * nullable before they are added. This changes only the wire representation (absent becomes
+     * explicit {@code null}) and preserves the business-level optionality seen by Jackson.
      */
     private static void sanitizeOpenAiJsonSchema(ObjectNode body) {
         sanitizeProviderJsonSchema(body);
@@ -328,21 +328,47 @@ public class LlamaCppPrefixChatClient {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return;
         }
-        if (node.isObject()) {
-            ObjectNode object = (ObjectNode) node;
-            normalizeStrictScalarSchema(object);
-            JsonNode properties = object.path("properties");
-            if (properties.isObject()) {
-                ArrayNode required = object.putArray("required");
-                properties.fieldNames().forEachRemaining(required::add);
-            }
-            node.fields().forEachRemaining(entry -> normalizeStrictSchema(entry.getValue()));
-        } else if (node.isArray()) {
+        if (node.isArray()) {
             node.forEach(LlamaCppPrefixChatClient::normalizeStrictSchema);
+            return;
         }
+        if (!node.isObject()) {
+            return;
+        }
+
+        ObjectNode object = (ObjectNode) node;
+        normalizeStrictScalarSchema(object);
+        JsonNode properties = object.path("properties");
+        if (properties.isObject()) {
+            java.util.LinkedHashSet<String> authoredRequired = new java.util.LinkedHashSet<>();
+            JsonNode required = object.path("required");
+            if (required.isArray()) {
+                required.forEach(value -> {
+                    if (value.isTextual()) {
+                        authoredRequired.add(value.asText());
+                    }
+                });
+            }
+
+            ArrayNode strictRequired = object.putArray("required");
+            properties.fields().forEachRemaining(entry -> {
+                String name = entry.getKey();
+                JsonNode property = entry.getValue();
+                normalizeStrictSchema(property);
+                if (!authoredRequired.contains(name) && property.isObject()) {
+                    makeNullable((ObjectNode) property);
+                }
+                strictRequired.add(name);
+            });
+        }
+
+        object.fields().forEachRemaining(entry -> {
+            if (!"properties".equals(entry.getKey()) && !"required".equals(entry.getKey())) {
+                normalizeStrictSchema(entry.getValue());
+            }
+        });
     }
 
-    /** OpenAI's strict subset requires a type on scalar enum/const nodes. */
     private static void normalizeStrictScalarSchema(ObjectNode object) {
         if (object.has("const") && !object.has("enum")) {
             ArrayNode values = object.putArray("enum");
@@ -360,6 +386,27 @@ public class LlamaCppPrefixChatClient {
         } else {
             ArrayNode typeArray = object.putArray("type");
             types.forEach(typeArray::add);
+        }
+    }
+
+    private static void makeNullable(ObjectNode schema) {
+        JsonNode type = schema.get("type");
+        if (type != null && type.isTextual()) {
+            ArrayNode types = MAPPER.createArrayNode();
+            types.add(type.asText());
+            types.add("null");
+            schema.set("type", types);
+        } else if (type != null && type.isArray()
+                && !java.util.stream.StreamSupport.stream(type.spliterator(), false)
+                        .anyMatch(value -> value.isTextual() && "null".equals(value.asText()))) {
+            ((ArrayNode) type).add("null");
+        }
+
+        JsonNode values = schema.get("enum");
+        if (values != null && values.isArray()
+                && !java.util.stream.StreamSupport.stream(values.spliterator(), false)
+                        .anyMatch(JsonNode::isNull)) {
+            ((ArrayNode) values).addNull();
         }
     }
 
@@ -422,13 +469,14 @@ public class LlamaCppPrefixChatClient {
     }
 
     private static IllegalStateException failedResponse(HttpResponse<String> response) {
-        return new IllegalStateException("llama.cpp chat failed status=" + response.statusCode());
+        return new IllegalStateException(
+                "OpenAI-compatible chat failed status=" + response.statusCode());
     }
 
     static final class JsonSchemaCapabilityException extends IllegalStateException {
 
         private JsonSchemaCapabilityException(String code, Throwable cause) {
-            super("llama.cpp json_schema capability probe failed code=" + code, cause);
+            super("OpenAI-compatible json_schema capability probe failed code=" + code, cause);
         }
 
         static JsonSchemaCapabilityException unexpectedStatus(int statusCode) {

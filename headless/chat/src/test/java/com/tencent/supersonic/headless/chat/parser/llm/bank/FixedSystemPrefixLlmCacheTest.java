@@ -16,21 +16,21 @@ import static org.mockito.Mockito.when;
 class FixedSystemPrefixLlmCacheTest {
 
     @Test
-    void freeSqlPrefixStartsPromptWithFixedSystem() {
+    void planPrefixStartsPromptWithFixedSystem() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenAnswer(invocation -> {
             String prompt = invocation.getArgument(0);
-            assertTrue(prompt.contains("各项存款余额"));
-            assertTrue(prompt.contains("\n\n存款\n\n附加信息：I"));
-            assertTrue(prompt.indexOf("各项存款余额") < prompt.indexOf("\n\n存款"));
-            return "{\"sql\":\"SELECT 1\"}";
+            assertTrue(prompt.startsWith(BankPlanPromptComposer.SINGLE_PASS_SYSTEM_PREFIX));
+            assertTrue(prompt.contains("\n\n用户问题\n\n<stage>SINGLE_PASS</stage>"));
+            assertTrue(prompt.indexOf("唯一正常阶段：SINGLE_PASS")
+                    < prompt.indexOf("\n\n用户问题"));
+            return "{}";
         });
-        String system = BankFreeSqlPromptComposer.composeSystemPrefix(
-                "Table=[银行], Metrics=[<各项存款余额>], Dimensions=[<机构>]");
-        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache(system,
-                BankFreeSqlPromptComposer.prefixVersion("Table=[银行]"), 32, false);
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache(
+                BankPlanPromptComposer.SINGLE_PASS_SYSTEM_PREFIX,
+                BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION, 32, false);
 
-        String user = BankFreeSqlPromptComposer.buildQuestionOnlyUserContent("存款", "I", "");
+        String user = BankPlanPromptComposer.buildSinglePassUserContent("用户问题");
         cache.generate(model, user, false);
         verify(model, times(1)).generate(anyString());
     }
@@ -38,12 +38,12 @@ class FixedSystemPrefixLlmCacheTest {
     @Test
     void memoReusesIdenticalUserPayload() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        when(model.generate(anyString())).thenReturn("{\"sql\":\"SELECT 1\"}");
+        when(model.generate(anyString())).thenReturn("{}");
         FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache(
-                BankFreeSqlPromptComposer.composeSystemPrefix("Table=[t]"),
-                BankFreeSqlPromptComposer.PROMPT_VERSION, 32, false);
+                BankPlanPromptComposer.SINGLE_PASS_SYSTEM_PREFIX,
+                BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION, 32, false);
 
-        String user = BankFreeSqlPromptComposer.buildQuestionOnlyUserContent("q", "I", "");
+        String user = BankPlanPromptComposer.buildSinglePassUserContent("q");
         assertEquals(cache.generate(model, user, true), cache.generate(model, user, true));
         verify(model, times(1)).generate(anyString());
         assertEquals(1L, cache.stats().get("completionHits"));
@@ -171,6 +171,34 @@ class FixedSystemPrefixLlmCacheTest {
     }
 
     @Test
+    void transportSelectionUsesLocalOpenAiEndpointOnlyForLlamaCppPrefix() {
+        ChatModelConfig local = modelConfig("OPEN_AI", "http://192.168.20.115:8080/v1",
+                "local-qwen");
+        ChatModelConfig cloud = modelConfig("OPEN_AI", "https://cloud.example.com/v1",
+                "cloud-model");
+        ChatModelConfig ollama = modelConfig("OLLAMA", "http://127.0.0.1:11434",
+                "local-ollama");
+
+        assertTrue(FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(local));
+        assertFalse(FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(cloud));
+        assertFalse(FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(ollama));
+    }
+
+    @Test
+    void memoKeySeparatesModelsForTheSameQuestion() {
+        FixedSystemPrefixLlmCache cache =
+                new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32, false);
+        ChatModelConfig local = modelConfig("OPEN_AI", "http://192.168.20.115:8080/v1",
+                "local-qwen");
+        ChatModelConfig cloud = modelConfig("OPEN_AI", "https://cloud.example.com/v1",
+                "cloud-model");
+
+        assertFalse(cache.memoKey(local, "同一问题").equals(cache.memoKey(cloud, "同一问题")));
+        assertFalse(cache.memoKey(local, "同一问题").contains("local-qwen"));
+        assertFalse(cache.memoKey(cloud, "同一问题").contains("cloud.example.com"));
+    }
+
+    @Test
     void structuredStagesBindTheirOwnPublishedContractSchema() {
         ChatModelConfig config = new ChatModelConfig();
         config.setJsonFormat(true);
@@ -204,5 +232,14 @@ class FixedSystemPrefixLlmCacheTest {
         assertEquals(thinking, options.enableThinking());
         assertEquals(maximum, options.maxTokens());
         assertTrue(options.omitResponseFormat());
+    }
+
+    private static ChatModelConfig modelConfig(String provider, String baseUrl,
+            String modelName) {
+        ChatModelConfig config = new ChatModelConfig();
+        config.setProvider(provider);
+        config.setBaseUrl(baseUrl);
+        config.setModelName(modelName);
+        return config;
     }
 }
