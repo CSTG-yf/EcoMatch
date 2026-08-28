@@ -468,6 +468,14 @@ final class BankS2SqlTemplateFactory {
         String aggregates = context.metrics().stream().map(
                 metric -> "SUM(" + metric.identifier() + ") AS " + metric.identifier() + "_value")
                 .collect(Collectors.joining(", "));
+        // Satisfaction follows each metric's catalog direction: higher-better metrics meet when
+        // above the average, lower-better (ASC ranking) when below — a direction-blind sign flag
+        // would mark the worst NPL as satisfying (test r6 TST-H-10 lesson).
+        String meetsConditions = context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
+                + metric.metricCode() + "' AND bank_values.metric_value "
+                + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode())) ? ">"
+                        : "<")
+                + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
         List<String> unpivots = new ArrayList<>();
         for (ResolvedMetric metric : context.metrics()) {
             unpivots.add("SELECT bank_organization, '" + metric.metricCode() + "' AS metric_code, "
@@ -491,9 +499,7 @@ final class BankS2SqlTemplateFactory {
                          bank_values.metric_value,
                          province_average.provincial_average AS provincial_average,
                          bank_values.metric_value - province_average.provincial_average AS gap_value,
-                         CASE WHEN bank_values.metric_value = province_average.provincial_average THEN 0
-                              WHEN bank_values.metric_value > province_average.provincial_average THEN 1
-                              ELSE -1 END AS meets_condition
+                         CASE WHEN %s THEN 1 ELSE 0 END AS meets_condition
                   FROM bank_values
                   INNER JOIN province_average
                     ON bank_values.metric_code = province_average.metric_code
@@ -504,7 +510,7 @@ final class BankS2SqlTemplateFactory {
                 ORDER BY metric_code ASC, bank_organization ASC
                 """
                 .formatted(aggregates, context.dataSetName(), where,
-                        String.join("\nUNION ALL\n", unpivots), outerWhere)
+                        String.join("\nUNION ALL\n", unpivots), meetsConditions, outerWhere)
                 .trim();
     }
 

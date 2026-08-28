@@ -118,6 +118,16 @@ class BankQueryPlanCoverageMatrixTest {
         assertTrue(sql.contains("provincial_average"));
         assertTrue(sql.contains("meets_condition"));
         assertTrue(sql.contains("ORDER BY metric_code ASC, bank_organization ASC"));
+        // Direction-aware satisfaction (test r6 TST-H-10 lesson): a lower-better metric meets
+        // below the average, a higher-better one above it — never a direction-blind sign flag.
+        String directionSql = assertCompiles(
+                multiMetricProvinceAverageThreshold("ZB013", "ZB015")).getS2sql();
+        assertTrue(directionSql.contains("(bank_values.metric_code = 'ZB013'"
+                + " AND bank_values.metric_value < province_average.provincial_average)"),
+                () -> directionSql);
+        assertTrue(directionSql.contains("(bank_values.metric_code = 'ZB015'"
+                + " AND bank_values.metric_value > province_average.provincial_average)"),
+                () -> directionSql);
     }
 
     /** Comparison intent keeps the long-form aggregation summary + gap contract. */
@@ -557,14 +567,22 @@ class BankQueryPlanCoverageMatrixTest {
 
     /** Synthetic two-metric threshold against the province average, province-wide. */
     private PlanAndHints multiMetricProvinceAverageThreshold() {
-        BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, List.of("ZB001", "ZB002"),
+        return multiMetricProvinceAverageThreshold("ZB001", "ZB002");
+    }
+
+    private PlanAndHints multiMetricProvinceAverageThreshold(String... metricCodes) {
+        List<String> metrics = List.of(metricCodes);
+        List<String> outputColumns = new java.util.ArrayList<>();
+        outputColumns.add("bank_organization");
+        outputColumns.addAll(metrics);
+        BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, metrics,
                 List.of("bank_organization"), List.of(),
                 dayTime(BankQueryPlan.TimeComparison.NONE),
                 BankQueryPlan.CalculationType.DIRECT,
                 List.of(filter("benchmark", "COMPARE", "PROVINCE_AVERAGE")), List.of(), null,
-                List.of("bank_organization", "ZB001", "ZB002"));
+                outputColumns);
         SemanticIntentHints hints = value(plan, BankIntentType.THRESHOLD,
-                List.of("ZB001", "ZB002"), List.of(),
+                metrics, List.of(),
                 List.of(new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
                         "PROVINCE_AVERAGE"))).hints();
         return new PlanAndHints(plan, hints);
@@ -727,7 +745,8 @@ class BankQueryPlanCoverageMatrixTest {
             List<SemanticIntentHints.DerivedMetricSpec> requiredDerivedMetrics) {
         BankQueryPlan.TimeRange time = plan.getTime();
         SemanticIntentHints hints = SemanticIntentHints.builder().expectedIntent(intent)
-                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011"))
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011", "ZB013",
+                        "ZB015"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.copyOf(requiredMetrics))
                 .requiredOrganizationCodes(Set.copyOf(requiredOrganizations))
@@ -783,7 +802,8 @@ class BankQueryPlanCoverageMatrixTest {
         schema.setMetrics(List.of(
                 schemaMetric("各项存款余额", "ZB001"), schemaMetric("各项贷款余额", "ZB002"),
                 schemaMetric("对公存款余额", "ZB003"), schemaMetric("个人存款余额", "ZB004"),
-                schemaMetric("净利润", "ZB011")));
+                schemaMetric("净利润", "ZB011"), schemaMetric("不良贷款率", "ZB013"),
+                schemaMetric("拨备覆盖率", "ZB015")));
         schema.setDimensions(List.of(
                 SchemaElement.builder().name("机构").bizName("bank_organization").build()));
         schema.setPartitionTime(
