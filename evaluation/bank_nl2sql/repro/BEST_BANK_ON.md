@@ -16,6 +16,8 @@
 | `s2.parser.bank.plan.thinking.enable` | **false** | 关闭额外思考输出 |
 | Agent `BANK_CONSTRAINED_PLAN` | **enable** | 启用模型计划入口 |
 | Agent `EXECUTION_SQL_CORRECTOR` | **enable**（建议） | 执行失败时一次受控修复 |
+| 部署 yaml `s2.mapper.embedding.use-llm-enhance` | **false** | 关闭向量召回后的 LLM 二次筛选（`conf/s2-config.yaml`，重启生效）。该调用会把全部召回塞进单个 prompt 且走旁路 langchain4j 客户端：全量思考模型（如 GLM-5.3-flash）下每次 parse 白付 60–100s 超时，曾致 6 道题撞 901s 天花板（见 RUN_RECORDS 2026-08-28 r1/r2 对照） |
+| Agent `REWRITE_MULTI_TURN` | **disable** | 多轮重写 app 会把题面语义改写坏（实测：「从年初」→「2025年1月1日至」、「存贷比」→「两指标分别是多少」），破坏族闸门触发词并引入逐轮方差；单轮隔离评测协议下零价值，且每题多烧一次 LLM 调用（parse p50 23s→8s）。关闭后 dev 40/40（RUN_RECORDS 2026-08-28 r4） |
 
 ## 评测
 
