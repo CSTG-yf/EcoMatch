@@ -511,4 +511,113 @@ class BankPlanPromptComposerTest {
                 BankPlanPromptComposer.sanitizeCatalogLeak("【语义目录】\n指标代码清单……"));
         assertEquals("plain failure", BankPlanPromptComposer.sanitizeCatalogLeak("plain failure"));
     }
+
+    @Test
+    void systemPrefixKeepsV58DateAndBaselinePrecedentsVerbatim() {
+        // 防再弱化闸门：以下关键短语逐条取自 v58（bank-plan-sys-v58-single-pass，
+        // git show HEAD 原文）的日期锚定与基期选择判例。v59 曾因新增查询族文案与这些判例
+        // 混排导致官方 smoke 回归（较上年末被改成同比基期、完整日期被月末化）。
+        // 任何改写、挪动或删除都必须显式更新本清单并重跑官方 smoke 验证。
+        List<String> v58Phrases = List.of(
+                // 年末字面日期与“较上年末”相对表述判例（REQUIREMENTS 判例区）
+                "题干明确写出的 YYYY年末/年底就是该年份的 12-31",
+                "将 baselineStartDate/baselineEndDate 都写为 2024-12-31",
+                "只有“较上年末/较去年末”这类相对表述才按当前期前一自然年年末解释",
+                "已写出的 2024年末再向前减一年。",
+                // DATE_BASELINE_RULES 共享基期规则
+                "“较年初”必须使用 comparison=START_OF_YEAR",
+                "baselineStartDate=baselineEndDate=当前期前一年的 12-31",
+                "当年 01-01 不是“较年初”基期",
+                // 同比与自然周期判例
+                "这类明确写出同期日期的同比使用 comparison=YEAR_OVER_YEAR",
+                "该语义使用 intent=CHANGE、comparison=PERIOD_OVER_PERIOD",
+                "“上季度末”是自然季度边界，不是固定回退三个月",
+                // PLAN 日期保真与 granularity 对齐（规则 12/13/15）
+                "题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，必须原样保留",
+                "不得因为日期恰好是月末就改为 MONTH，",
+                "也不得截断成 YYYY-MM",
+                "time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”");
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        v58Phrases.forEach(phrase -> assertTrue(sys.contains(phrase),
+                "v58 日期/基期判例被弱化或改写: " + phrase));
+    }
+
+    @Test
+    void granularityGuidanceKeepsExplicitPeriodEndAlignmentGate() {
+        // 题面明确“季末/半年末/年末”且日期对齐才可填非 DAY granularity，否则一律 DAY——
+        // 该闸门必须同时存在于 single-pass 与 staged PLAN 前缀中。
+        for (String prefix : List.of(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX,
+                BankPlanPromptComposer.PLAN_SYSTEM_PREFIX)) {
+            assertTrue(prefix.contains(
+                    "time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”"));
+            assertTrue(prefix.contains("且所填日期恰好是该自然期期末时才允许；否则一律 DAY"),
+                    "granularity gate lost the date-alignment condition");
+        }
+    }
+
+    @Test
+    void rankChangeAndCompoundRatioGuidanceStaysInsideItsOwnBlocks() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        // RANK_CHANGE 家族只允许住在专用补充块中；编号规则恢复 v58 的 1-15 收尾，不再有规则 16。
+        String familyHeader = "专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）";
+        int header = sys.indexOf(familyHeader);
+        assertTrue(header >= 0, "RANK_CHANGE family must live in its own labelled block");
+        assertFalse(sys.contains("16. “从基期到当期"),
+                "RANK_CHANGE must not be a numbered rule next to the date/granularity rules");
+        int aliasBulletEnd = sys.indexOf("逐字照抄权威目录中的中文名称，禁止自造别名");
+        assertTrue(aliasBulletEnd >= 0 && aliasBulletEnd < header);
+        String between = sys.substring(aliasBulletEnd, header);
+        assertFalse(between.contains("RANK_CHANGE"));
+        assertFalse(between.contains("排名变化"));
+        assertFalse(between.contains("numeratorOperands"));
+        assertFalse(between.contains("DERIVED_SUM"));
+
+        // 家族块内部不得夹带新的日期/基期判例或竞争性 comparison 选项，只能回指共享基期规则。
+        int planContract = sys.indexOf("PLAN 严格合同", header);
+        assertTrue(planContract > header);
+        String familyBlock = sys.substring(header, planContract);
+        assertTrue(familyBlock.contains("calculation.type=RANK_CHANGE"));
+        assertFalse(familyBlock.contains("较上年末"),
+                "baseline precedent stays in the canonical rules, not the family block");
+        assertFalse(familyBlock.contains("YEAR_OVER_YEAR"),
+                "family block must not advertise alternative comparisons");
+        // 带日期的合成示例会污染同一生成里的 requirements 日期槽（VAL-S-06：04-15 被
+        // 吸附到示例的 03-31），族块只允许无日期的槽位形状描述。
+        assertFalse(familyBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "family block must not carry literal example dates");
+        assertFalse(familyBlock.contains("合成示例"),
+                "family block must stay example-free; slots are described, not exemplified");
+        assertTrue(familyBlock.contains("题面当期日期"),
+                "family block must point dates back to the question's own words");
+        assertTrue(familyBlock.contains("沿用本提示的共享 time 基期规则"),
+                "family block must point back to the shared baseline rules");
+
+        // 复合分子比率只出现在规则 3i 自己的段落，不得混入日期/基期判例或其他规则。
+        int rule3iStart = sys.indexOf("比率分子为多个基础指标之和");
+        int rule3iEnd = sys.indexOf("4. 全省排名不等于全省均值比较");
+        assertTrue(rule3iStart >= 0 && rule3iEnd > rule3iStart);
+        for (int idx = sys.indexOf("numeratorOperands"); idx >= 0;
+                idx = sys.indexOf("numeratorOperands", idx + 1)) {
+            assertTrue(idx > rule3iStart && idx < rule3iEnd,
+                    "numeratorOperands guidance leaked outside rule 3i at index " + idx);
+        }
+        for (int idx = sys.indexOf("DERIVED_SUM"); idx >= 0;
+                idx = sys.indexOf("DERIVED_SUM", idx + 1)) {
+            assertTrue(idx > rule3iStart && idx < rule3iEnd,
+                    "DERIVED_SUM guidance leaked outside rule 3i at index " + idx);
+        }
+    }
+
+    @Test
+    void prefixVersionsArePinnedForReworkCacheInvalidation() {
+        // v59 因官方 smoke 回归被 v60 取代；v60 的族块示例日期又污染 requirements 日期槽
+        // （VAL-S-06）被 v61 去示例化取代；再次 bump 必须携带官方证据并同步更新本断言。
+        assertEquals("bank-plan-sys-v61-single-pass", BankPlanPromptComposer.PREFIX_VERSION);
+        assertEquals("bank-requirements-sys-v8-stage-split",
+                BankPlanPromptComposer.REQUIREMENTS_PREFIX_VERSION);
+        assertEquals("bank-plan-sys-v57-stage-split", BankPlanPromptComposer.PLAN_PREFIX_VERSION);
+        assertEquals(BankPlanPromptComposer.PREFIX_VERSION,
+                BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION);
+    }
 }

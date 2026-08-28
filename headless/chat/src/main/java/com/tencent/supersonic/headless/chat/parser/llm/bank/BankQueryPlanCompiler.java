@@ -120,13 +120,19 @@ public class BankQueryPlanCompiler {
      * template family declares (for example a ranking intent executed through the CHANGE family).
      */
     private SupportedQueryFamily declaredFamily(QueryShape shape) {
+        // calculationType wins first: the RANK_CHANGE family is declared by the calculation slot
+        // itself (validated to require two explicit period windows), so it routes before the
+        // direct/NONE and CHANGE branches — including the multi-metric DERIVED_RANKING route.
+        if (shape.calculationType() == BankQueryPlan.CalculationType.RANK_CHANGE) {
+            return SupportedQueryFamily.RANK_CHANGE;
+        }
         boolean directCalculation =
                 shape.calculationType() == BankQueryPlan.CalculationType.DIRECT
                         || shape.calculationType() == BankQueryPlan.CalculationType
                                 .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
         if (directCalculation
                 && shape.timeComparison() == BankQueryPlan.TimeComparison.NONE) {
-            if (shape.hasDerivedMetrics()) {
+            if (shape.hasDerivedMetrics() || shape.isMultiMetricRanking()) {
                 return SupportedQueryFamily.DERIVED_RANKING;
             }
             if (shape.calculationType() == BankQueryPlan.CalculationType
@@ -163,6 +169,10 @@ public class BankQueryPlanCompiler {
                         unsupportedQueryShapeMessage(shape));
             }
             case RATIO -> SupportedQueryFamily.RATIO;
+            // Unreachable: RANK_CHANGE is intercepted above the direct/NONE branch.
+            case RANK_CHANGE -> throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "rank change requires two explicit comparison periods");
             case DIRECT -> throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "time comparison requires a supported calculation type");
@@ -212,19 +222,30 @@ public class BankQueryPlanCompiler {
                         daysAboveProvinceAverageResultContract(plan, metrics, index));
             }
             case PROVINCE_AVERAGE -> {
-                if (plan.getIntent() == BankIntentType.THRESHOLD
-                        || plan.getIntent() == BankIntentType.COMPARISON && metrics.size() > 1) {
-                    boolean multi = metrics.size() > 1;
+                // Threshold intent asks "which organizations satisfy the benchmark": every
+                // metric count compiles through the threshold template so the rows carry an
+                // explicit meets_condition fact. Comparison intent asks "how far apart": the
+                // multi-metric long-form gap contract stays. Aggregation keeps its own family.
+                if (plan.getIntent() == BankIntentType.THRESHOLD) {
+                    if (metrics.size() > 1) {
+                        yield CompiledQuery.s2sql(
+                                templateFactory.compileProvinceAverageThreshold(templateContext),
+                                multiMetricProvinceAverageThresholdOutputColumns(),
+                                multiMetricProvinceAverageThresholdResultContract(plan, metrics,
+                                        index));
+                    }
                     yield CompiledQuery.s2sql(
-                            multi ? templateFactory
-                                    .compileMultiMetricProvinceAverageAggregation(templateContext)
-                                    : templateFactory.compileProvinceAverageThreshold(
-                                            templateContext),
-                            multi ? aggregationSummaryOutputColumns(metrics)
-                                    : List.of(ORGANIZATION_DIMENSION, "metric_value",
-                                            "provincial_average", "meets_condition"),
-                            multi ? multiMetricProvinceAverageResultContract(plan, metrics, index)
-                                    : provinceAverageThresholdResultContract(plan, metrics, index));
+                            templateFactory.compileProvinceAverageThreshold(templateContext),
+                            List.of(ORGANIZATION_DIMENSION, "metric_value", "provincial_average",
+                                    "meets_condition"),
+                            provinceAverageThresholdResultContract(plan, metrics, index));
+                }
+                if (plan.getIntent() == BankIntentType.COMPARISON && metrics.size() > 1) {
+                    yield CompiledQuery.s2sql(
+                            templateFactory
+                                    .compileMultiMetricProvinceAverageAggregation(templateContext),
+                            aggregationSummaryOutputColumns(metrics),
+                            multiMetricProvinceAverageResultContract(plan, metrics, index));
                 }
                 if (plan.getIntent() == BankIntentType.AGGREGATION) {
                     yield CompiledQuery.s2sql(
@@ -298,13 +319,23 @@ public class BankQueryPlanCompiler {
                                                 ? null
                                                 : multiMetricChangeResultContract(plan, index)));
             }
+            case RANK_CHANGE -> CompiledQuery.s2sql(
+                    templateFactory.compileRankChange(templateContext),
+                    List.of("metric_code", ORGANIZATION_DIMENSION, "baseline_rank", "current_rank",
+                            "rank_change"),
+                    rankChangeResultContract(plan, metrics, index));
             case RATIO -> {
                 ResolvedMetric denominator = ratioDenominator(plan, metrics);
                 double ratioScale = ratioScale(metrics, denominator);
                 BankResultProjector.Contract ratioContract =
                         ratioResultContract(plan, metrics, dimensions, index);
+                List<String> numeratorOperands =
+                        ratioNumeratorOperands(plan, metrics, denominator);
                 yield CompiledQuery.s2sql(
-                        templateFactory.compileRatio(templateContext, metrics.get(0).identifier(),
+                        templateFactory.compileRatio(templateContext,
+                                numeratorOperands.stream()
+                                        .map(operand -> identifier(index.metric(operand)))
+                                        .toList(),
                                 denominator.identifier(), ratioScale),
                         calculatedOutputColumns(dimensions, "numerator_value", "denominator_value",
                                 "ratio_percent"),
@@ -321,12 +352,77 @@ public class BankQueryPlanCompiler {
     }
 
     /**
+     * Numerator operands for the ratio template. A composite derived metric (numerator = sum of
+     * K base metrics) whose denominator equals the ratio baseline replaces the legacy single
+     * first-metric numerator; every other plan keeps the single first-metric numerator so the
+     * compiled SQL is unchanged.
+     */
+    private List<String> ratioNumeratorOperands(BankQueryPlan plan, List<ResolvedMetric> metrics,
+            ResolvedMetric denominator) {
+        String baseline = plan.getCalculation().getBaseline();
+        if (StringUtils.isNotBlank(baseline)
+                && denominator.planMetric().getBizName().equals(baseline)) {
+            for (BankQueryPlan.DerivedMetric derived : plan.getDerivedMetrics()) {
+                if (derived.getNumeratorOperands() != null
+                        && !derived.getNumeratorOperands().isEmpty()
+                        && baseline.equals(derived.getDenominator())) {
+                    return List.copyOf(derived.getNumeratorOperands());
+                }
+            }
+        }
+        return List.of(metrics.get(0).planMetric().getBizName());
+    }
+
+    /**
+     * The auditable projection contract for the cross-period rank-change template. The SQL
+     * already computes each metric's baseline and current ROW_NUMBER ranks over the full
+     * population and joins them per organization, so the projector only passes the
+     * baseline_rank/current_rank/rank_change facts through with organization identity.
+     */
+    private BankResultProjector.Contract rankChangeResultContract(BankQueryPlan plan,
+            List<ResolvedMetric> metrics, SchemaIndex index) {
+        if (!index.hasDimension(ORGANIZATION_DIMENSION)) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,
+                    "rank-change queries require the semantic organization dimension");
+        }
+        SchemaElement organization = index.dimension(ORGANIZATION_DIMENSION);
+        Map<String, String> organizationNames = new LinkedHashMap<>();
+        if (organization.getSchemaValueMaps() != null) {
+            for (SchemaValueMap valueMap : organization.getSchemaValueMaps()) {
+                if (valueMap != null && StringUtils.isNotBlank(valueMap.getTechName())
+                        && StringUtils.isNotBlank(valueMap.getBizName())) {
+                    organizationNames.put(valueMap.getTechName(), valueMap.getBizName());
+                }
+            }
+        }
+        List<BankResultProjector.MetricBinding> bindings = metrics.stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("metric_code")
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                .sorted(java.util.Comparator
+                        .comparing(BankResultProjector.MetricBinding::getMetricCode))
+                .toList();
+        return BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.RANK_CHANGE_LONG_FORM)
+                .organizationColumn(identifier(organization)).organizationNames(organizationNames)
+                .selectedOrganizationCodes(
+                        plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
+                                .filter(StringUtils::isNotBlank).sorted().toList())
+                .selectedDates(List.of(plan.getTime().getStartDate().toString(),
+                        plan.getTime().getEndDate().toString(),
+                        plan.getTime().getBaselineStartDate().toString(),
+                        plan.getTime().getBaselineEndDate().toString()))
+                .metrics(bindings).build();
+    }
+
+    /**
      * Declared template families of the constrained bank compiler. The family summary is rendered
      * into the UNSUPPORTED_QUERY_SHAPE message so the model (and reviewers) can see which shapes
      * the main path can compile.
      */
     enum SupportedQueryFamily {
-        DERIVED_RANKING("派生指标排名（RANKING/DIRECT+derivedMetrics）"),
+        DERIVED_RANKING("多指标/派生指标排名（RANKING/DIRECT+多指标或派生指标）"),
         COUNT_DAYS_ABOVE_PROVINCE_AVERAGE("高于全省均值天数统计（AGGREGATION/COUNT_DAYS+benchmark）"),
         PROVINCE_AVERAGE("省均值对比（THRESHOLD/COMPARISON多指标/AGGREGATION+benchmark）"),
         ABSOLUTE_THRESHOLD("单机构单指标绝对阈值（THRESHOLD/DIRECT+单个metric_value过滤）"),
@@ -335,6 +431,7 @@ public class BankQueryPlanCompiler {
         DAILY_AVERAGE_RANKING("日均值排名（RANKING/DIRECT+AVG）"),
         GENERIC_DIRECT("单点/趋势/长表直接查询（DIRECT/NONE）"),
         CHANGE("同环比变化（intent=CHANGE+非NONE比较）"),
+        RANK_CHANGE("跨期排名变化（calculation.type=RANK_CHANGE+双期时间，输出基期/当期排名与名次变化）"),
         RATIO("点值比率（intent=RATIO+calculation=RATIO）");
 
         private final String description;
@@ -357,10 +454,10 @@ public class BankQueryPlanCompiler {
      */
     record QueryShape(BankIntentType intent, BankQueryPlan.CalculationType calculationType,
             BankQueryPlan.TimeComparison timeComparison, int metricsCount, boolean allMetricsAverage,
-            BankQueryPlan.Aggregation firstMetricAggregation, boolean hasDerivedMetrics,
-            int organizationsCount, List<String> dimensions, int metricFilterCount,
-            boolean hasProvinceAverageBenchmark, boolean hasRankFilter, boolean hasOrderBy,
-            boolean hasLimit) {
+            boolean anyMetricAverage, BankQueryPlan.Aggregation firstMetricAggregation,
+            boolean hasDerivedMetrics, int organizationsCount, List<String> dimensions,
+            int metricFilterCount, boolean hasProvinceAverageBenchmark, boolean hasRankFilter,
+            boolean hasOrderBy, boolean hasLimit) {
 
         static QueryShape of(BankQueryPlan plan, List<ResolvedMetric> metrics,
                 List<ResolvedDimension> dimensions, List<Filter> metricFilters) {
@@ -368,16 +465,18 @@ public class BankQueryPlanCompiler {
                     .map(ResolvedDimension::identifier).toList();
             boolean allAverage = !metrics.isEmpty() && metrics.stream().allMatch(
                     metric -> metric.planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG);
+            boolean anyAverage = metrics.stream().anyMatch(
+                    metric -> metric.planMetric().getAggregation() == BankQueryPlan.Aggregation.AVG);
             BankQueryPlan.Aggregation firstAggregation = metrics.isEmpty() ? null
                     : metrics.get(0).planMetric().getAggregation();
             boolean rankFilter = plan.getFilters().stream()
                     .anyMatch(BankQueryPlanCompiler::isRankFilter);
             return new QueryShape(plan.getIntent(), plan.getCalculation().getType(),
-                    plan.getTime().getComparison(), metrics.size(), allAverage, firstAggregation,
-                    !plan.getDerivedMetrics().isEmpty(), plan.getOrganizations().size(),
-                    List.copyOf(dimensionIdentifiers), metricFilters.size(),
-                    BankQueryPlanCompiler.hasProvinceAverageBenchmark(plan), rankFilter,
-                    plan.getOrderBy() != null && !plan.getOrderBy().isEmpty(),
+                    plan.getTime().getComparison(), metrics.size(), allAverage, anyAverage,
+                    firstAggregation, !plan.getDerivedMetrics().isEmpty(),
+                    plan.getOrganizations().size(), List.copyOf(dimensionIdentifiers),
+                    metricFilters.size(), BankQueryPlanCompiler.hasProvinceAverageBenchmark(plan),
+                    rankFilter, plan.getOrderBy() != null && !plan.getOrderBy().isEmpty(),
                     plan.getLimit() != null);
         }
 
@@ -403,6 +502,19 @@ public class BankQueryPlanCompiler {
         boolean isDailyAverageRanking() {
             return intent == BankIntentType.RANKING && metricsCount() == 1
                     && firstMetricAggregation() == BankQueryPlan.Aggregation.AVG
+                    && metricFilterCount() == 0
+                    && dimensions().equals(List.of(ORGANIZATION_DIMENSION));
+        }
+
+        /**
+         * Multi-metric point ranking over the organization population (rank slices included). The
+         * bare long-form struct route loses the per-metric rank identity, so the in-memory rank
+         * slice cannot answer top/bottom questions; the ranked template family must own the shape.
+         * Daily-average (AVG) rankings and filtered/metric-filtered shapes keep their dedicated
+         * families.
+         */
+        boolean isMultiMetricRanking() {
+            return intent == BankIntentType.RANKING && metricsCount() > 1 && !anyMetricAverage()
                     && metricFilterCount() == 0
                     && dimensions().equals(List.of(ORGANIZATION_DIMENSION));
         }
@@ -518,6 +630,30 @@ public class BankQueryPlanCompiler {
     }
 
     /**
+     * Multi-metric threshold contract (W4a defect 2): the SQL template already computes each
+     * metric's provincial average, gap and meets_condition over the full population, so the
+     * projection only passes the per-metric threshold facts through with organization identity.
+     */
+    private BankResultProjector.Contract multiMetricProvinceAverageThresholdResultContract(
+            BankQueryPlan plan, List<ResolvedMetric> metrics, SchemaIndex index) {
+        List<BankResultProjector.MetricBinding> bindings = metrics.stream()
+                .map(metric -> BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("metric_value")
+                        .metricCode(metricCode(metric.schemaElement())).build())
+                .sorted(java.util.Comparator
+                        .comparing(BankResultProjector.MetricBinding::getMetricCode))
+                .toList();
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
+                bindings);
+    }
+
+    private List<String> multiMetricProvinceAverageThresholdOutputColumns() {
+        return List.of(ORGANIZATION_DIMENSION, "metric_code", "metric_value",
+                "provincial_average", "gap_value", "meets_condition");
+    }
+
+    /**
      * The auditable projection contract for the per-day province-average comparison. The fixed
      * output column order org_code, org_name, days_above_province_average, observation_count,
      * above_ratio_percent is shared verbatim by the projector and any downstream golden-label
@@ -625,6 +761,11 @@ public class BankQueryPlanCompiler {
                 .selectedOrganizationCodes(
                         plan.getOrganizations().stream().map(BankQueryPlan.Organization::getCode)
                                 .filter(StringUtils::isNotBlank).sorted().toList())
+                // The SQL already ranks the full population; rank slices stay declarative so the
+                // projector can cut the requested top/bottom ranks from the stable ROW_NUMBER
+                // ordinals instead of recomputing ranks from truncated rows.
+                .topRankLimit(rankFilterLimit(plan, "rank"))
+                .bottomRankLimit(rankFilterLimit(plan, "rank_from_bottom"))
                 .build();
     }
 

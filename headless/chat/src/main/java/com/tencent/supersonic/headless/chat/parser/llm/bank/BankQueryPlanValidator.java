@@ -59,6 +59,7 @@ public class BankQueryPlanValidator {
         validateFilters(plan, hints, errors);
         validateCalculation(plan, hints, errors);
         validateDerivedMetrics(plan, hints, errors);
+        validateRankChangeContract(plan, errors);
         validateOrderingAndLimit(plan, hints, errors);
         validateOutput(plan, hints, errors);
         validateAbsoluteThresholdContract(plan, errors);
@@ -101,8 +102,10 @@ public class BankQueryPlanValidator {
         Stream<String> metrics = safe(plan.getMetrics())
                 .flatMap(metric -> Stream.of(metric.getBizName(), metric.getAlias()));
         Stream<String> derivedMetrics =
-                safe(plan.getDerivedMetrics()).flatMap(derived -> Stream.of(derived.getMetricCode(),
-                        derived.getNumerator(), derived.getDenominator(), derived.getName()));
+                safe(plan.getDerivedMetrics()).flatMap(derived -> Stream.of(
+                        Stream.of(derived.getMetricCode(), derived.getNumerator(),
+                                derived.getDenominator(), derived.getName()),
+                        safe(derived.getNumeratorOperands())).flatMap(stream -> stream));
         Stream<String> organizations = safe(plan.getOrganizations()).flatMap(
                 organization -> Stream.of(organization.getCode(), organization.getBizName()));
         Stream<String> filters = safe(plan.getFilters()).flatMap(filter -> Stream.concat(
@@ -193,7 +196,8 @@ public class BankQueryPlanValidator {
                     "trend requires the semantic date dimension"));
         }
         if (plan.getCalculation() != null
-                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.CHANGE
+                && (plan.getCalculation().getType() == BankQueryPlan.CalculationType.CHANGE
+                        || plan.getCalculation().getType() == BankQueryPlan.CalculationType.RANK_CHANGE)
                 && dimensions.stream().anyMatch(TIME_DIMENSIONS::contains)) {
             errors.add(error("CHANGE_DATE_DIMENSION_FORBIDDEN",
                     "change comparison dates belong in time and must not group by bank_data_date"));
@@ -381,7 +385,8 @@ public class BankQueryPlanValidator {
             }
         }
         for (SemanticIntentHints.RequiredFilter required : hints.getRequiredFilters()) {
-            if (rankedChangeContract(plan) && isRankFieldName(required.field())) {
+            if ((rankedChangeContract(plan) || isRankChangePlan(plan))
+                    && isRankFieldName(required.field())) {
                 // Ranked-change results carry the full organization population; echoing the
                 // rank filter in the plan is optional metadata, not a compiled condition.
                 continue;
@@ -527,9 +532,11 @@ public class BankQueryPlanValidator {
         BankQueryPlan.TimeComparison comparison =
                 plan.getTime() == null ? null : plan.getTime().getComparison();
         if (comparison != null && comparison != BankQueryPlan.TimeComparison.NONE
-                && calculation.getType() != BankQueryPlan.CalculationType.CHANGE) {
+                && calculation.getType() != BankQueryPlan.CalculationType.CHANGE
+                && calculation.getType() != BankQueryPlan.CalculationType.RANK_CHANGE) {
             errors.add(error("COMPARISON_CALCULATION_REQUIRED",
-                    "a non-NONE time comparison requires calculation.type=CHANGE"));
+                    "a non-NONE time comparison requires calculation.type=CHANGE or "
+                            + "calculation.type=RANK_CHANGE"));
         }
         if (calculation.getType() == BankQueryPlan.CalculationType.CHANGE
                 && comparison == BankQueryPlan.TimeComparison.NONE) {
@@ -562,7 +569,11 @@ public class BankQueryPlanValidator {
                         && plan.getMetrics() != null && plan.getMetrics().size() >= 2
                         && (hints.getExpectedIntent() == BankIntentType.RATIO
                                 || hints.getExpectedIntent() == BankIntentType.UNKNOWN
-                                || hints.getExpectedIntent() == BankIntentType.AGGREGATION))) {
+                                || hints.getExpectedIntent() == BankIntentType.AGGREGATION))
+                // Cross-period rank change keeps the CHANGE intent for its time comparison but
+                // declares its own calculation family.
+                && !(calculation.getType() == BankQueryPlan.CalculationType.RANK_CHANGE
+                        && hints.getExpectedIntent() == BankIntentType.CHANGE)) {
             errors.add(error("CALCULATION_MISMATCH",
                     "calculation type conflicts with financial intent"));
         }
@@ -573,16 +584,35 @@ public class BankQueryPlanValidator {
         if (calculation.getType() == BankQueryPlan.CalculationType.RATIO) {
             List<String> metricOrder = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
                     .filter(StringUtils::isNotBlank).toList();
+            boolean compositeDenominator = compositeRatioDenominatorMatches(plan, metricOrder,
+                    calculation.getBaseline());
             if (metricOrder.size() < 2 || StringUtils.isBlank(calculation.getBaseline())) {
                 errors.add(error("RATIO_DENOMINATOR_REQUIRED",
                         "ratio requires an explicit second selected metric as denominator"));
-            } else if (!metricOrder.get(1).equals(calculation.getBaseline())) {
+            } else if (!metricOrder.get(1).equals(calculation.getBaseline())
+                    && !compositeDenominator) {
                 errors.add(error("RATIO_DENOMINATOR_MISMATCH",
                         "ratio denominator must be the second selected metric"));
-            } else {
+            } else if (!compositeDenominator) {
                 validateRatioOperands(hints, metricOrder, errors);
             }
         }
+    }
+
+    /**
+     * Composite-numerator ratio plans (numerator = sum of K base metrics over one denominator)
+     * keep the natural operand order: every sum operand first, the single denominator last. The
+     * baseline must be that last selected metric and a matching composite derived metric must
+     * declare the same denominator.
+     */
+    private boolean compositeRatioDenominatorMatches(BankQueryPlan plan,
+            List<String> metricOrder, String baseline) {
+        if (StringUtils.isBlank(baseline) || metricOrder.size() < 3
+                || !metricOrder.get(metricOrder.size() - 1).equals(baseline)) {
+            return false;
+        }
+        return safe(plan.getDerivedMetrics()).anyMatch(item -> isCompositeDerivedMetric(item)
+                && baseline.equals(item.getDenominator()));
     }
 
     /**
@@ -661,7 +691,13 @@ public class BankQueryPlanValidator {
             }
             return;
         }
-        if (required.isEmpty()) {
+        List<BankQueryPlan.DerivedMetric> single =
+                derived.stream().filter(item -> !isCompositeDerivedMetric(item))
+                        .collect(Collectors.toList());
+        // Composite-numerator ratios (sum of K base metrics over one denominator) have no
+        // catalog-derived evidence to match; they are admitted on their own whitelist shape.
+        // Any single-numerator derived metric still requires exact mapper evidence.
+        if (required.isEmpty() && !single.isEmpty()) {
             errors.add(error("DERIVED_METRIC_UNEXPECTED",
                     "plan contains a derived metric outside mapper evidence"));
             return;
@@ -680,12 +716,17 @@ public class BankQueryPlanValidator {
         for (BankQueryPlan.DerivedMetric item : derived) {
             validateDerivedMetricItem(item, seen, errors);
         }
-        if (derived.size() != required.size()) {
+        if (single.isEmpty()) {
+            if (!required.isEmpty()) {
+                errors.add(error("DERIVED_METRIC_MISMATCH",
+                        "plan derived metrics must match the recognized derived metric specifications"));
+            }
+        } else if (single.size() != required.size()) {
             errors.add(error("DERIVED_METRIC_MISMATCH",
                     "plan derived metrics must match the recognized derived metric specifications"));
         } else {
-            for (int index = 0; index < derived.size(); index++) {
-                if (!matches(required.get(index), derived.get(index))) {
+            for (int index = 0; index < single.size(); index++) {
+                if (!matches(required.get(index), single.get(index))) {
                     errors.add(error("DERIVED_METRIC_MISMATCH",
                             "plan derived metrics must match the recognized derived metric "
                                     + "specifications exactly, in order"));
@@ -696,10 +737,14 @@ public class BankQueryPlanValidator {
         List<String> planMetrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
                 .filter(StringUtils::isNotBlank).collect(Collectors.toList());
         for (BankQueryPlan.DerivedMetric item : derived) {
-            if (!containsIgnoreCase(planMetrics, item.getNumerator())) {
-                errors.add(error("DERIVED_METRIC_OPERAND_REQUIRED",
-                        "derived metric numerator must also be selected as a direct metric: "
-                                + item.getNumerator()));
+            List<String> operands = isCompositeDerivedMetric(item)
+                    ? item.getNumeratorOperands() : List.of(item.getNumerator());
+            for (String operand : operands) {
+                if (!containsIgnoreCase(planMetrics, operand)) {
+                    errors.add(error("DERIVED_METRIC_OPERAND_REQUIRED",
+                            "derived metric numerator must also be selected as a direct metric: "
+                                    + operand));
+                }
             }
             if (!containsIgnoreCase(planMetrics, item.getDenominator())) {
                 errors.add(error("DERIVED_METRIC_OPERAND_REQUIRED",
@@ -707,6 +752,11 @@ public class BankQueryPlanValidator {
                                 + item.getDenominator()));
             }
         }
+    }
+
+    private static boolean isCompositeDerivedMetric(BankQueryPlan.DerivedMetric item) {
+        return item != null && item.getNumeratorOperands() != null
+                && !item.getNumeratorOperands().isEmpty();
     }
 
     private void validateDerivedMetricItem(BankQueryPlan.DerivedMetric item, Set<String> seen,
@@ -723,6 +773,10 @@ public class BankQueryPlanValidator {
         if (!seen.add(code)) {
             errors.add(error("DERIVED_METRIC_DUPLICATE",
                     "derived metrics must not repeat a metric code: " + code));
+        }
+        if (isCompositeDerivedMetric(item)) {
+            validateCompositeDerivedMetricItem(item, errors);
+            return;
         }
         Matcher matcher = DERIVED_METRIC_CODE.matcher(code);
         if (!matcher.matches()) {
@@ -745,6 +799,61 @@ public class BankQueryPlanValidator {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "derived metric denominator must be a legal ZB### base metric: "
                             + denominator));
+        }
+    }
+
+    /**
+     * Whitelist shape for composite-numerator derived ratios: the code must equal
+     * {@code DERIVED_SUM_<n1>_AND_<n2>[_AND_...]_DIV_<d>}, every operand a distinct legal ZB###
+     * base metric (two or more), the denominator a single legal base metric, and the required
+     * numerator field repeats the first operand so single-operand consumers stay coherent.
+     */
+    private void validateCompositeDerivedMetricItem(BankQueryPlan.DerivedMetric item,
+            List<ValidationError> errors) {
+        String code = item.getMetricCode();
+        List<String> operands = item.getNumeratorOperands();
+        if (operands.isEmpty()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric numeratorOperands requires at least two distinct "
+                            + "ZB### base metrics: " + code));
+            return;
+        }
+        if (operands.stream().anyMatch(operand -> operand == null
+                || !BASE_METRIC_CODE.matcher(operand).matches())) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric numeratorOperands must all be legal ZB### base "
+                            + "metrics: " + code));
+            return;
+        }
+        if (operands.size() < 2) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric numeratorOperands requires at least two distinct "
+                            + "ZB### base metrics: " + code));
+        }
+        if (new LinkedHashSet<>(operands).size() != operands.size()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric numeratorOperands must not repeat an operand: "
+                            + code));
+        }
+        if (!item.getNumerator().equals(operands.get(0))) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric numerator must repeat the first numeratorOperands "
+                            + "entry: " + code));
+        }
+        if (item.getNumerator().equals(item.getDenominator())) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric numerator and denominator must differ: " + code));
+        }
+        if (!BASE_METRIC_CODE.matcher(item.getDenominator()).matches()) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "derived metric denominator must be a legal ZB### base metric: "
+                            + item.getDenominator()));
+        }
+        String expectedCode = "DERIVED_SUM_" + String.join("_AND_", operands) + "_DIV_"
+                + item.getDenominator();
+        if (!expectedCode.equals(code)) {
+            errors.add(error("DERIVED_METRIC_INVALID",
+                    "composite derived metric code must be " + expectedCode + ": " + code));
         }
     }
 
@@ -820,6 +929,44 @@ public class BankQueryPlanValidator {
             errors.add(error("DAYS_ABOVE_PROVINCE_AVERAGE_NO_ORDER_REQUIRED",
                     "days-above-province-average count requires no ordering"));
         }
+    }
+
+    /**
+     * Family contract for the cross-period rank-change query (当期排名 ⋈ 基期排名). Ranks are
+     * computed over the whole (or explicitly selected) organization population for each metric,
+     * so the family forbids derived metrics and rank slices, and requires both period windows:
+     * the current period in startDate/endDate and the earlier baseline period in
+     * baselineStartDate/baselineEndDate.
+     */
+    private void validateRankChangeContract(BankQueryPlan plan, List<ValidationError> errors) {
+        if (!isRankChangePlan(plan)) {
+            return;
+        }
+        if (safe(plan.getDerivedMetrics()).findAny().isPresent()) {
+            errors.add(error("RANK_CHANGE_DERIVED_METRIC_FORBIDDEN",
+                    "rank-change queries rank plain catalog metrics only; remove every derived "
+                            + "metric"));
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time != null && (time.getComparison() == null
+                || time.getComparison() == BankQueryPlan.TimeComparison.NONE
+                || time.getComparison() == BankQueryPlan.TimeComparison.MOM_AND_YOY
+                || time.getBaselineStartDate() == null || time.getBaselineEndDate() == null)) {
+            errors.add(error("RANK_CHANGE_TWO_PERIODS_REQUIRED",
+                    "rank-change queries require two explicit periods: time.comparison="
+                            + "PERIOD_OVER_PERIOD (or YEAR_OVER_YEAR / START_OF_YEAR) with the "
+                            + "earlier period in baselineStartDate/baselineEndDate"));
+        }
+        if (safe(plan.getFilters()).anyMatch(this::isRankFilter)) {
+            errors.add(error("RANK_CHANGE_RANK_FILTER_FORBIDDEN",
+                    "rank-change results carry the full population ranking; rank and "
+                            + "rank_from_bottom filters are illegal in this family"));
+        }
+    }
+
+    private static boolean isRankChangePlan(BankQueryPlan plan) {
+        return plan != null && plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RANK_CHANGE;
     }
 
     /**

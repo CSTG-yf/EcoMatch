@@ -708,7 +708,7 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
-    void rankChangeAcrossPeriodsIsRejectedAsAnUnsupportedQueryShape() {
+    void rankChangeAcrossPeriodsNearMissPlanIsRoutedIntoTheRankChangeFamilyWithRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(
                 planningResponse(rankChangeRequirementsJson(), rankChangePlanJson()));
@@ -721,15 +721,17 @@ class BankPlanGenStrategyTest {
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB017", "ZB011"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
 
-        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+        // The near-miss CHANGE plan is no longer a terminal UNSUPPORTED_QUERY_SHAPE: the shape
+        // owns the RANK_CHANGE family now, so the gate returns a repairable failure whose message
+        // tells the model to declare calculation.type=RANK_CHANGE on the plan only.
+        BankNl2SqlError exception = assertThrows(BankNl2SqlError.class,
                 () -> new TestBankPlanGenStrategy(model).generate(request));
 
-        assertEquals(BankPlanCompilationException.Reason.UNSUPPORTED_QUERY_SHAPE,
-                exception.getReason());
-        assertTrue(exception.getMessage().contains("rank_change_across_periods_unsupported"));
-        // Terminal at the plan gate: no in-strategy repair round is spent on a shape no plan
-        // language can express — the controlled free-SQL fallback owns it downstream.
-        verify(model, times(1)).generate(anyString());
+        assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
+        assertEquals("rank_change_plan_contract_required", exception.getPlanFailureCode());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("rank_change_plan_contract_required"));
         // The rejected attempt is pinned so the parser's COMPILE tool-repair round can rebuild
         // its previous candidate instead of degenerating without a plan.
         assertNotNull(request.getBankRequestContract());

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -96,6 +97,43 @@ class BankQueryPlanCoverageMatrixTest {
                 compiled.getResultContract().getType());
     }
 
+    /**
+     * Synthetic multi-metric threshold + province-average benchmark (W4a defect 2). A threshold
+     * intent asks "which organizations satisfy the benchmark", so the shape must compile through
+     * the threshold template whose rows carry an explicit meets_condition fact; the long-form gap
+     * contract answers the comparison intent instead.
+     */
+    @Test
+    void multiMetricThresholdRoutesToTheWideThresholdContract() {
+        CompiledQuery compiled = assertCompiles(multiMetricProvinceAverageThreshold());
+        assertEquals(
+                BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
+                compiled.getResultContract().getType());
+        assertEquals(List.of("bank_organization", "metric_code", "metric_value",
+                "provincial_average", "gap_value", "meets_condition"),
+                compiled.getOutputColumns());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("WITH bank_org AS"));
+        assertTrue(sql.contains("AS metric_code"));
+        assertTrue(sql.contains("provincial_average"));
+        assertTrue(sql.contains("meets_condition"));
+        assertTrue(sql.contains("ORDER BY metric_code ASC, bank_organization ASC"));
+    }
+
+    /** Comparison intent keeps the long-form aggregation summary + gap contract. */
+    @Test
+    void multiMetricComparisonKeepsTheLongFormGapContract() {
+        CompiledQuery compiled = assertCompiles(multiMetricProvinceAverageComparison());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
+                compiled.getResultContract().getType());
+        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
+                "max_value", "observation_count"), compiled.getOutputColumns());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("bank_daily_values_0 AS"));
+        assertTrue(sql.contains("UNION ALL"));
+        assertFalse(sql.contains("meets_condition"));
+    }
+
     @Test
     void absoluteThresholdKeepsAbsoluteThresholdFamily() {
         CompiledQuery compiled = assertCompiles(absoluteThreshold());
@@ -122,6 +160,52 @@ class BankQueryPlanCoverageMatrixTest {
         CompiledQuery compiled = assertCompiles(derivedRanking());
         assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
                 compiled.getResultContract().getType());
+    }
+
+    /**
+     * Synthetic multi-metric ranking + top/bottom rank slice (W4a defect 1). The ranked template
+     * family must own this shape so the SQL carries metric_code + rank_position identity; the
+     * bare long-form struct route loses that identity and the in-memory rank slice collapses to
+     * an empty result. The end-to-end half feeds the template-shaped rows back through the
+     * projector and requires a non-empty slice with contiguous per-metric ranks.
+     */
+    @Test
+    void multiMetricRankingWithRankSliceKeepsRankedTemplateFamily() {
+        CompiledQuery compiled = assertCompiles(multiMetricRankingWithRankSlice());
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
+                compiled.getResultContract().getType());
+        assertEquals(Integer.valueOf(3), compiled.getResultContract().getTopRankLimit());
+        assertEquals(Integer.valueOf(3), compiled.getResultContract().getBottomRankLimit());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("WITH bank_metric_0 AS"));
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY"));
+        assertTrue(sql.contains("AS rank_position"));
+        assertFalse(sql.contains("RANK()"));
+
+        List<String> codes = List.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011");
+        List<Map<String, Object>> sourceRows = new java.util.ArrayList<>();
+        for (String code : codes) {
+            for (int rank = 1; rank <= 13; rank++) {
+                sourceRows.add(Map.of("metric_code", code,
+                        "bank_organization", String.format("ORG%03d", rank),
+                        "metric_value", new java.math.BigDecimal(200 - rank),
+                        "rank_position", rank));
+            }
+        }
+        BankResultProjector.Projection projection = new BankResultProjector()
+                .project(compiled.getResultContract(), sourceRows);
+        assertTrue(projection.isApplied());
+        assertEquals(
+                List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position"),
+                projection.getColumns());
+        assertEquals(30, projection.getRows().size());
+        for (String code : codes) {
+            List<Object> ranks = projection.getRows().stream()
+                    .filter(row -> code.equals(row.get("metric_code")))
+                    .map(row -> row.get("rank_position")).toList();
+            assertEquals(List.of(1, 2, 3, 11, 12, 13), ranks, code);
+        }
     }
 
     @Test
@@ -161,28 +245,36 @@ class BankQueryPlanCoverageMatrixTest {
     }
 
     /**
-     * Declared UNSUPPORTED shape: "rank change across periods" (机构/指标排名在两个时期间的位次变化).
-     * No plan shape can express a two-period RANK() delta, so the compiler never rejects the
-     * near-miss CHANGE plan on its own — the compiler accepts it below on purpose — and the
-     * strategy-level rank-change gate is the explicit rejection point that keeps the shape out of
-     * the value CHANGE family. Single-period rankings, plain value changes, share/composition
-     * questions and magnitude rankings must all stay outside the trigger.
+     * Dedicated family: "rank change across periods" (机构/指标排名在两个时期间的位次变化) routes
+     * through calculation.type=RANK_CHANGE. The strategy gate enforces family↔question coherence
+     * in both directions — the shape must declare RANK_CHANGE (a near-miss CHANGE plan is a
+     * repairable failure, not a silent wrong-family success) and RANK_CHANGE may not appear on
+     * questions outside the shape — while single-period rankings, plain value changes,
+     * share/composition questions and magnitude rankings all stay outside the trigger.
      */
     @Test
-    void rankChangeAcrossPeriodsIsADeclaredUnsupportedShape() {
+    void rankChangeAcrossPeriodsRoutesIntoTheDedicatedFamily() {
         assertTrue(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
                 "从2024年末到2026年4月末，存款、贷款、不良率、净利润的排名分别变化了多少？"));
         assertTrue(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
                 "各行不良贷款率较年初的排名变动情况如何？"));
 
-        // The near-miss CHANGE plan a model would emit for the shape still compiles: the
-        // compiler alone cannot see the mismatch, which is why the shape is declared
-        // UNSUPPORTED at the strategy gate instead of in the routing table.
-        CompiledQuery compiled = assertCompiles(rankChangeNearMissPlan());
-        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
-                compiled.getResultContract().getType());
+        // The near-miss CHANGE plan a model would first emit for the shape is rejected by the
+        // plan gate as a repairable failure that tells the model to declare RANK_CHANGE.
+        BankQueryPlanParseException required = assertThrows(BankQueryPlanParseException.class,
+                () -> BankPlanGenStrategy.validateRankChangePlanContract(
+                        "从2024年末到2026年4月末，存款、贷款的排名分别变化了多少？",
+                        rankChangeNearMissPlan().plan()));
+        assertTrue(required.getMessage().contains("rank_change_plan_contract_required"));
 
-        // Negative space that must stay supported (never rejected by the gate).
+        // A RANK_CHANGE plan for a question without the shape is equally rejected.
+        BankQueryPlanParseException notApplicable = assertThrows(BankQueryPlanParseException.class,
+                () -> BankPlanGenStrategy.validateRankChangePlanContract(
+                        "某农商行2026年3月末各项存款余额是多少？",
+                        rankChangePlan().plan()));
+        assertTrue(notApplicable.getMessage().contains("rank_change_plan_not_applicable"));
+
+        // Negative space that must stay supported (never routed into the RANK_CHANGE family).
         assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
                 "某农商行从2024年末到2026年4月末，存款和贷款的余额分别变化了多少？"));
         assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
@@ -197,6 +289,91 @@ class BankQueryPlanCoverageMatrixTest {
                 "较年初各家农商行净利润增幅排名前三的是哪些？"));
     }
 
+    /**
+     * End-to-end rank-change family: plan → SQL asserts the two period windows, per-window
+     * ROW_NUMBER ranks and the baseline-current join; then the projector passes the SQL-computed
+     * rank facts through with organization identity (delta positive = moved up).
+     */
+    @Test
+    void rankChangeAcrossPeriodsCompilesTheRankChangeTemplate() {
+        PlanAndHints candidate = rankChangePlan();
+        CompiledQuery compiled = assertCompiles(candidate);
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.RANK_CHANGE_LONG_FORM,
+                compiled.getResultContract().getType());
+        assertEquals(List.of("metric_code", "bank_organization", "baseline_rank", "current_rank",
+                "rank_change"), compiled.getOutputColumns());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("bank_current_values_0 AS"));
+        assertTrue(sql.contains("bank_baseline_values_0 AS"));
+        assertTrue(sql.contains("bank_current_values_1 AS"));
+        // ZB001 and ZB002 are both higher-is-better, so both windows rank DESC.
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY metric_value DESC, bank_organization ASC) AS current_rank"));
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY metric_value DESC, bank_organization ASC) AS baseline_rank"));
+        assertTrue(sql.contains("INNER JOIN"));
+        assertTrue(sql.contains("baseline_rank - bank_current_rank_0.current_rank AS rank_change"));
+        assertTrue(sql.contains("UNION ALL"));
+        assertTrue(sql.contains("ORDER BY metric_code ASC, bank_organization ASC"));
+
+        List<Map<String, Object>> sourceRows = new java.util.ArrayList<>(List.of(
+                Map.of("metric_code", "ZB001", "bank_organization", "ORG002",
+                        "baseline_rank", 1L, "current_rank", 2L, "rank_change", -1L),
+                Map.of("metric_code", "ZB001", "bank_organization", "ORG001",
+                        "baseline_rank", 2L, "current_rank", 1L, "rank_change", 1L),
+                Map.of("metric_code", "ZB002", "bank_organization", "ORG001",
+                        "baseline_rank", 3L, "current_rank", 3L, "rank_change", 0L),
+                Map.of("metric_code", "ZB002", "bank_organization", "ORG002",
+                        "baseline_rank", 2L, "current_rank", 1L, "rank_change", 1L)));
+        BankResultProjector.Projection projection = new BankResultProjector()
+                .project(compiled.getResultContract(), sourceRows);
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("metric_code", "org_code", "org_name", "baseline_rank",
+                "current_rank", "rank_change"), projection.getColumns());
+        assertEquals(4, projection.getRows().size());
+        assertEquals(List.of("ZB001", "ORG001", 2L, 1L, 1L),
+                projection.getRows().stream().filter(row -> "ORG001".equals(row.get("org_code"))
+                        && "ZB001".equals(row.get("metric_code")))
+                        .map(row -> List.of(row.get("metric_code"), row.get("org_code"),
+                                row.get("baseline_rank"), row.get("current_rank"),
+                                row.get("rank_change"))).findFirst().orElse(List.of()));
+    }
+
+    /**
+     * Shape contract (test r5 JDBC_GRAMMAR root cause): the semantic field registration drops
+     * every field name that also appears as an alias in the S2SQL, so aliasing a semantic
+     * dimension ({@code ... AS bank_organization}) silently removes org_code from the physical
+     * field set and H2 rejects the executed SQL with column-not-found. The rank-change UNION and
+     * the threshold values-vs-average join must therefore carry no dimension alias anywhere.
+     */
+    @Test
+    void familyTemplatesKeepTheOuterQueryASingleUnqualifiedSelect() {
+        assertNoDimensionAliasAndSingleUnqualifiedOuterSelect(
+                assertCompiles(rankChangePlan()).getS2sql(),
+                "bank_rank_change_output",
+                "metric_code, bank_organization, baseline_rank, current_rank, rank_change");
+        assertNoDimensionAliasAndSingleUnqualifiedOuterSelect(
+                assertCompiles(multiMetricProvinceAverageThreshold()).getS2sql(),
+                "bank_gap",
+                "bank_organization, metric_code, metric_value, provincial_average,\n"
+                        + "       gap_value, meets_condition");
+    }
+
+    private static void assertNoDimensionAliasAndSingleUnqualifiedOuterSelect(
+            String sql, String outputCte, String outerSelectList) {
+        assertFalse(sql.matches("(?is).*\\bAS\\s+`?bank_organization`?\\b.*"),
+                () -> "semantic dimension must never be aliased in S2SQL:\n" + sql);
+        String trimmed = sql.trim();
+        assertTrue(trimmed.startsWith("WITH "), () -> sql);
+        String marker = ")\nSELECT " + outerSelectList + "\nFROM " + outputCte;
+        int outer = trimmed.indexOf(marker);
+        assertTrue(outer >= 0,
+                () -> "outer single SELECT over " + outputCte + " missing:\n" + sql);
+        String tail = trimmed.substring(outer);
+        assertFalse(tail.contains("UNION ALL"), () -> sql);
+        assertFalse(tail.matches("(?s).*[a-zA-Z_][a-zA-Z_0-9]*\\.[a-zA-Z_][a-zA-Z_0-9]+.*"),
+                () -> "outer query must not use qualified references:\n" + tail);
+    }
+
     /** The value CHANGE plan closest to a rank-change question (correct facts, wrong semantics). */
     private PlanAndHints rankChangeNearMissPlan() {
         BankQueryPlan plan = basePlan(BankIntentType.CHANGE, List.of("ZB001", "ZB002"),
@@ -207,6 +384,50 @@ class BankQueryPlanCoverageMatrixTest {
                 BankQueryPlan.CalculationType.CHANGE, List.of(), List.of(), null,
                 List.of("ZB001", "ZB002"));
         return value(plan, BankIntentType.CHANGE, List.of("ZB001", "ZB002"), List.of("ORG004"));
+    }
+
+    /** Synthetic cross-period rank-change plan: two metrics, both period windows, province-wide. */
+    private PlanAndHints rankChangePlan() {
+        BankQueryPlan plan = basePlan(BankIntentType.CHANGE, List.of("ZB001", "ZB002"),
+                List.of("bank_organization"), List.of(),
+                time(LocalDate.of(2026, 3, 31), LocalDate.of(2026, 3, 31),
+                        BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
+                        LocalDate.of(2024, 12, 31), LocalDate.of(2024, 12, 31)),
+                BankQueryPlan.CalculationType.RANK_CHANGE, List.of(), List.of(), null,
+                List.of("bank_organization", "ZB001", "ZB002"));
+        return value(plan, BankIntentType.CHANGE, List.of("ZB001", "ZB002"), List.of());
+    }
+
+    /**
+     * Composite-numerator ratio (numerator = ZB003 + ZB004 over denominator ZB001). The plan
+     * declares one composite derived metric; the template sums the operands as the numerator and
+     * every other part of the ratio template stays unchanged.
+     */
+    @Test
+    void compositeNumeratorRatioCompilesTheSumNumeratorTemplate() {
+        PlanAndHints candidate = compositeNumeratorRatio();
+        CompiledQuery compiled = assertCompiles(candidate);
+        assertEquals(BankResultProjector.ProjectionType.RATIO,
+                compiled.getResultContract().getType());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("(SUM(ZB003) + SUM(ZB004)) AS numerator_value"));
+        assertTrue(sql.contains("SUM(ZB001) AS denominator_value"));
+        assertTrue(sql.contains("numerator_value * 100.0 / denominator_value"));
+    }
+
+    private PlanAndHints compositeNumeratorRatio() {
+        BankQueryPlan plan = basePlan(BankIntentType.RATIO, List.of("ZB003", "ZB004", "ZB001"),
+                List.of("bank_organization"), List.of("ORG004"),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.RATIO, List.of(), List.of(), null,
+                List.of("bank_organization", "ZB003", "ZB004", "ZB001"));
+        plan.getCalculation().setBaseline("ZB001");
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_SUM_ZB003_AND_ZB004_DIV_ZB001").numerator("ZB003")
+                .numeratorOperands(List.of("ZB003", "ZB004")).denominator("ZB001")
+                .name("对公与个人存款合计占各项存款比例").build()));
+        return value(plan, BankIntentType.RATIO, List.of("ZB003", "ZB004", "ZB001"),
+                List.of("ORG004"));
     }
 
     private CompiledQuery assertCompiles(PlanAndHints candidate) {
@@ -334,6 +555,36 @@ class BankQueryPlanCoverageMatrixTest {
         return new PlanAndHints(plan, hints);
     }
 
+    /** Synthetic two-metric threshold against the province average, province-wide. */
+    private PlanAndHints multiMetricProvinceAverageThreshold() {
+        BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, List.of("ZB001", "ZB002"),
+                List.of("bank_organization"), List.of(),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT,
+                List.of(filter("benchmark", "COMPARE", "PROVINCE_AVERAGE")), List.of(), null,
+                List.of("bank_organization", "ZB001", "ZB002"));
+        SemanticIntentHints hints = value(plan, BankIntentType.THRESHOLD,
+                List.of("ZB001", "ZB002"), List.of(),
+                List.of(new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
+                        "PROVINCE_AVERAGE"))).hints();
+        return new PlanAndHints(plan, hints);
+    }
+
+    /** Synthetic two-metric comparison against the province average, single organization. */
+    private PlanAndHints multiMetricProvinceAverageComparison() {
+        BankQueryPlan plan = basePlan(BankIntentType.COMPARISON, List.of("ZB001", "ZB002"),
+                List.of("bank_organization"), List.of("ORG004"),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT,
+                List.of(filter("benchmark", "COMPARE", "PROVINCE_AVERAGE")), List.of(), null,
+                List.of("bank_organization", "ZB001", "ZB002"));
+        SemanticIntentHints hints = value(plan, BankIntentType.COMPARISON,
+                List.of("ZB001", "ZB002"), List.of("ORG004"),
+                List.of(new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
+                        "PROVINCE_AVERAGE"))).hints();
+        return new PlanAndHints(plan, hints);
+    }
+
     private PlanAndHints absoluteThreshold() {
         BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, List.of("ZB001"),
                 List.of("bank_organization"), List.of("ORG004"),
@@ -380,6 +631,23 @@ class BankQueryPlanCoverageMatrixTest {
         return value(plan, BankIntentType.RANKING, List.of("ZB001", "ZB002"), List.of("ORG004"),
                 List.of(), List.of(new SemanticIntentHints.DerivedMetricSpec(
                         "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")));
+    }
+
+    /** Synthetic five-metric point ranking with top-3/bottom-3 rank slices, province-wide. */
+    private PlanAndHints multiMetricRankingWithRankSlice() {
+        BankQueryPlan plan = basePlan(BankIntentType.RANKING,
+                List.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011"),
+                List.of("bank_organization"), List.of(),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT,
+                List.of(filter("rank", "LTE", "3"),
+                        filter("rank_from_bottom", "LTE", "3")),
+                List.of(order("ZB001", BankQueryPlan.SortDirection.DESC)), 6,
+                List.of("bank_organization", "ZB001", "ZB002", "ZB003", "ZB004", "ZB011"));
+        return value(plan, BankIntentType.RANKING,
+                List.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011"), List.of(),
+                List.of(new SemanticIntentHints.RequiredFilter("rank", "LTE", "3"),
+                        new SemanticIntentHints.RequiredFilter("rank_from_bottom", "LTE", "3")));
     }
 
     private PlanAndHints structureShare() {

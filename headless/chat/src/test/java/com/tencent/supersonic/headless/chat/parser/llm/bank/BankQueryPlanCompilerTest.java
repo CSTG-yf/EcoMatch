@@ -881,9 +881,11 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
-    void shouldCompileSingleOrgMultiMetricProvinceThresholdToComparisonContract() {
-        // The SQL gathers the complete institution population; the result projector then derives
-        // each metric's provincial average and target gap from those aggregation rows.
+    void shouldCompileSingleOrgMultiMetricProvinceThresholdToThresholdContract() {
+        // W4a defect 2: a threshold intent asks which organizations satisfy the benchmark, so the
+        // multi-metric shape compiles through the threshold template. The SQL gathers the complete
+        // institution population, restricts the selected organization only in the outer WHERE, and
+        // publishes an explicit meets_condition per metric.
         BankQueryPlan plan = thresholdPlan();
         plan.setIntent(BankIntentType.THRESHOLD);
         plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
@@ -906,13 +908,17 @@ class BankQueryPlanCompilerTest {
         BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
-        assertTrue(compiled.getS2sql().contains("bank_daily_values_0 AS"));
-        assertTrue(compiled.getS2sql().contains("bank_aggregation_0 AS"));
-        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
-        assertFalse(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
-        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
-                "max_value", "observation_count"), compiled.getOutputColumns());
-        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
+        String s2sql = compiled.getS2sql();
+        assertTrue(s2sql.contains("WITH bank_org AS"));
+        assertTrue(s2sql.contains("'ZB001' AS metric_code"));
+        assertTrue(s2sql.contains("province_average.provincial_average AS provincial_average"));
+        assertTrue(s2sql.contains("AS meets_condition"));
+        // Full-population average: the organization restriction appears once, outside the CTEs.
+        assertEquals(1, occurrences(s2sql, "bank_organization = 'ORG004'"));
+        assertEquals(List.of("bank_organization", "metric_code", "metric_value",
+                "provincial_average", "gap_value", "meets_condition"),
+                compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
                 compiled.getResultContract().getType());
     }
 

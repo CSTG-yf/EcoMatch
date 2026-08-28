@@ -677,24 +677,45 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     /**
      * Plan-level twin gate for the "rank change across periods" question shape: the wording asks
-     * how the RANK POSITION of institutions changed between two period ends. The plan language has
-     * no rank slot, so every plan for this shape silently compiles into a near-miss family (the
-     * value CHANGE family) and returns a wrong-but-plausible result fact — a wrong-family success
-     * the compiler can never detect. The shape is therefore rejected outright as a terminal
-     * {@code UNSUPPORTED_QUERY_SHAPE} so the controlled free-SQL fallback owns it. The rejection
-     * is deterministic and repair-proof: the trigger reads only the question's semantic shape.
+     * how the RANK POSITION of institutions changed between two period ends. That shape now owns
+     * the dedicated RANK_CHANGE query family, so the gate enforces family↔question coherence in
+     * both directions: a plan for this shape must declare calculation.type=RANK_CHANGE (a
+     * near-miss CHANGE/RANKING plan would still compile into a wrong-but-plausible result fact,
+     * which the compiler alone can never detect), and conversely a plan may not declare
+     * RANK_CHANGE for a question outside the shape. Both violations are repairable
+     * {@code VALIDATION_FAILED} parse failures whose messages tell the model exactly which plan
+     * slots to fix. The trigger reads only the question's semantic shape.
      */
-    private void validateRankChangePlanContract(String queryText, BankQueryPlan plan) {
-        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE
-                || !isRankChangeAcrossPeriodsQuestion(queryText)) {
+    static void validateRankChangePlanContract(String queryText, BankQueryPlan plan) {
+        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE) {
             return;
         }
-        throw new BankPlanCompilationException(
-                BankPlanCompilationException.Reason.UNSUPPORTED_QUERY_SHAPE,
-                "rank_change_across_periods_unsupported: 题目要求机构/指标排名在两个时期间的位次变化，"
-                        + "计划语言没有排名槽位，任何 intent×calculation 组合（包括 CHANGE 值变化族与 "
-                        + "RANKING 族）都会把该形状编译成错误的结果事实；该查询形状被显式拒绝，"
-                        + "禁止改用近似查询族作答。");
+        boolean shape = isRankChangeAcrossPeriodsQuestion(queryText);
+        boolean declaresRankChange = plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RANK_CHANGE;
+        if (shape == declaresRankChange) {
+            return;
+        }
+        if (shape) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "rank_change_plan_contract_required: 题目要求机构/指标排名在两个时期间的位次变化，"
+                            + "必须路由进 RANK_CHANGE 查询族；plan 必须声明 calculation.type=RANK_CHANGE，"
+                            + "并保持 intent=CHANGE、time.comparison=PERIOD_OVER_PERIOD（当前期写 "
+                            + "startDate=endDate，基期写 baselineStartDate=baselineEndDate）、"
+                            + "dimensions=[\"bank_organization\"]、orderBy=[]、limit=null、filters=[]"
+                            + "（禁止 rank/rank_from_bottom 过滤器，也不得使用 derivedMetrics）；"
+                            + "当前 plan calculation="
+                            + (plan.getCalculation() == null ? "null"
+                                    : plan.getCalculation().getType())
+                            + "。请仅修正 plan 的 calculation/intent/time/dimensions 槽位后重新输出"
+                            + "完整 planning JSON；不要改动 requirements。");
+        }
+        throw new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "rank_change_plan_not_applicable: 题面未出现跨期排名变化语义（排名词+变化词+跨期基期"
+                        + "三信号），禁止声明 calculation.type=RANK_CHANGE；请改回与题面语义匹配的"
+                        + "查询族后重新输出完整 planning JSON。");
     }
 
     /**

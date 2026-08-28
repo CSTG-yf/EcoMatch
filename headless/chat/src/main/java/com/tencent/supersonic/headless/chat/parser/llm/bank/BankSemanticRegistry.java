@@ -226,7 +226,8 @@ public final class BankSemanticRegistry {
                 "derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
                 "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},
-                "denominator":{"enum":%s},"name":{"type":"string"}}}}}}
+                "denominator":{"enum":%s},"name":{"type":"string"},
+                "numeratorOperands":{"type":["array","null"],"items":{"enum":%s}}}}}}}
                 """
                 .formatted(jsonArray(PLAN_ACTIONS), jsonArray(INTENTS), jsonArray(metricCodes()),
                         jsonArray(AGGREGATIONS), jsonArray(DIMENSIONS),
@@ -234,7 +235,8 @@ public final class BankSemanticRegistry {
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(CALCULATION_TYPES),
                         jsonArray(SORT_DIRECTIONS), jsonArray(derivedMetricCodes()),
-                        jsonArray(metricCodes()), jsonArray(metricCodes()))
+                        jsonArray(metricCodes()), jsonArray(metricCodes()),
+                        jsonArray(metricCodes()))
                 .strip();
     }
 
@@ -251,7 +253,9 @@ public final class BankSemanticRegistry {
                 "items":{"enum":%s}},"derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
                 "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},"denominator":{"enum":%s},
-                "name":{"type":"string"}}}},"organizationCodes":{"type":"array","items":{"enum":%s}},
+                "name":{"type":"string"},
+                "numeratorOperands":{"type":["array","null"],"items":{"enum":%s}}}}},
+                "organizationCodes":{"type":"array","items":{"enum":%s}},
                 "time":{"type":["object","null"],"additionalProperties":false,"required":["startDate",
                 "endDate","granularity","comparison","baselineStartDate","baselineEndDate"],"properties":{
                 "startDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},
@@ -267,6 +271,7 @@ public final class BankSemanticRegistry {
                 .formatted(jsonArray(REQUIREMENT_ACTIONS), jsonArray(REQUIREMENT_INTENTS),
                         jsonArray(metricCodes()), jsonArray(derivedMetricCodes()),
                         jsonArray(metricCodes()), jsonArray(metricCodes()),
+                        jsonArray(metricCodes()),
                         jsonArray(organizationCodes()), jsonArray(TIME_GRANULARITIES),
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(ANSWER_FACT_TYPES))

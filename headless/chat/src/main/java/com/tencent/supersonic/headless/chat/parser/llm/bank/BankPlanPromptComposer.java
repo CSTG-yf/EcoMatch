@@ -412,6 +412,15 @@ public final class BankPlanPromptComposer {
                     3g. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
                         dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
                         返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
+                    3i. 比率分子为多个基础指标之和（复合分子比率，如 (指标A+指标B)/指标C）时：
+                        metrics 按全部加数在前、分母最后一个排列，calculation.type=RATIO、
+                        baseline=分母代码；derivedMetrics 写一个复合派生指标，numeratorOperands
+                        逐项列出全部加数（≥2 个不同 ZB###）、numerator 填第一个加数、
+                        denominator 填分母，metricCode 必须精确写成
+                        DERIVED_SUM_<n1>_AND_<n2>_DIV_<d>。例如分子为对公存款加个人存款、
+                        分母为各项存款时，metricCode 只能写 DERIVED_SUM_ZB003_AND_ZB004_DIV_ZB001。
+                        全部加数与分母都必须保留在 metrics 与 requirements.metricCodes 中；
+                        不写 numeratorOperands 时保持既有单分子契约不变。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -515,6 +524,28 @@ public final class BankPlanPromptComposer {
                           逐字照抄权威目录中的中文名称，禁止自造别名。
 
                     ════════════════════════════════
+                    专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）
+                    ════════════════════════════════
+                    RANK_CHANGE 跨期排名变化：“从基期到当期，各机构的某些指标排名变化了多少/
+                    位次有何变动”必须使用专用 calculation.type=RANK_CHANGE 查询族，禁止退化为值
+                    变化（CHANGE）或普通 RANKING。plan 槽位形状（日期一律取题面原词对应的真实
+                    期末日期，不得参照或靠近任何示例日期）：
+                    "intent":"CHANGE"，
+                    "metrics":[所选各指标，aggregation=DEFAULT]，
+                    "dimensions":["bank_organization"]，
+                    "time" 的当期写 startDate=endDate=题面当期日期、基期写
+                    baselineStartDate=baselineEndDate=题面基期日期，granularity=DAY，
+                    "calculation":{"type":"RANK_CHANGE","baseline":null}，
+                    "filters":[]、"orderBy":[]、"limit":null。
+                    基期与 comparison 的选择一律沿用本提示的共享 time 基期规则（“较年初”=
+                    START_OF_YEAR、基期为上一自然年 12-31 等），本族不新增任何基期解释。
+                    filters 禁止 rank/rank_from_bottom（排名变化看全部/选中机构的位次，不是切片）；
+                    derivedMetrics 必须为空；output.columns 仍只写 bank_organization 和所选指标。
+                    编译器会返回 metric_code、baseline_rank、current_rank、rank_change 事实列，
+                    rank_change=基期名次-当期名次，正数表示位次上升；不要把这些结果列写进
+                    output.columns 或 orderBy。
+
+                    ════════════════════════════════
                     PLAN 严格合同
                     ════════════════════════════════
                     1. 指标只能是目录中完全一致的大写 ZB###；机构只能是完全一致的 ORG###。禁止近义词、拼音、
@@ -558,7 +589,8 @@ public final class BankPlanPromptComposer {
             requirements.action=CLARIFY 时 plan 必须为 null。一致性按下面的映射逐条核对：
             REQUIREMENTS↔PLAN 一致性映射表：
             - intent 原样继承；time（四项日期+granularity+comparison）原样继承。
-            - metricCodes ⇔ plan.metrics 的 bizName 集合，顺序一致；derivedMetrics 原样照抄。
+            - metricCodes ⇔ plan.metrics 的 bizName 集合，顺序一致；derivedMetrics 原样照抄
+              （唯一例外：复合分子比率见 PLAN 规则 3i，requirements.derivedMetrics 保持 []）。
               answerFactTypes 含 CHANGE_VALUE 或 CHANGE_RATE ⇔ calculation.type=CHANGE 且 comparison 非 NONE；
               answerFactTypes 含 RATIO_VALUE：点值比率 ⇔ calculation.type=RATIO 且 baseline=分母代码，
               目录派生指标 ⇔ derivedMetrics 非空。
@@ -592,16 +624,16 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v58-single-pass";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v61-single-pass";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;
 
     /** Version of the REQUIREMENTS stage prefix; part of the stage cache key. */
-    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v6-stage-split";
+    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v8-stage-split";
 
-    /** Version of the PLAN stage prefix; part of the stage cache key. */
-    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v54-stage-split";
+    /** Version of the PLAN stage prefix; part of the cache key. */
+    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v57-stage-split";
 
     private BankPlanPromptComposer() {}
 

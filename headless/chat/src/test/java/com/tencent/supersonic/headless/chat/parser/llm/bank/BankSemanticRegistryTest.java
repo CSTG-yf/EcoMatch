@@ -183,6 +183,31 @@ class BankSemanticRegistryTest {
     }
 
     @Test
+    void planCapabilityCatalogStaysFreeOfFamilyProseDuplicates() {
+        // 防再弱化闸门：RANK_CHANGE / 复合分子比率的教学文案只允许出现在
+        // BankPlanPromptComposer 的专用规则段落（与每个含目录的 PLAN 提示词同现），
+        // 目录必须保持 v58 的篇幅与版式，防止家族散文挤占枚举速查区、
+        // 弱化日期锚定与基期选择判例的相对显著性（v59 官方 smoke 回归根因之一）。
+        String capabilities = BankSemanticRegistry.planCapabilityCatalog();
+        String shared = BankSemanticRegistry.sharedCatalog();
+
+        assertFalse(capabilities.contains("numeratorOperands"),
+                "compound-ratio prose belongs to composer rule 3i, not the catalog");
+        assertFalse(capabilities.contains("DERIVED_SUM"));
+        assertFalse(capabilities.contains("跨期排名变化"),
+                "RANK_CHANGE prose belongs to the composer family block, not the catalog");
+        assertFalse(shared.contains("RANK_CHANGE"));
+        assertFalse(shared.contains("numeratorOperands"));
+
+        // 能力发现靠枚举速览而非目录散文：calculation type 枚举仍必须列出 RANK_CHANGE。
+        assertTrue(BankSemanticRegistry.calculationTypes().contains("RANK_CHANGE"));
+        assertTrue(capabilities.contains("RANK_CHANGE"),
+                "the calculation-type enum listing must still expose RANK_CHANGE");
+        // 复合分子比率仍作为 schema 形状契约对模型开放（允许该字段存在），但目录不重复教学。
+        assertTrue(BankQueryPlan.JSON_SCHEMA.contains("numeratorOperands"));
+    }
+
+    @Test
     void filterContractIsTheCompleteSingleSourceForFilterFieldsAndOperators() {
         String contract = BankSemanticRegistry.filterContract();
 

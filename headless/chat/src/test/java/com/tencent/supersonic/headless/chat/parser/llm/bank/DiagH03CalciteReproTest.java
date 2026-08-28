@@ -236,10 +236,18 @@ class DiagH03CalciteReproTest {
                         .requiredEndDate(java.time.LocalDate.of(2025, 11, 30))
                         .maxLimit(100).build(),
                 schema());
-        // Without derived metrics the same shape routes to the GENERIC_DIRECT family which is
-        // rendered through the struct S2SQL renderer, not an S2SQL template string.
-        assertEquals(CompilationRoute.STRUCT, compiled.getRoute(),
-                "derived-free ranking must not silently fall into another S2SQL template");
+        // W4a fix: the derived-free multi-metric ranking now routes through the same
+        // full-population ranked template family (bank_metric_N CTEs + ROW_NUMBER), so the result
+        // carries metric_code + rank_position identity; it no longer falls back to the bare
+        // struct long-form whose in-memory rank slice returned an empty row set.
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute(),
+                "derived-free multi-metric ranking must compile through the ranked template");
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("WITH bank_metric_0 AS"));
+        assertTrue(sql.contains("ROW_NUMBER() OVER (ORDER BY"));
+        assertTrue(sql.contains("AS rank_position"));
+        assertFalse(sql.contains("DERIVED_"));
+        validateAndOptimize(sql, "derived-free ranking");
     }
 
     /**
