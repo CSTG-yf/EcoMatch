@@ -220,12 +220,15 @@ public class FixedSystemPrefixLlmCache {
 
     /**
      * Resolves the llama.cpp chat options for one call: an explicit request (warm-up or thinking)
-     * wins; otherwise thinking wins when enabled; otherwise a safety cap bounds the decode, but
-     * only for local llama.cpp endpoints. Remote OpenAI-compatible endpoints (e.g. the remote
-     * DeepSeek reasoning endpoint) must not receive the implicit local safety cap, which would be
-     * consumed by {@code reasoning_content} and truncate the returned JSON.
+     * wins; otherwise thinking wins when enabled; otherwise a safety cap bounds the decode. The
+     * cap is always explicit for local llama.cpp endpoints and for remote endpoints whose model
+     * config carries a bounded reasoning budget ({@code reasoningEffort}); remote reasoning
+     * endpoints without that bound stay uncapped because server-side reasoning tokens would
+     * silently consume an implicit decode budget and truncate the returned JSON. Uncapped remote
+     * calls fall back to the provider default, which truncated long plan JSON in official runs
+     * (613/1114-token MALFORMED_JSON), so bounded-reasoning endpoints must send the cap.
      */
-    LlamaCppPrefixChatClient.ChatOptions resolveOptions(String baseUrl,
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(ChatModelConfig config,
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         if (requestedOptions != null) {
             return requestedOptions;
@@ -233,16 +236,34 @@ public class FixedSystemPrefixLlmCache {
         if (enableThinking) {
             return LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens);
         }
-        if (safetyMaxTokens > 0 && LlamaCppPrefixChatClient.usesLlamaCppExtensions(baseUrl)) {
+        String baseUrl = config == null ? null : config.getBaseUrl();
+        if (safetyMaxTokens > 0
+                && (LlamaCppPrefixChatClient.usesLlamaCppExtensions(baseUrl)
+                        || hasBoundedRemoteReasoning(config))) {
             return LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens);
         }
         return LlamaCppPrefixChatClient.ChatOptions.defaults();
     }
 
-    /** Legacy single-arg overload; resolves against the configured safety cap for local endpoints. */
+    private static boolean hasBoundedRemoteReasoning(ChatModelConfig config) {
+        return config != null && StringUtils.isNotBlank(config.getReasoningEffort());
+    }
+
+    /** Test/legacy bridge: baseUrl-only resolution with no model-level reasoning bound. */
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(String baseUrl,
+            LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
+        ChatModelConfig config = null;
+        if (baseUrl != null) {
+            config = new ChatModelConfig();
+            config.setBaseUrl(baseUrl);
+        }
+        return resolveOptions(config, requestedOptions);
+    }
+
+    /** Legacy single-arg overload; resolves without endpoint or reasoning-bound knowledge. */
     LlamaCppPrefixChatClient.ChatOptions resolveOptions(
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
-        return resolveOptions(null, requestedOptions);
+        return resolveOptions((ChatModelConfig) null, requestedOptions);
     }
 
     static boolean usesLlamaCppPrefixTransport(ChatModelConfig config) {
@@ -284,10 +305,11 @@ public class FixedSystemPrefixLlmCache {
             String dynamicUserContent, LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         boolean llamaCpp = usesLlamaCppPrefixTransport(config);
         LlamaCppPrefixChatClient.ChatOptions options = bindStageSchema(config,
-                resolveOptions(config == null ? null : config.getBaseUrl(), requestedOptions));
-        boolean structuredOpenAi = usesOpenAiStructuredTransport(config)
-                && options.hasJsonSchema();
-        if (llamaCpp || structuredOpenAi) {
+                resolveOptions(config, requestedOptions));
+        // Every OpenAI-compatible remote goes through our direct client so configured knobs such
+        // as reasoning_effort reach the wire even without a bound response schema.
+        boolean directOpenAiCompatible = !llamaCpp && usesOpenAiStructuredTransport(config);
+        if (llamaCpp || directOpenAiCompatible) {
             try {
                 LlamaCppPrefixChatClient.ChatResult result =
                         openAiCompatibleClient.chat(config, systemPrefix, dynamicUserContent,

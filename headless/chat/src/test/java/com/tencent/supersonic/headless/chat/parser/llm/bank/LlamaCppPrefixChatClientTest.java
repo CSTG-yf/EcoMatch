@@ -106,6 +106,35 @@ class LlamaCppPrefixChatClientTest {
     }
 
     @Test
+    void reasoningEffortTravelsOnOpenAiWireAndStaysOffLlamaCppPayloads() {
+        ChatModelConfig cloud = plainChatConfig();
+        cloud.setBaseUrl("https://www.autodl.art/api/v1");
+        cloud.setReasoningEffort(" low ");
+
+        ObjectNode cloudBody = new LlamaCppPrefixChatClient().createRequestBody(cloud,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true);
+        assertEquals("low", cloudBody.path("reasoning_effort").asText());
+
+        ChatModelConfig local = plainChatConfig();
+        local.setBaseUrl("http://127.0.0.1:8899");
+        local.setReasoningEffort("low");
+
+        ObjectNode localBody = new LlamaCppPrefixChatClient().createRequestBody(local,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true);
+        assertFalse(localBody.has("reasoning_effort"),
+                "llama.cpp payloads keep their native thinking switches");
+
+        ChatModelConfig unset = plainChatConfig();
+        unset.setBaseUrl("https://api.openai.com/v1");
+
+        assertFalse(new LlamaCppPrefixChatClient().createRequestBody(unset,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true).has("reasoning_effort"));
+    }
+
+    @Test
     void publicOpenAiEndpointUsesStrictSchemaWithEveryPropertyRequired() {
         ChatModelConfig config = jsonSchemaConfig();
         config.setBaseUrl("https://www.autodl.art/api/v1");
@@ -301,6 +330,15 @@ class LlamaCppPrefixChatClientTest {
         ChatModelConfig config = new ChatModelConfig();
         config.setJsonFormat(true);
         config.setJsonFormatType("json_schema");
+        return config;
+    }
+
+    private static ChatModelConfig plainChatConfig() {
+        ChatModelConfig config = new ChatModelConfig();
+        config.setProvider("OPEN_AI");
+        config.setApiKey("sk-test");
+        config.setTemperature(0.0d);
+        config.setJsonFormat(false);
         return config;
     }
 

@@ -103,6 +103,33 @@ class FixedSystemPrefixLlmCacheTest {
     }
 
     @Test
+    void remoteEndpointWithBoundedReasoningEffortGetsExplicitDecodeCap() {
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
+                false, "预热", false, 0, "SINGLE_PASS", 2048);
+
+        ChatModelConfig bounded = new ChatModelConfig();
+        bounded.setBaseUrl("https://www.autodl.art/api/v1");
+        bounded.setReasoningEffort("low");
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 2048),
+                cache.resolveOptions(bounded, null),
+                "remote endpoints with an explicit reasoning budget must send the decode cap "
+                        + "instead of trusting the provider default (plan-JSON truncation)");
+    }
+
+    @Test
+    void remoteEndpointWithoutReasoningBoundKeepsLegacyNoCapProtection() {
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
+                false, "预热", false, 0, "SINGLE_PASS", 2048);
+
+        ChatModelConfig implicitReasoning = new ChatModelConfig();
+        implicitReasoning.setBaseUrl("https://api.deepseek.com/v1");
+        assertEquals(LlamaCppPrefixChatClient.ChatOptions.defaults(),
+                cache.resolveOptions(implicitReasoning, null),
+                "implicit-reasoning remote endpoints stay uncapped: reasoning_content would "
+                        + "consume an implicit decode budget and truncate the JSON");
+    }
+
+    @Test
     void explicitWarmupAndThinkingWinRegardlessOfEndpoint() {
         FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
                 false, "预热", false, 0, "PLAN", 1024);

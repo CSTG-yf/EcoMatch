@@ -273,6 +273,11 @@ public class LlamaCppPrefixChatClient {
         if (config.getTopP() != null) {
             body.put("top_p", config.getTopP());
         }
+        // Reasoning-model budgets (AutoDL/GLM style): "low" effectively disables thinking on
+        // models that refuse enable_thinking=false. Omitted unless explicitly configured.
+        if (!llamaCppExtensions && StringUtils.isNotBlank(config.getReasoningEffort())) {
+            body.put("reasoning_effort", config.getReasoningEffort().strip());
+        }
         if (options.maxTokens() > 0) {
             body.put("max_tokens", options.maxTokens());
         }
