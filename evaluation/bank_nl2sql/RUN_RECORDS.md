@@ -344,3 +344,150 @@ VAL-H-03 归因进行中（见下）。**
 验证链：单题 replay 确认 attempt=1 不再 MALFORMED_JSON、attempt=2 修复被接受、产出与
 r4 通过时逐字节同长（3509 字符）的族模板 SQL、执行返回正确机构行集；随后官方 r6 全量
 确认。v58 提示词 + 全链路修复 + 兜底通道 + 显式 max_tokens 全部在位且 dev 满标。
+
+## 2026-08-28｜GLM-5.3-flash｜v58 + 显式 max_tokens + 兜底开关开｜test r2
+
+**结论：test r2 = 34/40（0.85），较 r1（35/40）-1。兜底通道仍零触发——设计性未命中：
+Hook 只监听编译终态（UNSUPPORTED_*），而 test 失败全部死在 plan 生成/校验阶段或执行后，
+见下。修复（准入扩展 + 排名变化形状声明）进行中。**
+
+同配置相对 r1 的增量：v58 提示词、全链路修复、显式 max_tokens、free-sql-fallback 开。
+
+| 题 | r1 | r2 | 归因 |
+|----|----|----|------|
+| TST-H-04 | fail | fail（同型） | 既有族执行缺陷（rank 切片空行集），兜底无关 |
+| TST-H-10 | fail | fail（同型） | 双阈值契约分歧（宽表+标志 vs 长格式），兜底无关 |
+| TST-H-11 | fail | fail（同型） | 排名跨期变化错编进 CHANGE 值变化族 → **错族成功**，编译不报错，Hook 不可见 |
+| TST-M-19 | fail | fail（同型） | 复合率（不良+逾期占贷款）：plan 阶段 derived_point_ratio_mismatch 预算耗尽 → PARSE_ERROR，**非编译终态**，Hook 不可见 |
+| TST-S-06 | **pass** | fail | SCHEMA_VIOLATION ×2（模型输出故障，方差回归；r1 同题过） |
+| TST-S-07 | fail | fail（同型） | plan 阶段终态拒绝，非编译终态，Hook 不可见 |
+
+通道拆分：MODEL 34/37；FREE_SQL 0 触发（0/0，无编译终态到达）；UNKNOWN 0/3（parse 即终止）。
+
+**结构性结论**：兜底触发器挂错层。真实失败分布 = plan 阶段预算耗尽（3 题）+ 错族成功
+（1 题）+ 既有族缺陷（2 题）。对应修复：
+1. Hook 准入扩展至 plan 阶段预算耗尽终态（覆盖 M-19/S-06/S-07 类）；
+2. 排名跨期变化形状在 plan 校验层显式拒为 UNSUPPORTED_QUERY_SHAPE（覆盖 H-11 类）；
+3. H-04/H-10 属族内缺陷/契约分歧，兜底不应也接不住，需族级修复（另行）。
+
+### 兜底触点修复 + dev r7 回归（2026-08-28 下午）
+
+针对 test r2 暴露的"触发器挂错层"，两项修复（合成单测 + 覆盖矩阵锁定，均未针对 test 题
+面调参）：
+
+1. **plan 阶段预算耗尽准入**（覆盖 M-19/S-06/S-07 类）：BankNl2SqlError 增加
+   planStageExhausted 标记 + 末次失败码；Hook 准入扩为双通道（编译期 4 Reason + plan 期
+   耗尽），triggerReason = `PLAN_STAGE_EXHAUSTED:<failureCode>`；LLMSqlParser 终态重抛前
+   尝试兜底。中间轮、澄清、模型/环境故障仍拒绝；开关关闭行为与原终态完全一致。
+2. **排名跨期变化形状声明**（覆盖 H-11 类）：validateRankChangePlanContract——题面三信号
+   合取（排名词 × 变化词 × 基线时间）且排除幅度排名（增幅/降幅…属 CHANGE 族），命中即抛
+   UNSUPPORTED_QUERY_SHAPE（`rank_change_across_periods_unsupported`），经既有编译期准入
+   转兜底。plan gate 前把 contract/plan JSON pin 到请求，保证 COMPILE repair 轮能重建
+   previous candidate（LLMSqlParser 相应一行 guard）。
+
+合并后 bank 包定向单测 484/484 绿；dev r7 = **40/40（1.000）**，MODEL 40/40、FREE_SQL 0
+触发（dev 无该类失败，符合预期）、parse p50 8.6s——主路径零回归。test r3 终验待用户指令。
+
+## 2026-08-28｜GLM-5.3-flash｜同 r7 配置｜test r3
+
+**结论：test r3 = 33/40（0.825），较 r2 再 -1。FREE_SQL 仍零触发（此后定位为全局参数解析
+缺陷，见下节——r3 实际上从未真正开启过兜底通道）。**
+
+| 题 | r2 | r3 | 归因 |
+|----|----|----|------|
+| TST-H-04 | fail | fail（PARSE_ERROR） | 既有族执行缺陷（rank 切片空行集） |
+| TST-H-10 | fail | fail（RESULT_FACT_MISMATCH，MODEL） | 双阈值契约分歧 |
+| TST-H-11 | fail | fail（PARSE_ERROR） | 排名跨期变化形状，plan 终态 |
+| TST-M-11 | pass | fail（PARSE_ERROR） | plan 生成采样方差（新入场） |
+| TST-M-18 | pass | fail（PARSE_ERROR） | plan 生成采样方差（新入场） |
+| TST-M-19 | fail | fail（RESULT_FACT_MISMATCH，MODEL） | r2 曾 plan 终态拒；r3 已能出 plan 但语义不等价 |
+| TST-S-07 | fail | fail（PARSE_ERROR） | plan 终态拒绝 |
+
+planSource 分布：MODEL 35 / NONE 5（= 5 个 PARSE_ERROR 题）/ FREE_SQL 0。
+
+## 2026-08-28｜根因定案与修复：-D 系统属性从未生效（全局参数解析缺陷）
+
+**现象回串**：r2/r3 兜底开关以 `-Ds2.parser.bank.free-sql-fallback.enable=true` 传入且
+进程内 `System.getProperty` 返回 true，但 Hook 三条件静默短路、全程零触发；dev r5–r7
+"兜底开而零触发"同样由此解释（并非 dev 无终态这一单一原因）。
+
+**根因**（插桩 `ParameterConfig.getParameterValue` 三步解析 + 运行时取证）：
+
+1. `SystemConfig.getParameters()` 返回的是**全量已注册参数表**：以 DB 行值做
+   `getOrDefault(name, defaultValue)` 回填——DB 里不存在的键也会拿到**声明默认值**
+   （`common/src/main/java/com/tencent/supersonic/common/config/SystemConfig.java:64`）。
+2. 因此 `getParameterByName` 对任何已注册参数**永不返回空白**，
+   `ParameterConfig.getParameterValue` 的第 1 步（H2 系统配置）总是非空短路，第 2 步
+   （Spring Environment，即 -D）成为死代码。
+3. 运行时取证：`step1=false envContains=true envValue=true sysProp=true final=false`
+   ——-D=true 一直在线，被回填的默认值 "false" 遮蔽。H2 行本身无该键（8564 字符，
+   LOCATE=0），排除"DB 显式配置遮蔽"。
+4. 波及面：**所有已注册 s2.* 参数的 -D 覆盖从未生效**；此前各 run 的 -D 之所以"正常"，
+   只是取值恰好等于默认值。
+
+**修复**（`ParameterConfig.getParameterValue`，-D 优先，符合各 Parameter 注释
+"也可用 -D 同名系统属性覆盖"的文档语义）：
+
+```java
+String sysProperty = System.getProperty(paramName);
+if (StringUtils.isNotBlank(sysProperty)) { return sysProperty; }
+// 之后维持原顺序：H2 系统配置 → Environment → 默认值
+```
+
+新增 `ParameterConfigParameterValueTest`（4 用例：-D 胜存储值 / -D 胜默认值回填——精确
+复现生产遮蔽路径 / 无 -D 时存储值胜 / 缺省回退默认值），common 模块；bank 包定向回归
+484+ 全绿。H2 显式配置（apply_best_bank_on）语义不变：无 -D 时 H2 值依旧优先。
+
+**probe 实证**（9081 探测实例 + H-11 replay）：修复前触发链止于 Hook 静默短路；修复后
+日志出现 `bank free-SQL fallback triggered: reason=PLAN_STAGE_EXHAUSTED:...`。H-11 的自由
+SQL 生成为 null（排名跨期需窗口函数，超出 AST 白名单）→ 终态保持，与修复前一致（无回归）。
+H-03 问法 replay 走正常多指标族（17.5s，执行返回机构行集），不受影响。
+
+## 2026-08-28｜GLM-5.3-flash｜-D 优先修复 jar｜dev r8
+
+（本节由回归完成后补记。）
+
+**结论：dev r8 = 39/40（0.975）。唯一失败 VAL-S-05 为 plan requirements 采样方差，
+非 -D 修复回归；fallback 通道修复后待命（dev 40 题无终态，0 触发符合预期）。**
+
+| 指标 | r7（修复前） | r8（-D 优先修复） |
+|------|----|----|
+| caseAccuracy | 1.000（40/40） | 0.975（39/40） |
+| planSource | MODEL 40 | MODEL 40，FREE_SQL 0 触发 |
+| parse p50 | 8.6s | 9.0s |
+
+**VAL-S-05 归因（SQL 逐字节相同，结果不同）**：r7/r8 该题 s2sql 完全一致（187 字符，
+同族同模板同 LIMIT），但投影行集不同——r7 = [rank1, rank2] 两行，r8 = 仅 [rank2] 一行
+（`resultFactsExact` true→false）。SQL 相同 ⇒ 编译层与 -D 修复无关；差异源于 plan
+requirements 里投影切片契约的采样漂移（parseMs 9.6s→13.0s 提示走了修复轮、温度升采样），
+与 r5 VAL-H-03、r2/r3 S-06/M-11/M-18 属同一方差类。该方差类是「单次结构化修复预算」的
+固有代价，后续如需收敛应在 requirements↔plan 一致性闸门上做通用增强，不属本修复范围。
+
+**-D 修复的运行时证据**：r8 启动参数与 r7 完全一致（§7.3 + free-sql-fallback=true）；
+修复前该开关静默失效（r2/r3 五个 plan 终态题零兜底），修复后探测 replay 已见
+`bank free-SQL fallback triggered: reason=PLAN_STAGE_EXHAUSTED:...`。test 侧五个终态题
+（H-04/H-11/M-11/M-18/S-07）为兜底通道的候选受益面，test r4 待用户批准。
+
+## 2026-08-28｜GLM-5.3-flash｜-D 优先修复 jar｜test r4（终验）
+
+**结论：test r4 = 35/40（0.875），回到 test 历史最优（= r1）。FREE_SQL 通道在官方 run
+首次真实触发（TST-M-19，planSource=FREE_SQL）——兜底链路端到端贯通。**
+
+| 指标 | r1 | r2 | r3 | r4（-D 修复） |
+|------|----|----|----|----|
+| caseAccuracy | 0.875（35/40） | 0.85（34/40） | 0.825（33/40） | **0.875（35/40）** |
+| planSource | MODEL 36/NONE 4 | MODEL 37/NONE 3 | MODEL 35/NONE 5 | **MODEL 38/NONE 1/FREE_SQL 1** |
+
+| 题 | r3 | r4 | 说明 |
+|----|----|----|------|
+| TST-H-04 | fail（PARSE_ERROR） | fail（RESULT_FACT_MISMATCH，MODEL） | 既有族 rank 切片缺陷，族级修复项 |
+| TST-H-10 | fail（RESULT_FACT_MISMATCH） | fail（同型） | 双阈值契约分歧，族级修复项 |
+| TST-H-11 | fail（PARSE_ERROR） | fail（PARSE_ERROR） | 排名跨期变化：fallback 触发但自由 SQL 需窗口函数、超 AST 白名单 → generate null → 终态保持（设计预期） |
+| TST-M-19 | fail（RESULT_FACT_MISMATCH，MODEL） | fail（EXECUTION_ERROR，**FREE_SQL**） | 复合派生率：plan 期耗尽 → 兜底接管并产出候选（首例），但候选 SQL 执行失败。记为兜底质量后续项：发布前应做执行级验证（explain/试执行），否则宁可保持终态 |
+| TST-S-07 | fail（PARSE_ERROR） | fail（RESULT_FACT_MISMATCH，MODEL） | plan 已能出（采样/修复轨迹变化），语义不等价 |
+| TST-M-11 / M-18 | fail×2（r3 采样方差） | **pass×2** | r3 方差收回 |
+
+**结构性判断**：-D 修复 + 兜底贯通后，test 的天花板回到 ~35/40；剩余 5 fail 中
+H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11 属形状缺口（需窗口函数或
+专用族），三者都只能靠族级/编译层通用修复推进，兜底通道不该也接不住。后续独立项：
+① 兜底候选执行级预验证（M-19 教训）；② H-04/H-10 族级修复；③ rank-change 专用族评估。
