@@ -116,9 +116,8 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 String candidate = prefixCache.generate(model, modelConfig,
                         BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, attempt == 0);
                 previousCandidate = candidate;
-                BankPlanningResponse planning = parseAndValidatePlanningResponse(
-                        llmReq.getQueryText(), candidate, admissionHints,
-                        toolRepair ? llmReq.getBankRequestContract() : null);
+                BankPlanningResponse planning = parseAndValidatePlanningResponse(llmReq,
+                        candidate);
                 BankRequestContract requirements = planning.getRequirements();
                 if (requirements.getAction() == BankRequestContract.Action.CLARIFY) {
                     String clarificationError = clarificationRecheckMessage(llmReq.getQueryText());
@@ -162,6 +161,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 repairReasons.add(exception.getReason().name());
                 repairCodes.add(repairErrorCode(exception));
                 logRepair("SINGLE_PASS", attempt + 1, repairErrorCode(exception), exception);
+            } catch (BankPlanCompilationException exception) {
+                // Terminal compiler-class rejection from a plan-shape gate (e.g. a question shape
+                // no query family can express). It is not a model failure and owns no structured
+                // repair: propagate untouched so the terminal error cause chain keeps the exact
+                // Reason for candidate ranking and the controlled free-SQL fallback admission.
+                throw exception;
             } catch (RuntimeException exception) {
                 throw exception instanceof BankNl2SqlError bankError ? bankError
                         : BankNl2SqlError.modelFailure(exception);
@@ -668,6 +673,51 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", baselineEndDate=" + time.getBaselineEndDate()
                         + "。请仅修正 plan 的冲突时间槽位后重新输出完整 planning JSON；不要改动"
                         + "requirements、指标、机构或答案事实。");
+    }
+
+    /**
+     * Plan-level twin gate for the "rank change across periods" question shape: the wording asks
+     * how the RANK POSITION of institutions changed between two period ends. The plan language has
+     * no rank slot, so every plan for this shape silently compiles into a near-miss family (the
+     * value CHANGE family) and returns a wrong-but-plausible result fact — a wrong-family success
+     * the compiler can never detect. The shape is therefore rejected outright as a terminal
+     * {@code UNSUPPORTED_QUERY_SHAPE} so the controlled free-SQL fallback owns it. The rejection
+     * is deterministic and repair-proof: the trigger reads only the question's semantic shape.
+     */
+    private void validateRankChangePlanContract(String queryText, BankQueryPlan plan) {
+        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE
+                || !isRankChangeAcrossPeriodsQuestion(queryText)) {
+            return;
+        }
+        throw new BankPlanCompilationException(
+                BankPlanCompilationException.Reason.UNSUPPORTED_QUERY_SHAPE,
+                "rank_change_across_periods_unsupported: 题目要求机构/指标排名在两个时期间的位次变化，"
+                        + "计划语言没有排名槽位，任何 intent×calculation 组合（包括 CHANGE 值变化族与 "
+                        + "RANKING 族）都会把该形状编译成错误的结果事实；该查询形状被显式拒绝，"
+                        + "禁止改用近似查询族作答。");
+    }
+
+    /**
+     * Abstract shape trigger for rank change across periods (word lists only; no sample ids, no
+     * full-question matching, no catalog answers). All three signals must co-occur: a ranking
+     * word, a rank-change word, and a cross-period baseline signal. Magnitude-ranking markers
+     * (增幅/降幅/…排名) belong to the supported CHANGE family and are excluded; single-period
+     * rankings carry no change word, plain value changes carry no rank word, and share/composition
+     * questions carry neither — none of them can trip the triple.
+     */
+    static boolean isRankChangeAcrossPeriodsQuestion(String queryText) {
+        if (queryText == null || queryText.isBlank()) {
+            return false;
+        }
+        boolean rankSignal = containsAny(queryText, "排名", "排行", "名次", "位次", "榜单", "榜");
+        boolean rankChangeSignal = containsAny(queryText, "变化", "变动", "差异");
+        boolean magnitudeRankingSignal = containsAny(queryText, "增幅", "降幅", "涨跌幅", "变化幅度",
+                "增长最快", "下降最快", "增长最多", "下降最多");
+        boolean baselineSignal = containsAny(queryText, "较年初", "年初", "同比", "环比", "较上月",
+                "较去年", "较同期", "较上季", "上年末", "年末", "年底")
+                || (queryText.contains("从") && queryText.contains("到"))
+                || EXPLICIT_YEAR_END_RANGE.matcher(queryText).find();
+        return rankSignal && rankChangeSignal && !magnitudeRankingSignal && baselineSignal;
     }
 
     /**
@@ -1258,7 +1308,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + "drop an explicitly named metric or change the comparison family.");
     }
 
-    private boolean containsAny(String text, String... values) {
+    private static boolean containsAny(String text, String... values) {
         for (String value : values) {
             if (text.contains(value)) {
                 return true;
@@ -1307,9 +1357,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 + "base operands for each derived metric, and do not return CLARIFY for these slots.";
     }
 
-    private BankPlanningResponse parseAndValidatePlanningResponse(String queryText,
-            String candidate, SemanticIntentHints admissionHints,
-            BankRequestContract expectedRequirements) {
+    private BankPlanningResponse parseAndValidatePlanningResponse(LLMReq llmReq,
+            String candidate) {
+        String queryText = llmReq.getQueryText();
+        SemanticIntentHints admissionHints = llmReq.getSemanticIntentHints();
+        BankRequestContract expectedRequirements =
+                llmReq.getBankPlanToolResult() == null ? null : llmReq.getBankRequestContract();
         BankRequestContract requirements =
                 planningResponseParser.parseRequirements(candidate, admissionHints);
         if (expectedRequirements != null && !expectedRequirements.equals(requirements)) {
@@ -1322,8 +1375,15 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         validateHighConfidenceQueryFamily(queryText, requirements);
         BankPlanningResponse planning = planningResponseParser.parse(candidate, admissionHints);
         if (planning.getPlan() != null) {
+            // Pin the validated requirements and this attempt's plan before the plan-shape gates
+            // run: a terminal UNSUPPORTED_QUERY_SHAPE rejection must leave the parser's COMPILE
+            // tool-repair round a rebuildable previous candidate instead of a missing-plan
+            // degeneration. The model still owns the complete contract; nothing is rewritten.
+            llmReq.setBankRequestContract(requirements);
+            llmReq.setPreviousBankQueryPlanJson(JsonUtil.toString(planning.getPlan()));
             // The plan is what compiles: requirements-level gates alone let a divergent plan
             // slip through when the model writes the requirements correctly but the plan wrong.
+            validateRankChangePlanContract(queryText, planning.getPlan());
             validateStartOfYearPlanContract(queryText, planning.getPlan());
             validateRatioPlanContract(queryText, planning.getPlan());
             validateModelOwnedOutputContract(queryText, planning.getPlan());

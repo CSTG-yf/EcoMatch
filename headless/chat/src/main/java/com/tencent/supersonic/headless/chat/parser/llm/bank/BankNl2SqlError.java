@@ -14,18 +14,38 @@ public class BankNl2SqlError extends RuntimeException {
     private final Stage stage;
     private final Category category;
     private final boolean retryable;
+    private final boolean planStageExhausted;
+    private final String planFailureCode;
 
     private BankNl2SqlError(Stage stage, Category category, boolean retryable, String message,
             Throwable cause) {
+        this(stage, category, retryable, message, cause, false, null);
+    }
+
+    private BankNl2SqlError(Stage stage, Category category, boolean retryable, String message,
+            Throwable cause, boolean planStageExhausted, String planFailureCode) {
         super(message, cause);
         this.stage = stage;
         this.category = category;
         this.retryable = retryable;
+        this.planStageExhausted = planStageExhausted;
+        this.planFailureCode = planFailureCode;
+    }
+
+    /**
+     * Terminal state when the plan strategy exhausted its structured repair budget without a valid
+     * plan. Carries a machine-readable marker (plus the last failure code) so the controlled
+     * free-SQL fallback can distinguish this terminal state from repairable intermediate
+     * failures; category and user message stay identical to the non-fallback terminal error.
+     */
+    public static BankNl2SqlError planStageExhausted(BankQueryPlanParseException cause) {
+        return new BankNl2SqlError(Stage.PLAN, category(cause), false,
+                "bank query plan remained invalid after one structured repair", cause, true,
+                planFailureCode(cause));
     }
 
     public static BankNl2SqlError afterSingleRepair(BankQueryPlanParseException cause) {
-        return new BankNl2SqlError(Stage.PLAN, category(cause), false,
-                "bank query plan remained invalid after one structured repair", cause);
+        return planStageExhausted(cause);
     }
 
     public static BankNl2SqlError modelFailure(Throwable cause) {
@@ -99,6 +119,30 @@ public class BankNl2SqlError extends RuntimeException {
             case VALIDATION_FAILED -> Category.VALIDATION_FAILED;
             case MODEL_FAILURE -> Category.MODEL_FAILURE;
         };
+    }
+
+    /**
+     * Mirrors {@code BankPlanGenStrategy#repairErrorCode}: prefers the snake_case code that
+     * prefixes validator messages, falling back to the parse reason name. Kept local so this
+     * envelope stays decoupled from the strategy implementation.
+     */
+    private static String planFailureCode(BankQueryPlanParseException cause) {
+        if (cause == null) {
+            return BankQueryPlanParseException.Reason.VALIDATION_FAILED.name();
+        }
+        String message = cause.getMessage();
+        if (message != null) {
+            int colon = message.indexOf(':');
+            if (colon > 0) {
+                String candidate = message.substring(0, colon).trim();
+                if (candidate.matches("[a-z][a-z0-9_]{2,63}")) {
+                    return candidate;
+                }
+            }
+        }
+        return cause.getReason() == null
+                ? BankQueryPlanParseException.Reason.VALIDATION_FAILED.name()
+                : cause.getReason().name();
     }
 
     public enum Stage {

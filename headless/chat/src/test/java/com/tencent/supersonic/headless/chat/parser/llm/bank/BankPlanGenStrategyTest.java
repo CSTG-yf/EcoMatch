@@ -708,6 +708,80 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void rankChangeAcrossPeriodsIsRejectedAsAnUnsupportedQueryShape() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(rankChangeRequirementsJson(), rankChangePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText(
+                "从2024年末到2026年4月末，某农商行存款、贷款、不良率、净利润的排名分别变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB017", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertEquals(BankPlanCompilationException.Reason.UNSUPPORTED_QUERY_SHAPE,
+                exception.getReason());
+        assertTrue(exception.getMessage().contains("rank_change_across_periods_unsupported"));
+        // Terminal at the plan gate: no in-strategy repair round is spent on a shape no plan
+        // language can express — the controlled free-SQL fallback owns it downstream.
+        verify(model, times(1)).generate(anyString());
+        // The rejected attempt is pinned so the parser's COMPILE tool-repair round can rebuild
+        // its previous candidate instead of degenerating without a plan.
+        assertNotNull(request.getBankRequestContract());
+        assertNotNull(request.getPreviousBankQueryPlanJson());
+    }
+
+    @Test
+    void plainValueChangeAcrossTheSameBaselineIsNotRejectedByTheRankChangeGate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(rankChangeRequirementsJson(), rankChangePlanJson()));
+
+        LLMReq request = request();
+        // Baseline + change wording but no rank word: the near-miss shape that must keep
+        // compiling through the value CHANGE family.
+        request.setQueryText("某农商行从2024年末到2026年4月末，存款和贷款的余额分别变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB017", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+        assertFalse(prompts.getAllValues().get(0).contains("rank_change_across_periods"));
+    }
+
+    @Test
+    void singlePeriodTopRankingIsNotRejectedByTheRankChangeGate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(planningResponse(
+                singlePeriodRankingRequirementsJson(), singlePeriodRankingPlanJson()));
+
+        LLMReq request = request();
+        // Rank wording + a year-end anchor but no change wording: single-period rankings stay in
+        // the RANKING family.
+        request.setQueryText("2024年末，各家农商行存款余额排名前三的有哪些？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+        assertFalse(prompts.getAllValues().get(0).contains("rank_change_across_periods"));
+    }
+
+    @Test
     void explicitYearEndBaselineRangeIsNotInterceptedByTheYearStartGate() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(
@@ -1949,6 +2023,53 @@ class BankPlanGenStrategyTest {
                 "time":{"startDate":"2025-07-31","endDate":"2025-07-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
                 "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
                 "output":{"columns":["bank_organization","ZB003"],"orderSensitive":false,"aggregationMode":null}}
+                """;
+    }
+
+    /**
+     * What the model would emit for a rank-change-across-periods question: a fully valid
+     * multi-metric CHANGE contract with the explicit year-end baseline — the near-miss family the
+     * rank-change gate must reject before it compiles into a wrong result fact.
+     */
+    private String rankChangeRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB001","ZB002","ZB017","ZB011"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","CHANGE_RATE"],"clarification":null}
+                """;
+    }
+
+    private String rankChangePlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT","alias":null},{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null},{"bizName":"ZB011","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB001","ZB002","ZB017","ZB011"],"orderSensitive":false,"aggregationMode":null}}
+                """;
+    }
+
+    private String singlePeriodRankingRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metricCodes":["ZB001"],"derivedMetrics":[],"organizationCodes":[],
+                "time":{"startDate":"2024-12-31","endDate":"2024-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"3","values":[]}],
+                "requiredLimit":3,"answerFactTypes":["VALUE","RANK"],"clarification":null}
+                """;
+    }
+
+    private String singlePeriodRankingPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[],
+                "time":{"startDate":"2024-12-31","endDate":"2024-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"3","values":[]}],
+                "calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"ZB001","direction":"DESC"}],"limit":3,
+                "output":{"columns":["bank_organization","ZB001"],"orderSensitive":true}}
                 """;
     }
 

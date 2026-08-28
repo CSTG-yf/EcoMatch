@@ -14,6 +14,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -157,6 +158,55 @@ class BankQueryPlanCoverageMatrixTest {
         assertTrue(exception.getMessage().contains("已支持的查询族"));
         assertTrue(exception.getMessage().contains("CHANGE"));
         assertTrue(exception.getMessage().contains("RANKING"));
+    }
+
+    /**
+     * Declared UNSUPPORTED shape: "rank change across periods" (机构/指标排名在两个时期间的位次变化).
+     * No plan shape can express a two-period RANK() delta, so the compiler never rejects the
+     * near-miss CHANGE plan on its own — the compiler accepts it below on purpose — and the
+     * strategy-level rank-change gate is the explicit rejection point that keeps the shape out of
+     * the value CHANGE family. Single-period rankings, plain value changes, share/composition
+     * questions and magnitude rankings must all stay outside the trigger.
+     */
+    @Test
+    void rankChangeAcrossPeriodsIsADeclaredUnsupportedShape() {
+        assertTrue(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "从2024年末到2026年4月末，存款、贷款、不良率、净利润的排名分别变化了多少？"));
+        assertTrue(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "各行不良贷款率较年初的排名变动情况如何？"));
+
+        // The near-miss CHANGE plan a model would emit for the shape still compiles: the
+        // compiler alone cannot see the mismatch, which is why the shape is declared
+        // UNSUPPORTED at the strategy gate instead of in the routing table.
+        CompiledQuery compiled = assertCompiles(rankChangeNearMissPlan());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE,
+                compiled.getResultContract().getType());
+
+        // Negative space that must stay supported (never rejected by the gate).
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "某农商行从2024年末到2026年4月末，存款和贷款的余额分别变化了多少？"));
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "2026年4月末不良贷款率较年初变化了多少？"));
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "2024年末存款余额排名前三的机构有哪些？"));
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "2024年末存款余额排名后三的机构有哪些？"));
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "2026年2月末对公存款和个人存款占存款总额的占比是多少？"));
+        assertFalse(BankPlanGenStrategy.isRankChangeAcrossPeriodsQuestion(
+                "较年初各家农商行净利润增幅排名前三的是哪些？"));
+    }
+
+    /** The value CHANGE plan closest to a rank-change question (correct facts, wrong semantics). */
+    private PlanAndHints rankChangeNearMissPlan() {
+        BankQueryPlan plan = basePlan(BankIntentType.CHANGE, List.of("ZB001", "ZB002"),
+                List.of(), List.of("ORG004"),
+                time(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 4, 30),
+                        BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
+                        LocalDate.of(2024, 12, 31), LocalDate.of(2024, 12, 31)),
+                BankQueryPlan.CalculationType.CHANGE, List.of(), List.of(), null,
+                List.of("ZB001", "ZB002"));
+        return value(plan, BankIntentType.CHANGE, List.of("ZB001", "ZB002"), List.of("ORG004"));
     }
 
     private CompiledQuery assertCompiles(PlanAndHints candidate) {

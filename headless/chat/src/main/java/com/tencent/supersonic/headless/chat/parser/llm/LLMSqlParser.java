@@ -430,7 +430,11 @@ public class LLMSqlParser implements SemanticParser {
                                 compilationAllowedValues(compilationException.getReason()),
                                 compilationToolFeedback(compilationException,
                                         previousBankPlanJson)));
-                        llmReq.setPreviousBankQueryPlanJson(previousBankPlanJson);
+                        // A compile exception raised before any plan was returned must not wipe
+                        // the attempted plan that the plan gate pinned on the request; without it
+                        // the COMPILE repair round cannot rebuild its previous candidate.
+                        llmReq.setPreviousBankQueryPlanJson(previousBankPlanJson != null
+                                ? previousBankPlanJson : llmReq.getPreviousBankQueryPlanJson());
                         lastToolFailureSignature = signature;
                     } else {
                         publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
@@ -449,6 +453,13 @@ public class LLMSqlParser implements SemanticParser {
                             candidateRejectionState, candidateValidationErrorType,
                             candidateCompilerReason);
                     if (e instanceof BankNl2SqlError bankError) {
+                        // Plan-stage structured-repair budget exhaustion ("remained invalid
+                        // after one structured repair") is a terminal state the controlled
+                        // free-SQL fallback may absorb; non-admitted errors keep the original
+                        // terminal failure verbatim.
+                        if (tryBankFreeSqlFallback(queryCtx, llmReq, bankError)) {
+                            return;
+                        }
                         throw bankError;
                     }
                     if (bankPlanCompilationException(e) != null) {
@@ -498,10 +509,10 @@ public class LLMSqlParser implements SemanticParser {
     }
 
     /**
-     * Terminal-state interception (design v1 §1): semantically unreachable compile failures with
-     * the switch enabled may reroute into the controlled free-SQL fallback channel. Any
-     * non-admitted error (and any failure of the fallback itself) keeps the original terminal
-     * failure verbatim.
+     * Terminal-state interception (design v1 §1): semantically unreachable compile failures and
+     * plan-stage structured-repair budget exhaustion, with the switch enabled, may reroute into
+     * the controlled free-SQL fallback channel. Any non-admitted error (and any failure of the
+     * fallback itself) keeps the original terminal failure verbatim.
      */
     private boolean tryBankFreeSqlFallback(ChatQueryContext queryCtx, LLMReq llmReq,
             BankNl2SqlError terminalError) {

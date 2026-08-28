@@ -16,11 +16,15 @@ import java.util.Set;
  * Terminal-state interception that routes a semantically unreachable constrained bank plan into
  * the controlled free-SQL fallback (design v1 §1/§2/§4).
  *
- * <p>Admission is a whitelist: only compiler terminal failures with reason
- * UNSUPPORTED_QUERY_SHAPE / UNSUPPORTED_CALCULATION / UNSUPPORTED_FILTER / S2SQL_RENDER_FAILED
- * (repair budget exhausted) qualify. MALFORMED_JSON / SCHEMA_VIOLATION, CLARIFICATION_REQUIRED,
- * VALIDATION_FAILED, MODEL_FAILURE / ENVIRONMENT_FAULT and the disabled switch all decline, and
- * bank-off mode never reaches the constrained route at all. The hook lives in the parser layer:
+ * <p>Admission is a whitelist with two terminal classes: compiler terminal failures with reason
+ * UNSUPPORTED_QUERY_SHAPE / UNSUPPORTED_CALCULATION / UNSUPPORTED_FILTER / S2SQL_RENDER_FAILED,
+ * and plan-stage structured-repair budget exhaustion marked by
+ * {@link BankNl2SqlError#isPlanStageExhausted()} (trigger reason
+ * {@code PLAN_STAGE_EXHAUSTED:<failureCode>}; the failure code may be any last blocking code,
+ * including MALFORMED_JSON / SCHEMA_VIOLATION / VALIDATION_FAILED). Clarification,
+ * MODEL_FAILURE / ENVIRONMENT_FAULT, intermediate rounds that still own a repair chance, and the
+ * disabled switch all decline, and bank-off mode never reaches the constrained route at all. The
+ * hook lives in the parser layer:
  * {@code LLMSqlParser} owns the LLMReq/schema plumbing and the candidate pipeline here, while the
  * chat-server repair loop only sees persisted execution results.
  */
@@ -34,21 +38,47 @@ public final class BankFreeSqlFallbackHook {
             BankPlanCompilationException.Reason.UNSUPPORTED_FILTER,
             BankPlanCompilationException.Reason.S2SQL_RENDER_FAILED);
 
+    /** Trigger-reason prefix for plan-stage structured-repair budget exhaustion. */
+    static final String PLAN_STAGE_EXHAUSTED_PREFIX = "PLAN_STAGE_EXHAUSTED";
+
     private BankFreeSqlFallbackHook() {}
 
     /**
-     * True when the terminal error qualifies for the fallback channel. Structural/model failures
-     * (MALFORMED_JSON, SCHEMA_VIOLATION), clarification, no-candidate validation misses and
-     * model/environment failures never fall back — free SQL cannot help them.
+     * Machine-readable trigger reason for an admitted terminal error: the compiler reason name
+     * for compile-stage failures, and {@code PLAN_STAGE_EXHAUSTED:<failureCode>} when the plan
+     * strategy exhausted its structured repair budget without a valid plan. Null when the error
+     * is not admitted (structural/model failures, clarification, no-candidate validation misses,
+     * intermediate rounds that still own a repair chance).
      */
-    static boolean admits(BankNl2SqlError error) {
-        if (error == null || error.getCategory() != BankNl2SqlError.Category.COMPILATION_FAILURE) {
-            return false;
+    static String admittedTriggerReason(BankNl2SqlError error) {
+        if (error == null) {
+            return null;
+        }
+        if (error.isPlanStageExhausted()) {
+            return error.getPlanFailureCode() == null || error.getPlanFailureCode().isBlank()
+                    ? PLAN_STAGE_EXHAUSTED_PREFIX
+                    : PLAN_STAGE_EXHAUSTED_PREFIX + ":" + error.getPlanFailureCode();
+        }
+        if (error.getCategory() != BankNl2SqlError.Category.COMPILATION_FAILURE) {
+            return null;
         }
         BankPlanCompilationException compilationException =
                 findCompilationException(error.getCause());
-        return compilationException != null && compilationException.getReason() != null
-                && ADMITTED_REASONS.contains(compilationException.getReason());
+        if (compilationException == null || compilationException.getReason() == null
+                || !ADMITTED_REASONS.contains(compilationException.getReason())) {
+            return null;
+        }
+        return compilationException.getReason().name();
+    }
+
+    /**
+     * True when the terminal error qualifies for the fallback channel: an admitted compiler
+     * reason or plan-stage budget exhaustion. Clarification, no-candidate validation misses,
+     * model/environment failures, and intermediate rounds that still own a repair chance never
+     * fall back — free SQL cannot help them.
+     */
+    static boolean admits(BankNl2SqlError error) {
+        return admittedTriggerReason(error) != null;
     }
 
     /**
@@ -73,7 +103,8 @@ public final class BankFreeSqlFallbackHook {
 
     static boolean tryRun(ChatQueryContext queryCtx, LLMReq llmReq, BankNl2SqlError error,
             BankFreeSqlFallbackStrategy strategy, LLMResponseService responseService) {
-        if (!admits(error)) {
+        String triggerReason = admittedTriggerReason(error);
+        if (triggerReason == null) {
             return false;
         }
         if (!fallbackEnabled()) {
@@ -84,9 +115,6 @@ public final class BankFreeSqlFallbackHook {
             // bank-off mode: S2SQL_PARSER is already the unconstrained full path.
             return false;
         }
-        BankPlanCompilationException compilationException = findCompilationException(
-                error.getCause());
-        String triggerReason = compilationException.getReason().name();
         log.info("bank free-SQL fallback triggered: reason={}", triggerReason);
         BankFreeSqlFallbackStrategy.FallbackSql fallback = strategy.generate(llmReq,
                 triggerReason);

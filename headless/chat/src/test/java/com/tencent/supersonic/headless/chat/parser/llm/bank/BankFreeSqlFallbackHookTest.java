@@ -35,10 +35,10 @@ import static org.mockito.Mockito.verify;
 
 /**
  * Admission-matrix and wiring tests for the terminal-state interception. Only compiler terminal
- * failures with the four admitted reasons enter the fallback; malformed JSON, clarification,
- * validation misses and model failures never do; the disabled switch (the default) and bank-off
- * mode decline even admitted errors; a produced candidate carries the FREE contract and
- * planSource=FREE_SQL diagnostics.
+ * failures with the four admitted reasons and plan-stage structured-repair budget exhaustion
+ * enter the fallback; malformed JSON, clarification, no-candidate misses and model failures never
+ * do; the disabled switch (the default) and bank-off mode decline even admitted errors; a
+ * produced candidate carries the FREE contract and planSource=FREE_SQL diagnostics.
  */
 class BankFreeSqlFallbackHookTest {
 
@@ -66,12 +66,6 @@ class BankFreeSqlFallbackHookTest {
 
     @Test
     void structuralClarificationAndModelFailuresAreNeverAdmitted() {
-        assertFalse(BankFreeSqlFallbackHook.admits(BankNl2SqlError.afterSingleRepair(
-                new BankQueryPlanParseException(BankQueryPlanParseException.Reason.MALFORMED_JSON,
-                        "bad json"))));
-        assertFalse(BankFreeSqlFallbackHook.admits(BankNl2SqlError.afterSingleRepair(
-                new BankQueryPlanParseException(
-                        BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, "bad schema"))));
         assertFalse(BankFreeSqlFallbackHook.admits(
                 BankNl2SqlError.clarificationRequired("请补充时间范围")));
         assertFalse(BankFreeSqlFallbackHook.admits(
@@ -83,6 +77,55 @@ class BankFreeSqlFallbackHookTest {
         assertFalse(BankFreeSqlFallbackHook.admits(
                 BankNl2SqlError.compilationFailure(new RuntimeException("no compiler cause"))));
         assertFalse(BankFreeSqlFallbackHook.admits(null));
+    }
+
+    @Test
+    void planStageBudgetExhaustionIsAdmittedWithDistinguishableTriggerReason() {
+        BankQueryPlanParseException schemaViolation = new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, "bad schema");
+        assertTrue(BankFreeSqlFallbackHook.admits(
+                BankNl2SqlError.planStageExhausted(schemaViolation)));
+        assertTrue(BankFreeSqlFallbackHook.admits(BankNl2SqlError.afterSingleRepair(
+                new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                        "derived_point_ratio_mismatch: ratio operands disagree"))));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback =
+                new BankFreeSqlFallbackStrategy.FallbackSql(GOOD_SQL,
+                        List.of("org_code", "metric_value"), 0.9D, 2, "unused");
+        BankFreeSqlFallbackStrategy strategy = spy(new BankFreeSqlFallbackStrategy());
+        doReturn(fallback).when(strategy).generate(any(), anyString());
+        LLMResponseService responseService = mock(LLMResponseService.class);
+        ChatQueryContext queryCtx = new ChatQueryContext(new QueryNLReq());
+        queryCtx.setParseResp(new ParseResp("query"));
+
+        try (MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(ParserConfig.class))
+                    .thenReturn(configWithValue("true"));
+            assertTrue(BankFreeSqlFallbackHook.tryRun(queryCtx, bankConstrainedRequest(),
+                    BankNl2SqlError.afterSingleRepair(schemaViolation), strategy,
+                    responseService));
+        }
+        ArgumentCaptor<String> triggerReason = ArgumentCaptor.forClass(String.class);
+        verify(strategy).generate(any(), triggerReason.capture());
+        assertEquals("PLAN_STAGE_EXHAUSTED:SCHEMA_VIOLATION", triggerReason.getValue());
+    }
+
+    @Test
+    void planStageBudgetExhaustionWithSwitchOffKeepsTheTerminalError() {
+        try (MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(ParserConfig.class))
+                    .thenReturn(configWithValue("false"));
+            BankFreeSqlFallbackStrategy strategy = spy(new BankFreeSqlFallbackStrategy());
+            LLMResponseService responseService = mock(LLMResponseService.class);
+
+            assertFalse(BankFreeSqlFallbackHook.tryRun(new ChatQueryContext(new QueryNLReq()),
+                    bankConstrainedRequest(),
+                    BankNl2SqlError.planStageExhausted(new BankQueryPlanParseException(
+                            BankQueryPlanParseException.Reason.SCHEMA_VIOLATION, "bad schema")),
+                    strategy, responseService));
+            verify(strategy, never()).generate(any(), anyString());
+            verify(responseService, never()).addParseInfo(any(), any(), any(), anyDouble(), any());
+        }
     }
 
     @Test
