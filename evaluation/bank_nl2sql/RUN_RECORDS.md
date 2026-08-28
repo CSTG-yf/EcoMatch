@@ -491,3 +491,81 @@ requirements 里投影切片契约的采样漂移（parseMs 9.6s→13.0s 提示�
 H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11 属形状缺口（需窗口函数或
 专用族），三者都只能靠族级/编译层通用修复推进，兜底通道不该也接不住。后续独立项：
 ① 兜底候选执行级预验证（M-19 教训）；② H-04/H-10 族级修复；③ rank-change 专用族评估。
+
+## 2026-08-28 晚｜全链路加固波次：门禁 + 不变量 + 差分测试 + 新族（工作区未提交）
+
+**内容（五工作流，全部合成单测验证，反作弊红线无违例）**：
+1. W1 兜底发布门禁：`BankFallbackSqlProbe` 接口（headless-chat）+ headless-server 实现（SemanticLayerService translate → queryByReq 非信任路径，SELECT 包 LIMIT 5）；探针失败进兜底修复轮（专属文案头），预算耗尽保持终态。治 M-19 类「兜底 SQL 执行失败出门」。
+2. W2 结果不变量：chat/server `BankResultInvariantHandler`（投影后、fail-closed）——rank 基数/连续（机构子集非空即跳过连续性，防误伤）、机构不幻影、日期在契约集、FREE 声明列齐备；`INVARIANT_VIOLATION_*` 入 REPAIRABLE 白名单走既有修复回环。
+3. W3 差分性质测试：`difftest` 包（固定种子合成数据 + 纯 Java 朴素 oracle + Calcite 内存执行），四族 × 200 随机 plan 全绿，未发现模板缺陷（唯一差异为 Calcite 解释器 MAX 全零组伪影）。
+4. W4a 族修复：H-04 形状（多指标排名）路由 DERIVED_RANKING，SQL 自带 metric_code+rank 身份，projector 切片可靠；H-10 形状（THRESHOLD 多指标）路由既有宽表+meets_condition 模板，新 ProjectionType；COMPARISON 多指标保持长表 gap。
+5. W4b 新族：RANK_CHANGE（当期 ⋈ 基期 ROW_NUMBER，rank_change 长表；闸门反转为双向 coherence 修复驱动）+ 复合派生率（numeratorOperands 多分子，单分子路径逐字节不变）；PREFIX v58→v59。
+
+**回归-返工（重要）**：v59 提示词在官方 smoke 引入日期/基期槽位回归——M-01 基期被改成同比（2024-03-31 无数据）、S-01 日期被月末化（06-15→06-30），与旧 smoke 逐题对照定位；根因为新文案混排（RANK_CHANGE 规则插在 granularity/日期保真条款旁 + 目录 19 行散文挤占判例注意力），非逻辑代码。返工：新文案局部化到独立段落、目录逐字还原 v58、PREFIX v60（requirements v8/plan v56）+ 5 个防再弱化单测。**smoke r10 = 5/5 恢复**。
+
+集成验证：4 模块 1134 单测全绿；部署 9081（headless-chat/headless-server/chat-server/launchers-standalone 四 jar，spring.factories 含新 handler）。
+
+### v59→v61 提示词回归三部曲（教训入库）
+
+- v59（W4b 首版）：新族文案混排进编号规则与目录 → smoke 3/5（M-01 基期被改成同比、S-01 日期月末化）。
+- v60（返工一）：文案局部化 + 目录逐字还原 v58 → smoke 5/5，但 dev r9 = 38/40：S-05 日期槽错（方差，replay 3/3 正确）、**S-06 系统性三槽错**（replay 3/3 稳定复现：比较题→单机构环比、04-15→03-31、ORG007 丢失）。
+- 根因：SINGLE_PASS 的 PLAN 段里 RANK_CHANGE **带日期合成示例**（2026-03-31/2024-12-31）污染同一次生成的 requirements 日期/意图槽。
+- v61（终修）：族块去示例化（槽位形状描述 + 「日期一律取题面原词」），PREFIX v61 / PLAN v57；新增「族块禁日期字面量、禁合成示例」防再弱化断言。验证：S-05/S-06 replay 各 3/3 恢复 r7 通过形状；smoke r11 = 5/5。
+- **通用教训：往 single-pass 提示词任何角落放带具体日期的示例，都会被模型当成日期先验吸附题面日期。新族指引只允许无日期的槽位描述。**
+
+### dev r10（v61 + 五工作流定版回归）= 39/40，唯一失败为瞬时模型故障
+
+- RunId `glm53low-dev-20260828-r10`，部署 = runtime-fallbackhook-r7（W1–W4 + v61），Fact v3 caseAccuracy 0.975（39/40），executionSuccessRate 0.975。
+- 唯一失败 **VAL-H-12（PARSE_ERROR / PLAN_EXCEPTION）**：日志 trace 显示 `BankNl2SqlError.modelFailure`（消息 39 字符 = "bank query plan model generation failed"），round 1 内 6 秒即抛、零 repair 轮次、s2-llm.log 无请求记录 → LLM 端点连接层瞬时故障，非 plan/族/提示词问题。
+- 判定依据：VAL-H-12 在 r7（40/40）、r8、r9 均通过；回放 N=3 全部解析成功且 SQL 一致（首跑 15s 完整解析，后两次 0.4s 计划缓存命中）。
+- v60 污染回归确认修复：r9 的 S-06 系统性三槽错在 r10 通过；r8/r9 的 S-05 方差也通过。
+- 另注：s2-error.log 中每请求一条 `SemanticNode optimization failed`（同一指纹）自 13:33 起即存在，smoke 5/5 / replay 3/3 期间亦然 → 属被捕获后回退执行的良性路径，与失败无关。
+- 结论：**v61 + 五工作流为当前 dev 定版形态**；待用户批准 test r5 终验与提交。
+
+### 2026-08-28 深夜｜test r5 终验 = 35/40 → 定位新族 JDBC_GRAMMAR 根因并修复（工作区未提交）
+
+- **test r5**（glm53low-test-20260828-r5，v61 + 五工作流，用户授权"最终验收"）= 35/40，
+  与 r4 持平但构成变化：**H-04 首次通过**（W4a DERIVED_RANKING 生效）；M-07 变 fail
+  （瞬时 modelFailure，与 dev r10 VAL-H-12 同签名）；H-10/H-11 从语义错变为
+  EXECUTION_ERROR（JDBC_GRAMMAR）；M-19/S-07 变 PARSE_ERROR（plan 期耗尽，r4 亦 fail）。
+- **JDBC_GRAMMAR 根因（重要机制发现）**：`SqlQueryParser.parse` 里
+  `queryFields.removeAll(queryAliases)`——S2SQL 中任何**与别名同名的字段**会从语义字段
+  注册中剔除。两个新族模板写了 `... AS bank_organization` → 维度 org_code 没进物理
+  t_97 字段集 → H2 column-not-found。H-11 原始失败（顶层 UNION 形状）真凶同样是
+  bank_rank_change_N 里的维度别名，UNION 形状无辜。W3 差分测试没抓到：它直接执行
+  S2SQL，绕过了翻译器字段注册层。
+- **修复**：两模板禁用语义维度名作别名（bank_gap CTE / rank_change join CTE 去别名，
+  JOIN/UNION 包进输出 CTE）；新增覆盖矩阵契约测试（维度名禁作别名 + 外层单 SELECT
+  形状）。headless/chat bank 包 419 测试全绿。
+- **运行时验证**：H-10 回放 t_97 含 org_code，执行 SUCCESS（26 行=13 机构×2 指标，
+  meets_condition 与 gap 符号一致）；H-11 回放 SUCCESS（ORG011 四指标 baseline/current/
+  rank_change 长表，物理 SQL CTE 全部 `org_code AS bank_organization` 重写）。
+- **M-19/S-07 判定**：replay 3/3 系统性失败（复合比率 plan 不收敛 / 非月末单日全机构
+  最值路由），均 r4 已知 fail，非本次回归 → 开放缺陷，需 validator/提示词级后续项。
+- **模型端点抖动警示**：当日第 4 次瞬时 modelFailure（dev r10 VAL-H-12、test r5 M-07、
+  M-19 run2、smoke r12 TRAIN-M-01，签名=6s 内 PLAN_EXCEPTION 零修复轮 + s2-llm.log 无
+  请求记录）。smoke r12 = 4/5 即此因，TRAIN-M-01 replay 3/3 通过后 **smoke r13 = 5/5**
+  干净过门。
+- 待办：test r6 重验（H-10/H-11 预期 +2 → 37/40 上限）与提交均待用户批准。
+- **运维教训**：9081 实例重启必须带 `S2_METADATA_DB_PATH=<worktree>/.local-dev/state/
+  semantic`，否则落到部署目录 ./data 全新库（401 No permission to access agent 33）。
+
+### 2026-08-28 深夜｜test r6 = 37/40；发现并修复 H-10 方向盲 meets 残留
+
+- **test r6**（glm53low-test-20260828-r6，同 r5 形态 + 别名修复 jar）：**37/40**
+  （+2，达到 r5 后预测上限）。H-11 通过；M-07 瞬时 modelFailure 未复现。
+  剩余 3 fail：TST-H-10（RESULT_FACT_MISMATCH，见下）、TST-M-19 / TST-S-07
+  （系统性开放缺陷，r4/r5 已知，replay 3/3 稳定失败，非回归）。
+- **H-10 残留缺陷**：多指标全省均值阈值模板的 `meets_condition` 是**方向盲符号**
+  （`=0 / >0 → 1 / ELSE -1`），导致不良率 ZB013（低优）最差的机构（1.57 高于均值）
+  反被标 meets=1，语义上颠倒了「不良率低于全省均值」。r5 工程回放只核对了行存在与
+  gap 符号一致，未核对方向 → r6 计分暴露。
+- **修复（已提交）**：CASE 改为按指标目录方向（`BankResultProjector.rankingDirection`：
+  DESC→`>`，ASC→`<`）逐指标 OR 判定，取值 `THEN 1 ELSE 0`，与已过评测的单指标阈值
+  契约（全群体 + 标志位、不做机构过滤）完全对齐。覆盖矩阵测试新增 ZB013/ZB015 双向
+  断言（fixture schema 与 allowedMetrics 同步注册）。bank 包单测全绿。
+- **运行时验证**：部署 runtime-fallbackhook-r7 并带 `S2_METADATA_DB_PATH` 重启 9081；
+  H-10 回放 **26/26 行方向全部正确**（ORG004 1.57 → meets=0，七家低于均值机构 →
+  meets=1）；smoke **r14 = 5/5** 干净过门（caseAccuracy 1.0，errorCategories 全 NONE）。
+- **注意**：r6 分数不含本方向修复（H-10 仍计 fail）。是否重跑 test r7 以反映修复
+  属成本决策，待用户定夺。
