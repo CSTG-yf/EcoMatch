@@ -333,6 +333,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         validateMonthAndYearComparison(queryText, requirements);
+        validateStartOfYearComparison(queryText, requirements);
         validateExplicitYearEndRange(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
         validateProvinceWideInstitutionRanking(queryText, requirements);
@@ -350,6 +351,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             validateRankingIntent(requirements);
         }
         validateRankedChangeFamily(requirements, evidence);
+        // Named-ratio questions (存贷比/净利润率/人均利润) must keep the RATIO family wherever
+        // they appear — not only in the single-org single-date standalone context — so a
+        // degraded two-metric pivot cannot slip through validation.
+        validateDerivedPointRatioQuery(queryText, requirements, evidence);
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
         validateSelectedOrganizationBestComparison(queryText, requirements);
@@ -363,7 +368,6 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (!isStandalonePointRatioContext(queryText, requirements)) {
             return;
         }
-        validateDerivedPointRatioQuery(queryText, requirements, evidence);
         if (queryText.contains("不良贷款余额") && queryText.contains("贷款总额")
                 && containsAny(queryText, "占", "比重", "比例")) {
             validateQueryFamily("loan_share_ratio_mismatch", requirements, BankIntentType.RATIO,
@@ -481,12 +485,28 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     /**
-     * Validates any recognized derived metric (存贷比/净利润率/人均利润) as a standalone point ratio:
+     * Validates any recognized derived metric (存贷比/净利润率/人均利润) as a ratio-family query:
      * intent=RATIO with both base operands and the derived specification. The per-capita contract
-     * keeps its legacy error code so existing diagnostics stay comparable.
+     * keeps its legacy error code so existing diagnostics stay comparable. The gate is
+     * slot-driven and family-scoped: it fires whenever the lexicon recognizes a named ratio and
+     * the question carries no change, ranking, trend, benchmark, or composition wording that
+     * belongs to a different family — regardless of organization count or date shape — so a
+     * degraded two-metric STRUCT/POINT_QUERY pivot cannot silently pass validation.
      */
     private void validateDerivedPointRatioQuery(String queryText, BankRequestContract requirements,
             BankIntentResult evidence) {
+        if (requirements == null
+                || requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "较年初",
+                        "较上月", "较去年", "较同期", "增幅", "增量", "增长", "下降", "变动", "变化",
+                        "最高", "最低", "全省均值", "对比", "比较", "分别", "各自", "构成", "结构", "占")) {
+            return;
+        }
+        if (evidence.getMetrics().size() != 2 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null) {
+            return;
+        }
         for (BankIntentResult.DerivedMetricCandidate derived : evidence.getDerivedMetrics()) {
             String errorCode = "DERIVED_ZB011_DIV_ZB018".equals(derived.getCode())
                     ? "per_capita_profit_mismatch"
@@ -570,6 +590,130 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", organizationCodes=" + actualOrganizations + ", metricCodes="
                         + actualMetrics + ". Regenerate the complete requirements JSON; do not "
                         + "rewrite the model plan in the backend.");
+    }
+
+    /**
+     * Validates the "较年初 / 从年初" baseline family. A year-start comparison is anchored at
+     * the prior calendar year's 12-31; a contract that answers it with PERIOD_OVER_PERIOD and a
+     * current-year 01-01 baseline compiles to a different fact and is returned as a repairable
+     * error. Questions carrying an explicit YYYY年末 baseline belong to the explicit-year-end
+     * family and are excluded here.
+     */
+    private void validateStartOfYearComparison(String queryText,
+            BankRequestContract requirements) {
+        if (!isStartOfYearComparisonQuestion(queryText)) {
+            return;
+        }
+        BankQueryPlan.TimeRange time = requirements.getTime();
+        if (time == null || time.getStartDate() == null || time.getEndDate() == null
+                || time.getEndDate().getYear() <= 1) {
+            return;
+        }
+        LocalDate expectedBaseline = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+        boolean valid = time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && expectedBaseline.equals(time.getBaselineStartDate())
+                && expectedBaseline.equals(time.getBaselineEndDate());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "start_of_year_baseline_mismatch: “年初/较年初”比较的基期是当前期前一年的 12-31，"
+                        + "当年 01-01 不是基期；expected time.comparison=START_OF_YEAR, "
+                        + "baselineStartDate=baselineEndDate=" + expectedBaseline + "; model time="
+                        + time + ". 请仅修正冲突的时间槽位后重新生成完整 requirements JSON；不要改动"
+                        + "指标、机构或答案事实。");
+    }
+
+    /**
+     * Shared trigger for the year-start family: the wording names a relative year start and asks
+     * for a comparison, and the question does not carry an explicit YYYY年末 baseline (that is
+     * the explicit-year-end family).
+     */
+    private boolean isStartOfYearComparisonQuestion(String queryText) {
+        if (queryText == null || !queryText.contains("年初")
+                || containsAny(queryText, "年末", "年底")
+                || EXPLICIT_YEAR_END_RANGE.matcher(queryText).find()) {
+            return false;
+        }
+        return containsAny(queryText, "较年初", "年初以来", "年初至今")
+                || (queryText.contains("年初") && queryText.contains("到"));
+    }
+
+    /**
+     * Plan-level twin of {@link #validateStartOfYearComparison}: the SQL is compiled from the
+     * plan, so a requirements contract that passes while the plan keeps PERIOD_OVER_PERIOD with
+     * a current-year 01-01 baseline still produces the wrong fact. The same family trigger is
+     * enforced against the plan's own time slots.
+     */
+    private void validateStartOfYearPlanContract(String queryText, BankQueryPlan plan) {
+        if (!isStartOfYearComparisonQuestion(queryText) || plan == null || plan.getTime() == null
+                || plan.getTime().getEndDate() == null
+                || plan.getTime().getEndDate().getYear() <= 1) {
+            return;
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        LocalDate expectedBaseline = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+        boolean valid = time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && expectedBaseline.equals(time.getBaselineStartDate())
+                && expectedBaseline.equals(time.getBaselineEndDate());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "start_of_year_plan_mismatch: “年初/较年初”比较的基期是当前期前一年的 12-31，"
+                        + "当年 01-01 不是基期；plan.time 必须 comparison=START_OF_YEAR 且 "
+                        + "baselineStartDate=baselineEndDate=" + expectedBaseline
+                        + "；当前 plan.time comparison=" + time.getComparison()
+                        + ", baselineStartDate=" + time.getBaselineStartDate()
+                        + ", baselineEndDate=" + time.getBaselineEndDate()
+                        + "。请仅修正 plan 的冲突时间槽位后重新输出完整 planning JSON；不要改动"
+                        + "requirements、指标、机构或答案事实。");
+    }
+
+    /**
+     * Plan-level twin of {@link #validateDerivedPointRatioQuery}: a named-ratio question whose
+     * requirements pass while the plan degrades to a POINT_QUERY/STRUCT pivot compiles to a
+     * two-metric pivot without the ratio column. The plan must keep intent=RATIO with a RATIO
+     * calculation.
+     */
+    private void validateRatioPlanContract(String queryText, BankQueryPlan plan) {
+        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "较年初",
+                        "较上月", "较去年", "较同期", "增幅", "增量", "增长", "下降", "变动", "变化",
+                        "最高", "最低", "全省均值", "对比", "比较", "分别", "各自", "构成", "结构", "占")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getMetrics().size() != 2 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null
+                || evidence.getDerivedMetrics().isEmpty()) {
+            return;
+        }
+        boolean ratioPlan = plan.getIntent() == BankIntentType.RATIO
+                && plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RATIO;
+        if (ratioPlan) {
+            return;
+        }
+        StringBuilder derivedSpecs = new StringBuilder();
+        for (BankIntentResult.DerivedMetricCandidate derived : evidence.getDerivedMetrics()) {
+            if (derivedSpecs.length() > 0) {
+                derivedSpecs.append(", ");
+            }
+            derivedSpecs.append(derived.getCode()).append('=').append(derived.getNumerator())
+                    .append('/').append(derived.getDenominator());
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "derived_point_ratio_plan_mismatch: 命名比率类问法要求 plan 保持 RATIO 查询族"
+                        + "（intent=RATIO 且 calculation.type=RATIO，产出 numerator_value/"
+                        + "denominator_value/ratio_percent 列）；目录派生指标 " + derivedSpecs
+                        + "；当前 plan intent=" + plan.getIntent() + ", calculation="
+                        + (plan.getCalculation() == null ? "null"
+                                : plan.getCalculation().getType())
+                        + " 会退化为两指标透视点查。请仅修正 plan 的 intent/calculation/metrics "
+                        + "槽位后重新输出完整 planning JSON；不要改动 requirements。");
     }
 
     /**
@@ -1178,6 +1322,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         validateHighConfidenceQueryFamily(queryText, requirements);
         BankPlanningResponse planning = planningResponseParser.parse(candidate, admissionHints);
         if (planning.getPlan() != null) {
+            // The plan is what compiles: requirements-level gates alone let a divergent plan
+            // slip through when the model writes the requirements correctly but the plan wrong.
+            validateStartOfYearPlanContract(queryText, planning.getPlan());
+            validateRatioPlanContract(queryText, planning.getPlan());
             validateModelOwnedOutputContract(queryText, planning.getPlan());
         }
         return planning;
