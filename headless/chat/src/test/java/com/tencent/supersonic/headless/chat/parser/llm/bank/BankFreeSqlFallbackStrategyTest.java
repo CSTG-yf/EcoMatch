@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
 import com.tencent.supersonic.common.pojo.ChatApp;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
+import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.headless.api.pojo.SchemaElement;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.chat.parser.llm.OnePassSCSqlGenStrategy;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
@@ -164,6 +166,152 @@ class BankFreeSqlFallbackStrategyTest {
         assertTrue(content.contains("1. 表 \"x\" 不在语义数据集白名单内"));
         assertTrue(content.contains("2. 函数 median 不在白名单内"));
         assertTrue(content.contains("columns"));
+    }
+
+    @Test
+    void probePassPublishesTheCandidateUnchanged() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenReturn(dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        // Case-insensitive column containment: physical labels may differ in case.
+        when(probe.probe(any(LLMReq.class), eq(GOOD_SQL)))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.pass(
+                        List.of("ORG_CODE", "METRIC_VALUE"), 1));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback =
+                generateWithModelAndProbe(model, probe, "UNSUPPORTED_QUERY_SHAPE");
+
+        assertNotNull(fallback);
+        assertEquals(GOOD_SQL, fallback.getSql());
+        assertEquals(List.of("org_code", "metric_value"), fallback.getDeclaredColumns());
+        assertEquals(1, fallback.getModelAttempts());
+        verify(probe).probe(any(LLMReq.class), eq(GOOD_SQL));
+    }
+
+    @Test
+    void probeFailureFeedsExecutionErrorIntoRepairRound() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")),
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        when(probe.probe(any(LLMReq.class), anyString()))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.fail(
+                        BankFallbackSqlProbe.ERROR_EXECUTION_FAILED,
+                        "Query execution failed (failureLayer=JDBC_GRAMMAR)"))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.pass(
+                        List.of("org_code", "metric_value"), 1));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback =
+                generateWithModelAndProbe(model, probe, "S2SQL_RENDER_FAILED");
+
+        assertNotNull(fallback);
+        assertEquals(GOOD_SQL, fallback.getSql());
+        assertEquals(2, fallback.getModelAttempts());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repairPrompt = prompts.getAllValues().get(1);
+        assertTrue(repairPrompt.contains("上一轮输出已通过白名单校验，但发布前试执行未通过"));
+        assertTrue(repairPrompt.contains("试执行失败[EXECUTION_FAILED]"));
+        assertTrue(repairPrompt.contains("failureLayer=JDBC_GRAMMAR"));
+        assertTrue(repairPrompt.contains("重新只输出一条符合系统规则的 JSON"));
+    }
+
+    @Test
+    void probeFailureInBothRoundsFailsClosed() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenReturn(dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        when(probe.probe(any(LLMReq.class), anyString()))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.fail(
+                        BankFallbackSqlProbe.ERROR_TRANSLATE_FAILED,
+                        "parse exception: unknown metric"));
+
+        assertNull(generateWithModelAndProbe(model, probe, "UNSUPPORTED_QUERY_SHAPE"));
+        verify(model, times(2)).generate(anyString());
+        verify(probe, times(2)).probe(any(LLMReq.class), anyString());
+    }
+
+    @Test
+    void probeMissingDeclaredColumnFeedsRepairRound() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")),
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        when(probe.probe(any(LLMReq.class), anyString()))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.pass(List.of("metric_value"), 1))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.pass(
+                        List.of("org_code", "metric_value"), 2));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback =
+                generateWithModelAndProbe(model, probe, "UNSUPPORTED_FILTER");
+
+        assertNotNull(fallback);
+        assertEquals(2, fallback.getModelAttempts());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repairPrompt = prompts.getAllValues().get(1);
+        assertTrue(repairPrompt.contains("试执行结果缺少声明列: [org_code]"));
+        assertTrue(repairPrompt.contains("实际返回列: [metric_value]"));
+    }
+
+    @Test
+    void probeExceptionIsTreatedAsRepairableProbeFailure() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")),
+                dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        when(probe.probe(any(LLMReq.class), anyString()))
+                .thenThrow(new IllegalStateException("probe infra down"))
+                .thenReturn(BankFallbackSqlProbe.ProbeReport.pass(
+                        List.of("org_code", "metric_value"), 1));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback =
+                generateWithModelAndProbe(model, probe, "UNSUPPORTED_QUERY_SHAPE");
+
+        assertNotNull(fallback);
+        assertEquals(2, fallback.getModelAttempts());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("试执行失败[OTHER]"));
+        assertTrue(prompts.getAllValues().get(1).contains("probe infra down"));
+    }
+
+    @Test
+    void missingProbeBeanKeepsLegacyBehavior() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenReturn(dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
+
+        BankFreeSqlFallbackStrategy.FallbackSql fallback;
+        try (MockedStatic<ModelProvider> modelProvider = mockStatic(ModelProvider.class);
+                MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(BankFallbackSqlProbe.class))
+                    .thenThrow(new IllegalStateException("no spring context"));
+            modelProvider.when(() -> ModelProvider.getChatModel(any(ChatModelConfig.class)))
+                    .thenReturn(model);
+            fallback = strategy.generate(bankRequest(), "UNSUPPORTED_QUERY_SHAPE");
+        }
+
+        assertNotNull(fallback);
+        assertEquals(GOOD_SQL, fallback.getSql());
+        assertEquals(1, fallback.getModelAttempts());
+    }
+
+    private BankFreeSqlFallbackStrategy.FallbackSql generateWithModelAndProbe(
+            ChatLanguageModel model, BankFallbackSqlProbe probe, String triggerReason) {
+        try (MockedStatic<ModelProvider> modelProvider = mockStatic(ModelProvider.class);
+                MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(BankFallbackSqlProbe.class))
+                    .thenReturn(probe);
+            modelProvider.when(() -> ModelProvider.getChatModel(any(ChatModelConfig.class)))
+                    .thenReturn(model);
+            return strategy.generate(bankRequest(), triggerReason);
+        }
     }
 
     private BankFreeSqlFallbackStrategy.FallbackSql generateWithModel(ChatLanguageModel model,
