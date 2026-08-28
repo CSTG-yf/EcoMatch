@@ -10,6 +10,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.chat.ChatQueryContext;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankFreeSqlFallbackHook;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlExecutionCoordinator;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanCompilationException;
@@ -130,6 +131,11 @@ public class LLMSqlParser implements SemanticParser {
                 values.put("calculation.type", sorted(BankSemanticRegistry.calculationTypes()));
                 values.put("time.comparison", sorted(BankSemanticRegistry.timeComparisons()));
             }
+            case UNSUPPORTED_QUERY_SHAPE -> {
+                values.put("intent", sorted(BankSemanticRegistry.intents()));
+                values.put("calculation.type", sorted(BankSemanticRegistry.calculationTypes()));
+                values.put("time.comparison", sorted(BankSemanticRegistry.timeComparisons()));
+            }
             case CLARIFICATION_REQUIRED -> values.put("action",
                     sorted(BankSemanticRegistry.planActions()));
             default -> { /* terminal/config-class reasons carry no slot whitelist */ }
@@ -163,6 +169,13 @@ public class LLMSqlParser implements SemanticParser {
             return List.of("当前计划是“全省排名”而不是“全省均值”比较：删除 "
                     + "benchmark/COMPARE/PROVINCE_AVERAGE，令 filters=[]；保留 intent=RANKING "
                     + "和 bank_organization 维度后，重新输出完整 BankQueryPlan。");
+        }
+        if (reason == BankPlanCompilationException.Reason.INVALID_PLAN
+                && isIdenticalOperandRatioPlan(previousPlanJson)) {
+            return List.of("当前计划的比率分子与分母解析到同一个目录指标（metrics[0] 与 "
+                    + "metrics[1]/calculation.baseline 相同），比率会恒为常数：metrics 必须选择"
+                    + "两个不同的目录 ZB### 指标，metrics[0]=分子、metrics[1]=calculation."
+                    + "baseline=分母；保持其余槽位不变，重新输出完整 BankQueryPlan。");
         }
         return switch (reason == null ? BankPlanCompilationException.Reason.INVALID_PLAN : reason) {
             case INVALID_PLAN -> List.of("计划 JSON 未通过基础合同校验：逐项核对 version/action/"
@@ -200,6 +213,11 @@ public class LLMSqlParser implements SemanticParser {
             case S2SQL_RENDER_FAILED -> List.of("模板渲染失败通常是切片过滤器或聚合组合越界：rank/"
                     + "rank_from_bottom 只能用于 RANKING；“前N和后N”需要 rank 与 rank_from_bottom 两个"
                     + "过滤器且 limit=2*N；多指标聚合 dimensions 只能是 [\"bank_organization\"]。");
+            case UNSUPPORTED_QUERY_SHAPE -> List.of("当前 intent×calculation 组合没有对应的查询族模板"
+                    + "（例如“排名”类意图不能直接套用 CHANGE 族）：对照 allowedValues 重新选择合法组合——"
+                    + "RANKING/DIRECT 配 rank 过滤、CHANGE/intent=CHANGE 配非 NONE 比较基期、"
+                    + "RATIO/intent=RATIO 配两个不同指标；若问题确实需要跨族组合，请保持原意并改写为"
+                    + "上述合法形状之一后，重新输出完整 BankQueryPlan。");
             default -> List.of("编译器拒绝当前计划组合（" + reason + "）。请根据上一份完整计划重新检查 "
                     + "intent、calculation、filters、dimensions、output 的组合后，重新输出完整 "
                     + "BankQueryPlan。");
@@ -282,6 +300,27 @@ public class LLMSqlParser implements SemanticParser {
                             filter != null && "benchmark".equals(filter.getField())
                                     && "COMPARE".equals(filter.getOperator())
                                     && "PROVINCE_AVERAGE".equals(filter.getValue()));
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    /** Detects a ratio plan whose two operands resolve to the same catalog metric. */
+    private static boolean isIdenticalOperandRatioPlan(String previousPlanJson) {
+        if (previousPlanJson == null || previousPlanJson.isBlank()) {
+            return false;
+        }
+        try {
+            BankQueryPlan plan = JsonUtil.toObject(previousPlanJson, BankQueryPlan.class);
+            if (plan == null || plan.getCalculation() == null
+                    || plan.getCalculation().getType() != BankQueryPlan.CalculationType.RATIO
+                    || plan.getMetrics() == null || plan.getMetrics().size() < 2
+                    || plan.getCalculation().getBaseline() == null) {
+                return false;
+            }
+            String numerator = plan.getMetrics().get(0).getBizName();
+            String denominator = plan.getCalculation().getBaseline();
+            return numerator != null && numerator.equalsIgnoreCase(denominator);
         } catch (RuntimeException ignored) {
             return false;
         }
@@ -397,6 +436,12 @@ public class LLMSqlParser implements SemanticParser {
                         publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, false,
                                 candidateRejectionState, candidateValidationErrorType,
                                 candidateCompilerReason);
+                        if (tryBankFreeSqlFallback(queryCtx, llmReq,
+                                BankNl2SqlError.compilationFailure(e))) {
+                            // Controlled fallback produced a whitelisted candidate; the parse
+                            // request must not surface the terminal compile failure anymore.
+                            return;
+                        }
                         throw BankNl2SqlError.compilationFailure(e);
                     }
                 } else if (bankConstrainedPlan && !BankNl2SqlError.allowsParserRetry(e)) {
@@ -407,6 +452,10 @@ public class LLMSqlParser implements SemanticParser {
                         throw bankError;
                     }
                     if (bankPlanCompilationException(e) != null) {
+                        if (tryBankFreeSqlFallback(queryCtx, llmReq,
+                                BankNl2SqlError.compilationFailure(e))) {
+                            return;
+                        }
                         throw BankNl2SqlError.compilationFailure(e);
                     }
                     throw e;
@@ -445,6 +494,23 @@ public class LLMSqlParser implements SemanticParser {
                     selectedDiagnostics);
             publishBankRoutingAttemptTelemetry(queryCtx.getParseResp(), llmReq, true, null,
                     null);
+        }
+    }
+
+    /**
+     * Terminal-state interception (design v1 §1): semantically unreachable compile failures with
+     * the switch enabled may reroute into the controlled free-SQL fallback channel. Any
+     * non-admitted error (and any failure of the fallback itself) keeps the original terminal
+     * failure verbatim.
+     */
+    private boolean tryBankFreeSqlFallback(ChatQueryContext queryCtx, LLMReq llmReq,
+            BankNl2SqlError terminalError) {
+        try {
+            return BankFreeSqlFallbackHook.tryRun(queryCtx, llmReq, terminalError);
+        } catch (RuntimeException e) {
+            log.error("bank free-SQL fallback failed: type={}, error=[{}]",
+                    e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e.getMessage()));
+            return false;
         }
     }
 

@@ -239,6 +239,94 @@ class BankQueryPlanValidatorTest {
     }
 
     @Test
+    void rejectsARatioWhoseOperandsResolveToTheSameCatalogMetric() {
+        BankQueryPlan plan = validPlan();
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setFilters(new ArrayList<>());
+        plan.setMetrics(new ArrayList<>(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB001", "ZB001")));
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB001").build());
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, ratioRequirements(Set.of("ZB001"), List.of()));
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("RATIO_OPERAND_IDENTICAL"));
+        // The repair message must name the conflicting slots and the offending operand.
+        assertTrue(result.summary().contains("metrics[0]"));
+        assertTrue(result.summary().contains("ZB001"));
+    }
+
+    @Test
+    void rejectsARatioThatInvertsTheRecognizedDerivedMetricDirection() {
+        BankQueryPlan plan = validPlan();
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setFilters(new ArrayList<>());
+        plan.setMetrics(new ArrayList<>(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB018")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB011")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB018", "ZB011")));
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB011").build());
+        SemanticIntentHints requirements = ratioRequirements(Set.of("ZB011", "ZB018"),
+                List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB011_DIV_ZB018", "ZB011", "ZB018", "人均利润")));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, requirements);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("RATIO_DIRECTION_MISMATCH"));
+        // The repair message must state the catalog direction and the legal operand order.
+        assertTrue(result.summary().contains("DERIVED_ZB011_DIV_ZB018"));
+        assertTrue(result.summary().contains("ZB011"));
+
+        // The forward direction of the same named ratio stays legal.
+        plan.setMetrics(new ArrayList<>(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB011")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB018")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011", "ZB018")));
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB018").build());
+
+        assertTrue(validator.validate(plan, requirements).isValid());
+    }
+
+    @Test
+    void keepsUnrecognizedRatioOperandsUnlockedSoEvidenceFreeRatiosStillCompile() {
+        BankQueryPlan plan = validPlan();
+        plan.setIntent(BankIntentType.RATIO);
+        plan.setFilters(new ArrayList<>());
+        plan.setCalculation(BankQueryPlan.Calculation.builder()
+                .type(BankQueryPlan.CalculationType.RATIO).baseline("ZB002").build());
+
+        // No derived spec in hints: the direction is not determinable, so the validator must
+        // not reject this operand order for direction reasons.
+        assertTrue(validator
+                .validate(plan, ratioRequirements(Set.of("ZB001", "ZB002"), List.of()))
+                .isValid());
+    }
+
+    private SemanticIntentHints ratioRequirements(Set<String> requiredMetrics,
+            List<SemanticIntentHints.DerivedMetricSpec> derivedSpecs) {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RATIO)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB011", "ZB018"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(requiredMetrics).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredDerivedMetrics(derivedSpecs)
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build();
+    }
+
+    @Test
     void rejectsDirectCalculationWhenPlanDeclaresATimeComparison() {
         BankQueryPlan plan = provinceWideChangeTopNPlan();
         plan.getTime().setComparison(BankQueryPlan.TimeComparison.START_OF_YEAR);

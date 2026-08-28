@@ -16,7 +16,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -61,12 +63,70 @@ public class BankResultProjector {
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
             case DERIVED_RANKING -> projectDerivedRanking(contract, sourceRows);
+            case FREE -> projectFree(contract, sourceRows);
         };
     }
 
     static String rankingDirection(String metricCode) {
         return LOWER_VALUE_IS_BETTER_METRICS.contains(StringUtils.upperCase(metricCode)) ? "ASC"
                 : "DESC";
+    }
+
+    /** Declared canonical output columns of a FREE passthrough contract, in declared order. */
+    public static List<String> freeSqlDeclaredColumns(Contract contract) {
+        if (contract == null || contract.getType() != ProjectionType.FREE) {
+            return List.of();
+        }
+        return contract.getMetrics().stream()
+                .map(BankResultProjector.MetricBinding::getSemanticColumn)
+                .filter(StringUtils::isNotBlank).toList();
+    }
+
+    /**
+     * Fail-closed dual-output check for the fallback channel: the physical result column
+     * metadata must name exactly the declared canonical columns (case-insensitive, order
+     * irrelevant). Returns true when there is no metadata evidence to contradict the
+     * declaration (empty or missing columns).
+     */
+    public static boolean freeSqlColumnsConsistent(Contract contract,
+            List<String> resultColumnNames) {
+        List<String> declared = freeSqlDeclaredColumns(contract);
+        if (declared.isEmpty()) {
+            return false;
+        }
+        if (resultColumnNames == null || resultColumnNames.isEmpty()) {
+            return true;
+        }
+        Set<String> declaredSet = declared.stream().map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualSet = resultColumnNames.stream().filter(Objects::nonNull)
+                .map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return declaredSet.equals(actualSet);
+    }
+
+    /**
+     * FREE passthrough projection: rows are returned verbatim under their declared canonical
+     * column names. Any row key outside the declared set (execution result diverging from the
+     * whitelisted statement shape) fails the projection so the handler can refuse the answer.
+     */
+    private Projection projectFree(Contract contract, List<Map<String, Object>> sourceRows) {
+        List<String> declared = freeSqlDeclaredColumns(contract);
+        if (declared.isEmpty()) {
+            return Projection.notApplied();
+        }
+        Set<String> declaredSet = declared.stream()
+                .map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            for (String key : sourceRow.keySet()) {
+                if (key == null || !declaredSet.contains(key.strip().toLowerCase(Locale.ROOT))) {
+                    return Projection.notApplied();
+                }
+            }
+        }
+        return Projection.applied(declared, sourceRows == null ? List.of() : sourceRows);
     }
 
     private Projection projectTrend(Contract contract, List<Map<String, Object>> sourceRows) {
@@ -145,9 +205,9 @@ public class BankResultProjector {
                     BigDecimal part = decimal(value.value());
                     row.put("ratio_percent",
                             part == null || totalNumeric == null
-                                    || totalNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
-                                            : part.multiply(BigDecimal.valueOf(100)).divide(
-                                                    totalNumeric, 15, RoundingMode.HALF_UP));
+                            || totalNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
+                                    : part.multiply(BigDecimal.valueOf(100)).divide(
+                                            totalNumeric, 2, RoundingMode.HALF_UP));
                     if (totalNumeric != null) {
                         row.put("numerator_value", value.value());
                         row.put("denominator_value", totalNumeric);
@@ -366,7 +426,7 @@ public class BankResultProjector {
             row.put("denominator_value", total);
             row.put("ratio_percent",
                     num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
-                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 2,
                                     RoundingMode.HALF_UP));
             out.add(row);
         }
@@ -1507,7 +1567,9 @@ public class BankResultProjector {
         TREND,
         MOM_YOY_CHANGE,
         MULTI_METRIC_CHANGE,
-        DERIVED_RANKING
+        DERIVED_RANKING,
+        /** Controlled free-SQL fallback passthrough; metrics bindings declare the output columns. */
+        FREE
     }
 
     @Data

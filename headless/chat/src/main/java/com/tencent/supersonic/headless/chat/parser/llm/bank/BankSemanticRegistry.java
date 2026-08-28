@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -75,6 +76,7 @@ public final class BankSemanticRegistry {
     private static final Map<String, MetricDefinition> DERIVED_METRICS = buildDerivedMetrics();
     private static final Map<String, OrganizationDefinition> ORGANIZATIONS = buildOrganizations();
     private static final Map<String, PlanFieldDefinition> PLAN_FIELDS = buildPlanFields();
+    private static final Map<String, Double> DERIVED_RATIO_SCALES = buildDerivedRatioScales();
 
     private BankSemanticRegistry() {}
 
@@ -151,6 +153,18 @@ public final class BankSemanticRegistry {
 
     public static Map<String, MetricDefinition> derivedMetrics() {
         return DERIVED_METRICS;
+    }
+
+    /**
+     * Result-contract multiplier applied to a numerator/denominator ratio, owned here so the point
+     * ratio compiler and the derived ranking template stay consistent. Percent-style catalog
+     * ratios default to 100; pairs whose units already cancel keep the raw quotient (1.0), and
+     * unit-conversion pairs (亿元→万元) scale by 10000.
+     */
+    public static double ratioScale(String numerator, String denominator) {
+        Double scale = numerator == null || denominator == null ? null
+                : DERIVED_RATIO_SCALES.get(ratioPairKey(numerator, denominator));
+        return scale == null ? 100.0 : scale;
     }
 
     public static Map<String, OrganizationDefinition> organizations() {
@@ -437,6 +451,27 @@ public final class BankSemanticRegistry {
                         immutableSet(source.getNumerator(), source.getDenominator()), INTENTS,
                         immutableSet("RATIO_PERCENT", "RANK_POSITION", "METRIC_ROLE"))));
         return Collections.unmodifiableMap(metrics);
+    }
+
+    /**
+     * Ratio result scales keyed by operand pair. Catalog ratios are percent-style (scale 100)
+     * unless the units cancel: 人均利润 = 净利润(万元) / 员工人数(人) is already a raw quotient
+     * (scale 1.0), and 网点平均存款规模 = 各项存款(亿元) / 网点数量(个) converts to 万元 per
+     * outlet (scale 10000). The point ratio compiler and the derived ranking template both read
+     * this map, so the two routes can never drift apart again.
+     */
+    private static Map<String, Double> buildDerivedRatioScales() {
+        LinkedHashMap<String, Double> scales = new LinkedHashMap<>();
+        BankFinancialLexicon.derivedMetrics().forEach((code, source) -> scales.put(
+                ratioPairKey(source.getNumerator(), source.getDenominator()), 100.0));
+        scales.put(ratioPairKey("ZB011", "ZB018"), 1.0);
+        scales.put(ratioPairKey("ZB001", "ZB019"), 10000.0);
+        return Collections.unmodifiableMap(scales);
+    }
+
+    private static String ratioPairKey(String numerator, String denominator) {
+        return numerator.toUpperCase(Locale.ROOT) + "|"
+                + denominator.toUpperCase(java.util.Locale.ROOT);
     }
 
     private static Map<String, OrganizationDefinition> buildOrganizations() {

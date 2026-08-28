@@ -6,6 +6,7 @@ import com.tencent.supersonic.chat.server.util.ResultFormatter;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankResultProjector;
 
@@ -33,9 +34,18 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
             return false;
         }
         BankResultProjector.Contract contract = contract(queryResult.getChatContext());
+        boolean freeSqlContract = contract != null
+                && contract.getType() == BankResultProjector.ProjectionType.FREE;
+        if (freeSqlContract && !BankResultProjector.freeSqlColumnsConsistent(contract,
+                columnNames(queryResult))) {
+            return failFreeSqlContract(queryResult);
+        }
         BankResultProjector.Projection projection =
                 projector.project(contract, queryResult.getQueryResults());
         if (!projection.isApplied()) {
+            if (freeSqlContract) {
+                return failFreeSqlContract(queryResult);
+            }
             failResultSemantic(queryResult.getChatContext());
             return false;
         }
@@ -46,6 +56,29 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
         queryResult.setTextResult(ResultFormatter.transform2TextNew(columns, projection.getRows()));
         completeToolResult(queryResult.getChatContext(), projection);
         return true;
+    }
+
+    /**
+     * Fail-closed refusal of a fallback answer whose execution output diverges from the declared
+     * canonical columns: the query becomes an explicit failure and the raw rows are withheld —
+     * never a silent downgrade to the unprojected table (design v1 §2⑤).
+     */
+    private boolean failFreeSqlContract(QueryResult queryResult) {
+        failResultSemantic(queryResult.getChatContext());
+        queryResult.setQueryState(QueryState.SEARCH_EXCEPTION);
+        queryResult.setErrorMsg("自由 SQL 兜底输出与声明的列契约不一致，已拒绝返回");
+        queryResult.setQueryColumns(java.util.Collections.emptyList());
+        queryResult.setQueryResults(java.util.Collections.emptyList());
+        queryResult.setTextResult("");
+        return false;
+    }
+
+    private List<String> columnNames(QueryResult queryResult) {
+        if (queryResult.getQueryColumns() == null) {
+            return List.of();
+        }
+        return queryResult.getQueryColumns().stream().map(QueryColumn::getName)
+                .filter(java.util.Objects::nonNull).toList();
     }
 
     private void failResultSemantic(SemanticParseInfo parseInfo) {

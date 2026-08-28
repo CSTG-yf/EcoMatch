@@ -579,8 +579,65 @@ public class BankQueryPlanValidator {
             } else if (!metricOrder.get(1).equals(calculation.getBaseline())) {
                 errors.add(error("RATIO_DENOMINATOR_MISMATCH",
                         "ratio denominator must be the second selected metric"));
+            } else {
+                validateRatioOperands(hints, metricOrder, errors);
             }
         }
+    }
+
+    /**
+     * Fail-closed gates for the ratio operand contract. The numerator and denominator must be
+     * different catalog metrics (a ratio of an operand to itself would silently compile to a
+     * constant), and when the runtime derived-metric evidence pins the direction (e.g.
+     * 存贷比 = ZB002 / ZB001) the plan must keep the catalog numerator in metrics[0]; otherwise
+     * the compiled ratio silently inverts into the reciprocal.
+     */
+    private void validateRatioOperands(SemanticIntentHints hints, List<String> metricOrder,
+            List<ValidationError> errors) {
+        String numerator = metricOrder.get(0);
+        String denominator = metricOrder.get(1);
+        if (numerator.equalsIgnoreCase(denominator)) {
+            errors.add(error("RATIO_OPERAND_IDENTICAL",
+                    "ratio numerator and denominator resolve to the same metric: metrics[0]="
+                            + numerator + " 与 metrics[1]=calculation.baseline=" + denominator
+                            + " 相同，比率恒为常数；必须选择两个不同的 ZB### 目录指标，metrics[0]=分子、"
+                            + "metrics[1]=分母"));
+            return;
+        }
+        SemanticIntentHints.DerivedMetricSpec spec = matchingRatioSpec(hints, numerator,
+                denominator);
+        if (spec != null && !spec.numerator().equalsIgnoreCase(numerator)) {
+            errors.add(error("RATIO_DIRECTION_MISMATCH",
+                    "ratio direction is inverted: 目录派生指标 " + spec.code() + "（" + spec.name()
+                            + "）定义为 " + spec.numerator() + " / " + spec.denominator()
+                            + "，metrics[0] 必须是分子 " + spec.numerator()
+                            + "、metrics[1]=calculation.baseline 必须是分母 " + spec.denominator()
+                            + "；当前 metrics=[" + numerator + ", " + denominator
+                            + "] 会产生倒数比率"));
+        }
+    }
+
+    /**
+     * Returns the derived-metric spec whose operand pair is exactly the plan's two ratio
+     * operands (in either order). Only such a spec locks the direction; unrecognized operand
+     * pairs stay unlocked so evidence-free ratios are never falsely rejected.
+     */
+    private SemanticIntentHints.DerivedMetricSpec matchingRatioSpec(SemanticIntentHints hints,
+            String numerator, String denominator) {
+        for (SemanticIntentHints.DerivedMetricSpec spec : hints.getRequiredDerivedMetrics()) {
+            if (spec == null || StringUtils.isBlank(spec.numerator())
+                    || StringUtils.isBlank(spec.denominator())) {
+                continue;
+            }
+            boolean forward = spec.numerator().equalsIgnoreCase(numerator)
+                    && spec.denominator().equalsIgnoreCase(denominator);
+            boolean reversed = spec.numerator().equalsIgnoreCase(denominator)
+                    && spec.denominator().equalsIgnoreCase(numerator);
+            if (forward || reversed) {
+                return spec;
+            }
+        }
+        return null;
     }
 
     /**

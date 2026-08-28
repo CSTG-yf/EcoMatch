@@ -7,6 +7,7 @@ import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +29,12 @@ public final class BankFreeSqlPromptComposer {
      * prefix version also appends a stable-schema fingerprint (see {@link #prefixVersion(String)}).
      */
     public static final String PROMPT_VERSION = "bank-free-sql-sys-v7-fields-examples";
+
+    /**
+     * Version tag of the controlled free-SQL fallback prefix (design v1: bank-free-sql-v1). Bump
+     * when {@link #FREE_FALLBACK_SYSTEM_PREFIX} text changes.
+     */
+    public static final String FREE_FALLBACK_PROMPT_VERSION = "bank-free-sql-v1";
 
     private static final Pattern FORBIDDEN_LONG_TABLE = Pattern
             .compile("(?i)(\\b指标\\b\\s*=|\\bmetric_code\\b|\\bmetric_value\\b|\\borg_code\\b|"
@@ -214,6 +221,67 @@ public final class BankFreeSqlPromptComposer {
                 """.formatted(nullToEmpty(stableSchemaBlock)).strip();
     }
 
+    /**
+     * Fixed system prefix of the controlled free-SQL fallback (design v1 §2①). Reuses the same
+     * frozen semantic-catalog rendering as the main free-SQL path and adds the hard output-column
+     * contract, the AST whitelist rules and the structured dual-output JSON contract. The user
+     * turn carries only the question.
+     */
+    public static final String FREE_FALLBACK_SYSTEM_PREFIX = """
+                        你是银行问数的受控自由 SQL 兜底生成器。主路径语义查询族不可达时，把中文问题写成本语义数据集上可执行的一条 SQL。
+                        先对齐：意图、指标中文名、机构码、时间（绝对日期字面量）、排序（不良率/成本收入比/逾期率越小越好→ASC）。
+
+                        ════════════════════════════════
+                        一、可引用数据（以文末【语义目录】为准）
+                        ════════════════════════════════
+                        【表】只能 FROM【语义目录】Table 给出的语义数据集，禁止任何物理表或外部表。
+                        【维度列】机构（机构过滤/分组，取值 'ORG001'…'ORG013'）；数据日期（字面量 'YYYY-MM-DD'）。
+                        【度量列】只写目录中的指标中文名列；禁止把 ZB### 当列名。
+
+                        ════════════════════════════════
+                        二、硬性列契约（评测绑定，违者作废）
+                        ════════════════════════════════
+                        每个表达式列（函数/四则运算/窗口计算的结果）必须 AS 下列规范名之一：
+                        org_code, org_name, metric_code, data_date, bank_data_date, comparison_type,
+                        current_value, baseline_value, value_difference, absolute_change, metric_value,
+                        aggregate_value, daily_average, rank_position, numerator_value, denominator_value,
+                        ratio_percent, absolute_gap, gap_value, provincial_average,
+                        days_above_province_average, observation_count, above_ratio_percent
+                        机构列 AS org_code（值）或 org_name（名称）；日期分组列 AS data_date；指标数值列 AS metric_value 或 aggregate_value。
+                        只有直接选取目录列本身（如 `各项存款余额`）时才允许省略 AS。
+
+                        ════════════════════════════════
+                        三、安全规则（AST 白名单强制校验）
+                        ════════════════════════════════
+                        1. 只允许一条 SELECT 或 WITH...SELECT 主查询；禁止 UNION、INSERT/UPDATE/DELETE/DDL、注释、SELECT *、t.*。
+                        2. 只允许引用【语义目录】中的表、维度列与指标列；禁止其他任何列。
+                        3. 函数白名单：SUM、AVG、MAX、MIN、COUNT、CASE WHEN、ROW_NUMBER、RANK、DENSE_RANK、LAG、LEAD、COALESCE、NULLIF、ROUND、ABS；窗口函数 OVER 允许。
+                        4. 时间一律写字面量日期，禁止用函数推导“上个月/去年同期”。
+
+                        ════════════════════════════════
+                        四、输出格式（只输出 JSON，无 Markdown）
+                        ════════════════════════════════
+                        {"sql":"一条完整 SQL","columns":[{"alias":"规范列名","semantic_type":"dimension|metric|value","unit":"单位或空串"}],"confidence":0到1的小数}
+                        columns 必须逐列声明 SQL 顶层输出，且 alias 与 SQL 中的 AS 别名完全一致。
+                        """
+                + """
+
+                        【语义目录】（写 SQL 必须用下列表名/度量/维度）
+                        %s
+                        """.formatted(nullToEmpty(freeSqlMetricCatalogLines()));
+
+    /** System message for the fallback prefix = fixed fallback rules + frozen schema catalog. */
+    public static String composeFreeFallbackSystemPrefix(String stableSchemaBlock) {
+        String catalog = stableSchemaBlock == null || stableSchemaBlock.isBlank() ? ""
+                : stableSchemaBlock;
+        return FREE_FALLBACK_SYSTEM_PREFIX + "\n\n【当前数据集目录】\n" + catalog;
+    }
+
+    /** Prefix cache key for the fallback channel: fallback version + stable-schema fingerprint. */
+    public static String freeFallbackPrefixVersion(String stableSchemaBlock) {
+        return FREE_FALLBACK_PROMPT_VERSION + ":" + shortFingerprint(stableSchemaBlock);
+    }
+
     /** Prefix cache key: prompt version + short fingerprint of stable schema. */
     public static String prefixVersion(String stableSchemaBlock) {
         return PROMPT_VERSION + ":" + shortFingerprint(stableSchemaBlock);
@@ -321,11 +389,56 @@ public final class BankFreeSqlPromptComposer {
         return false;
     }
 
+    /** One declared output column of the fallback dual output (design v1 §2②). */
+    @lombok.Data
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public static class DeclaredColumn {
+        private String alias;
+        private String semanticType;
+        private String unit;
+    }
+
+    /** Structured dual output of the fallback channel: SQL plus declared columns. */
+    @lombok.Data
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    public static class FreeSqlResponse {
+        private String sql;
+        private List<DeclaredColumn> columns = new ArrayList<>();
+        private Double confidence;
+    }
+
+    /**
+     * Parses the fallback dual output JSON ({@code {"sql","columns","confidence"}}). Returns null
+     * when the text carries no parseable JSON object; callers treat null as a repairable
+     * malformed-output error.
+     */
+    public static FreeSqlResponse parseFreeSqlResponse(String modelOutput) {
+        if (modelOutput == null || modelOutput.isBlank()) {
+            return null;
+        }
+        String text = LlamaCppPrefixChatClient.stripThinking(modelOutput);
+        if (text == null || text.isBlank()) {
+            text = modelOutput;
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        try {
+            FreeSqlResponse response = com.tencent.supersonic.common.util.JsonUtil.toObject(
+                    text.substring(start, end + 1), FreeSqlResponse.class);
+            return response == null || response.getSql() == null || response.getSql().isBlank()
+                    ? null : response;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /**
      * Extract SQL from model output: prefers JSON {@code sql} field, then fenced code, else raw.
      */
-    public static String extractSql(String modelOutput) {
-        if (modelOutput == null || modelOutput.isBlank()) {
+    public static String extractSql(String modelOutput) {        if (modelOutput == null || modelOutput.isBlank()) {
             return "";
         }
         String text = LlamaCppPrefixChatClient.stripThinking(modelOutput);

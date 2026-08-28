@@ -36,6 +36,34 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldProjectPartialStructureShareRatioPercentAtTwoDecimalPlaces() {
+        // ZB001 + one part (ZB003) is a partial composition group: the generic long-form share
+        // path runs and must publish ratio_percent at the same 2-dp scale as the dedicated
+        // deposit/loan structure share projectors.
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.LONG_FORM)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "江苏省A市农商行"))
+                .selectedOrganizationCodes(List.of("ORG001"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb003")
+                                .metricCode("ZB003").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb001")
+                                .metricCode("ZB001").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "zb003", new BigDecimal("35.52"),
+                        "zb001", new BigDecimal("100"))));
+
+        assertEquals(2, projection.getRows().size());
+        // BigDecimal.equals is scale-sensitive: 35.52 pins the 2-dp contract (a 15-dp divide
+        // would produce 35.520000000000000 and must fail this assertion).
+        assertEquals(new BigDecimal("35.52"), projection.getRows().get(0).get("ratio_percent"));
+        assertEquals(new BigDecimal("100.00"), projection.getRows().get(1).get("ratio_percent"));
+    }
+
+    @Test
     void shouldProjectMultipleMetricChangeToTheStableOrganizationContract() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.MULTI_METRIC_CHANGE)

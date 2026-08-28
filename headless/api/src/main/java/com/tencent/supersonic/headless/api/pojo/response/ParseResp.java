@@ -69,7 +69,7 @@ public class ParseResp implements Serializable {
     }
 
     public enum BankRoutingSqlGenType {
-        ONE_PASS_SELF_CONSISTENCY, BANK_CONSTRAINED_PLAN
+        ONE_PASS_SELF_CONSISTENCY, BANK_CONSTRAINED_PLAN, FREE_SQL
     }
 
     public enum BankCandidateRejectionState {
@@ -89,7 +89,8 @@ public class ParseResp implements Serializable {
         ORDER_FIELD_NOT_SELECTED,
         UNSUPPORTED_FILTER,
         UNSUPPORTED_CALCULATION,
-        S2SQL_RENDER_FAILED
+        S2SQL_RENDER_FAILED,
+        UNSUPPORTED_QUERY_SHAPE
     }
 
     public ParseResp(String queryText) {

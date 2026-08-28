@@ -225,9 +225,7 @@ final class BankS2SqlTemplateFactory {
                         .collect(Collectors.joining(", "));
         String outerDimensions = groupColumns.isEmpty() ? "" : groupColumns + ", ";
         // Keep a decimal literal so percent ratios stay `* 100.0 /` (existing tests + SQL style).
-        String scaleLiteral = (Math.abs(scale - Math.rint(scale)) < 1e-9)
-                ? String.valueOf((long) Math.rint(scale)) + ".0"
-                : String.valueOf(scale);
+        String scaleLiteral = scaleLiteral(scale);
         return """
                 WITH bank_ratio AS (
                   SELECT %s
@@ -240,6 +238,16 @@ final class BankS2SqlTemplateFactory {
                 FROM bank_ratio%s
                 """.formatted(innerSelect, context.dataSetName(), where, groupBy, outerDimensions,
                 scaleLiteral, orderBy).trim();
+    }
+
+    /**
+     * Renders a ratio scale as a decimal SQL literal (e.g. {@code 100 -> 100.0}) so the compiled
+     * expression always stays in decimal arithmetic.
+     */
+    private static String scaleLiteral(double scale) {
+        return (Math.abs(scale - Math.rint(scale)) < 1e-9)
+                ? String.valueOf((long) Math.rint(scale)) + ".0"
+                : String.valueOf(scale);
     }
 
     /**
@@ -609,16 +617,22 @@ final class BankS2SqlTemplateFactory {
         }
         for (BankQueryPlan.DerivedMetric derived : context.plan().getDerivedMetrics()) {
             String cte = "bank_metric_" + metricIndex;
+            // The ratio scale is registry-owned so this ranking route cannot drift from the
+            // point-ratio template for the same operand pair (e.g. 人均利润 stays a raw
+            // 万元/人 quotient while percent-style ratios keep the * 100.0 contract).
+            double ratioScale = BankSemanticRegistry.ratioScale(derived.getNumerator(),
+                    derived.getDenominator());
             ctes.add("""
                     %s AS (
                       SELECT '%s' AS metric_code, bank_organization,
-                             SUM(%s) / NULLIF(SUM(%s), 0) * 100.0 AS metric_value
+                             SUM(%s) / NULLIF(SUM(%s), 0) * %s AS metric_value
                       FROM %s
                       WHERE %s
                       GROUP BY bank_organization
                     )
                     """.formatted(cte, derived.getMetricCode(), derived.getNumerator(),
-                    derived.getDenominator(), context.dataSetName(), where).trim());
+                    derived.getDenominator(), scaleLiteral(ratioScale), context.dataSetName(),
+                    where).trim());
             rankedSelects.add(rankedSelect(cte, "DESC"));
             metricIndex++;
         }

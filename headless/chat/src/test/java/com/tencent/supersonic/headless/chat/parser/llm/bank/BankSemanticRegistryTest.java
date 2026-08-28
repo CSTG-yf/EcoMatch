@@ -111,6 +111,19 @@ class BankSemanticRegistryTest {
     }
 
     @Test
+    void ratioScalesAreRegistryOwnedAndConsistentAcrossOperandCase() {
+        // Percent-style catalog ratio (存贷比 = ZB002 / ZB001).
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB002", "ZB001"));
+        // Raw quotient (人均利润 = 净利润(万元) / 员工人数(人)) must not inflate by 100.
+        assertEquals(1.0, BankSemanticRegistry.ratioScale("ZB011", "ZB018"));
+        // Unit conversion (网点平均存款规模: 亿元 deposits -> 万元 per outlet).
+        assertEquals(10000.0, BankSemanticRegistry.ratioScale("ZB001", "ZB019"));
+        // Unknown pairs fall back to the percent default; matching is case-insensitive.
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB013", "ZB001"));
+        assertEquals(1.0, BankSemanticRegistry.ratioScale("zb011", "zb018"));
+    }
+
+    @Test
     void sharedCatalogListsEveryMetricDerivedAndOrganizationExactlyOnce() {
         String shared = BankSemanticRegistry.sharedCatalog();
 
