@@ -101,9 +101,15 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     private static final int MAX_BANK_PLAN_ATTEMPTS = 2;
     private static final DateTimeFormatter MONTH_DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM");
-    /** TRANSLATION_FAILED re-enters the full parse+tool-repair path; ENVIRONMENT_FAULT never does. */
+    /**
+     * TRANSLATION_FAILED re-enters the full parse+tool-repair path; ENVIRONMENT_FAULT never does.
+     * INVARIANT_VIOLATION_* codes come from BankResultInvariantHandler (exact codes, one per
+     * invariant kind).
+     */
     private static final Set<String> REPAIRABLE_BANK_PLAN_ERRORS = Set.of("SQL_SAFETY_POLICY",
-            "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH", "TRANSLATION_FAILED");
+            "QUERY_GATEWAY", "JDBC_GRAMMAR", "RESULT_CONTRACT_MISMATCH", "TRANSLATION_FAILED",
+            "INVARIANT_VIOLATION_RANK", "INVARIANT_VIOLATION_ORG", "INVARIANT_VIOLATION_DATE",
+            "INVARIANT_VIOLATION_FREE_COLUMNS");
 
     @Autowired
     private ChatManageService chatManageService;
