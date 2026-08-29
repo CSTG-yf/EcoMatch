@@ -622,3 +622,145 @@ H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11
 - **修复批验证闭环达成**：族审计修复批（方向对象入模板 + 守卫收口 + 差分测试加固）
   smoke 5/5 → train r3 118/119（有效题 100%）→ 本节 + r2 归因节存档。
   13 文件修复批 + 本记录 **commit 待用户批准**。
+
+## 2026-08-29｜兜底不收敛批次：M-19/S-07 族改进 + 安全策略反馈（验证闭环 + H-07 memo 固化事故归因）
+
+- **批次内容**（四 owner 增量，~23 文件，全部在 headless/chat + chat/server）：
+  1. **方向语义（S-07/S-17 族）**：最高/最低值词面不再盲配排序端——按
+     `BankFinancialLexicon.MetricDirection`（LOWER_BETTER=ZB012/ZB013/ZB017）在
+     recognizer superlative 分支决定 `rank`（目录最优端）vs `rank_from_bottom`；
+     REQUIREMENTS 提示词写两步确定性映射（无日期化示例），PREFIX v61→v62
+     （`bank-plan-sys-v62-single-pass`）。
+  2. **加合族（M-19）**：新查询族「两个同单位百分率指标合计点查」——派生码
+     `DERIVED_SUM_<M1>_AND_<M2>`（规范字典序、无 `_DIV_`）、`metric1 + metric2`
+     单机构单日模板、validator 白名单 + POINT_QUERY 形状契约、registry
+     `additiveDerivedMetricCode`；RATIO 槽位对加合问法让位（防修复无不动点）。
+  3. **输出后反馈**：SqlExecutor `correctionHints` 透传 `failed_layer=` +
+     `root_message=`（normalizeSpace+截断 200）进修复上下文；兜底探测 bean 缺失
+     改 fail-closed（零模型调用）；兜底系统前缀补「每分支必须带过滤或 LIMIT」规则
+     （`bank-free-sql-v2-branch-filters`）。
+  4. **词干解析（M-19 第二刀）**：evidence 只有 ZB002（「贷款」命中）时加合槽无法
+     触发的缺口——`additiveOperandResolution` 以「别名包含词干 + 唯一 % 单位候选」
+     解析 不良/逾期 类 shorthand 词干，歧义即放弃，纯目录驱动无题面硬编码。
+- **单测**：bank 546 全绿 + chat/server 196 全绿；validator/strategy/recognizer/
+  composer/覆盖矩阵新增合成用例锁定列契约与路由。
+- **运行时验证（live 采样）**：部署后 replay——S-17 3/3（ZB013 rank=1=最低 0.73
+  J市，LOWER_BETTER 方向确定性 ✓）、S-07 3/3（ZB001 rank_from_bottom=13=最少
+  38.01 H市 ✓）、**M-19 3/3（`DERIVED_SUM_ZB013_AND_ZB017` = 2.25 = 1.21+1.04，
+  加合族编译+投影契约 ✓）**；smoke **r5 = 5/5，caseAccuracy 1.0**（parse p50
+  5.9s 全 live 轮）过门。
+- **H-07 memo 固化事故（重要工程发现，与本批代码无关）**：
+  - 现象：D 增量部署后 smoke r3 = 4/5，H-07 `PLAN_EXCEPTION`，replay 0/3
+    （66–104s）系统性失败，与端点抖动签名（llmCandidateCreated=false + 短时多轮
+    全挂）不符，深挖。
+  - 证据链（keyPipeline 日志）：14:31 smoke r3 首败 = attempt1 真实模型轮
+    prompt_tokens=15687 → completion 508 **截断**（MALFORMED_JSON「not complete
+    strict JSON」）；attempt2 修复轮 487 tokens 仍无效（DERIVED_METRIC_MISSING +
+    RANKING_ORDER_REQUIRED）→ 兜底 SQL completion 恰 **2048 顶格截断** →
+    Calcite + SQL_SAFETY_POLICY 双杀。对照 13:52/14:01/14:02（D 之前、同 prompt
+    v62、同 prompt_tokens=15687）：attempt1 461 tokens 完整但同两校验错 →
+    attempt2 636–745 tokens 被接受（~16s 过）。
+  - 机制：**14:30 重启清空 `FixedSystemPrefixLlmCache` 进程内 memo（user-content→
+    响应）**→ 14:31 live 采样掷出截断变体（一次坏采样）→ 坏响应被 memo 固化 →
+    后续同题 parse 3ms 命中坏响应、修复轮输入确定性复现 → 5 连败自我延续。
+    **证明：smoke r4 = 4/5，其余 4 题 parseMs p50=251ms（memo 回声秒过）、H-07
+    103.7s——恰如预测**。重启清 memo 后 smoke r5 H-07 live 即过。
+  - 定性：本批无罪（D 增量对 H-07 为死代码：无加法面词 + 「排名」排除词双重
+    短路；C 仅动兜底/执行层；主 plan 路径 prompt 与 r4 逐字节同源）。
+  - **暴露工程债两点（登记 backlog，未改）**：①memo 会缓存 MALFORMED 响应并
+    原样重放，抵消模型重试（候选改进：malformed 不入 memo 或加 TTL）；
+    ②兜底模型输出预算 2048 tokens 被 reasoning 烧满 → 兜底 SQL 必然截断，
+    是 H-07 兜底不收敛的根因（与本批 C 新增分支过滤规则的加长输出存在预算
+    紧张交互）。
+- 待办：train r5 全量无回归门（结果下节）；本批 commit **待用户批准**。
+
+### 2026-08-29｜train r5 = 116/119：1 处批次副作用（M-58）当场定位并修复（v63）；2 处闭集排名族采样方差
+
+- **train r5**（glm53low-train-20260829-r5，v62 jar + smoke r5 5/5 门禁后）：
+  **116/119，caseAccuracy = 0.97479**，用时 20m12s，串行。H-07 通过（1.6s，
+  memo 回声其 smoke r5 好响应）。
+- **3 失败逐一归因（全部 chars=60 planStageExhausted，非 39 字符端点抖动）**：
+  1. **TRAIN-M-58 = 本批副作用（已修）**：「净利息收入和中间业务收入合计」
+     （ZB008+ZB007，均亿元）。r1（v61）通过的形态是**双指标 pivot**
+     （`SUM(zb008), SUM(zb007)` 两列，金标要两个值）——r1 s2sql 为证。
+     v62 提示词 3i 词表把 `DERIVED_SUM_<M1>_AND_<M2>` 词汇泄漏给金额合计题，
+     模型照写后 requirements 白名单以「必须两个百分率(%)操作数」拒之——该修复
+     指令对金额题**不可满足**，两轮烧尽 → 耗尽。r4/r5 同挂（2/2），r1-r3 全过
+     （0/3），v62 引入确凿。
+     **修复（v63，`bank-plan-sys-v63-additive-percent-scope`）**：①白名单对
+     「规范码但非 % 操作数」改发**可满足重定向**（金额类合计不是派生指标：删
+     derivedMetrics、把加数并列写进 metrics/metricCodes——回 r1 契约）；
+     ②提示词 3i 词表显式收窄（仅 % 加数对可用该编码 + 金额合计重定向句）。
+     加合族语义边界由此更完整：% 指标合计才是派生指标（复合率），金额合计
+     属普通多指标查询。单测 +2（重定向文案 + 畸形码仍走 canonical 消息），
+     bank 558 全绿；部署后 M-58 replay **3/3 过**（首轮 live 23.4s 收敛为
+     双指标行）。
+  2. **TRAIN-H-09 = 闭集排名族采样方差（不修，与 H-07 同族）**：attempt1
+     510 tokens 截断（MALFORMED_JSON，与 H-07 坏轮同签名）→ attempt2 487
+     tokens 无效（DERIVED_METRIC_MISSING + RANKING_ORDER_REQUIRED）→ 耗尽。
+  3. **TRAIN-H-08 = 同族采样方差（不修）**：两轮均为完整 JSON 但语义错
+     （explicit_closed_metric_list_mismatch → DERIVED_METRIC_MISSING +
+     RANKING_ORDER_REQUIRED）。H-07/08/09 三胞胎是 9 指标闭集 + 排名 + 派生
+     存贷比的最长输出题，修复轮收敛与否取决于模型采样；r1-r4 均通过。
+- **处置**：v63 重新部署（重启顺带清 memo）→ smoke r6 门禁 → train r6 复跑
+  （结果下节）。
+
+### 2026-08-29｜memo 固化缺陷修复（MALFORMED_JSON 逐出）+ smoke r6→r7；v63 终版 jar 定版
+
+- **smoke r6 = 4/5**（v63 jar）：唯一失败 TRAIN-H-07（83.1s，live 采样又掷出
+  截断轮；其余 4 题 live 5.6–9.7s 全过）。签名与 r3/r5 的 H-09 完全相同
+  （attempt1 ~510 tokens 截断 MALFORMED_JSON → attempt2 无效）。
+- **同病类当场修复（类比清扫）**：`FixedSystemPrefixLlmCache` memo 会把截断
+  响应原样固化，后续同题 attempt1 毫秒级重放垃圾、修复轮输入被污染，收敛
+  概率减半——这正是「不收敛」家族成员。修复：缓存层新增 `evictCompletion`，
+  策略层捕获 `MALFORMED_JSON` 时逐出当前 user-content 的 memo 条目（语义
+  无效但完整的响应**保留** memo——修复轮可从其确定性收敛，即 H-07 通过路径）。
+  单测 +1（逐出后必须真重掷），bank 559 全绿。
+- **smoke r7 = 5/5，errorCategories 全 NONE**（v63 + memo 逐出终版 jar）过门。
+- **H-07/08/09 定性（记录在案，不在本批修）**：三胞胎 9 指标闭集排名题的
+  attempt1 输出 ~460–510 tokens 贴着截断线，修复轮收敛与否取决于模型采样；
+  r1–r4 三题全过、r5 挂 H-08/H-09、r6 挂 H-07——跨 run 随机分布，非代码
+  回归。memo 逐出修复后其期望通过率应显著上升（坏采样不再被固化放大）。
+- train r6（终版 jar 全量门）：见下节。
+
+### 2026-08-29｜train r6 = 117/119（v63 终版 jar 定版；目标族全过，2 失败=采样方差）
+
+- **train r6**（glm53low-train-20260829-r6，v63 + memo 逐出终版 jar，smoke r7
+  5/5 门禁后）：**117/119，caseAccuracy = 0.98319**，用时 20m11s，串行。
+- **本批目标族全量通过**：M-19 ✓（7.1s）、M-58 ✓（6.7s，v63 修复在全量跑生效）、
+  S-07 ✓（11.4s）、S-17 ✓（5.0s）；H-07/H-08/H-09 三胞胎本次**全部通过**
+  （14.7/22.6/27.8s，memo 逐出后坏采样不再被固化放大）。
+- **2 失败归因（均为模型采样方差，非代码回归）**：
+  - TRAIN-H-26（82.4s）：attempt1 截断（MALFORMED_JSON，**EVICT 逐出如期触发**）
+    → attempt2 新采样仍 VALIDATION_FAILED → 耗尽；该题 r4 亦挂过，惯常刀尖题。
+  - TRAIN-H-27（60.3s）：两轮 SCHEMA_VIOLATION。
+  与 r1–r5 的失败分布（0/3/1/3/3，题号随机）同模式。
+- **定版**：遵循 dev r10=39/40 与 train r3=118/119 先例——唯二失败为采样方差、
+  目标族与契约验证完备，**train r6 = 117/119 定版**，不重跑刷分。
+  本批（A 方向语义 + B/D 加合族 + C 反馈回灌 + v63 收窄 + memo 逐出，~26 文件）
+  **commit 待用户批准**；push 从未授权。
+
+### 2026-08-29｜兜底解码上限 2048→4096（用户指示继续后收尾的最后一个 backlog 项）
+
+- **病灶**：兜底通道显式解码上限 2048 tokens，而思考型网关在 SQL 之前就消耗
+  大量解码预算于 reasoning（观测单轮 reasoning ~8k 字符对 2048 上限）→ 长题
+  （H-07/08/09 族）兜底**每一轮都被截成 MALFORMED_JSON**，通道结构性不收敛。
+- **修复**：`FREE_FALLBACK_MAX_OUTPUT_TOKENS` 2048→4096（值锁定单测 ≥4096，
+  防无证据调回）；兜底通道 useMemo=false 无 memo 固化问题，无需逐出。
+  bank 560 全绿。
+- **部署与门禁**：smoke **r8 = 5/5**（errorCategories 全 NONE）过门；train r7
+  全量结果见下节。
+
+### 2026-08-29｜train r7 = 118/119（兜底 4096 终版 jar 定版；关键题全过）
+
+- **train r7**（glm53low-train-20260829-r7，兜底 4096 终版 jar，smoke r8 5/5 门禁后）：
+  **118/119，caseAccuracy = 0.9916**，用时 18m05s，串行。
+- **全量跑关键题清一色通过**：M-19 ✓、M-58 ✓、S-07 ✓、S-17 ✓、
+  H-07 ✓、H-08 ✓、H-09 ✓、H-26 ✓、H-27 ✓（r6 的两个方差失败本轮自然恢复）。
+- **唯一失败 TRAIN-S-08**（24.0s，chars=60 planStageExhausted，校验形状坏轮）：
+  r1–r6 从未挂过，属跨 run 随机方差彩票（r1–r7 失败数 0/3/1/3/3/2/1，题号互不
+  重叠），非代码回归；不重跑刷分。
+- **定版结论**：兜底不收敛批次全部四项目标（M-19 加合族、S-07/S-17 方向语义、
+  SafetyPolicy 反馈回灌、兜底收敛性）+ 验证期发现的两个同病类缺陷修复
+  （M-58 词表泄漏 v63、memo 固化逐出）+ 兜底解码上限 4096，**train r7 = 118/119
+  定版**。终版 jar 计 ~28 文件，**commit 待用户批准**；push 从未授权。
