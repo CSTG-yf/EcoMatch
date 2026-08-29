@@ -74,6 +74,7 @@ public class S2ChatLayerService implements ChatLayerService {
         } else {
             chatWorkflowEngine.start(ChatWorkflowState.PARSING, queryCtx);
         }
+        parseResp.setBankIntentResult(queryCtx.getBankIntentResult());
         return parseResp;
     }
 

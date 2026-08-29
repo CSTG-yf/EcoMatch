@@ -1,4 +1,5 @@
 import {
+  BankIntentResultType,
   ChatContextType,
   DateInfoType,
   DashboardQuerySource,
@@ -17,6 +18,7 @@ import { message, Spin } from 'antd';
 import AssistantAvatar from '../AssistantAvatar';
 import ExpandParseTip from './ExpandParseTip';
 import ExecuteItem from './ExecuteItem';
+import PlainTextAnswerCard from './PlainTextAnswerCard';
 import { isMobile } from '../../utils/utils';
 import classNames from 'classnames';
 import { AgentType } from '../../Chat/type';
@@ -28,6 +30,7 @@ import BankAnswerToolbar from './BankAnswerToolbar';
 import MultiTurnContextBar from './MultiTurnContextBar';
 import { QueryWorkflowStage, stageFromRequestError, stageFromResponseCode } from './workflow';
 import { buildDashboardQuerySource, canSaveDashboardResult } from './dashboardModel';
+import { shouldAwaitClarification } from './contextModel';
 
 const SUMMARY_POLL_INTERVAL_MS = 500;
 // 总结轮询上限 2 分钟：解释阶段走 LLM，复杂问题可能较慢；
@@ -115,6 +118,7 @@ const ChatItem: React.FC<Props> = ({
   );
   const [isParserError, setIsParseError] = useState<boolean>(false);
   const [multiTurnContext, setMultiTurnContext] = useState<MultiTurnContextType>();
+  const [bankIntentResult, setBankIntentResult] = useState<BankIntentResultType>();
   const [workflowStage, setWorkflowStage] = useState<QueryWorkflowStage>('idle');
   const [totalWallMs, setTotalWallMs] = useState<number>();
   const queryStartRef = useRef(0);
@@ -263,6 +267,7 @@ const ChatItem: React.FC<Props> = ({
     queryStartRef.current = performance.now();
     setTotalWallMs(undefined);
     setWorkflowStage('parsing');
+    setBankIntentResult(undefined);
     setIsParseError(false);
     setParseLoading(true);
     try {
@@ -282,9 +287,29 @@ const ChatItem: React.FC<Props> = ({
         parseTimeCost,
         errorMsg,
         multiTurnContext,
+        bankIntentResult: responseBankIntentResult,
       } = data || {};
       setMultiTurnContext(multiTurnContext);
+      setBankIntentResult(responseBankIntentResult);
       const parses = selectedParses?.concat(candidateParses || []) || [];
+      if (shouldAwaitClarification(responseBankIntentResult)) {
+        const clarificationParseInfo = {
+          queryId,
+          properties: {},
+        } as ChatContextType;
+        setParseInfoOptions([]);
+        setParseInfo(clarificationParseInfo);
+        setParseTimeCost(parseTimeCost);
+        setEntityInfo({} as EntityInfoType);
+        setDimensionFilters([]);
+        setDateInfo({} as DateInfoType);
+        setParseTip('');
+        setIsParseError(false);
+        setExecuteMode(false);
+        setWorkflowStage('clarifying');
+        onUpdateMessageScroll?.();
+        return;
+      }
       if (
         code !== 200 ||
         state === ParseStateEnum.FAILED ||
@@ -330,6 +355,22 @@ const ChatItem: React.FC<Props> = ({
 
   const initChatItem = (msg, msgData) => {
     if (msgData) {
+      const historyBankIntentResult = msgData.bankIntentResult;
+      setBankIntentResult(historyBankIntentResult);
+      if (shouldAwaitClarification(historyBankIntentResult)) {
+        const clarificationParseInfo = {
+          queryId: msgData.queryId,
+          properties: {},
+        } as ChatContextType;
+        setParseInfoOptions([]);
+        setParseInfo(clarificationParseInfo);
+        setParseTimeCost(parseTimeCostValue);
+        setExecuteMode(false);
+        setParseTip('');
+        setIsParseError(false);
+        setWorkflowStage('clarifying');
+        return;
+      }
       const parseInfoOptionsValue =
         parseInfos && parseInfos.length > 0
           ? parseInfos.map(item => ({ ...item, queryId: msgData.queryId }))
@@ -509,6 +550,7 @@ const ChatItem: React.FC<Props> = ({
   const contentClass = classNames(`${prefixCls}-content`, {
     [`${prefixCls}-content-mobile`]: isMobile,
   });
+  const isPlainTextAnswer = parseInfo?.queryMode === 'PLAIN_TEXT';
 
   const { llmReq, llmResp } = parseInfo?.properties?.CONTEXT || {};
 
@@ -526,27 +568,31 @@ const ChatItem: React.FC<Props> = ({
           </div>
           <div className={contentClass}>
             <MultiTurnContextBar context={multiTurnContext} question={msg} onSendMsg={onSendMsg} />
-            <BankAnswerWorkflow
-              question={msg}
-              parseInfo={parseInfo}
-              parseTimeCost={parseTimeCost}
-              totalTimeCost={totalWallMs}
-              data={data}
-              workflowStage={workflowStage}
-              parseTip={parseTip}
-              isSimpleMode={isSimpleMode}
-              isDeveloper={isDeveloper}
-              isDebugMode={isDebugMode}
-              dimensionFilters={dimensionFilters}
-              dateInfo={dateInfo}
-              entityInfo={entityInfo}
-              agentId={agentId}
-              integrateSystem={integrateSystem}
-              onFiltersChange={onFiltersChange}
-              onSwitchEntity={onSwitchEntity}
-              onDateInfoChange={onDateInfoChange}
-              handlePresetClick={handlePresetClick}
-            />
+            {parseInfo?.queryMode !== 'PLAIN_TEXT' && (
+              <BankAnswerWorkflow
+                question={msg}
+                parseInfo={parseInfo}
+                parseTimeCost={parseTimeCost}
+                totalTimeCost={totalWallMs}
+                data={data}
+                workflowStage={workflowStage}
+                intent={bankIntentResult}
+                onApplyClarification={question => onSendMsg?.(question)}
+                parseTip={parseTip}
+                isSimpleMode={isSimpleMode}
+                isDeveloper={isDeveloper}
+                isDebugMode={isDebugMode}
+                dimensionFilters={dimensionFilters}
+                dateInfo={dateInfo}
+                entityInfo={entityInfo}
+                agentId={agentId}
+                integrateSystem={integrateSystem}
+                onFiltersChange={onFiltersChange}
+                onSwitchEntity={onSwitchEntity}
+                onDateInfoChange={onDateInfoChange}
+                handlePresetClick={handlePresetClick}
+              />
+            )}
             <>
               {currentAgent?.enableFeedback === 1 && !questionId && showExpandParseTip && (
                 <div style={{ marginBottom: 10 }}>
@@ -568,28 +614,33 @@ const ChatItem: React.FC<Props> = ({
               )}
             </>
 
-            {executeMode && (
-              <Spin spinning={entitySwitchLoading}>
-                <div style={{ minHeight: 50 }}>
-                  <ExecuteItem
-                    isSimpleMode={isSimpleMode}
-                    queryId={parseInfo?.queryId}
-                    question={actualQueryText}
-                    queryMode={parseInfo?.queryMode}
-                    executeLoading={executeLoading}
-                    executeTip={executeTip}
-                    executeErrorMsg={executeErrorMsg}
-                    chartIndex={0}
-                    data={data}
-                    triggerResize={triggerResize}
-                    executeItemNode={executeItemNode}
-                    isDeveloper={isDeveloper}
-                    renderCustomExecuteNode={renderCustomExecuteNode}
-                  />
-                </div>
-              </Spin>
+            {executeMode && workflowStage !== 'clarifying' && (
+              isPlainTextAnswer && data ? (
+                <PlainTextAnswerCard text={data.textResult} />
+              ) : (
+                <Spin spinning={entitySwitchLoading}>
+                  <div style={{ minHeight: 50 }}>
+                    <ExecuteItem
+                      isSimpleMode={isSimpleMode}
+                      queryId={parseInfo?.queryId}
+                      question={actualQueryText}
+                      queryMode={parseInfo?.queryMode}
+                      executeLoading={executeLoading}
+                      executeTip={executeTip}
+                      executeErrorMsg={executeErrorMsg}
+                      chartIndex={0}
+                      data={data}
+                      triggerResize={triggerResize}
+                      executeItemNode={executeItemNode}
+                      isDeveloper={isDeveloper}
+                      renderCustomExecuteNode={renderCustomExecuteNode}
+                    />
+                  </div>
+                </Spin>
+              )
             )}
             {(parseTip !== '' || (executeMode && !executeLoading)) &&
+              workflowStage !== 'clarifying' &&
               parseInfo?.queryMode !== 'PLAIN_TEXT' && (
                 <BankAnswerToolbar
                   msg={msg}

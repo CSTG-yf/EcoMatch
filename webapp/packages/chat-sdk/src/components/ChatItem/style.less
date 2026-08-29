@@ -324,6 +324,52 @@
     border-bottom: 1px solid var(--border-color-base);
   }
 
+  &-plain-text-answer-card {
+    color: var(--text-color);
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+    user-select: text;
+
+    p {
+      margin: 0 0 10px;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    ul,
+    ol {
+      margin: 6px 0 10px;
+      padding-left: 22px;
+    }
+
+    blockquote {
+      padding-left: 12px;
+      margin: 8px 0;
+      border-left: 3px solid var(--border-color-base);
+      color: var(--text-color-secondary);
+    }
+
+    pre {
+      padding: 10px 12px;
+      overflow-x: auto;
+      background: #f5f8fb;
+      border-radius: 4px;
+    }
+
+    code {
+      padding: 1px 4px;
+      background: #f5f8fb;
+      border-radius: 3px;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+  }
+
   // 自然语言回答的排版：行高放宽，避免文字贴在一起
   &-summary-text {
     line-height: 1.8;
