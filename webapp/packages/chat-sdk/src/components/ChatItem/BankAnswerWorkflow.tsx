@@ -16,6 +16,7 @@ import { CopyToClipboard } from 'react-copy-to-clipboard';
 import dayjs, { Dayjs } from 'dayjs';
 import quarterOfYear from 'dayjs/plugin/quarterOfYear';
 import {
+  BankIntentResultType,
   ChatContextType,
   DateInfoType,
   EntityInfoType,
@@ -26,6 +27,7 @@ import {
 import { PREFIX_CLS } from '../../common/constants';
 import { isMobile } from '../../utils/utils';
 import FilterItem from './FilterItem';
+import BankClarificationPanel from './BankClarificationPanel';
 import { QueryWorkflowStage, WORKFLOW_STAGE_TEXT } from './workflow';
 import { confidenceLevel, filterSummaries, semanticNames, sqlValidationLabel } from './trustModel';
 import {
@@ -60,6 +62,8 @@ type Props = {
   totalTimeCost?: number;
   data?: MsgDataType;
   workflowStage: QueryWorkflowStage;
+  intent?: BankIntentResultType;
+  onApplyClarification?: (question: string) => void;
   parseTip?: string;
   isSimpleMode?: boolean;
   isDeveloper?: boolean;
@@ -194,6 +198,8 @@ const BankAnswerWorkflow: React.FC<Props> = ({
   totalTimeCost,
   data,
   workflowStage,
+  intent,
+  onApplyClarification,
   parseTip,
   isSimpleMode,
   isDeveloper,
@@ -211,8 +217,8 @@ const BankAnswerWorkflow: React.FC<Props> = ({
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const [activeSqlTab, setActiveSqlTab] = useState<string>('');
 
-  // 精简模式：不展示问数过程，直接展示结果
-  if (workflowStage === 'idle' || isSimpleMode) {
+  // 精简模式：不展示问数过程，直接展示结果；澄清仍需展示交互面板
+  if (workflowStage === 'idle' || (isSimpleMode && workflowStage !== 'clarifying')) {
     return null;
   }
 
@@ -588,6 +594,13 @@ const BankAnswerWorkflow: React.FC<Props> = ({
                   </div>
                 )}
                 <DetailGrid prefixCls={prefixCls} items={understandDetails} />
+                {workflowStage === 'clarifying' && (
+                  <BankClarificationPanel
+                    intent={intent}
+                    question={question}
+                    onApply={onApplyClarification}
+                  />
+                )}
                 {parseTip && <p className={`${prefixCls}-stage-note`}>{parseTip}</p>}
               </>
             )}

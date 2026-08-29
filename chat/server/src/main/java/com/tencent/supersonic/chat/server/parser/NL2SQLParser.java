@@ -220,6 +220,7 @@ public class NL2SQLParser implements ChatQueryParser {
         resp.setParseTimeCost(parseResp.getParseTimeCost());
         resp.setErrorMsg(parseResp.getErrorMsg());
         resp.setBankRoutingAttemptTelemetry(parseResp.getBankRoutingAttemptTelemetry());
+        resp.setBankIntentResult(parseResp.getBankIntentResult());
     }
 
     void rewriteMultiTurn(ParseContext parseContext, QueryNLReq queryNLReq) {

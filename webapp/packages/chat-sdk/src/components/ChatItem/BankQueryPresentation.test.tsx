@@ -165,6 +165,28 @@ describe('bank query presentation', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('renders clarification inside the understand stage and keeps later stages pending', () => {
+    render(
+      <BankAnswerWorkflow
+        question="最近贷款情况怎么样"
+        workflowStage="clarifying"
+        intent={
+          {
+            clarificationRequired: true,
+            clarifications: [
+              { type: 'METRIC', question: '您希望查询哪个指标？', options: ['贷款余额'] },
+            ],
+          } as any
+        }
+      />
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('等待补充查询条件');
+    expect(screen.getByRole('region', { name: '问题澄清' })).toBeInTheDocument();
+    expect(screen.getAllByText('等待').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('待澄清')).toHaveLength(1);
+  });
+
   it('collects official clarification options before resubmitting', () => {
     const onApply = jest.fn();
     render(

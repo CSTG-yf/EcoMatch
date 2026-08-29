@@ -10,6 +10,7 @@ import { solarizedlight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import React, { ReactNode, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import BusinessInsightPanel from './BusinessInsightPanel';
+import PlainTextAnswerCard from './PlainTextAnswerCard';
 
 type Props = {
   queryId?: number;
@@ -118,20 +119,26 @@ const ExecuteItem: React.FC<Props> = ({
           {data.queryAuthorization?.message && (
             <div className={`${prefixCls}-auth-tip`}>提示：{data.queryAuthorization.message}</div>
           )}
-          <BusinessInsightPanel
-            explanation={data.businessExplanation}
-            recommendation={data.recommendedChart}
-          />
-          {data.textSummary && !data.businessExplanation?.summary && (
-            <p className={`${prefixCls}-step-title ${prefixCls}-summary-text`}>
-              <span style={{ marginRight: 5 }}>总结:</span>
-              <ReactMarkdown>{data.textSummary}</ReactMarkdown>
-            </p>
+          {data.queryMode !== 'PLAIN_TEXT' && (
+            <>
+              <BusinessInsightPanel
+                explanation={data.businessExplanation}
+                recommendation={data.recommendedChart}
+              />
+              {data.textSummary && !data.businessExplanation?.summary && (
+                <p className={`${prefixCls}-step-title ${prefixCls}-summary-text`}>
+                  <span style={{ marginRight: 5 }}>总结:</span>
+                  <ReactMarkdown>{data.textSummary}</ReactMarkdown>
+                </p>
+              )}
+            </>
           )}
 
           {renderCustomExecuteNode && executeItemNode ? (
             executeItemNode
-          ) : data?.queryMode === 'PLAIN_TEXT' || data?.queryMode === 'WEB_SERVICE' ? (
+          ) : data?.queryMode === 'PLAIN_TEXT' ? (
+            <PlainTextAnswerCard text={data.textResult} />
+          ) : data?.queryMode === 'WEB_SERVICE' ? (
             data?.textResult
           ) : data?.queryMode === 'WEB_PAGE' ? (
             <WebPage id={queryId!} data={data} />

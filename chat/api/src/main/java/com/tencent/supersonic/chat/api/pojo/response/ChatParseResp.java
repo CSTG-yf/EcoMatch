@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.Lists;
 import com.tencent.supersonic.common.pojo.Text2SQLExemplar;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
+import com.tencent.supersonic.headless.api.pojo.response.BankIntentResult;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.api.pojo.response.ParseTimeCostResp;
 import lombok.Data;
@@ -19,6 +20,7 @@ public class ChatParseResp {
     @JsonIgnore
     private boolean terminalError;
     private List<SemanticParseInfo> selectedParses = Lists.newArrayList();
+    private BankIntentResult bankIntentResult;
     private ParseResp.BankRoutingAttemptTelemetry bankRoutingAttemptTelemetry;
     private ParseTimeCostResp parseTimeCost = new ParseTimeCostResp();
     private List<Text2SQLExemplar> usedExemplars;

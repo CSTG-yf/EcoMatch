@@ -16,6 +16,7 @@ public class ParseResp implements Serializable {
     private ParseState state = ParseState.PENDING;
     private String errorMsg;
     private List<SemanticParseInfo> selectedParses = Lists.newArrayList();
+    private BankIntentResult bankIntentResult;
     private BankRoutingAttemptTelemetry bankRoutingAttemptTelemetry;
     private ParseTimeCostResp parseTimeCost = new ParseTimeCostResp();
 
