@@ -179,7 +179,11 @@ def _write_h2(path: Path, metrics: list[dict[str, Any]], facts: list[dict[str, A
         f"INSERT INTO bank_metric_daily VALUES ({_sql_quote(x['dataDate'])}, {_sql_quote(x['orgCode'])}, {_sql_quote(x['metricCode'])}, {x['metricValue']}, 'SYNTHETIC', 'synthetic-360-v1');"
         for x in facts
     )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Keep the generated release byte-stable across Windows and POSIX hosts.
+    # ``Path.write_text`` applies the platform newline policy on Windows,
+    # which would make the manifest describe CRLF bytes while Git stores the
+    # checked-in SQL as LF.  The release hash must cover canonical LF bytes.
+    path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
 
 
 def build_release(catalog_dir: Path, output_dir: Path) -> dict[str, Any]:

@@ -36,6 +36,11 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         raise SyntheticValidationError(f"invalid JSONL: {path}: {error}") from error
 
 
+def _write_report(path: Path, report: dict[str, Any]) -> None:
+    """Write canonical LF JSON bytes on every supported platform."""
+    path.write_bytes((json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+
 def validate_release(release_dir: Path) -> dict[str, Any]:
     release_dir = release_dir.resolve()
     manifest = json.loads((release_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -124,7 +129,7 @@ def main() -> int:
         print(f"INVALID: {error}")
         return 1
     report_path = args.report or (args.release_dir / "validation_report.json")
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_report(report_path, report)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 
