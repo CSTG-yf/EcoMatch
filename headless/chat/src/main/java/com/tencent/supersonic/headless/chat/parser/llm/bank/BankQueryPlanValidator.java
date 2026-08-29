@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -64,6 +65,7 @@ public class BankQueryPlanValidator {
         validateOutput(plan, hints, errors);
         validateAbsoluteThresholdContract(plan, errors);
         validateMonthAndYearComparisonContract(plan, errors);
+        validateFamilyShapeGuards(plan, errors);
         return new ValidationResult(errors);
     }
 
@@ -835,6 +837,22 @@ public class BankQueryPlanValidator {
                     "composite derived metric numeratorOperands must not repeat an operand: "
                             + code));
         }
+        // Degenerate composite ratio (e.g. (ZB003+ZB001)/ZB001): a denominator hidden inside the
+        // numerator sum inflates the ratio by a constant 1 and silently corrupts every ranked or
+        // compared value. The index-0 case is already covered by the numerator==denominator check.
+        String denominatorKey = item.getDenominator() == null ? null
+                : item.getDenominator().toUpperCase(Locale.ROOT);
+        for (int index = 1; index < operands.size(); index++) {
+            if (denominatorKey != null
+                    && operands.get(index).toUpperCase(Locale.ROOT).equals(denominatorKey)) {
+                errors.add(error("DEGENERATE_COMPOSITE_RATIO",
+                        "composite derived ratio must not contain the denominator inside "
+                                + "numeratorOperands: " + code + " 的分母 " + item.getDenominator()
+                                + " 同时出现在分子求和项中（如 (ZB003+ZB001)/ZB001），比率会被恒定膨胀；"
+                                + "请把分母移出 numeratorOperands"));
+                break;
+            }
+        }
         if (!item.getNumerator().equals(operands.get(0))) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "composite derived metric numerator must repeat the first numeratorOperands "
@@ -1003,6 +1021,191 @@ public class BankQueryPlanValidator {
         if (time.getBaselineStartDate() != null || time.getBaselineEndDate() != null) {
             errors.add(error("MOM_AND_YOY_BASELINES_MUST_BE_DERIVED",
                     "MOM_AND_YOY baseline dates must be null so the compiler can derive them"));
+        }
+    }
+
+    /**
+     * Family audit guards: reject only plan shapes that provably compile into a wrong result or a
+     * broken projection downstream. Each guard mirrors a compiler/projector hard contract that was
+     * previously enforced by silent override or silent degradation.
+     */
+    private void validateFamilyShapeGuards(BankQueryPlan plan, List<ValidationError> errors) {
+        validateNoDuplicateMetrics(plan, errors);
+        validateThresholdBenchmarkDimensionGate(plan, errors);
+        validateThresholdAnchor(plan, errors);
+        validateChangePopulationDimension(plan, errors);
+        validateTrendQuarterEndWindow(plan, errors);
+        validatePercentMetricRangeAggregation(plan, errors);
+    }
+
+    /**
+     * Duplicate selected metrics compile into identical aggregate aliases (SUM(x) AS x_value
+     * twice) inside the multi-metric templates, which the executor rejects at run time.
+     */
+    private void validateNoDuplicateMetrics(BankQueryPlan plan, List<ValidationError> errors) {
+        Set<String> seen = new LinkedHashSet<>();
+        Set<String> duplicates = new LinkedHashSet<>();
+        for (BankQueryPlan.Metric metric : safe(plan.getMetrics())
+                .collect(Collectors.toList())) {
+            if (metric == null || StringUtils.isBlank(metric.getBizName())) {
+                continue;
+            }
+            String code = metric.getBizName().toUpperCase(Locale.ROOT);
+            if (!seen.add(code)) {
+                duplicates.add(code);
+            }
+        }
+        if (!duplicates.isEmpty()) {
+            errors.add(error("DUPLICATE_METRIC",
+                    "plan.metrics must not repeat a metric code (uppercase-normalized): "
+                            + String.join(",", duplicates)
+                            + "；重复指标会编译出同名聚合别名（SUM(x) AS x_value 出现两次），执行期必然失败；"
+                            + "请去掉 metrics 中的重复项"));
+        }
+    }
+
+    /**
+     * Province-average threshold templates hardcode GROUP BY bank_organization; any extra
+     * dimension would be silently dropped from the compiled rows and its output check bypassed.
+     */
+    private void validateThresholdBenchmarkDimensionGate(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        if (plan.getIntent() != BankIntentType.THRESHOLD
+                || safe(plan.getFilters()).noneMatch(this::isProvinceAverageBenchmark)) {
+            return;
+        }
+        List<String> extraDimensions = safe(plan.getDimensions())
+                .filter(StringUtils::isNotBlank)
+                .filter(dimension -> !ORGANIZATION_DIMENSIONS.contains(dimension))
+                .distinct().toList();
+        if (!extraDimensions.isEmpty()) {
+            errors.add(error("UNSUPPORTED_THRESHOLD_DIMENSION",
+                    "province-average threshold templates group by bank_organization only; "
+                            + "extra dimensions would be silently dropped: "
+                            + String.join(",", extraDimensions)
+                            + "；dimensions 只允许 [bank_organization] 或空，请移除其余维度"));
+        }
+    }
+
+    /**
+     * A THRESHOLD plan without any anchor (province-average benchmark, metric_value direction, or
+     * a numeric metric_value threshold) silently degrades to the generic direct route and loses
+     * the threshold semantics; fail closed instead so repair can restore the anchor.
+     */
+    private void validateThresholdAnchor(BankQueryPlan plan, List<ValidationError> errors) {
+        if (plan.getIntent() != BankIntentType.THRESHOLD) {
+            return;
+        }
+        boolean hasBenchmark = safe(plan.getFilters()).anyMatch(this::isProvinceAverageBenchmark);
+        boolean hasMetricValueFilter = safe(plan.getFilters())
+                .anyMatch(filter -> "metric_value".equals(filter.getField()));
+        if (!hasBenchmark && !hasMetricValueFilter) {
+            errors.add(error("THRESHOLD_UNANCHORED",
+                    "threshold plans require an anchor: a benchmark COMPARE/PROVINCE_AVERAGE "
+                            + "filter or a metric_value direction/threshold filter"
+                            + "；无锚点的 THRESHOLD 会静默降级 GENERIC_DIRECT 丢失阈值语义，"
+                            + "请补齐 benchmark 或 metric_value 过滤项"));
+        }
+    }
+
+    /**
+     * A province-wide CHANGE (no selected organization) without the organization dimension has no
+     * per-organization key left for the change projection; the projector can never apply, so the
+     * plan is a guaranteed dead end regardless of any TopN request.
+     */
+    private void validateChangePopulationDimension(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        if (plan.getIntent() != BankIntentType.CHANGE || plan.getCalculation() == null
+                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.CHANGE) {
+            return;
+        }
+        boolean hasOrganization = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).anyMatch(StringUtils::isNotBlank);
+        if (hasOrganization
+                || safe(plan.getDimensions()).anyMatch(ORGANIZATION_DIMENSIONS::contains)) {
+            return;
+        }
+        errors.add(error("CHANGE_POPULATION_DIMENSION_REQUIRED",
+                "province-wide CHANGE requires the bank_organization dimension so the compiled "
+                        + "rows keep an organization identity; without it the result projection "
+                        + "can never apply"
+                        + "；请在 dimensions 中加入 bank_organization（或显式选择机构）"));
+    }
+
+    /**
+     * The trend contract projects a quarter-end point series; plans with any other granularity
+     * would have their non-quarter rows silently discarded by the projection.
+     */
+    /**
+     * Trend answers compile into a quarter-end point series: rows whose dates are not quarter
+     * ends are dropped by the contract. A window covering fewer than two quarter ends would
+     * collapse to a single point, so such plans are rejected instead of silently degrading. The
+     * plan granularity itself is irrelevant here — real models emit quarter-end point windows
+     * with DAY granularity and the series contract selects the quarter ends from the window.
+     */
+    private void validateTrendQuarterEndWindow(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        if (plan.getIntent() != BankIntentType.TREND || plan.getTime() == null
+                || plan.getTime().getStartDate() == null || plan.getTime().getEndDate() == null) {
+            return;
+        }
+        LocalDate windowStart = plan.getTime().getStartDate();
+        LocalDate windowEnd = plan.getTime().getEndDate();
+        int quarterEnds = 0;
+        for (LocalDate month = windowStart.withDayOfMonth(1);
+                !month.isAfter(windowEnd); month = month.plusMonths(1)) {
+            int monthValue = month.getMonthValue();
+            if (monthValue == 3 || monthValue == 6 || monthValue == 9 || monthValue == 12) {
+                LocalDate monthEnd = month.withDayOfMonth(month.lengthOfMonth());
+                if (!monthEnd.isBefore(windowStart) && !monthEnd.isAfter(windowEnd)) {
+                    quarterEnds++;
+                }
+            }
+        }
+        if (quarterEnds < 2) {
+            errors.add(error("UNSUPPORTED_TREND_WINDOW",
+                    "trend answers are compiled as a quarter-end point series; the time window "
+                            + "must cover at least two quarter-end dates, window="
+                            + windowStart + ".." + windowEnd + " covers " + quarterEnds
+                            + "；窗口内季末点不足两个时趋势会坍缩为单点，请扩大窗口或改用其他意图"));
+        }
+    }
+
+    /**
+     * Percent-unit metrics must never be SUM-aggregated across a multi-day window: the compiled
+     * sum of percentages is meaningless. AVG (period-average semantics) and point-day windows stay
+     * legal, so every daily-average template family keeps passing. COUNT_DAYS plans are exempt:
+     * the days-above family aggregates per day and never sums across the window.
+     */
+    private void validatePercentMetricRangeAggregation(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null || time.getStartDate() == null || time.getEndDate() == null
+                || !time.getStartDate().isBefore(time.getEndDate())
+                || plan.getCalculation() != null && plan.getCalculation().getType()
+                        == BankQueryPlan.CalculationType.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
+            return;
+        }
+        List<String> offenders = new ArrayList<>();
+        for (BankQueryPlan.Metric metric : safe(plan.getMetrics())
+                .collect(Collectors.toList())) {
+            if (metric == null || StringUtils.isBlank(metric.getBizName())
+                    || metric.getAggregation() != BankQueryPlan.Aggregation.DEFAULT
+                            && metric.getAggregation() != BankQueryPlan.Aggregation.SUM) {
+                continue;
+            }
+            BankSemanticRegistry.MetricDefinition definition = BankSemanticRegistry.metrics()
+                    .get(metric.getBizName().toUpperCase(Locale.ROOT));
+            if (definition != null && "%".equals(definition.unit())) {
+                offenders.add(definition.code() + "(" + metric.getAggregation() + ")");
+            }
+        }
+        if (!offenders.isEmpty()) {
+            errors.add(error("PERCENT_METRIC_RANGE_SUM",
+                    "percent-unit metrics must not be summed across a date range: "
+                            + String.join(",", offenders)
+                            + "；区间求和会把百分数相加，结果必然错误；请改用 AVG（日均/期间均值语义），"
+                            + "或将窗口收窄为单日"));
         }
     }
 

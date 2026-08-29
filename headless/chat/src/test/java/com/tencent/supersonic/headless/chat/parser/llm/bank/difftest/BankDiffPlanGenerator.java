@@ -7,24 +7,37 @@ import com.tencent.supersonic.headless.chat.parser.llm.bank.BankSemanticRegistry
 import com.tencent.supersonic.headless.chat.parser.llm.bank.difftest.BankDiffOracle.Variant;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
 /**
- * Fixed-seed random plan generator for the four target query families. Every plan is built
+ * Fixed-seed random plan generator for the target query families. Every plan is built
  * directly against the documented routing shape of its family, then must pass
  * {@link BankQueryPlanValidator} together with the mapper-style hints; rejected candidates are
  * discarded and regenerated, and the discard rate is reported.
+ *
+ * <p>Family-specific boundaries honored here:
+ *
+ * <ul>
+ *   <li>DERIVED_RANKING plans are always multi-metric and/or derived-ratio; slice variants carry
+ *       rank/rank_from_bottom LTE filters (limit = N or top+bottom), non-slice variants carry
+ *       selected organizations and no limit. Limit-only plans are never generated.</li>
+ *   <li>ABSOLUTE_THRESHOLD plans carry exactly one numeric metric_value filter anchored near the
+ *       true aggregate; no province-average benchmark or direction object is ever mixed in.</li>
+ * </ul>
  */
 public final class BankDiffPlanGenerator {
 
     public enum Family {
-        AGGREGATION_SUMMARY, RATIO, CHANGE, PROVINCE_AVERAGE
+        AGGREGATION_SUMMARY, RATIO, CHANGE, PROVINCE_AVERAGE, DERIVED_RANKING, ABSOLUTE_THRESHOLD
     }
 
     public record Generated(BankQueryPlan plan, SemanticIntentHints hints,
@@ -38,6 +51,11 @@ public final class BankDiffPlanGenerator {
             new String[] {"ZB002", "ZB001"}, // 存贷比 scale 100
             new String[] {"ZB011", "ZB018"}, // 人均利润 scale 1.0 (zero denominator on ORG007)
             new String[] {"ZB001", "ZB019"}); // 网点平均存款规模 scale 10000 (zero den on ORG004)
+    /** Catalog derived ratios usable as plan derived metrics (dataset-backed operand pairs). */
+    private static final List<String[]> CATALOG_DERIVED_PAIRS = List.of(
+            new String[] {"DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001"}, // 存贷比 scale 100
+            new String[] {"DERIVED_ZB011_DIV_ZB009", "ZB011", "ZB009"}, // 净利润率 scale 100
+            new String[] {"DERIVED_ZB011_DIV_ZB018", "ZB011", "ZB018"}); // 人均利润 scale 1.0
     private static final List<BankQueryPlan.TimeComparison> CHANGE_COMPARISONS = List.of(
             BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD,
             BankQueryPlan.TimeComparison.YEAR_OVER_YEAR,
@@ -45,13 +63,20 @@ public final class BankDiffPlanGenerator {
 
     private final Family family;
     private final Random random;
+    private final BankDiffDataset dataset;
     private final BankQueryPlanValidator validator = new BankQueryPlanValidator();
     private int attempts;
     private int discarded;
 
     public BankDiffPlanGenerator(Family family, long seed) {
+        this(family, seed, BankDiffDataset.build());
+    }
+
+    /** Dataset-aware constructor: the threshold family anchors literals at true aggregates. */
+    public BankDiffPlanGenerator(Family family, long seed, BankDiffDataset dataset) {
         this.family = family;
         this.random = new Random(seed);
+        this.dataset = dataset;
     }
 
     /**
@@ -60,6 +85,7 @@ public final class BankDiffPlanGenerator {
      */
     public List<Generated> generate(int count) {
         List<Generated> plans = new ArrayList<>(count);
+        Map<String, Integer> variantCounts = new LinkedHashMap<>();
         int maxAttempts = count * 50 + 100;
         while (plans.size() < count) {
             if (attempts >= maxAttempts) {
@@ -71,6 +97,8 @@ public final class BankDiffPlanGenerator {
                 case RATIO -> ratio();
                 case CHANGE -> change();
                 case PROVINCE_AVERAGE -> provinceAverage();
+                case DERIVED_RANKING -> derivedRanking();
+                case ABSOLUTE_THRESHOLD -> absoluteThreshold();
             };
             attempts++;
             if (!validator.validate(candidate.plan(), candidate.hints()).isValid()) {
@@ -78,10 +106,11 @@ public final class BankDiffPlanGenerator {
                 continue;
             }
             plans.add(candidate);
+            variantCounts.merge(candidate.variant().name(), 1, Integer::sum);
         }
         System.out.printf("[BankFamilyDiff] family=%s requested=%d attempts=%d discarded=%d "
-                + "(discard rate %.1f%%)%n", family, count, attempts, discarded,
-                attempts == 0 ? 0.0 : 100.0 * discarded / attempts);
+                + "(discard rate %.1f%%) variants=%s%n", family, count, attempts, discarded,
+                attempts == 0 ? 0.0 : 100.0 * discarded / attempts, variantCounts);
         return plans;
     }
 
@@ -225,6 +254,167 @@ public final class BankDiffPlanGenerator {
                 Variant.PROVINCE_AVERAGE_FULL_POPULATION);
     }
 
+    private Generated derivedRanking() {
+        LinkedHashSet<String> codes = new LinkedHashSet<>();
+        List<BankQueryPlan.DerivedMetric> derivedMetrics = new ArrayList<>();
+        List<SemanticIntentHints.DerivedMetricSpec> evidence = new ArrayList<>();
+        int derivedMode = random.nextInt(10);
+        if (derivedMode < 3) {
+            // Single catalog ratio with exact mapper evidence (code/numerator/denominator/name).
+            String[] pair =
+                    CATALOG_DERIVED_PAIRS.get(random.nextInt(CATALOG_DERIVED_PAIRS.size()));
+            derivedMetrics.add(catalogDerivedMetric(pair[0], pair[1], pair[2]));
+            evidence.add(new SemanticIntentHints.DerivedMetricSpec(pair[0], pair[1], pair[2],
+                    BankSemanticRegistry.derivedMetrics().get(pair[0]).name()));
+            codes.add(pair[1]);
+            codes.add(pair[2]);
+        } else if (derivedMode < 5) {
+            // Two catalog ratios: evidence must list them in plan derived-metric order.
+            String[] first =
+                    CATALOG_DERIVED_PAIRS.get(random.nextInt(CATALOG_DERIVED_PAIRS.size()));
+            String[] second = first;
+            while (second[0].equals(first[0])) {
+                second = CATALOG_DERIVED_PAIRS.get(random.nextInt(CATALOG_DERIVED_PAIRS.size()));
+            }
+            for (String[] pair : List.of(first, second)) {
+                derivedMetrics.add(catalogDerivedMetric(pair[0], pair[1], pair[2]));
+                evidence.add(new SemanticIntentHints.DerivedMetricSpec(pair[0], pair[1], pair[2],
+                        BankSemanticRegistry.derivedMetrics().get(pair[0]).name()));
+                codes.add(pair[1]);
+                codes.add(pair[2]);
+            }
+        } else if (derivedMode < 7) {
+            // Composite derived ratio: whitelist shape, needs no mapper evidence.
+            List<String> operands = pickMetrics(2 + random.nextInt(2));
+            List<String> denominatorPool = new ArrayList<>(METRICS);
+            denominatorPool.remove(operands.get(0));
+            String denominator = denominatorPool.get(random.nextInt(denominatorPool.size()));
+            derivedMetrics.add(compositeDerivedMetric(operands, denominator));
+            codes.addAll(operands);
+            codes.add(denominator);
+        }
+        // Top up to 2..4 direct metrics (multi-metric shape; a direct-only single metric would
+        // route into the generic struct family instead of the ranked template family).
+        int directTarget = 2 + random.nextInt(3);
+        List<String> pool = new ArrayList<>(METRICS);
+        Collections.shuffle(pool, random);
+        for (String code : pool) {
+            if (codes.size() >= directTarget) {
+                break;
+            }
+            codes.add(code);
+        }
+        List<BankQueryPlan.Metric> metrics = codes.stream()
+                .map(code -> BankQueryPlan.Metric.builder().bizName(code)
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())
+                .toList();
+        List<BankQueryPlan.Organization> orgs;
+        List<BankQueryPlan.Filter> filters = new ArrayList<>();
+        Integer limit = null;
+        if (random.nextInt(10) < 4) {
+            // Slice plan: rank filters over the whole population with the documented limit
+            // convention (single side N, both sides top+bottom — equal N gives 2*N).
+            orgs = List.of();
+            int top = rankSliceBound();
+            int bottom = rankSliceBound();
+            int sliceMode = random.nextInt(10);
+            if (sliceMode < 4) {
+                filters.add(rankFilter("rank", top));
+                limit = top;
+            } else if (sliceMode < 7) {
+                filters.add(rankFilter("rank", top));
+                filters.add(rankFilter("rank_from_bottom", bottom));
+                limit = top + bottom;
+            } else {
+                filters.add(rankFilter("rank_from_bottom", bottom));
+                limit = bottom;
+            }
+        } else {
+            // Non-slice plan: 1..3 selected organizations and no limit. Limit-only plans
+            // (limit without a rank filter) are deliberately never generated: their slice
+            // semantics sit exactly on the compiler/projector boundary under active change.
+            List<String> orgPool = new ArrayList<>(BankDiffDataset.ORGS);
+            Collections.shuffle(orgPool, random);
+            orgs = orgPool.subList(0, 1 + random.nextInt(3)).stream()
+                    .map(code -> BankQueryPlan.Organization.builder().code(code).build())
+                    .toList();
+        }
+        // Direct-only rankings must declare a sort field; with derived metrics present the
+        // direction is compiler-owned (per-metric catalog direction) and orderBy stays empty.
+        List<BankQueryPlan.OrderBy> orderBy = derivedMetrics.isEmpty()
+                ? List.of(new BankQueryPlan.OrderBy(
+                        random.nextBoolean() ? "bank_organization" : codes.iterator().next(),
+                        random.nextBoolean() ? BankQueryPlan.SortDirection.ASC
+                                : BankQueryPlan.SortDirection.DESC))
+                : List.of();
+        BankQueryPlan plan = base(BankIntentType.RANKING, metrics, List.of("bank_organization"),
+                orgs, anyWindow(0.4), BankQueryPlan.CalculationType.DIRECT,
+                BankQueryPlan.TimeComparison.NONE, filters, orderBy, limit);
+        plan.setDerivedMetrics(List.copyOf(derivedMetrics));
+        return new Generated(plan,
+                hints(plan, BankIntentType.RANKING, null, null, null, evidence),
+                Variant.DERIVED_RANKING);
+    }
+
+    /**
+     * ABSOLUTE_THRESHOLD plans: single metric, single organization, dimensions exactly
+     * [bank_organization], exactly one numeric metric_value filter (GT/GTE/LT/LTE) and no
+     * benchmark, orderBy or limit. The literal sits at a random signed cent offset from the true
+     * aggregate so plans hit both CASE branches plus the exact-equality boundary (offset 0); a
+     * trailing percent occasionally exercises the template's literal normalization.
+     */
+    private Generated absoluteThreshold() {
+        String code = pickMetrics(1).get(0);
+        BankQueryPlan.Organization org = organization();
+        TimeWindow window = anyWindow(0.4);
+        BigDecimal aggregate =
+                dataset.sumOverOrgs(List.of(org.getCode()), code, window.start(), window.end());
+        BigDecimal offset = random.nextInt(10) == 0 ? BigDecimal.ZERO
+                : BigDecimal.valueOf(random.nextInt(2_000_001) - 1_000_000, 2);
+        String literal = aggregate.add(offset).toPlainString()
+                + (random.nextInt(10) == 0 ? "%" : "");
+        BankQueryPlan.Filter threshold = BankQueryPlan.Filter.builder().field("metric_value")
+                .operator(directionOperator()).value(literal).build();
+        BankQueryPlan plan = base(BankIntentType.THRESHOLD,
+                List.of(BankQueryPlan.Metric.builder().bizName(code)
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build()),
+                List.of("bank_organization"), List.of(org), window,
+                BankQueryPlan.CalculationType.DIRECT, BankQueryPlan.TimeComparison.NONE,
+                List.of(threshold), List.of(), null);
+        return new Generated(plan, hints(plan, BankIntentType.THRESHOLD, null, null, null),
+                Variant.ABSOLUTE_THRESHOLD);
+    }
+
+    /** 1..4, with a 1-in-10 oversized bound (>= ranked population) for saturated slices. */
+    private int rankSliceBound() {
+        return random.nextInt(10) == 0 ? 9 + random.nextInt(4) : 1 + random.nextInt(4);
+    }
+
+    private static BankQueryPlan.Filter rankFilter(String field, int bound) {
+        return BankQueryPlan.Filter.builder().field(field).operator("LTE")
+                .value(Integer.toString(bound)).build();
+    }
+
+    private static BankQueryPlan.DerivedMetric catalogDerivedMetric(String code, String numerator,
+            String denominator) {
+        return BankQueryPlan.DerivedMetric.builder().metricCode(code).numerator(numerator)
+                .denominator(denominator)
+                .name(BankSemanticRegistry.derivedMetrics().get(code).name())
+                .build();
+    }
+
+    /**
+     * Whitelist-shape composite derived ratio (numerator = sum of >= 2 distinct base metrics over
+     * one denominator). Requires no mapper evidence, so the plan hints carry no derived spec.
+     */
+    private static BankQueryPlan.DerivedMetric compositeDerivedMetric(List<String> operands,
+            String denominator) {
+        String code = "DERIVED_SUM_" + String.join("_AND_", operands) + "_DIV_" + denominator;
+        return BankQueryPlan.DerivedMetric.builder().metricCode(code)
+                .numerator(operands.get(0)).denominator(denominator).name("组合派生比率")
+                .numeratorOperands(List.copyOf(operands)).build();
+    }
+
     // ------------------------------------------------------------------ shared helpers
 
     private BankQueryPlan base(BankIntentType intent, List<BankQueryPlan.Metric> metrics,
@@ -258,6 +448,12 @@ public final class BankDiffPlanGenerator {
     private SemanticIntentHints hints(BankQueryPlan plan, BankIntentType intent,
             BankQueryPlan.TimeComparison comparison, LocalDate baselineStart,
             LocalDate baselineEnd) {
+        return hints(plan, intent, comparison, baselineStart, baselineEnd, List.of());
+    }
+
+    private SemanticIntentHints hints(BankQueryPlan plan, BankIntentType intent,
+            BankQueryPlan.TimeComparison comparison, LocalDate baselineStart,
+            LocalDate baselineEnd, List<SemanticIntentHints.DerivedMetricSpec> derivedEvidence) {
         Set<String> metricCodes = new LinkedHashSet<>(
                 plan.getMetrics().stream().map(BankQueryPlan.Metric::getBizName).toList());
         Set<String> orgCodes = new LinkedHashSet<>(plan.getOrganizations().stream()
@@ -270,7 +466,7 @@ public final class BankDiffPlanGenerator {
                 .requiredEndDate(plan.getTime().getEndDate())
                 .requiredTimeComparison(comparison).requiredBaselineStartDate(baselineStart)
                 .requiredBaselineEndDate(baselineEnd)
-                .requiredDerivedMetrics(List.of()).requiredFilters(List.of())
+                .requiredDerivedMetrics(derivedEvidence).requiredFilters(List.of())
                 .maxLimit(SemanticIntentHints.DEFAULT_MAX_LIMIT).build();
     }
 

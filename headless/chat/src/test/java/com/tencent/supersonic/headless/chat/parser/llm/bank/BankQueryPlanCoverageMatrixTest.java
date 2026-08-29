@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,6 +28,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * now fails loudly with UNSUPPORTED_QUERY_SHAPE instead of silently using a near-miss template.
  */
 class BankQueryPlanCoverageMatrixTest {
+
+    /**
+     * Semantic field names must never be alias targets in compiler S2SQL: the semantic field
+     * registration drops every field name that also appears as an alias, so aliasing the
+     * organization/time dimension or a ZB### metric silently removes a physical field and H2
+     * rejects the executed SQL with column-not-found (test r5 JDBC_GRAMMAR root cause).
+     */
+    private static final String SEMANTIC_ALIAS_PATTERN =
+            "(?is).*\\bAS\\s+`?(bank_organization|bank_data_date|zb\\d{3})`?\\b.*";
 
     private final BankQueryPlanValidator validator = new BankQueryPlanValidator();
     private final BankQueryPlanCompiler compiler = new BankQueryPlanCompiler();
@@ -130,6 +140,67 @@ class BankQueryPlanCoverageMatrixTest {
                 () -> directionSql);
     }
 
+    /**
+     * A single global direction object (metric_value GT/GTE/LT/LTE PROVINCE_AVERAGE) overrides
+     * the catalog's strict default in the multi-metric threshold template with the plan's own
+     * comparison — including the lenient GTE/LTE boundaries — exactly like the single-metric
+     * threshold family (provinceComparisonOperator).
+     */
+    @Test
+    void multiMetricThresholdHonorsThePlanDirectionObject() {
+        // ZB001/ZB002 are higher-is-better (DESC catalog); the declared GT matches it.
+        String gtSql = assertCompiles(
+                multiMetricProvinceAverageThresholdWithDirection("GT", "ZB001", "ZB002"))
+                .getS2sql();
+        assertTrue(gtSql.contains("(bank_values.metric_code = 'ZB001'"
+                + " AND bank_values.metric_value > province_average.provincial_average)"),
+                () -> gtSql);
+        assertTrue(gtSql.contains("(bank_values.metric_code = 'ZB002'"
+                + " AND bank_values.metric_value > province_average.provincial_average)"),
+                () -> gtSql);
+        // GTE keeps the lenient boundary instead of being downgraded to a strict sign.
+        String gteSql = assertCompiles(
+                multiMetricProvinceAverageThresholdWithDirection("GTE", "ZB001", "ZB002"))
+                .getS2sql();
+        assertTrue(gteSql.contains(
+                "bank_values.metric_value >= province_average.provincial_average"), () -> gteSql);
+        assertFalse(gteSql.contains(
+                "bank_values.metric_value > province_average.provincial_average"), () -> gteSql);
+        // LTE on lower-is-better metrics (ZB013 不良率 / ZB017 逾期率, ASC catalog) keeps the
+        // lenient lower boundary too.
+        String lteSql = assertCompiles(
+                multiMetricProvinceAverageThresholdWithDirection("LTE", "ZB013", "ZB017"))
+                .getS2sql();
+        assertTrue(lteSql.contains("(bank_values.metric_code = 'ZB013'"
+                + " AND bank_values.metric_value <= province_average.provincial_average)"),
+                () -> lteSql);
+        assertTrue(lteSql.contains("(bank_values.metric_code = 'ZB017'"
+                + " AND bank_values.metric_value <= province_average.provincial_average)"),
+                () -> lteSql);
+    }
+
+    /**
+     * One global direction object cannot express a mixed-direction metric set (ZB013 is
+     * lower-is-better ASC, ZB015 higher-is-better DESC): applying a single sign to both would
+     * silently invert one metric's satisfaction, so the combination fails loudly for repair.
+     */
+    @Test
+    void multiMetricThresholdWithOneDirectionOverMixedCatalogDirectionsFailsLoud() {
+        PlanAndHints candidate =
+                multiMetricProvinceAverageThresholdWithDirection("GT", "ZB013", "ZB015");
+        BankQueryPlanValidator.ValidationResult validation =
+                validator.validate(candidate.plan(), candidate.hints());
+        assertTrue(validation.isValid(), validation.summary());
+
+        BankPlanCompilationException exception = assertThrows(BankPlanCompilationException.class,
+                () -> compiler.compile(candidate.plan(), candidate.hints(), schema()));
+        assertEquals(BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                exception.getReason());
+        assertTrue(exception.getMessage().contains("mixed catalog directions"),
+                () -> exception.getMessage());
+        assertTrue(exception.getMessage().contains("per-metric"), () -> exception.getMessage());
+    }
+
     /** Comparison intent keeps the long-form aggregation summary + gap contract. */
     @Test
     void multiMetricComparisonKeepsTheLongFormGapContract() {
@@ -170,6 +241,42 @@ class BankQueryPlanCoverageMatrixTest {
         CompiledQuery compiled = assertCompiles(derivedRanking());
         assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
                 compiled.getResultContract().getType());
+    }
+
+    /**
+     * Plain limit=N without rank filters means top-N: the contract carries topRankLimit=N so the
+     * projector cuts the top N from the full-population ROW_NUMBER ordinals (single-metric
+     * GENERIC_DIRECT struct LIMIT parity). The template SQL itself stays LIMIT-free — the slice
+     * is the contract's job — and bottom-N must be declared with rank_from_bottom.
+     */
+    @Test
+    void derivedRankingPlainLimitMapsToTheTopNContractSlice() {
+        CompiledQuery compiled = assertCompiles(derivedRanking(3, List.of()));
+        assertEquals(BankResultProjector.ProjectionType.DERIVED_RANKING,
+                compiled.getResultContract().getType());
+        assertEquals(Integer.valueOf(3), compiled.getResultContract().getTopRankLimit());
+        assertNull(compiled.getResultContract().getBottomRankLimit());
+        assertFalse(compiled.getS2sql().contains("LIMIT"), () -> compiled.getS2sql());
+
+        List<String> codes = List.of("ZB001", "ZB002", "DERIVED_ZB002_DIV_ZB001");
+        List<Map<String, Object>> sourceRows = new java.util.ArrayList<>();
+        for (String code : codes) {
+            for (int rank = 1; rank <= 5; rank++) {
+                sourceRows.add(Map.of("metric_code", code,
+                        "bank_organization", String.format("ORG%03d", rank),
+                        "metric_value", new java.math.BigDecimal(200 - rank),
+                        "rank_position", rank));
+            }
+        }
+        BankResultProjector.Projection projection = new BankResultProjector()
+                .project(compiled.getResultContract(), sourceRows);
+        assertTrue(projection.isApplied());
+        assertEquals(9, projection.getRows().size());
+        for (String code : codes) {
+            assertEquals(List.of(1, 2, 3), projection.getRows().stream()
+                    .filter(row -> code.equals(row.get("metric_code")))
+                    .map(row -> row.get("rank_position")).toList(), code);
+        }
     }
 
     /**
@@ -368,10 +475,66 @@ class BankQueryPlanCoverageMatrixTest {
                         + "       gap_value, meets_condition");
     }
 
+    /**
+     * The no-semantic-alias guard applied to every declared family that emits an S2SQL template
+     * (organization/time dimension and ZB### metric codes alike). Struct-routed shapes carry no
+     * S2SQL text to guard; for them the assertion is that they keep compiling through the struct
+     * route.
+     */
+    @Test
+    void everyDeclaredFamilyTemplateAvoidsSemanticNameAliases() {
+        assertTemplateFamilyAvoidsSemanticAliases("changePeriod", changePeriod());
+        assertTemplateFamilyAvoidsSemanticAliases("changeMomAndYoy", changeMomAndYoy());
+        assertTemplateFamilyAvoidsSemanticAliases("changeStartOfYear", changeStartOfYear());
+        assertTemplateFamilyAvoidsSemanticAliases("multiMetricChange", multiMetricChange());
+        assertTemplateFamilyAvoidsSemanticAliases("rankedChangeH18", rankedChangeH18());
+        assertTemplateFamilyAvoidsSemanticAliases("ratio", ratio());
+        assertTemplateFamilyAvoidsSemanticAliases("compositeNumeratorRatio",
+                compositeNumeratorRatio());
+        assertTemplateFamilyAvoidsSemanticAliases("provinceAverageThreshold",
+                provinceAverageThreshold());
+        assertTemplateFamilyAvoidsSemanticAliases("multiMetricProvinceAverageAggregation",
+                multiMetricProvinceAverageAggregation());
+        assertTemplateFamilyAvoidsSemanticAliases("multiMetricProvinceAverageThreshold",
+                multiMetricProvinceAverageThreshold());
+        assertTemplateFamilyAvoidsSemanticAliases("multiMetricProvinceAverageComparison",
+                multiMetricProvinceAverageComparison());
+        assertTemplateFamilyAvoidsSemanticAliases("absoluteThreshold", absoluteThreshold());
+        assertTemplateFamilyAvoidsSemanticAliases("dailyAggregationSummary",
+                dailyAggregationSummary());
+        assertTemplateFamilyAvoidsSemanticAliases("daysAboveProvinceAverage",
+                daysAboveProvinceAverage());
+        assertTemplateFamilyAvoidsSemanticAliases("derivedRanking", derivedRanking());
+        assertTemplateFamilyAvoidsSemanticAliases("multiMetricRankingWithRankSlice",
+                multiMetricRankingWithRankSlice());
+        assertTemplateFamilyAvoidsSemanticAliases("organizationComparison",
+                organizationComparison());
+        assertTemplateFamilyAvoidsSemanticAliases("rankChangePlan", rankChangePlan());
+
+        // Struct routes (GENERIC_DIRECT): no S2SQL template is emitted, so compiling through the
+        // struct route is the whole guard.
+        for (PlanAndHints candidate : List.of(rankingTop(), rankingFromBottom(), structureShare(),
+                trend())) {
+            assertEquals(CompilationRoute.STRUCT, assertCompiles(candidate).getRoute(),
+                    () -> candidate + " must keep the struct route");
+        }
+    }
+
+    private void assertTemplateFamilyAvoidsSemanticAliases(String family, PlanAndHints candidate) {
+        CompiledQuery compiled = assertCompiles(candidate);
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute(),
+                () -> family + " must compile through the S2SQL template route");
+        assertNoSemanticAlias(family, compiled.getS2sql());
+    }
+
+    private static void assertNoSemanticAlias(String context, String sql) {
+        assertFalse(sql.matches(SEMANTIC_ALIAS_PATTERN),
+                () -> context + ": semantic field names must never be aliased in S2SQL:\n" + sql);
+    }
+
     private static void assertNoDimensionAliasAndSingleUnqualifiedOuterSelect(
             String sql, String outputCte, String outerSelectList) {
-        assertFalse(sql.matches("(?is).*\\bAS\\s+`?bank_organization`?\\b.*"),
-                () -> "semantic dimension must never be aliased in S2SQL:\n" + sql);
+        assertNoSemanticAlias("outer select shape", sql);
         String trimmed = sql.trim();
         assertTrue(trimmed.startsWith("WITH "), () -> sql);
         String marker = ")\nSELECT " + outerSelectList + "\nFROM " + outputCte;
@@ -588,6 +751,27 @@ class BankQueryPlanCoverageMatrixTest {
         return new PlanAndHints(plan, hints);
     }
 
+    /** Synthetic multi-metric threshold with an explicit global province-average direction. */
+    private PlanAndHints multiMetricProvinceAverageThresholdWithDirection(String direction,
+            String... metricCodes) {
+        List<String> metrics = List.of(metricCodes);
+        List<String> outputColumns = new java.util.ArrayList<>();
+        outputColumns.add("bank_organization");
+        outputColumns.addAll(metrics);
+        BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, metrics,
+                List.of("bank_organization"), List.of(),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT,
+                List.of(filter("benchmark", "COMPARE", "PROVINCE_AVERAGE"),
+                        filter("metric_value", direction, "PROVINCE_AVERAGE")),
+                List.of(), null, outputColumns);
+        SemanticIntentHints hints = value(plan, BankIntentType.THRESHOLD,
+                metrics, List.of(),
+                List.of(new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
+                        "PROVINCE_AVERAGE"))).hints();
+        return new PlanAndHints(plan, hints);
+    }
+
     /** Synthetic two-metric comparison against the province average, single organization. */
     private PlanAndHints multiMetricProvinceAverageComparison() {
         BankQueryPlan plan = basePlan(BankIntentType.COMPARISON, List.of("ZB001", "ZB002"),
@@ -638,15 +822,19 @@ class BankQueryPlanCoverageMatrixTest {
     }
 
     private PlanAndHints derivedRanking() {
+        return derivedRanking(null, List.of("ORG004"));
+    }
+
+    private PlanAndHints derivedRanking(Integer limit, List<String> organizations) {
         BankQueryPlan plan = basePlan(BankIntentType.RANKING, List.of("ZB001", "ZB002"),
-                List.of("bank_organization"), List.of("ORG004"),
+                List.of("bank_organization"), organizations,
                 dayTime(BankQueryPlan.TimeComparison.NONE),
-                BankQueryPlan.CalculationType.DIRECT, List.of(), List.of(), null,
+                BankQueryPlan.CalculationType.DIRECT, List.of(), List.of(), limit,
                 List.of("bank_organization", "ZB001", "ZB002"));
         plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
                 .metricCode("DERIVED_ZB002_DIV_ZB001").numerator("ZB002").denominator("ZB001")
                 .name("存贷比").build()));
-        return value(plan, BankIntentType.RANKING, List.of("ZB001", "ZB002"), List.of("ORG004"),
+        return value(plan, BankIntentType.RANKING, List.of("ZB001", "ZB002"), organizations,
                 List.of(), List.of(new SemanticIntentHints.DerivedMetricSpec(
                         "DERIVED_ZB002_DIV_ZB001", "ZB002", "ZB001", "存贷比")));
     }
@@ -746,7 +934,7 @@ class BankQueryPlanCoverageMatrixTest {
         BankQueryPlan.TimeRange time = plan.getTime();
         SemanticIntentHints hints = SemanticIntentHints.builder().expectedIntent(intent)
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003", "ZB004", "ZB011", "ZB013",
-                        "ZB015"))
+                        "ZB015", "ZB017"))
                 .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
                 .requiredMetrics(Set.copyOf(requiredMetrics))
                 .requiredOrganizationCodes(Set.copyOf(requiredOrganizations))
@@ -803,7 +991,7 @@ class BankQueryPlanCoverageMatrixTest {
                 schemaMetric("各项存款余额", "ZB001"), schemaMetric("各项贷款余额", "ZB002"),
                 schemaMetric("对公存款余额", "ZB003"), schemaMetric("个人存款余额", "ZB004"),
                 schemaMetric("净利润", "ZB011"), schemaMetric("不良贷款率", "ZB013"),
-                schemaMetric("拨备覆盖率", "ZB015")));
+                schemaMetric("拨备覆盖率", "ZB015"), schemaMetric("逾期贷款率", "ZB017")));
         schema.setDimensions(List.of(
                 SchemaElement.builder().name("机构").bizName("bank_organization").build()));
         schema.setPartitionTime(

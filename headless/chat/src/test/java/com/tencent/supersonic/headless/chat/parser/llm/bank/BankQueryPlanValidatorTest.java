@@ -579,6 +579,171 @@ class BankQueryPlanValidatorTest {
         assertTrue(summary.contains("MOM_AND_YOY_METRIC_FILTER_FORBIDDEN"));
     }
 
+    @Test
+    void acceptsDistinctMetricsForTheMultiMetricTemplate() {
+        BankQueryPlan plan = validPlan();
+
+        assertTrue(validator.validate(plan, requirements()).isValid());
+    }
+
+    @Test
+    void rejectsDuplicateSelectedMetricsBeforeTemplateCompilation() {
+        BankQueryPlan plan = validPlan();
+        plan.setMetrics(new ArrayList<>(List.of(
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB002")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build(),
+                BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, requirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DUPLICATE_METRIC"));
+        assertTrue(result.summary().contains("ZB001"));
+    }
+
+    @Test
+    void acceptsACompositeRatioWhoseOperandsStayDisjointFromTheDenominator() {
+        BankQueryPlan plan = compositeRatioPlan(List.of("ZB003", "ZB004"), "ZB001");
+
+        assertTrue(validator.validate(plan, compositeRatioRequirements(
+                Set.of("ZB003", "ZB004", "ZB001"))).isValid());
+    }
+
+    @Test
+    void rejectsACompositeRatioThatHidesItsDenominatorInsideTheNumeratorSum() {
+        BankQueryPlan plan = compositeRatioPlan(List.of("ZB003", "ZB001"), "ZB001");
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                compositeRatioRequirements(Set.of("ZB003", "ZB001")));
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DEGENERATE_COMPOSITE_RATIO"));
+        assertTrue(result.summary().contains("ZB001"));
+    }
+
+    @Test
+    void acceptsTheSingleOrganizationDimensionForAProvinceAverageThreshold() {
+        BankQueryPlan plan = thresholdBenchmarkPlan();
+
+        assertTrue(validator.validate(plan, thresholdBenchmarkRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsExtraDimensionsOnAProvinceAverageThresholdPlan() {
+        BankQueryPlan plan = thresholdBenchmarkPlan();
+        plan.setDimensions(new ArrayList<>(List.of("bank_organization", "bank_data_date")));
+        plan.getOutput().setColumns(
+                new ArrayList<>(List.of("bank_organization", "bank_data_date", "ZB015")));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, thresholdBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNSUPPORTED_THRESHOLD_DIMENSION"));
+        assertTrue(result.summary().contains("bank_data_date"));
+    }
+
+    @Test
+    void rejectsAThresholdPlanWithoutAnyBenchmarkOrMetricValueAnchor() {
+        BankQueryPlan plan = thresholdBenchmarkPlan();
+        plan.setFilters(new ArrayList<>());
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, thresholdBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("THRESHOLD_UNANCHORED"));
+        assertTrue(result.summary().contains("GENERIC_DIRECT"));
+    }
+
+    @Test
+    void acceptsAThresholdPlanAnchoredByANumericMetricValueFilter() {
+        assertTrue(validator.validate(absoluteThresholdPlan(), absoluteThresholdRequirements())
+                .isValid());
+    }
+
+    @Test
+    void acceptsAProvinceWideChangeGroupedByOrganization() {
+        BankQueryPlan plan = populationChangePlan();
+        plan.setDimensions(new ArrayList<>(List.of("bank_organization")));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011")));
+
+        assertTrue(validator.validate(plan, populationChangeRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsAProvinceWideChangeWithoutTheOrganizationDimension() {
+        BankQueryPlan plan = populationChangePlan();
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, populationChangeRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("CHANGE_POPULATION_DIMENSION_REQUIRED"));
+    }
+
+    @Test
+    void acceptsTheQuarterEndTrendContract() {
+        BankQueryPlan plan = trendPlan(BankQueryPlan.TimeGranularity.QUARTER);
+
+        assertTrue(validator.validate(plan, trendRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsATrendWindowWithFewerThanTwoQuarterEnds() {
+        BankQueryPlan plan = trendPlan(BankQueryPlan.TimeGranularity.DAY);
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 3, 2))
+                .endDate(LocalDate.of(2026, 3, 31))
+                .granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, trendRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNSUPPORTED_TREND_WINDOW"));
+        assertTrue(result.summary().contains("quarter-end"));
+    }
+
+    @Test
+    void acceptsOppositeOrderByDirectionBecauseTheCompilerOverridesItWithTheCatalogDirection() {
+        BankQueryPlan ascTopN = bottomRankingSlicePlan("rank", BankQueryPlan.SortDirection.ASC);
+        BankQueryPlan bottomOwned = bottomRankingSlicePlan("rank_from_bottom",
+                BankQueryPlan.SortDirection.ASC);
+
+        // Real rank questions ("排名最后") make the model emit ASC for higher-is-better metrics;
+        // the compiler overrides the direction with the catalog one, so rejecting the shape here
+        // would only burn a repair round on plans that currently compile and score.
+        assertTrue(validator.validate(ascTopN, bottomRankingRequirements()).isValid());
+        assertTrue(validator.validate(bottomOwned, bottomRankingRequirements()).isValid());
+    }
+
+    @Test
+    void acceptsAverageAndPointDayPercentMetricsButRejectsTheRangeSum() {
+        BankQueryPlan averaged = percentMetricPlan(BankQueryPlan.Aggregation.AVG);
+        BankQueryPlan pointDay = percentMetricPlan(BankQueryPlan.Aggregation.DEFAULT);
+        pointDay.getTime().setEndDate(LocalDate.of(2025, 1, 1));
+
+        assertTrue(validator.validate(averaged, percentMetricRequirements()).isValid());
+        assertFalse(validator.validate(pointDay, percentMetricRequirements()).codes()
+                .contains("PERCENT_METRIC_RANGE_SUM"));
+    }
+
+    @Test
+    void rejectsAPercentMetricSummedAcrossADateRange() {
+        BankQueryPlan plan = percentMetricPlan(BankQueryPlan.Aggregation.DEFAULT);
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, percentMetricRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("PERCENT_METRIC_RANGE_SUM"));
+        assertTrue(result.summary().contains("AVG"));
+    }
+
     private SemanticIntentHints requirements() {
         return SemanticIntentHints.builder().expectedIntent(BankIntentType.COMPARISON)
                 .allowedMetrics(Set.of("ZB001", "ZB002", "ZB003"))
@@ -808,5 +973,189 @@ class BankQueryPlanValidatorTest {
                         .columns(new ArrayList<>(List.of("bank_organization", "ZB001", "ZB002")))
                         .orderSensitive(false).build())
                 .build();
+    }
+
+    private BankQueryPlan compositeRatioPlan(List<String> numeratorOperands, String denominator) {
+        List<String> metrics = new ArrayList<>(numeratorOperands);
+        if (!metrics.contains(denominator)) {
+            metrics.add(denominator);
+        }
+        List<BankQueryPlan.Metric> planMetrics = new ArrayList<>();
+        for (String code : metrics) {
+            planMetrics.add(BankQueryPlan.Metric.builder().bizName(code)
+                    .aggregation(BankQueryPlan.Aggregation.DEFAULT).build());
+        }
+        List<String> outputColumns = new ArrayList<>();
+        outputColumns.add("bank_organization");
+        outputColumns.addAll(metrics);
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.RATIO).metrics(planMetrics)
+                .derivedMetrics(new ArrayList<>(List.of(BankQueryPlan.DerivedMetric.builder()
+                        .metricCode("DERIVED_SUM_" + String.join("_AND_", numeratorOperands)
+                                + "_DIV_" + denominator)
+                        .numerator(numeratorOperands.get(0))
+                        .numeratorOperands(new ArrayList<>(numeratorOperands))
+                        .denominator(denominator).name("合计占比").build())))
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 7, 31))
+                        .endDate(LocalDate.of(2025, 7, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.RATIO).baseline(denominator).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder().columns(outputColumns)
+                        .orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints compositeRatioRequirements(Set<String> requiredMetrics) {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.RATIO)
+                .allowedMetrics(Set.of("ZB001", "ZB003", "ZB004"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(requiredMetrics).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 7, 31))
+                .requiredEndDate(LocalDate.of(2025, 7, 31)).build();
+    }
+
+    private BankQueryPlan thresholdBenchmarkPlan() {
+        BankQueryPlan plan = absoluteThresholdPlan();
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("benchmark").operator("COMPARE").value("PROVINCE_AVERAGE")
+                .values(new ArrayList<>()).build())));
+        return plan;
+    }
+
+    private SemanticIntentHints thresholdBenchmarkRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.THRESHOLD)
+                .allowedMetrics(Set.of("ZB015"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB015")).requiredOrganizationCodes(Set.of("ORG002"))
+                .requiredStartDate(LocalDate.of(2025, 12, 31))
+                .requiredEndDate(LocalDate.of(2025, 12, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE"))).build();
+    }
+
+    private BankQueryPlan populationChangePlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.CHANGE)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB011")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>()).dimensions(new ArrayList<>())
+                .organizations(new ArrayList<>())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 4, 30))
+                        .endDate(LocalDate.of(2026, 4, 30))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                        .baselineStartDate(LocalDate.of(2024, 12, 31))
+                        .baselineEndDate(LocalDate.of(2024, 12, 31)).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.CHANGE).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder().columns(new ArrayList<>(List.of("ZB011")))
+                        .orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints populationChangeRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.CHANGE)
+                .allowedMetrics(Set.of("ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011")).requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 4, 30))
+                .requiredEndDate(LocalDate.of(2026, 4, 30))
+                .requiredTimeComparison(BankQueryPlan.TimeComparison.PERIOD_OVER_PERIOD)
+                .requiredBaselineStartDate(LocalDate.of(2024, 12, 31))
+                .requiredBaselineEndDate(LocalDate.of(2024, 12, 31)).build();
+    }
+
+    private BankQueryPlan trendPlan(BankQueryPlan.TimeGranularity granularity) {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.TREND)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB001")
+                        .aggregation(BankQueryPlan.Aggregation.DEFAULT).build())))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_data_date")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 3, 31))
+                        .endDate(LocalDate.of(2026, 3, 31)).granularity(granularity)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(new ArrayList<>(List.of(BankQueryPlan.OrderBy.builder()
+                        .field("bank_data_date").direction(BankQueryPlan.SortDirection.ASC)
+                        .build()))).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_data_date", "ZB001")))
+                        .orderSensitive(true).build())
+                .build();
+    }
+
+    private SemanticIntentHints trendRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.TREND)
+                .allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB001")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31)).build();
+    }
+
+    private BankQueryPlan bottomRankingSlicePlan(String rankField,
+            BankQueryPlan.SortDirection direction) {
+        BankQueryPlan plan = derivedMetricRankingPlan();
+        plan.setDerivedMetrics(new ArrayList<>());
+        plan.setMetrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder()
+                .bizName("ZB011").aggregation(BankQueryPlan.Aggregation.DEFAULT).build())));
+        plan.setOrganizations(new ArrayList<>());
+        plan.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 8, 31))
+                .endDate(LocalDate.of(2025, 8, 31))
+                .granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        plan.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field(rankField).operator("LTE").value("1").values(new ArrayList<>()).build())));
+        plan.setOrderBy(new ArrayList<>(List.of(BankQueryPlan.OrderBy.builder().field("ZB011")
+                .direction(direction).build())));
+        plan.setLimit(1);
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB011")));
+        return plan;
+    }
+
+    private BankQueryPlan percentMetricPlan(BankQueryPlan.Aggregation aggregation) {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.AGGREGATION)
+                .metrics(new ArrayList<>(List.of(BankQueryPlan.Metric.builder().bizName("ZB013")
+                        .aggregation(aggregation).build())))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2025, 1, 1))
+                        .endDate(LocalDate.of(2025, 12, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", "ZB013")))
+                        .orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints percentMetricRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.AGGREGATION)
+                .allowedMetrics(Set.of("ZB013"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013")).requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2025, 1, 1))
+                .requiredEndDate(LocalDate.of(2025, 12, 31)).build();
     }
 }

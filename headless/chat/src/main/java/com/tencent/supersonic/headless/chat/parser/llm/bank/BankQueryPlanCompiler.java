@@ -100,7 +100,8 @@ public class BankQueryPlanCompiler {
                                         metricCode(metric.schemaElement())))
                                 .collect(Collectors.toList()),
                         dimensions.stream().map(ResolvedDimension::identifier).toList(),
-                        dateField(index.partitionTime()), executionDimensionFilters, metricFilters);
+                        dateField(index.partitionTime()), executionDimensionFilters, metricFilters,
+                        provinceAverageDirectionOperator(plan));
 
         // Coverage matrix: the routing decision is derived from one shape table (single source of
         // truth). The dispatch below only executes the family the matrix selected, so a plan shape
@@ -292,7 +293,8 @@ public class BankQueryPlanCompiler {
                                 templateContext.dataSetName(), templateContext.metrics(),
                                 List.copyOf(changeDimensions), templateContext.dateField(),
                                 templateContext.dimensionFilters(),
-                                templateContext.metricFilters());
+                                templateContext.metricFilters(),
+                                templateContext.provinceAverageOperator());
                 yield CompiledQuery.s2sql(
                         monthAndYear ? templateFactory.compileMonthAndYearChange(changeContext)
                                 : templateFactory.compileChange(changeContext),
@@ -349,6 +351,22 @@ public class BankQueryPlanCompiler {
                 .anyMatch(filter -> "benchmark".equals(filter.getField())
                         && "COMPARE".equals(filter.getOperator())
                         && "PROVINCE_AVERAGE".equals(filter.getValue()));
+    }
+
+    /**
+     * Captures the plan's optional single global province-average direction object (metric_value
+     * GT/GTE/LT/LTE PROVINCE_AVERAGE) so both threshold templates honor the declared comparison
+     * instead of silently dropping it. The filter itself never becomes a physical dimension or
+     * metric filter: it is a logical benchmark direction consumed through the template context.
+     */
+    private String provinceAverageDirectionOperator(BankQueryPlan plan) {
+        return plan.getFilters().stream()
+                .filter(filter -> "metric_value".equals(filter.getField())
+                        && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
+                                || "LT".equals(filter.getOperator())
+                                || "LTE".equals(filter.getOperator()))
+                        && "PROVINCE_AVERAGE".equals(filter.getValue()))
+                .map(BankQueryPlan.Filter::getOperator).findFirst().orElse(null);
     }
 
     /**
@@ -736,7 +754,11 @@ public class BankQueryPlanCompiler {
     /**
      * The auditable projection contract for the compiler-owned derived-metric ranking template. The
      * SQL already ranks over the full organization population, so the projector must preserve the
-     * source rank_position verbatim instead of recomputing ranks from the returned rows.
+     * source rank_position verbatim instead of recomputing ranks from the returned rows. Explicit
+     * rank/rank_from_bottom filters map to the top/bottom rank slices; when neither filter is
+     * present, a plain positive limit=N maps to topRankLimit=N so "排名前三" cuts the top N from
+     * the stable ROW_NUMBER ordinals exactly like the single-metric GENERIC_DIRECT struct LIMIT.
+     * Bottom-N answers must be declared with rank_from_bottom — a bare limit never means bottom-N.
      */
     private BankResultProjector.Contract derivedRankingResultContract(BankQueryPlan plan,
             SchemaIndex index) {
@@ -755,6 +777,12 @@ public class BankQueryPlanCompiler {
                 }
             }
         }
+        Integer topRankLimit = rankFilterLimit(plan, "rank");
+        Integer bottomRankLimit = rankFilterLimit(plan, "rank_from_bottom");
+        if (topRankLimit == null && bottomRankLimit == null && plan.getLimit() != null
+                && plan.getLimit() > 0) {
+            topRankLimit = plan.getLimit();
+        }
         return BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.DERIVED_RANKING)
                 .organizationColumn(identifier(organization)).organizationNames(organizationNames)
@@ -764,9 +792,7 @@ public class BankQueryPlanCompiler {
                 // The SQL already ranks the full population; rank slices stay declarative so the
                 // projector can cut the requested top/bottom ranks from the stable ROW_NUMBER
                 // ordinals instead of recomputing ranks from truncated rows.
-                .topRankLimit(rankFilterLimit(plan, "rank"))
-                .bottomRankLimit(rankFilterLimit(plan, "rank_from_bottom"))
-                .build();
+                .topRankLimit(topRankLimit).bottomRankLimit(bottomRankLimit).build();
     }
 
     private BankResultProjector.Contract provinceAverageContract(BankQueryPlan plan,
@@ -1110,6 +1136,10 @@ public class BankQueryPlanCompiler {
                 continue;
             }
             if ("metric_value".equals(filter.getField())) {
+                // Logical metric_value conditions never become physical dimension filters: the
+                // province-average direction object is captured separately
+                // (provinceAverageDirectionOperator) and numeric thresholds belong to
+                // compileMetricFilters.
                 continue;
             }
             if (index.hasDimension(filter.getField())) {
@@ -1130,7 +1160,8 @@ public class BankQueryPlanCompiler {
             }
             if ("metric_value".equals(filter.getField())) {
                 // Logical direction for province-average threshold (value=PROVINCE_AVERAGE) is
-                // consumed by the S2SQL template, not as a numeric metric filter.
+                // captured into the template context (provinceAverageDirectionOperator), never a
+                // numeric metric filter or a physical WHERE condition.
                 if ("PROVINCE_AVERAGE".equals(filter.getValue())) {
                     continue;
                 }

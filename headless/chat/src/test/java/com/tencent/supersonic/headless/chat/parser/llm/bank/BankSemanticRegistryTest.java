@@ -124,6 +124,29 @@ class BankSemanticRegistryTest {
     }
 
     @Test
+    void netProfitMarginScaleIsLockedAt100ByThe20260829DataEvidence() {
+        // 2026-08-29 数据实证：逐机构 ZB011(净利润)/ZB009(营业收入) 比值 ≈ 47–55%，
+        // 与 percent 缩放 100 一致（存储层分子分母单位一致）。catalog 的 万元/亿元 标注
+        // 与实际存储不符，禁止按 catalog 单位把净利润率缩放改成 1.0 或 10000。
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB011", "ZB009"));
+    }
+
+    @Test
+    void derivedRatioCatalogStaysFreeOfLowerIsBetterMetricsForTheDescHardcodedTemplate() {
+        // compileDerivedMetricRanking (BankS2SqlTemplateFactory ~line 789) hardcodes "DESC" for
+        // every derived-ratio row. The invariant below locks the current catalog state: every
+        // derived ratio is higher-is-better (or neutral), so the hardcode is correct. If a
+        // lower-is-better derived ratio is ever added, factory:789 must read
+        // BankResultProjector.rankingDirection semantics for derived codes in the same change —
+        // this test goes red first.
+        BankSemanticRegistry.derivedMetrics().forEach((code, metric) ->
+                assertNotEquals(BankSemanticRegistry.Direction.LOWER_BETTER, metric.direction(),
+                        code + " is lower-is-better but the derived ranking template hardcodes "
+                                + "DESC; update BankS2SqlTemplateFactory.compileDerivedMetricRanking "
+                                + "before adding it"));
+    }
+
+    @Test
     void sharedCatalogListsEveryMetricDerivedAndOrganizationExactlyOnce() {
         String shared = BankSemanticRegistry.sharedCatalog();
 

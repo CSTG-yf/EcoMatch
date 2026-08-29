@@ -31,6 +31,13 @@ public final class BankDiffAssert {
             // Arrays.asList (not List.of): result rows legitimately contain NULL cells.
             actual.add(java.util.Arrays.asList(row));
         }
+        return compareRowMultiset(actual, expectedRows, tolerance);
+    }
+
+    /** Same multiset comparison for already-materialized row lists (e.g. sliced oracle rows). */
+    public static Comparison compareRowMultiset(List<List<Object>> actualRows,
+            List<List<Object>> expectedRows, double tolerance) {
+        List<List<Object>> actual = new ArrayList<>(actualRows);
         List<List<Object>> remaining = new ArrayList<>(expectedRows);
         List<List<Object>> unmatchedActual = new ArrayList<>();
         for (List<Object> candidate : actual) {

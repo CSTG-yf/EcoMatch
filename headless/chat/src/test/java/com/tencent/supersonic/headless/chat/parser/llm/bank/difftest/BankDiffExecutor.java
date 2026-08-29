@@ -40,6 +40,7 @@ import org.apache.calcite.sql2rel.SqlToRelConverter;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -49,6 +50,14 @@ import java.util.Properties;
  * {@code Bindables.RULES} -> {@code Interpreters.bindable}), so no JDBC/Avatica transport (and
  * none of its optional protobuf dependency) and no janino code generation is required. The
  * case-insensitive identifier handling mirrors the H2 engine used by the runtime evaluation.
+ *
+ * <p>Window functions: the configured converter keeps {@code ROW_NUMBER() OVER (ORDER BY ...)}
+ * inline in a {@code LogicalProject} as a {@link org.apache.calcite.rex.RexOver} and the
+ * interpreter cannot translate it. The ranked ranking template only uses that exact window
+ * shape, so projects containing it are materialized here in Java ({@code ROW_NUMBER} = 1-based
+ * position after a stable sort by the window's order keys, per key direction) and replaced by a
+ * {@code LogicalValues} before the bindable conversion. Every other operator (aggregates,
+ * filters, unions, sorts) still executes through Calcite itself.
  */
 public final class BankDiffExecutor implements AutoCloseable {
 
@@ -95,8 +104,11 @@ public final class BankDiffExecutor implements AutoCloseable {
             RelNode optimized = hepRun(List.of(
                     CoreRules.CALC_SPLIT,
                     CoreRules.AGGREGATE_REDUCE_FUNCTIONS), root.rel);
+            // The interpreter rejects inline ROW_NUMBER() OVER project expressions (see class
+            // javadoc), so materialize exactly those projects before bindable conversion.
+            RelNode materialized = materializeRowNumberProjects(optimized, dataContext());
             // Convert the logical plan into the interpretable BINDABLE convention.
-            RelNode bindableRel = hepRun(Bindables.RULES, optimized);
+            RelNode bindableRel = hepRun(Bindables.RULES, materialized);
 
             Bindable bindable = Interpreters.bindable(bindableRel);
             Enumerable<Object[]> enumerable = (Enumerable<Object[]>) bindable.bind(dataContext());
@@ -117,6 +129,141 @@ public final class BankDiffExecutor implements AutoCloseable {
         HepPlanner planner = new HepPlanner(builder.build());
         planner.setRoot(rel);
         return planner.findBestExp();
+    }
+
+    /**
+     * Replaces every project whose expressions contain a window function with precomputed rows.
+     * The walk is post-order so nested over-projects (the ranked template's UNION ALL branches)
+     * materialize independently before their parent operators are converted.
+     */
+    private RelNode materializeRowNumberProjects(RelNode rel, DataContext context) {
+        List<RelNode> inputs = rel.getInputs();
+        List<RelNode> newInputs = new java.util.ArrayList<>(inputs.size());
+        boolean changed = false;
+        for (RelNode input : inputs) {
+            RelNode replacement = materializeRowNumberProjects(input, context);
+            newInputs.add(replacement);
+            changed |= replacement != input;
+        }
+        if (changed) {
+            rel = rel.copy(rel.getTraitSet(), newInputs);
+        }
+        if (rel instanceof org.apache.calcite.rel.logical.LogicalProject project
+                && project.containsOver()) {
+            return materializeRowNumberProject(project, context);
+        }
+        return rel;
+    }
+
+    /**
+     * Materializes one project containing {@code ROW_NUMBER() OVER (ORDER BY key ...)} over the
+     * interpreted input subtree. Row numbers are 1-based positions after a stable sort by the
+     * window's order keys (each key in its declared direction, BigDecimal/String natural
+     * ordering), exactly the semantics of {@code ROW_NUMBER} in the executed SQL: no partition
+     * keys are accepted and ties fall through to the next order key.
+     */
+    private RelNode materializeRowNumberProject(
+            org.apache.calcite.rel.logical.LogicalProject project, DataContext context) {
+        List<org.apache.calcite.rex.RexNode> exprs = project.getProjects();
+        Map<Integer, long[]> ranksByExpr = new java.util.LinkedHashMap<>();
+        List<Object[]> inputRows = executeBindable(project.getInput(), context);
+        for (int i = 0; i < exprs.size(); i++) {
+            if (!(exprs.get(i) instanceof org.apache.calcite.rex.RexOver over)) {
+                continue;
+            }
+            if (over.getKind() != org.apache.calcite.sql.SqlKind.ROW_NUMBER
+                    || !over.getWindow().partitionKeys.isEmpty()) {
+                throw new AssertionError("unsupported window expression: " + over);
+            }
+            ranksByExpr.put(i, rowNumbers(over, inputRows));
+        }
+        RexBuilder rexBuilder = project.getCluster().getRexBuilder();
+        List<com.google.common.collect.ImmutableList<org.apache.calcite.rex.RexLiteral>> tuples =
+                new java.util.ArrayList<>();
+        for (int r = 0; r < inputRows.size(); r++) {
+            Object[] inputRow = inputRows.get(r);
+            com.google.common.collect.ImmutableList.Builder<org.apache.calcite.rex.RexLiteral> tuple =
+                    com.google.common.collect.ImmutableList.builder();
+            for (int i = 0; i < exprs.size(); i++) {
+                long[] ranks = ranksByExpr.get(i);
+                Object value = ranks != null ? ranks[r] : evalSimple(exprs.get(i), inputRow);
+                tuple.add((org.apache.calcite.rex.RexLiteral) rexBuilder.makeLiteral(value,
+                        project.getRowType().getFieldList().get(i).getType()));
+            }
+            tuples.add(tuple.build());
+        }
+        return org.apache.calcite.rel.logical.LogicalValues.create(project.getCluster(),
+                project.getRowType(), com.google.common.collect.ImmutableList.copyOf(tuples));
+    }
+
+    private static long[] rowNumbers(org.apache.calcite.rex.RexOver over, List<Object[]> rows) {
+        Integer[] order = new Integer[rows.size()];
+        for (int i = 0; i < order.length; i++) {
+            order[i] = i;
+        }
+        java.util.Arrays.sort(order, (left, right) -> {
+            for (org.apache.calcite.rex.RexFieldCollation key : over.getWindow().orderKeys) {
+                int index = collationIndex(key);
+                int cmp = compareCells(rows.get(left)[index], rows.get(right)[index],
+                        key.getDirection()
+                                == org.apache.calcite.rel.RelFieldCollation.Direction.DESCENDING);
+                if (cmp != 0) {
+                    return cmp;
+                }
+            }
+            return 0;
+        });
+        long[] ranks = new long[rows.size()];
+        for (int position = 0; position < order.length; position++) {
+            ranks[order[position]] = position + 1L;
+        }
+        return ranks;
+    }
+
+    private static int collationIndex(org.apache.calcite.rex.RexFieldCollation key) {
+        org.apache.calcite.rex.RexNode operand = key.left;
+        if (operand instanceof org.apache.calcite.rex.RexInputRef ref) {
+            return ref.getIndex();
+        }
+        if (operand instanceof org.apache.calcite.rex.RexFieldAccess access) {
+            return access.getField().getIndex();
+        }
+        throw new AssertionError("unsupported window order key: " + operand);
+    }
+
+    private static int compareCells(Object left, Object right, boolean descending) {
+        if (left == null && right == null) {
+            return 0;
+        }
+        if (left == null) {
+            return descending ? 1 : -1;
+        }
+        if (right == null) {
+            return descending ? -1 : 1;
+        }
+        @SuppressWarnings("unchecked")
+        int cmp = ((java.lang.Comparable<Object>) left).compareTo(right);
+        return descending ? -cmp : cmp;
+    }
+
+    private static Object evalSimple(org.apache.calcite.rex.RexNode node, Object[] row) {
+        if (node instanceof org.apache.calcite.rex.RexInputRef ref) {
+            return row[ref.getIndex()];
+        }
+        if (node instanceof org.apache.calcite.rex.RexLiteral literal) {
+            return literal.getValue();
+        }
+        throw new AssertionError("unsupported project expression over window: " + node);
+    }
+
+    private List<Object[]> executeBindable(RelNode rel, DataContext context) {
+        RelNode bindable = hepRun(Bindables.RULES, rel);
+        Bindable bind = Interpreters.bindable(bindable);
+        List<Object[]> rows = new java.util.ArrayList<>();
+        for (Object row : (Enumerable<Object[]>) bind.bind(context)) {
+            rows.add((Object[]) row);
+        }
+        return rows;
     }
 
     @Override

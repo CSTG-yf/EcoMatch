@@ -743,11 +743,19 @@ class BankQueryPlanCompilerTest {
     @Test
     void shouldPreserveAnInFilterWhenThePlannerProvidesOneScalarValue() {
         BankQueryPlan plan = thresholdPlan();
+        // POINT_QUERY keeps this a plain struct-direct plan: THRESHOLD plans are now guarded
+        // (THRESHOLD_UNANCHORED) and the absolute-threshold contract pins orgs/dims/output.
+        plan.setIntent(BankIntentType.POINT_QUERY);
         plan.setFilters(List.of(BankQueryPlan.Filter.builder().field("bank_organization")
                 .operator("IN").value("ORG004").build()));
 
-        BankQueryPlanCompiler.CompiledQuery compiled =
-                compiler.compile(plan, thresholdHints(), schema());
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan,
+                SemanticIntentHints.builder().expectedIntent(BankIntentType.POINT_QUERY)
+                        .allowedMetrics(Set.of("ZB001", "ZB002"))
+                        .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                        .requiredMetrics(Set.of("ZB001")).requiredStartDate(LocalDate.of(2026, 3, 31))
+                        .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build(),
+                schema());
 
         assertEquals(FilterOperatorEnum.IN,
                 compiled.getStructReq().getDimensionFilters().get(0).getOperator());

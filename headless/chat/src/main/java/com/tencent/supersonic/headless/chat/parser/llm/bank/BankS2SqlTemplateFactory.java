@@ -468,14 +468,7 @@ final class BankS2SqlTemplateFactory {
         String aggregates = context.metrics().stream().map(
                 metric -> "SUM(" + metric.identifier() + ") AS " + metric.identifier() + "_value")
                 .collect(Collectors.joining(", "));
-        // Satisfaction follows each metric's catalog direction: higher-better metrics meet when
-        // above the average, lower-better (ASC ranking) when below — a direction-blind sign flag
-        // would mark the worst NPL as satisfying (test r6 TST-H-10 lesson).
-        String meetsConditions = context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
-                + metric.metricCode() + "' AND bank_values.metric_value "
-                + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode())) ? ">"
-                        : "<")
-                + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
+        String meetsConditions = meetsConditions(context);
         List<String> unpivots = new ArrayList<>();
         for (ResolvedMetric metric : context.metrics()) {
             unpivots.add("SELECT bank_organization, '" + metric.metricCode() + "' AS metric_code, "
@@ -512,6 +505,44 @@ final class BankS2SqlTemplateFactory {
                 .formatted(aggregates, context.dataSetName(), where,
                         String.join("\nUNION ALL\n", unpivots), meetsConditions, outerWhere)
                 .trim();
+    }
+
+    /**
+     * Per-metric satisfaction predicates for the multi-metric threshold template. Without an
+     * explicit plan direction the metric catalog decides: higher-better metrics meet when above
+     * the average, lower-better (ASC ranking) when below — a direction-blind sign flag would mark
+     * the worst NPL as satisfying (test r6 TST-H-10 lesson). When the plan declares a single
+     * global direction object (metric_value GT/GTE/LT/LTE PROVINCE_AVERAGE) that direction wins
+     * for every metric with its lenient GTE/LTE semantics, exactly like the single-metric
+     * {@link #provinceComparisonOperator} family — but the catalog directions must be uniform:
+     * one global operator cannot express a mixed-direction metric set (e.g. 不良率 below AND
+     * 拨备覆盖率 above the average), so that combination fails loudly for repair instead of
+     * guessing.
+     */
+    private String meetsConditions(TemplateContext context) {
+        String planComparator = provinceAverageComparator(context.provinceAverageOperator());
+        if (planComparator == null) {
+            return context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
+                    + metric.metricCode() + "' AND bank_values.metric_value "
+                    + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode()))
+                            ? ">" : "<")
+                    + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
+        }
+        List<String> catalogDirections = context.metrics().stream()
+                .map(metric -> BankResultProjector.rankingDirection(metric.metricCode()))
+                .distinct().toList();
+        if (catalogDirections.size() > 1) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-metric province-average threshold cannot apply a single global "
+                            + "direction object to mixed catalog directions ("
+                            + String.join("/", catalogDirections)
+                            + "); declare per-metric directions or split the plan into "
+                            + "uniform-direction metrics");
+        }
+        return context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
+                + metric.metricCode() + "' AND bank_values.metric_value " + planComparator
+                + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
     }
 
     String compileAbsoluteThreshold(TemplateContext context) {
@@ -839,18 +870,29 @@ final class BankS2SqlTemplateFactory {
                 .orElse(null);
     }
 
+    /**
+     * Single-metric threshold comparison sign. The plan's captured province-average direction
+     * object (GT/GTE/LT/LTE) wins verbatim — including its lenient boundaries — so a question
+     * asking against the catalog direction (e.g. 不良率高于全省均值) is never judged inverted;
+     * without a direction object the higher-is-better default applies.
+     */
     private String provinceComparisonOperator(TemplateContext context) {
-        return context.plan().getFilters().stream()
-                .filter(filter -> "metric_value".equals(filter.getField())
-                        && "PROVINCE_AVERAGE".equals(filter.getValue()))
-                .map(BankQueryPlan.Filter::getOperator).findFirst()
-                .map(operator -> switch (operator) {
-                case "GT" -> ">";
-                case "GTE" -> ">=";
-                case "LT" -> "<";
-                case "LTE" -> "<=";
-                default -> null;
-                }).orElse(">");
+        String comparator = provinceAverageComparator(context.provinceAverageOperator());
+        return comparator == null ? ">" : comparator;
+    }
+
+    /** Maps the plan's logical direction object (GT/GTE/LT/LTE) to its SQL comparison sign. */
+    private static String provinceAverageComparator(String operator) {
+        if (operator == null) {
+            return null;
+        }
+        return switch (operator) {
+            case "GT" -> ">";
+            case "GTE" -> ">=";
+            case "LT" -> "<";
+            case "LTE" -> "<=";
+            default -> null;
+        };
     }
 
     private String comparisonOrderBy(BankQueryPlan plan) {
@@ -900,7 +942,13 @@ final class BankS2SqlTemplateFactory {
 
     record ResolvedMetric(String identifier, String metricCode) {}
 
+    /**
+     * Immutable template inputs resolved by the compiler. {@code provinceAverageOperator} carries
+     * the plan's optional single global province-average direction object (metric_value
+     * GT/GTE/LT/LTE PROVINCE_AVERAGE); it is a logical benchmark direction consumed by the
+     * threshold templates and must never be rendered into a physical WHERE clause.
+     */
     record TemplateContext(BankQueryPlan plan, String dataSetName, List<ResolvedMetric> metrics,
             List<String> dimensions, String dateField, List<Filter> dimensionFilters,
-            List<Filter> metricFilters) {}
+            List<Filter> metricFilters, String provinceAverageOperator) {}
 }

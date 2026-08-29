@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -49,7 +50,16 @@ public final class BankDiffOracle {
         /** CHANGE, multiple metrics: long-form per-(org,)date sums over the union window. */
         CHANGE_MULTI_METRIC,
         /** CHANGE MOM_AND_YOY: scalar current + derived month/year baselines. */
-        CHANGE_MOM_AND_YOY
+        CHANGE_MOM_AND_YOY,
+        /**
+         * DERIVED_RANKING: full-population per-metric ranking (direct metrics + derived ratios),
+         * long-form metric_code / bank_organization / metric_value / rank_position rows over the
+         * complete organization population (the selected-organization restriction is applied after
+         * ranking, exactly like the template's outer WHERE).
+         */
+        DERIVED_RANKING,
+        /** ABSOLUTE_THRESHOLD: single-org SUM vs a numeric metric_value literal + meets flag. */
+        ABSOLUTE_THRESHOLD
     }
 
     private static final MathContext DIVISION = MathContext.DECIMAL128;
@@ -72,6 +82,8 @@ public final class BankDiffOracle {
             case CHANGE_PIVOT -> changePivot(plan);
             case CHANGE_MULTI_METRIC -> changeMultiMetric(plan);
             case CHANGE_MOM_AND_YOY -> changeMomAndYear(plan);
+            case DERIVED_RANKING -> derivedRanking(plan);
+            case ABSOLUTE_THRESHOLD -> absoluteThreshold(plan);
         };
     }
 
@@ -276,6 +288,126 @@ public final class BankDiffOracle {
         BigDecimal yearBaselineValue = dataset.sumOverOrgs(orgScope, code, yearBaseline,
                 yearBaseline);
         return List.of(Arrays.asList(current, monthBaselineValue, yearBaselineValue));
+    }
+
+    /**
+     * [metric_code, bank_organization, metric_value, rank_position] for every metric over the
+     * complete organization population. Mirrors {@code compileDerivedMetricRanking} exactly:
+     *
+     * <ul>
+     *   <li>direct metrics aggregate {@code SUM(zb)} per organization over the window and rank
+     *       with the metric's catalog direction ({@link #rankingDirection}),</li>
+     *   <li>derived ratios compute {@code SUM(numerator) / NULLIF(SUM(denominator), 0) * scale}
+     *       (composite numerators sum every operand) and always rank DESC,</li>
+     *   <li>an org whose ratio has a zero denominator yields NULL and is dropped before
+     *       numbering, so it can never occupy or shift a rank position,</li>
+     *   <li>ranks are ROW_NUMBER ordinals — ordered by (metric_value direction, bank_organization
+     *       ASC), one per surviving org, no competition-ranking gaps on ties,</li>
+     *   <li>the selected-organization restriction is applied only after ranking (the template
+     *       keeps the ranking population-wide and filters outside it).</li>
+     * </ul>
+     */
+    private List<List<Object>> derivedRanking(BankQueryPlan plan) {
+        List<String> orgScope = organizationCodes(plan);
+        LocalDate start = plan.getTime().getStartDate();
+        LocalDate end = plan.getTime().getEndDate();
+        List<List<Object>> rows = new ArrayList<>();
+        List<BankQueryPlan.Metric> directMetrics = plan.getMetrics().stream()
+                .sorted(java.util.Comparator.comparing(BankQueryPlan.Metric::getBizName,
+                        String.CASE_INSENSITIVE_ORDER))
+                .toList();
+        for (BankQueryPlan.Metric metric : directMetrics) {
+            String code = metric.getBizName().toUpperCase(Locale.ROOT);
+            Map<String, BigDecimal> valuesByOrg = new TreeMap<>();
+            for (String org : BankDiffDataset.ORGS) {
+                valuesByOrg.put(org, dataset.sumOverOrgs(List.of(org), code, start, end));
+            }
+            collectRankedRows(rows, code, valuesByOrg, rankingDirection(code), orgScope);
+        }
+        for (BankQueryPlan.DerivedMetric derived : plan.getDerivedMetrics()) {
+            List<String> operands = derived.getNumeratorOperands() == null
+                    || derived.getNumeratorOperands().isEmpty()
+                            ? List.of(derived.getNumerator())
+                            : derived.getNumeratorOperands();
+            BigDecimal scale = BigDecimal.valueOf(BankSemanticRegistry.ratioScale(
+                    derived.getNumerator(), derived.getDenominator()));
+            Map<String, BigDecimal> valuesByOrg = new TreeMap<>();
+            for (String org : BankDiffDataset.ORGS) {
+                BigDecimal numeratorSum = BigDecimal.ZERO;
+                for (String operand : operands) {
+                    numeratorSum = numeratorSum.add(
+                            dataset.sumOverOrgs(List.of(org), operand, start, end));
+                }
+                BigDecimal denominatorSum =
+                        dataset.sumOverOrgs(List.of(org), derived.getDenominator(), start, end);
+                // NULLIF(denominator, 0) contract: a zero denominator becomes a NULL metric
+                // value that the ranked select drops before ROW_NUMBER.
+                valuesByOrg.put(org, denominatorSum.compareTo(BigDecimal.ZERO) == 0 ? null
+                        : numeratorSum.divide(denominatorSum, DIVISION).multiply(scale));
+            }
+            collectRankedRows(rows, derived.getMetricCode(), valuesByOrg, "DESC", orgScope);
+        }
+        return rows;
+    }
+
+    /** ROW_NUMBER semantics: (value direction, org ASC) ordinals over non-null values only. */
+    private static void collectRankedRows(List<List<Object>> rows, String metricCode,
+            Map<String, BigDecimal> valuesByOrg, String direction, List<String> orgScope) {
+        Comparator<Map.Entry<String, BigDecimal>> byOrg = Map.Entry.comparingByKey();
+        Comparator<Map.Entry<String, BigDecimal>> rankingOrder = ("ASC".equals(direction)
+                ? Comparator.<Map.Entry<String, BigDecimal>, BigDecimal>comparing(
+                        Map.Entry::getValue)
+                : Comparator.<Map.Entry<String, BigDecimal>, BigDecimal>comparing(
+                        Map.Entry::getValue, Comparator.reverseOrder())).thenComparing(byOrg);
+        List<Map.Entry<String, BigDecimal>> ranked = valuesByOrg.entrySet().stream()
+                .filter(entry -> entry.getValue() != null)
+                .sorted(rankingOrder)
+                .toList();
+        long rank = 0;
+        for (Map.Entry<String, BigDecimal> entry : ranked) {
+            rank++;
+            if (!orgScope.isEmpty() && !orgScope.contains(entry.getKey())) {
+                continue; // selected-organization restriction lives outside the ranking.
+            }
+            rows.add(Arrays.asList(metricCode, entry.getKey(), entry.getValue(), rank));
+        }
+    }
+
+    /**
+     * Mirrors {@code BankResultProjector.rankingDirection} from the shared registry: catalog
+     * LOWER_BETTER metrics rank ASC (lower is better), everything else DESC.
+     */
+    private static String rankingDirection(String metricCode) {
+        return BankSemanticRegistry.metrics().get(metricCode).direction()
+                == BankSemanticRegistry.Direction.LOWER_BETTER ? "ASC" : "DESC";
+    }
+
+    /**
+     * [bank_organization, metric_value, meets_condition] for the single selected organization.
+     * Mirrors {@code compileAbsoluteThreshold}: the SUM is computed over every row in the window
+     * (the threshold filter is the CASE comparison, never a WHERE predicate), and the plan's
+     * numeric literal keeps its exact value after the template's percent-sign strip.
+     */
+    private List<List<Object>> absoluteThreshold(BankQueryPlan plan) {
+        String code = plan.getMetrics().get(0).getBizName();
+        String org = plan.getOrganizations().get(0).getCode();
+        LocalDate start = plan.getTime().getStartDate();
+        LocalDate end = plan.getTime().getEndDate();
+        BigDecimal metricValue = dataset.sumOverOrgs(List.of(org), code, start, end);
+        BankQueryPlan.Filter threshold = plan.getFilters().stream()
+                .filter(filter -> "metric_value".equals(filter.getField())).findFirst()
+                .orElseThrow();
+        BigDecimal literal = new BigDecimal(
+                threshold.getValue().replace("%", "").trim());
+        int comparison = metricValue.compareTo(literal);
+        boolean meets = switch (threshold.getOperator()) {
+            case "GTE" -> comparison >= 0;
+            case "LT" -> comparison < 0;
+            case "LTE" -> comparison <= 0;
+            case "EQ" -> comparison == 0;
+            default -> comparison > 0;
+        };
+        return List.of(Arrays.asList(org, metricValue, meets ? 1 : 0));
     }
 
     private static LocalDate currentStartDate(BankQueryPlan plan) {
