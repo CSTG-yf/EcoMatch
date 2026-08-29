@@ -607,13 +607,50 @@ class BankPlanPromptComposerTest {
             assertTrue(idx > rule3iStart && idx < rule3iEnd,
                     "DERIVED_SUM guidance leaked outside rule 3i at index " + idx);
         }
+        // 加合派生指标词表（同单位百分率之和，无 _DIV_ 后缀、按字典序排列）同样只允许住在 3i，
+        // 且不得给加合码强加 _DIV_ 后缀或附带你判例。
+        assertTrue(sys.contains("DERIVED_SUM_<M1>_AND_<M2>"));
+        assertTrue(sys.contains("无 _DIV_ 后缀"));
+        assertTrue(sys.contains("按字典序排列"));
+        int additiveIdx = sys.indexOf("DERIVED_SUM_<M1>_AND_<M2>");
+        assertTrue(additiveIdx > rule3iStart && additiveIdx < rule3iEnd,
+                "additive derived-metric vocabulary must stay inside rule 3i");
+        // v63 收窄：加合编码仅限百分率(%)加数对，金额类“合计”必须重定向为普通多指标查询。
+        assertTrue(sys.contains("仅当两个加数都是目录中百分率"),
+                "the DERIVED_SUM vocabulary must be scoped to percent-unit operand pairs");
+        assertTrue(sys.contains("金额类指标（元/亿元）的“合计/之和”不是派生指标"),
+                "amount-unit sums must be redirected to the plain multi-metric contract");
+    }
+
+    @Test
+    void rankingSuperlativeSliceFollowsDeterministicCatalogDirectionMapping() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        // rank=目录最优端、rank_from_bottom=对侧端的两步确定性映射必须写进 REQUIREMENTS 词条。
+        assertTrue(sys.contains("rank 永远表示目录排序的"));
+        assertTrue(requirements.contains("rank 永远表示目录排序的"));
+        assertTrue(requirements.contains("direction=LOWER_BETTER（低优指标）时"));
+        assertTrue(requirements.contains("“最低/最少/最小”写唯一的 rank/LTE/1"));
+        assertTrue(requirements.contains("“最高/最多/最大/最好”写唯一的"));
+        assertTrue(requirements.contains("rank_from_bottom/LTE/1"));
+        assertTrue(requirements.contains("“排第一/排最后”是位置语义，与指标方向无关"));
+        // PLAN 规则 9 的全省极值选择必须回指同一方向映射，不得再写死“最低→rank”。
+        assertTrue(sys.contains("名次切片字段必须按 REQUIREMENTS 合同的"));
+        assertTrue(sys.contains("确定性方向映射选择"));
+        assertFalse(sys.contains("（按题干的正向或倒数语义）"),
+                "the direction-neutral rank wording must be replaced by the catalog mapping");
     }
 
     @Test
     void prefixVersionsArePinnedForReworkCacheInvalidation() {
         // v59 因官方 smoke 回归被 v60 取代；v60 的族块示例日期又污染 requirements 日期槽
-        // （VAL-S-06）被 v61 去示例化取代；再次 bump 必须携带官方证据并同步更新本断言。
-        assertEquals("bank-plan-sys-v61-single-pass", BankPlanPromptComposer.PREFIX_VERSION);
+        // （VAL-S-06）被 v61 去示例化取代；v62 将极值名次切片改为按目录 direction 的确定性
+        // 映射，并在 3i 补充同单位百分率加合词表；v63 把该词表收窄到百分率(%)加数对并给
+        // 金额类合计写明普通多指标重定向（TRAIN-M-58 修复轮死循环教训）。再次 bump 必须
+        // 携带官方证据并同步更新本断言。
+        assertEquals("bank-plan-sys-v63-additive-percent-scope",
+                BankPlanPromptComposer.PREFIX_VERSION);
         assertEquals("bank-requirements-sys-v8-stage-split",
                 BankPlanPromptComposer.REQUIREMENTS_PREFIX_VERSION);
         assertEquals("bank-plan-sys-v57-stage-split", BankPlanPromptComposer.PLAN_PREFIX_VERSION);

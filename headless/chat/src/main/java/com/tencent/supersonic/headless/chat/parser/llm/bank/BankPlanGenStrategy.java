@@ -161,6 +161,12 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 repairReasons.add(exception.getReason().name());
                 repairCodes.add(repairErrorCode(exception));
                 logRepair("SINGLE_PASS", attempt + 1, repairErrorCode(exception), exception);
+                if (exception.getReason() == BankQueryPlanParseException.Reason.MALFORMED_JSON) {
+                    // A truncated response replays identically from the completion memo and
+                    // would poison every later round with the same garbage; force a fresh roll.
+                    prefixCache.evictCompletion(modelConfig, BankPlanLlmPrefixCache.Stage.SINGLE_PASS,
+                            dynamicUser);
+                }
             } catch (BankPlanCompilationException exception) {
                 // Terminal compiler-class rejection from a plan-shape gate (e.g. a question shape
                 // no query family can express). It is not a model failure and owns no structured
@@ -348,6 +354,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // catalog recognizer is used to return a repairable error when a complete two-operand
         // point ratio is incorrectly clarified or classified as another query family.
         validateGenericPointRatioQuery(queryText, requirements);
+        validateAdditiveCompositeQuery(queryText, requirements);
         validateStructureShareFamily(queryText, requirements, evidence);
         if (requirements.getAction() != BankRequestContract.Action.EXECUTE) {
             return;
@@ -1223,7 +1230,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private void validateGenericPointRatioQuery(String queryText,
             BankRequestContract requirements) {
-        if (!isGenericPointRatioQuestion(queryText)) {
+        if (!isGenericPointRatioQuestion(queryText)
+                // Two same-unit percent metrics summed together are the additive composite
+                // family's slots, not a two-metric ratio: the additive plan shape can never
+                // satisfy the RATIO contract and vice versa, so forcing RATIO here would turn
+                // repair into a no-accepting-fixed-point loop. The additive family gate below
+                // owns the repairable contract for these questions.
+                || isAdditiveCompositeSlot(queryText)) {
             return;
         }
         BankIntentResult evidence =
@@ -1244,6 +1257,118 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 && containsAny(queryText, "比重", "比例", "占比", "比率")
                 && !containsAny(queryText, "分别", "各自", "构成", "结构", "排名", "排行", "趋势", "走势", "同比",
                         "环比", "较年初", "全省均值", "对比", "比较");
+    }
+
+    /**
+     * Slot trigger of the additive composite family (两个同单位百分率指标的合计点查). Word lists
+     * only — no sample ids, no full-question matching, no catalog answers. All slots must
+     * co-occur: an addition word face (合计/相加/之和/加起来/加总/加), an operand pair — either
+     * the two percent-unit evidence metrics or the two operands resolved by the recognizer's
+     * additive-phrase analysis (shorthand stems like 不良/逾期 that the alias table alone cannot
+     * bind, with unrelated evidence metrics such as a 贷款 share phrase ignored) — one
+     * organization and one explicit single-day window, without any change/ranking/trend/
+     * comparison/composition wording that belongs to a different family. Only then does the
+     * question yield from the generic point-ratio gate into the additive family contract.
+     */
+    private boolean isAdditiveCompositeSlot(String queryText) {
+        if (queryText == null
+                || !containsAny(queryText, "合计", "相加", "之和", "加起来", "加总", "加")
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "变化",
+                        "变动", "增长", "增加", "下降", "减少", "增幅", "降幅", "较年初", "较上月",
+                        "较去年", "较同期", "最高", "最低", "最大", "最小", "全省均值", "对比",
+                        "比较", "分别", "各自", "构成", "结构")) {
+            return false;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null
+                || !evidence.getTime().getStartDate().equals(evidence.getTime().getEndDate())) {
+            return false;
+        }
+        return !additiveOperandCodes(queryText, evidence).isEmpty();
+    }
+
+    /**
+     * Final operand contract of the additive slot: the recognizer's additive-phrase resolution
+     * wins because it alone can bind shorthand stems to their unique percent metric, and the two
+     * percent-unit evidence metrics are the fallback when the question spells the aliases out.
+     * Sorted so the canonical derived code is stable regardless of mention order.
+     */
+    private List<String> additiveOperandCodes(String queryText, BankIntentResult evidence) {
+        List<String> resolved = clarificationEvidenceRecognizer
+                .additiveOperandResolution(queryText)
+                .map(BankFinancialIntentRecognizer.AdditiveOperandPair::operandCodes)
+                .orElse(List.of());
+        if (resolved.size() == 2) {
+            return resolved.stream().sorted().toList();
+        }
+        List<String> codes = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        if (codes.size() == 2
+                && BankSemanticRegistry.isPercentUnitMetric(codes.get(0))
+                && BankSemanticRegistry.isPercentUnitMetric(codes.get(1))) {
+            return codes.stream().sorted().toList();
+        }
+        return List.of();
+    }
+
+    /**
+     * Family gate for additive composite questions (两个同单位百分率指标的合计): the only
+     * compilable contract keeps intent=POINT_QUERY with both operands as the only metrics and
+     * one canonical {@code DERIVED_SUM_<M1>_AND_<M2>} derived metric — a RATIO plan is
+     * numerically never equivalent to the sum, and a plain two-metric pivot loses the combined
+     * value fact. Validation-only: the model still owns the complete requirements JSON; a
+     * mismatch returns as a repairable error and never rewrites the model output.
+     */
+    private void validateAdditiveCompositeQuery(String queryText, BankRequestContract requirements) {
+        if (requirements == null
+                || requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || !isAdditiveCompositeSlot(queryText)) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        List<String> expectedOperands = additiveOperandCodes(queryText, evidence);
+        if (expectedOperands.size() != 2) {
+            return;
+        }
+        String expectedDerived = BankSemanticRegistry.additiveDerivedMetricCode(
+                expectedOperands.get(0), expectedOperands.get(1));
+        String expectedOrganization = evidence.getOrganizations().get(0).getCode();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        List<BankQueryPlan.DerivedMetric> actualDerived =
+                safeList(requirements.getDerivedMetrics());
+        boolean valid = requirements.getIntent() == BankIntentType.POINT_QUERY
+                && actualMetrics.equals(new LinkedHashSet<>(expectedOperands))
+                && actualDerived.size() == 1
+                && expectedDerived.equals(actualDerived.get(0).getMetricCode())
+                && safeList(requirements.getOrganizationCodes())
+                        .equals(List.of(expectedOrganization))
+                && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && actualTime.getStartDate().equals(actualTime.getEndDate())
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.NONE
+                && safeList(requirements.getFilters()).isEmpty();
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "additive_composite_mismatch: 两个同单位百分率指标合计的问法要求 action=EXECUTE、"
+                        + "intent=POINT_QUERY、metricCodes=" + expectedOperands
+                        + "（加合与顺序无关，两个操作数都要直选）、derivedMetrics 恰为 "
+                        + "[{metricCode=" + expectedDerived + ", numerator="
+                        + expectedOperands.get(0) + ", denominator=" + expectedOperands.get(1)
+                        + "}]（按字典序规范形）、organizationCodes=[" + expectedOrganization
+                        + "]、单日 time（startDate=endDate=" + evidence.getTime().getStartDate()
+                        + "、comparison=NONE）、filters=[]；model intent="
+                        + requirements.getIntent() + ", metricCodes="
+                        + requirements.getMetricCodes() + ", derivedMetrics=" + actualDerived
+                        + ", organizationCodes=" + requirements.getOrganizationCodes()
+                        + ", time=" + actualTime + "。请重新生成完整 requirements JSON；"
+                        + "两个 % 指标的合计不得编译成 RATIO 或普通双指标点查。");
     }
 
     private void validateQueryFamily(String errorCode, BankRequestContract requirements,

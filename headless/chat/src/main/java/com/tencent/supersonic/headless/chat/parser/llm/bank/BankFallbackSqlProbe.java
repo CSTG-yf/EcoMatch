@@ -11,8 +11,8 @@ import java.util.List;
  * fallback budget instead of a terminal execute-stage error.
  *
  * <p>The execution facilities live in headless-server, so this interface is implemented there;
- * the chat-side strategy resolves the bean opportunistically through the Spring context and skips
- * the gate (legacy behavior) when no implementation is present.
+ * the chat-side strategy resolves the bean opportunistically through the Spring context and fails
+ * closed (publishes nothing) when no implementation is present.
  */
 public interface BankFallbackSqlProbe {
 

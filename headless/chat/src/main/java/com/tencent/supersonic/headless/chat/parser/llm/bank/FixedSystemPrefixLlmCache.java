@@ -180,6 +180,24 @@ public class FixedSystemPrefixLlmCache {
         return text;
     }
 
+    /**
+     * Drops the memoized completion for this user content so a poisoned entry (e.g. a
+     * truncated model response that fails JSON parsing) is never replayed to later requests;
+     * the next caller rolls a fresh sample instead. Semantically invalid but well-formed
+     * responses should stay memoized — structured repair converges from them deterministically.
+     */
+    public void evictCompletion(ChatModelConfig config, String dynamicUserContent) {
+        if (dynamicUserContent == null) {
+            return;
+        }
+        String removed = completionMemo.remove(memoKey(config, dynamicUserContent));
+        if (removed != null) {
+            KEY_PIPELINE.info(
+                    "FixedSystemPrefixLlmCache completion EVICT prefixVersion={} memoSize={}",
+                    prefixVersion, completionMemo.size());
+        }
+    }
+
     public Map<String, Object> stats() {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("stage", stageLabel);

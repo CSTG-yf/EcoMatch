@@ -36,14 +36,15 @@ import java.util.stream.Collectors;
  * <p>Budget is strictly one generation plus one repair round with deterministic error feedback
  * (whitelist violations or publish-gate probe failures). The model output is a structured dual
  * response ({sql, columns, confidence}); the SQL must pass
- * {@link BankFreeSqlWhitelistValidator} before it may leave this class. When a
- * {@link BankFallbackSqlProbe} bean is available, the whitelisted candidate is additionally
- * trial-executed (read-only, tiny row cap) before publication so that execution failures and
- * missing declared columns become repairable feedback instead of terminal execute-stage errors;
- * without a probe bean the gate is skipped and behavior is unchanged. Execution of published
- * candidates goes through the non-trusted SqlSafetyPolicy path and the QueryExecutionGateway, and
- * the declared columns are fail-closed against the physical result metadata by the FREE
- * projection contract.
+ * {@link BankFreeSqlWhitelistValidator} before it may leave this class. The whitelisted candidate
+ * is additionally trial-executed (read-only, tiny row cap) by a {@link BankFallbackSqlProbe} bean
+ * before publication so that execution failures and missing declared columns become repairable
+ * feedback instead of terminal execute-stage errors; when no probe bean exists the gate cannot
+ * run, so the strategy fails closed and declines to publish any candidate (an unverified
+ * statement would otherwise fail only at real execution, e.g. via SqlSafetyPolicy). Execution of
+ * published candidates goes through the non-trusted SqlSafetyPolicy path and the
+ * QueryExecutionGateway, and the declared columns are fail-closed against the physical result
+ * metadata by the FREE projection contract.
  */
 @Service
 @Slf4j
@@ -69,15 +70,18 @@ public class BankFreeSqlFallbackStrategy {
             "上一轮输出已通过白名单校验，但发布前试执行未通过（试执行失败或声明列缺失），"
                     + "必须修正以下全部问题后重新输出：";
 
-    /** Logged once when no probe bean exists so gate-skip stays visible without spamming. */
+    /** Logged once when no probe bean exists so the fail-closed decline stays visible. */
     private static volatile boolean probeAbsentLogged;
 
     /**
      * Explicit decode bound for the {sql, columns} JSON: remote providers apply their own default
-     * output cap when max_tokens is absent, which truncates longer fallback SQL. The bound also
-     * covers the plan channel's observed P99 output maxima with headroom.
+     * output cap when max_tokens is absent, which truncates longer fallback SQL. The thinking
+     * gateway spends a large share of the decode budget on reasoning content before any SQL
+     * (observed ~8k reasoning chars against a 2048 bound), so the bound must leave room for
+     * reasoning plus the full statement — 2048 truncated every attempt of long questions and
+     * made the channel structurally non-convergent (TRAIN-H-07/08/09, 2026-08-29).
      */
-    private static final int FREE_FALLBACK_MAX_OUTPUT_TOKENS = 2048;
+    static final int FREE_FALLBACK_MAX_OUTPUT_TOKENS = 4096;
 
     private final ConcurrentHashMap<String, FixedSystemPrefixLlmCache> fallbackPrefixCaches =
             new ConcurrentHashMap<>();
@@ -140,6 +144,11 @@ public class BankFreeSqlFallbackStrategy {
         List<String> lastViolations = List.of();
         String lastRepairHeader = WHITELIST_REPAIR_HEADER;
         BankFallbackSqlProbe probe = resolveProbe();
+        if (probe == null) {
+            // Fail closed: without the pre-publish probe there is no executability proof, and a
+            // published candidate would only surface safety/gateway failures after publication.
+            return null;
+        }
         for (int attempt = 1; attempt <= MAX_MODEL_ATTEMPTS; attempt++) {
             String dynamicUser = attempt == 1 ? userContent
                     : buildRepairUserContent(question, lastViolations, lastRepairHeader);
@@ -170,14 +179,12 @@ public class BankFreeSqlFallbackStrategy {
                         declarationViolations);
                 return null;
             }
-            if (probe != null) {
-                String probeViolation = publishGateViolation(probe, llmReq, sql, declared);
-                if (probeViolation != null) {
-                    lastViolations = List.of(probeViolation);
-                    lastRepairHeader = PROBE_REPAIR_HEADER;
-                    logFallback(attempt, "PROBE_FAILED", lastViolations);
-                    continue;
-                }
+            String probeViolation = publishGateViolation(probe, llmReq, sql, declared);
+            if (probeViolation != null) {
+                lastViolations = List.of(probeViolation);
+                lastRepairHeader = PROBE_REPAIR_HEADER;
+                logFallback(attempt, "PROBE_FAILED", lastViolations);
+                continue;
             }
             KEY_PIPELINE_LOG.info(
                     "BankFreeSqlFallbackStrategy accepted free-SQL fallback attempt={} trigger={} declaredColumns={}",
@@ -260,8 +267,10 @@ public class BankFreeSqlFallbackStrategy {
     /**
      * Opportunistic probe lookup: the execution facilities live in headless-server, so the gate
      * only exists when a {@link BankFallbackSqlProbe} bean is present. Without Spring (unit tests,
-     * bare construction) the bean lookup fails and the gate is skipped, keeping legacy behavior;
-     * the skip is logged once to stay visible without spamming every request.
+     * bare construction) the bean lookup fails and the caller must fail closed: the fallback
+     * never publishes an unverified candidate. The decline is logged once (WARN) to stay visible
+     * without spamming every request; in the standalone launcher the probe bean is always
+     * deployed, so this only disables the fallback where it could not safely publish anyway.
      */
     static BankFallbackSqlProbe resolveProbe() {
         try {
@@ -269,9 +278,10 @@ public class BankFreeSqlFallbackStrategy {
         } catch (RuntimeException e) {
             if (!probeAbsentLogged) {
                 probeAbsentLogged = true;
-                KEY_PIPELINE_LOG.info(
+                KEY_PIPELINE_LOG.warn(
                         "BankFreeSqlFallbackStrategy no BankFallbackSqlProbe bean available; "
-                                + "pre-publish trial-execution gate skipped (behavior unchanged)");
+                                + "free-SQL fallback fails closed without publishing candidates "
+                                + "(pre-publish trial-execution gate is mandatory)");
             }
             return null;
         }

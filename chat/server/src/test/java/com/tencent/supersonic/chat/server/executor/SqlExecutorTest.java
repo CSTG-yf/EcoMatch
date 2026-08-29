@@ -218,15 +218,62 @@ class SqlExecutorTest {
                 (Map<String, Object>) parseInfo.getProperties().get("executionTelemetry");
         assertEquals(Map.of("failureLayer", "JDBC_GRAMMAR", "repairAttempted", false,
                 "repaired", false), telemetry);
-        assertTrue(parseInfo.getProperties().values().stream()
-                .noneMatch(value -> String.valueOf(value).contains("opaque-details")));
         assertTrue(!parseInfo.getProperties().containsKey("sqlExecutionFeedback"));
         BankPlanToolResult toolResult =
                 (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
         assertEquals(BankPlanToolResult.Status.FAILED, toolResult.getStatus());
         assertEquals(BankPlanToolResult.Stage.DATABASE_EXECUTE, toolResult.getFailedStage());
         assertEquals("JDBC_GRAMMAR", toolResult.getErrorCode());
-        assertTrue(toolResult.toRepairFeedback().contains("JDBC_GRAMMAR"));
-        assertTrue(!toolResult.toRepairFeedback().contains("opaque-details"));
+        // The raw execution error is the dynamic root-cause channel (hints), while the toolResult
+        // message keeps the generic contract text.
+        assertTrue(toolResult.toRepairFeedback().contains("failed_layer=JDBC_GRAMMAR"));
+        assertTrue(toolResult.toRepairFeedback().contains("root_message=opaque-details"));
+        assertEquals("数据库执行失败，请根据允许值修正完整计划。", toolResult.getMessage());
+        assertTrue(!toolResult.getMessage().contains("opaque-details"));
+        assertEquals(List.of("failed_layer=JDBC_GRAMMAR", "root_message=opaque-details",
+                "根据失败阶段重新生成完整 BankQueryPlan"), toolResult.getCorrectionHints());
+    }
+
+    @Test
+    void safetyPolicyFailureCarriesLayerAndTruncatesLongRootMessage() throws Exception {
+        SemanticLayerService semanticLayer = mock(SemanticLayerService.class);
+        ChatContextService chatContextService = mock(ChatContextService.class);
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBean(SemanticLayerService.class)).thenReturn(semanticLayer);
+        when(applicationContext.getBean(ChatContextService.class)).thenReturn(chatContextService);
+        new ContextUtils().setApplicationContext(applicationContext);
+
+        User user = User.get(1L, "tester");
+        when(chatContextService.getOrCreateContext(7)).thenReturn(new ChatContext());
+        String longMessage = "SQL policy violation: " + "x".repeat(260);
+        SemanticQueryResp failed = new SemanticQueryResp();
+        failed.setErrorMsg(longMessage);
+        failed.setExecutionTelemetry(Map.of("failureLayer", "SQL_SAFETY_POLICY"));
+        when(semanticLayer.queryByReq(any(SemanticQueryReq.class), eq(user))).thenReturn(failed);
+
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        parseInfo.getSqlInfo().setCorrectedS2SQL("SELECT metric");
+        parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY,
+                BankPlanToolResult.started(1, "trace-safety", "fingerprint-1", "STRUCT",
+                        List.of("metric_value")));
+        ExecuteContext executeContext = new ExecuteContext(ChatExecuteReq.builder()
+                .user(user).chatId(7).queryId(9L).queryText("query").build());
+        executeContext.setParseInfo(parseInfo);
+
+        new SqlExecutor().execute(executeContext);
+
+        BankPlanToolResult toolResult =
+                (BankPlanToolResult) parseInfo.getProperties().get(BankPlanToolResult.PROPERTY_KEY);
+        assertEquals(BankPlanToolResult.Status.FAILED, toolResult.getStatus());
+        assertEquals(BankPlanToolResult.Stage.SQL_SAFETY, toolResult.getFailedStage());
+        assertEquals("SQL_SAFETY_POLICY", toolResult.getErrorCode());
+        assertEquals("SQL 安全检查失败，请修正计划而不是直接生成 SQL。", toolResult.getMessage());
+        assertEquals(List.of("failed_layer=SQL_SAFETY_POLICY",
+                "root_message=" + longMessage.substring(0, 200),
+                "只修正 BankQueryPlan，不要直接生成或修改物理 SQL"), toolResult.getCorrectionHints());
+        String feedback = toolResult.toRepairFeedback();
+        assertTrue(feedback.contains("failed_layer=SQL_SAFETY_POLICY"));
+        assertTrue(feedback.contains("root_message=" + longMessage.substring(0, 200)));
+        assertFalse(feedback.contains(longMessage));
     }
 }

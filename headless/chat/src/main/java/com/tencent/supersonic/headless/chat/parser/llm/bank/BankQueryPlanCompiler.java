@@ -133,6 +133,13 @@ public class BankQueryPlanCompiler {
                                 .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
         if (directCalculation
                 && shape.timeComparison() == BankQueryPlan.TimeComparison.NONE) {
+            // The additive composite point family owns its shape before the generic derived
+            // route: a POINT_QUERY carrying only additive derived metrics (两个同单位百分率指标的
+            // 合计虚拟指标) compiles into the plain point-day sum template, never into a
+            // ranking over virtual metrics.
+            if (shape.isAdditiveCompositePoint()) {
+                return SupportedQueryFamily.ADDITIVE_COMPOSITE;
+            }
             if (shape.hasDerivedMetrics() || shape.isMultiMetricRanking()) {
                 return SupportedQueryFamily.DERIVED_RANKING;
             }
@@ -343,7 +350,32 @@ public class BankQueryPlanCompiler {
                                 "ratio_percent"),
                         ratioContract);
             }
+            case ADDITIVE_COMPOSITE -> CompiledQuery.s2sql(
+                    templateFactory.compileAdditiveComposite(templateContext),
+                    List.of(ORGANIZATION_DIMENSION, "metric_value"),
+                    additiveCompositeResultContract(plan, index));
         };
+    }
+
+    /**
+     * The auditable projection contract for the additive composite point query: the SQL already
+     * computes the plain sum of the two percent-unit operands for the single selected
+     * organization on its observation day, so the projector only passes that combined value
+     * through with organization identity under the canonical virtual-metric code — exactly the
+     * point long-form contract of one catalog metric.
+     */
+    private BankResultProjector.Contract additiveCompositeResultContract(BankQueryPlan plan,
+            SchemaIndex index) {
+        BankQueryPlan.DerivedMetric derived = plan.getDerivedMetrics().stream()
+                .filter(BankQueryPlanValidator::isAdditiveDerivedMetric).findFirst()
+                .orElseThrow(() -> new BankPlanCompilationException(
+                        BankPlanCompilationException.Reason.UNSUPPORTED_QUERY_SHAPE,
+                        "additive composite compilation requires an additive derived metric"));
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.LONG_FORM,
+                List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("metric_value").metricCode(derived.getMetricCode())
+                        .build()));
     }
 
     private static boolean hasProvinceAverageBenchmark(BankQueryPlan plan) {
@@ -450,7 +482,8 @@ public class BankQueryPlanCompiler {
         GENERIC_DIRECT("单点/趋势/长表直接查询（DIRECT/NONE）"),
         CHANGE("同环比变化（intent=CHANGE+非NONE比较）"),
         RANK_CHANGE("跨期排名变化（calculation.type=RANK_CHANGE+双期时间，输出基期/当期排名与名次变化）"),
-        RATIO("点值比率（intent=RATIO+calculation=RATIO）");
+        RATIO("点值比率（intent=RATIO+calculation=RATIO）"),
+        ADDITIVE_COMPOSITE("同单位百分率指标加合点查（POINT_QUERY/DIRECT+DERIVED_SUM_<M1>_AND_<M2>，两个%目录指标单日合计）");
 
         private final String description;
 
@@ -473,7 +506,8 @@ public class BankQueryPlanCompiler {
     record QueryShape(BankIntentType intent, BankQueryPlan.CalculationType calculationType,
             BankQueryPlan.TimeComparison timeComparison, int metricsCount, boolean allMetricsAverage,
             boolean anyMetricAverage, BankQueryPlan.Aggregation firstMetricAggregation,
-            boolean hasDerivedMetrics, int organizationsCount, List<String> dimensions,
+            boolean hasDerivedMetrics, boolean allDerivedMetricsAdditive,
+            int organizationsCount, List<String> dimensions,
             int metricFilterCount, boolean hasProvinceAverageBenchmark, boolean hasRankFilter,
             boolean hasOrderBy, boolean hasLimit) {
 
@@ -489,13 +523,26 @@ public class BankQueryPlanCompiler {
                     : metrics.get(0).planMetric().getAggregation();
             boolean rankFilter = plan.getFilters().stream()
                     .anyMatch(BankQueryPlanCompiler::isRankFilter);
+            boolean allDerivedAdditive = !plan.getDerivedMetrics().isEmpty()
+                    && plan.getDerivedMetrics().stream()
+                            .allMatch(BankQueryPlanValidator::isAdditiveDerivedMetric);
             return new QueryShape(plan.getIntent(), plan.getCalculation().getType(),
                     plan.getTime().getComparison(), metrics.size(), allAverage, anyAverage,
-                    firstAggregation, !plan.getDerivedMetrics().isEmpty(),
+                    firstAggregation, !plan.getDerivedMetrics().isEmpty(), allDerivedAdditive,
                     plan.getOrganizations().size(), List.copyOf(dimensionIdentifiers),
                     metricFilters.size(), BankQueryPlanCompiler.hasProvinceAverageBenchmark(plan),
                     rankFilter, plan.getOrderBy() != null && !plan.getOrderBy().isEmpty(),
                     plan.getLimit() != null);
+        }
+
+        /**
+         * Additive composite point plan: a point query whose derived metrics are all additive
+         * composite codes ({@code DERIVED_SUM_<M1>_AND_<M2>}). The full family shape (single
+         * organization, single day, operands as the only metrics, no filters/order/limit) is
+         * pinned by the validator's family guard before routing runs.
+         */
+        boolean isAdditiveCompositePoint() {
+            return intent == BankIntentType.POINT_QUERY && allDerivedMetricsAdditive();
         }
 
         boolean isAbsoluteThreshold() {

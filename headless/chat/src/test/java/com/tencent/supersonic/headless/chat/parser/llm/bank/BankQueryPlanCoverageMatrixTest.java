@@ -510,6 +510,8 @@ class BankQueryPlanCoverageMatrixTest {
         assertTemplateFamilyAvoidsSemanticAliases("organizationComparison",
                 organizationComparison());
         assertTemplateFamilyAvoidsSemanticAliases("rankChangePlan", rankChangePlan());
+        assertTemplateFamilyAvoidsSemanticAliases("additiveComposite", additiveComposite("ZB013",
+                "ZB015"));
 
         // Struct routes (GENERIC_DIRECT): no S2SQL template is emitted, so compiling through the
         // struct route is the whole guard.
@@ -601,6 +603,68 @@ class BankQueryPlanCoverageMatrixTest {
                 .name("对公与个人存款合计占各项存款比例").build()));
         return value(plan, BankIntentType.RATIO, List.of("ZB003", "ZB004", "ZB001"),
                 List.of("ORG004"));
+    }
+
+    /**
+     * Additive composite family (两个同单位百分率指标的合计点查): a POINT_QUERY carrying the
+     * canonical DERIVED_SUM_<M1>_AND_<M2> derived metric routes into its own family and compiles
+     * the plain point-day sum — no SUM aggregation, no *100 scale, single-day WHERE. The output
+     * keeps the point long-form contract (org + combined value) under the virtual metric code,
+     * and the operand expression stays byte-stable regardless of the plan's mention order.
+     */
+    @Test
+    void additiveCompositeRoutesToItsOwnFamilyAndCompilesThePlainPointSum() {
+        PlanAndHints candidate = additiveComposite("ZB015", "ZB013");
+        CompiledQuery compiled = assertCompiles(candidate);
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.LONG_FORM,
+                compiled.getResultContract().getType());
+        assertEquals(List.of("bank_organization", "metric_value"), compiled.getOutputColumns());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.startsWith("SELECT bank_organization, ZB013 + ZB015 AS metric_value"), sql);
+        assertTrue(sql.contains("FROM 银行指标数据集"), sql);
+        assertTrue(sql.contains("bank_organization = 'ORG004'"), sql);
+        assertTrue(sql.contains("数据日期 >= '2026-03-31'"), sql);
+        assertTrue(sql.contains("数据日期 <= '2026-03-31'"), sql);
+        assertFalse(sql.contains("SUM("), sql);
+        assertFalse(sql.contains("GROUP BY"), sql);
+        assertFalse(sql.contains("* 100"), sql);
+        assertFalse(sql.contains("ratio_percent"), sql);
+
+        // Reversed mention order compiles to the byte-stable canonical expression.
+        assertEquals(sql, assertCompiles(additiveComposite("ZB013", "ZB015")).getS2sql());
+
+        // End-to-end point contract: the projector passes the combined value through with
+        // organization identity under the virtual metric code.
+        BankResultProjector.Projection projection = new BankResultProjector().project(
+                compiled.getResultContract(),
+                List.of(Map.of("bank_organization", "ORG004",
+                        "metric_value", new java.math.BigDecimal("2.25"))));
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value"),
+                projection.getColumns());
+        assertEquals(List.of("ORG004", "DERIVED_SUM_ZB013_AND_ZB015",
+                new java.math.BigDecimal("2.25")),
+                List.of(projection.getRows().get(0).get("org_code"),
+                        projection.getRows().get(0).get("metric_code"),
+                        projection.getRows().get(0).get("metric_value")));
+    }
+
+    private PlanAndHints additiveComposite(String firstMention, String secondMention) {
+        String smaller = firstMention.compareTo(secondMention) < 0 ? firstMention : secondMention;
+        String larger = firstMention.compareTo(secondMention) < 0 ? secondMention : firstMention;
+        List<String> output = new java.util.ArrayList<>(
+                List.of("bank_organization", firstMention, secondMention));
+        BankQueryPlan plan = basePlan(BankIntentType.POINT_QUERY,
+                List.of(firstMention, secondMention), List.of("bank_organization"),
+                List.of("ORG004"), dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT, List.of(), List.of(), null, output);
+        plan.setDerivedMetrics(List.of(BankQueryPlan.DerivedMetric.builder()
+                .metricCode("DERIVED_SUM_" + smaller + "_AND_" + larger)
+                .numerator(smaller).denominator(larger)
+                .name("两个百分率指标合计").build()));
+        return value(plan, BankIntentType.POINT_QUERY,
+                List.of(firstMention, secondMention), List.of("ORG004"));
     }
 
     private CompiledQuery assertCompiles(PlanAndHints candidate) {

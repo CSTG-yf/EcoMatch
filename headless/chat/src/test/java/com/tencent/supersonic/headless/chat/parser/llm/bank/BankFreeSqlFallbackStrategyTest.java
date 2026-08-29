@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -47,6 +48,15 @@ class BankFreeSqlFallbackStrategyTest {
             "SELECT ZB001 AS metric_value FROM other_dataset";
 
     private final BankFreeSqlFallbackStrategy strategy = new BankFreeSqlFallbackStrategy();
+
+    @Test
+    void fallbackDecodeBoundLeavesRoomForThinkingGatewayReasoningOverhead() {
+        // 思考型网关会在 SQL 之前消耗大量解码预算（观测 ~8k reasoning 字符对 2048 上限），
+        // 2048 会把长题兜底的每一轮都截成 MALFORMED_JSON，通道结构性不收敛
+        // （TRAIN-H-07/08/09，2026-08-29）。再次调低等于重开该缺陷，必须带官方证据。
+        assertTrue(BankFreeSqlFallbackStrategy.FREE_FALLBACK_MAX_OUTPUT_TOKENS >= 4096,
+                "fallback decode bound must leave room for reasoning plus the full statement");
+    }
 
     @Test
     void whitelistViolationGetsOneRepairRoundThenSucceeds() {
@@ -282,7 +292,7 @@ class BankFreeSqlFallbackStrategyTest {
     }
 
     @Test
-    void missingProbeBeanKeepsLegacyBehavior() {
+    void missingProbeBeanFailsClosedWithoutPublishingOrModelCall() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString()))
                 .thenReturn(dualResponse(GOOD_SQL, List.of("org_code", "metric_value")));
@@ -297,9 +307,9 @@ class BankFreeSqlFallbackStrategyTest {
             fallback = strategy.generate(bankRequest(), "UNSUPPORTED_QUERY_SHAPE");
         }
 
-        assertNotNull(fallback);
-        assertEquals(GOOD_SQL, fallback.getSql());
-        assertEquals(1, fallback.getModelAttempts());
+        // Fail closed: no probe bean means no executability proof, so nothing may be published.
+        assertNull(fallback);
+        verify(model, never()).generate(anyString());
     }
 
     private BankFreeSqlFallbackStrategy.FallbackSql generateWithModelAndProbe(
@@ -316,7 +326,16 @@ class BankFreeSqlFallbackStrategyTest {
 
     private BankFreeSqlFallbackStrategy.FallbackSql generateWithModel(ChatLanguageModel model,
             String triggerReason) {
-        try (MockedStatic<ModelProvider> modelProvider = mockStatic(ModelProvider.class)) {
+        // The publish gate is mandatory since fail-closed: unit tests stub an always-passing
+        // probe so the strategy exercises its normal budget path.
+        BankFallbackSqlProbe probe = mock(BankFallbackSqlProbe.class);
+        when(probe.probe(any(LLMReq.class), anyString()))
+                .thenAnswer(invocation -> BankFallbackSqlProbe.ProbeReport.pass(
+                        List.of("org_code", "metric_value"), 1));
+        try (MockedStatic<ModelProvider> modelProvider = mockStatic(ModelProvider.class);
+                MockedStatic<ContextUtils> contextUtils = mockStatic(ContextUtils.class)) {
+            contextUtils.when(() -> ContextUtils.getBean(BankFallbackSqlProbe.class))
+                    .thenReturn(probe);
             modelProvider.when(() -> ModelProvider.getChatModel(any(ChatModelConfig.class)))
                     .thenReturn(model);
             return strategy.generate(bankRequest(), triggerReason);

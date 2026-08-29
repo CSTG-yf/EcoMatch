@@ -380,6 +380,42 @@ final class BankS2SqlTemplateFactory {
     }
 
     /**
+     * Additive composite point query (两个同单位百分率指标的合计点查): one organization on one
+     * observation day, and the plain sum of the two percent-unit metric columns as one virtual
+     * metric. Percent values are already stored in %, and a single-day point window has nothing
+     * to aggregate across, so the template performs no SUM aggregation and applies no *100 scale
+     * — exactly the point contract of a virtual catalog metric. Operands are emitted in
+     * canonical (lexicographic metric-code) order, so one operand pair always compiles to the
+     * same byte-stable expression regardless of the plan's mention order.
+     */
+    String compileAdditiveComposite(TemplateContext context) {
+        if (context.metrics().size() != 2 || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "additive composite compilation requires exactly two metrics and no metric "
+                            + "filter");
+        }
+        List<ResolvedMetric> ordered = context.metrics().stream()
+                .sorted(java.util.Comparator.comparing(ResolvedMetric::metricCode)).toList();
+        if (context.dimensions().size() != 1
+                || !"bank_organization".equals(context.dimensions().get(0))) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "additive composite compilation requires only the organization dimension");
+        }
+        String dimension = context.dimensions().get(0);
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        return """
+                SELECT %s, %s + %s AS metric_value
+                FROM %s
+                WHERE %s
+                ORDER BY %s ASC
+                """.formatted(dimension, ordered.get(0).identifier(),
+                ordered.get(1).identifier(), context.dataSetName(), where, dimension).trim();
+    }
+
+    /**
      * Filters selected organizations outside the semantic aggregation. The semantic translator
      * renders a dimension as a physical column with its semantic name as an alias, so putting a
      * multi-value filter in the inner WHERE would incorrectly reference that alias before it

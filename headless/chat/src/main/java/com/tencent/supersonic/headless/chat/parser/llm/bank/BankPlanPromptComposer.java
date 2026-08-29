@@ -237,8 +237,14 @@ public final class BankPlanPromptComposer {
                       先指定机构；若题干已经指定某一机构，则不是这个全省机构选择合同。
                     - “哪家农商行/机构的某指标最高、最低、最多、最少、排第一或排最后”同样是全体机构选择：
                       没有题干点名的机构时 organizationCodes 必须为 []，intent=RANKING，保留一个目录指标和
-                      明确日期；第一/最高/最多/最大使用 filters 中唯一的 rank/LTE/1，最低/最少/最小/最后
-                      使用唯一的 rank 或 rank_from_bottom/LTE/1（按题干的正向或倒数语义），requiredLimit=1。
+                      明确日期，requiredLimit=1。名次切片按两步确定性映射填写，不凭语感：第一步查所选指标
+                      在权威目录 direction 列的方向；第二步按极值词面取对应端——rank 永远表示目录排序的
+                      最优端，rank_from_bottom 永远表示对侧端。direction=LOWER_BETTER（低优指标）时，
+                      “最低/最少/最小”写唯一的 rank/LTE/1，“最高/最多/最大/最好”写唯一的
+                      rank_from_bottom/LTE/1；direction=NEUTRAL 或 HIGHER_BETTER 时相反，
+                      “最高/最多/最大/最好”写唯一的 rank/LTE/1，“最低/最少/最小”写唯一的
+                      rank_from_bottom/LTE/1。“排第一/排最后”是位置语义，与指标方向无关，分别固定写
+                      rank/LTE/1 与 rank_from_bottom/LTE/1。
                       不得把任意一家机构写入 organizationCodes；若题干点名机构，才使用局部排名合同。
                     下面第二份是 action=CLARIFY 的完整格式：
                     {
@@ -421,6 +427,12 @@ public final class BankPlanPromptComposer {
                         分母为各项存款时，metricCode 只能写 DERIVED_SUM_ZB003_AND_ZB004_DIV_ZB001。
                         全部加数与分母都必须保留在 metrics 与 requirements.metricCodes 中；
                         不写 numeratorOperands 时保持既有单分子契约不变。
+                        词表补充：两个同单位百分率指标的直接加合（“A与B之和/合计”类问法，无分母、
+                        无除法）编码为 DERIVED_SUM_<M1>_AND_<M2>：无 _DIV_ 后缀，M1、M2 为参与
+                        加合的目录指标码并按字典序排列。该编码仅当两个加数都是目录中百分率
+                        单位(%)的指标时才允许；金额类指标（元/亿元）的“合计/之和”不是派生指标——
+                        derivedMetrics 保持为空，把各加数直接并列写进 metrics 与
+                        requirements.metricCodes（普通多指标查询）。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -473,7 +485,11 @@ public final class BankPlanPromptComposer {
                        若题干是“全省/全部机构中哪家排最后/倒数第N”，organizations 必须为 []，dimensions
                        必须为 ["bank_organization"]；不得虚构一个目标机构，也不得把“哪家”当作缺槽位。
                        对“哪家农商行/机构最高、最低、最多、最少、排第一”也一样：organizations=[]，
-                       dimensions=["bank_organization"]，只保留唯一 rank/LTE/1（不是机构过滤）；同时对直接指标
+                       dimensions=["bank_organization"]，名次切片字段必须按 REQUIREMENTS 合同的
+                       确定性方向映射选择——rank 表示目录排序最优端、rank_from_bottom 表示对侧端：
+                       低优指标（direction=LOWER_BETTER）的“最低/最少/最小”写 rank、
+                       “最高/最多/最大/最好”写 rank_from_bottom，中性/高优指标相反——值固定为
+                       LTE/1（不是机构过滤）；同时对直接指标
                        用该指标的 ZB### 代码填写 orderBy，不能手填物理字段或结果别名；只有派生指标排名才由编译器
                        决定 orderBy=[]。
                     10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
@@ -624,7 +640,7 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v61-single-pass";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v63-additive-percent-scope";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -165,6 +166,43 @@ public final class BankSemanticRegistry {
         Double scale = numerator == null || denominator == null ? null
                 : DERIVED_RATIO_SCALES.get(ratioPairKey(numerator, denominator));
         return scale == null ? 100.0 : scale;
+    }
+
+    /**
+     * Additive composite derived code shape: {@code DERIVED_SUM_<M1>_AND_<M2>} — no {@code _DIV_}
+     * suffix. The shape is deliberately not part of {@link #derivedMetricCodes()} (the prompt
+     * vocabulary stays pairwise-free); validators and parsers accept any canonical instantiation
+     * whose operands are registered percent-unit catalog metrics.
+     */
+    private static final Pattern ADDITIVE_DERIVED_METRIC_CODE =
+            Pattern.compile("DERIVED_SUM_([A-Z0-9]+)_AND_([A-Z0-9]+)");
+
+    /** True when the catalog publishes the metric with the percent unit (%). */
+    public static boolean isPercentUnitMetric(String code) {
+        MetricDefinition definition =
+                code == null ? null : METRICS.get(code.toUpperCase(Locale.ROOT));
+        return definition != null && "%".equals(definition.unit());
+    }
+
+    /** Exact-shape check for the additive composite derived code (two operands, no _DIV_ suffix). */
+    public static boolean isAdditiveDerivedMetricCode(String code) {
+        return code != null && ADDITIVE_DERIVED_METRIC_CODE.matcher(code).matches();
+    }
+
+    /**
+     * Canonical additive derived code for an operand pair: the operands are sorted
+     * lexicographically so one metric pair always has exactly one code form
+     * (e.g. ZB013+ZB017 → DERIVED_SUM_ZB013_AND_ZB017 regardless of mention order).
+     */
+    public static String additiveDerivedMetricCode(String first, String second) {
+        if (first == null || second == null) {
+            throw new IllegalArgumentException("additive derived operands are required");
+        }
+        String left = first.toUpperCase(Locale.ROOT);
+        String right = second.toUpperCase(Locale.ROOT);
+        return left.compareTo(right) < 0
+                ? "DERIVED_SUM_" + left + "_AND_" + right
+                : "DERIVED_SUM_" + right + "_AND_" + left;
     }
 
     public static Map<String, OrganizationDefinition> organizations() {

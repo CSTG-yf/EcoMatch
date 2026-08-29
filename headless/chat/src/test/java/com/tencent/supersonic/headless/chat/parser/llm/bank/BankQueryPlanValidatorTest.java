@@ -1158,4 +1158,183 @@ class BankQueryPlanValidatorTest {
                 .requiredStartDate(LocalDate.of(2025, 1, 1))
                 .requiredEndDate(LocalDate.of(2025, 12, 31)).build();
     }
+
+    // ------------------------------------------------------------------
+    // Additive composite family (DERIVED_SUM_<M1>_AND_<M2>, two percent-unit metrics).
+    // All questions/plans below are synthetic; no evaluation-set text or answers.
+    // ------------------------------------------------------------------
+
+    @Test
+    void acceptsTheCanonicalAdditiveCompositeDerivedMetricAsAVirtualPointMetric() {
+        BankQueryPlan plan = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+
+        assertTrue(validator.validate(plan, additiveRequirements(
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017")).isValid());
+        // Evidence-free plans are admitted too: a virtual sum metric has no mapper evidence.
+        assertTrue(validator.validate(plan, additiveRequirements(null, null, null)).isValid());
+    }
+
+    @Test
+    void rejectsANonCanonicalAdditiveDerivedCodeWithTheRepairableShape() {
+        BankQueryPlan plan = additiveCompositePlan("ZB017", "ZB013",
+                "DERIVED_SUM_ZB017_AND_ZB013", "ZB017", "ZB013");
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                additiveRequirements(null, null, null));
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("UNSUPPORTED_DERIVED_SHAPE"), result.summary());
+        assertTrue(result.summary().contains("DERIVED_SUM_ZB013_AND_ZB017"));
+    }
+
+    @Test
+    void rejectsAdditiveOperandsThatAreNotDistinctPercentUnitCatalogMetrics() {
+        BankQueryPlan mixedUnit = additiveCompositePlan("ZB013", "ZB001",
+                "DERIVED_SUM_ZB001_AND_ZB013", "ZB001", "ZB013");
+        BankQueryPlanValidator.ValidationResult mixedResult =
+                validator.validate(mixedUnit, additiveRequirements(null, null, null));
+        assertFalse(mixedResult.isValid());
+        assertTrue(mixedResult.codes().contains("ADDITIVE_OPERAND_INVALID"), mixedResult.summary());
+
+        BankQueryPlan identical = additiveCompositePlan("ZB013", "ZB013",
+                "DERIVED_SUM_ZB013_AND_ZB013", "ZB013", "ZB013");
+        BankQueryPlanValidator.ValidationResult identicalResult =
+                validator.validate(identical, additiveRequirements(null, null, null));
+        assertFalse(identicalResult.isValid());
+        assertTrue(identicalResult.codes().contains("ADDITIVE_OPERAND_INVALID"),
+                identicalResult.summary());
+
+        BankQueryPlan unknown = additiveCompositePlan("ZB099", "ZB013",
+                "DERIVED_SUM_ZB013_AND_ZB099", "ZB099", "ZB013");
+        BankQueryPlanValidator.ValidationResult unknownResult =
+                validator.validate(unknown, additiveRequirements(null, null, null));
+        assertFalse(unknownResult.isValid());
+        assertTrue(unknownResult.codes().contains("ADDITIVE_OPERAND_INVALID"),
+                unknownResult.summary());
+    }
+
+    @Test
+    void rejectsAnAdditiveDerivedMetricWhoseOperandsAreNotDirectlySelected() {
+        BankQueryPlan plan = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        plan.setMetrics(new ArrayList<>(List.of(metric("ZB013"))));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB013")));
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                additiveRequirements(null, null, null));
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_OPERAND_REQUIRED"), result.summary());
+    }
+
+    @Test
+    void rejectsAnAdditiveDerivedCodeCarryingTheRatioDivSuffix() {
+        BankQueryPlan plan = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017_DIV_ZB001", "ZB013", "ZB017");
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan,
+                additiveRequirements(null, null, null));
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("DERIVED_METRIC_INVALID"), result.summary());
+    }
+
+    @Test
+    void rejectsAdditiveDerivedMetricsOutsideTheSingleOrgSingleDayPointFamilyShape() {
+        BankQueryPlan ranged = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        ranged.setTime(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 1, 31))
+                .endDate(LocalDate.of(2026, 3, 31))
+                .granularity(BankQueryPlan.TimeGranularity.DAY)
+                .comparison(BankQueryPlan.TimeComparison.NONE).build());
+        BankQueryPlanValidator.ValidationResult rangedResult =
+                validator.validate(ranged, additiveRequirements(null, null, null));
+        assertFalse(rangedResult.isValid());
+        assertTrue(rangedResult.codes().contains("ADDITIVE_FAMILY_SINGLE_DAY_REQUIRED"),
+                rangedResult.summary());
+
+        BankQueryPlan provinceWide = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        provinceWide.setOrganizations(new ArrayList<>());
+        BankQueryPlanValidator.ValidationResult provinceResult =
+                validator.validate(provinceWide, additiveRequirements(null, null, null));
+        assertFalse(provinceResult.isValid());
+        assertTrue(provinceResult.codes().contains("ADDITIVE_FAMILY_SINGLE_ORGANIZATION_REQUIRED"),
+                provinceResult.summary());
+
+        BankQueryPlan filtered = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        filtered.setFilters(new ArrayList<>(List.of(BankQueryPlan.Filter.builder()
+                .field("benchmark").operator("COMPARE").value("PROVINCE_AVERAGE")
+                .values(new ArrayList<>()).build())));
+        BankQueryPlanValidator.ValidationResult filteredResult =
+                validator.validate(filtered, additiveRequirements(null, null, null));
+        assertFalse(filteredResult.isValid());
+        assertTrue(filteredResult.codes().contains("ADDITIVE_FAMILY_FILTER_FORBIDDEN"),
+                filteredResult.summary());
+
+        BankQueryPlan limited = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        limited.setLimit(3);
+        BankQueryPlanValidator.ValidationResult limitedResult =
+                validator.validate(limited, additiveRequirements(null, null, null));
+        assertFalse(limitedResult.isValid());
+        assertTrue(limitedResult.codes().contains("ADDITIVE_FAMILY_NO_LIMIT_REQUIRED"),
+                limitedResult.summary());
+
+        BankQueryPlan ranked = additiveCompositePlan("ZB013", "ZB017",
+                "DERIVED_SUM_ZB013_AND_ZB017", "ZB013", "ZB017");
+        ranked.setIntent(BankIntentType.RANKING);
+        BankQueryPlanValidator.ValidationResult rankedResult =
+                validator.validate(ranked, additiveRequirements(null, null, null));
+        assertFalse(rankedResult.isValid());
+        assertTrue(rankedResult.codes().contains("ADDITIVE_FAMILY_INTENT_REQUIRED"),
+                rankedResult.summary());
+    }
+
+    private BankQueryPlan.Metric metric(String code) {
+        return BankQueryPlan.Metric.builder().bizName(code)
+                .aggregation(BankQueryPlan.Aggregation.DEFAULT).build();
+    }
+
+    private BankQueryPlan additiveCompositePlan(String firstMetric, String secondMetric,
+            String derivedCode, String numerator, String denominator) {
+        return BankQueryPlan.builder().version(BankQueryPlan.CURRENT_VERSION)
+                .action(BankQueryPlan.PlanAction.EXECUTE).intent(BankIntentType.POINT_QUERY)
+                .metrics(new ArrayList<>(List.of(metric(firstMetric), metric(secondMetric))))
+                .derivedMetrics(new ArrayList<>(List.of(BankQueryPlan.DerivedMetric.builder()
+                        .metricCode(derivedCode).numerator(numerator).denominator(denominator)
+                        .name("两个百分率指标合计").build())))
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>(
+                        List.of(BankQueryPlan.Organization.builder().code("ORG004").build())))
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 5, 31))
+                        .endDate(LocalDate.of(2026, 5, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>())
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", firstMetric,
+                                secondMetric)))
+                        .orderSensitive(false).build())
+                .build();
+    }
+
+    private SemanticIntentHints additiveRequirements(String derivedCode, String numerator,
+            String denominator) {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.POINT_QUERY)
+                .allowedMetrics(Set.of("ZB001", "ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013", "ZB017"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredDerivedMetrics(derivedCode == null ? List.of()
+                        : List.of(new SemanticIntentHints.DerivedMetricSpec(derivedCode,
+                                numerator, denominator, "两个百分率指标合计")))
+                .requiredStartDate(LocalDate.of(2026, 5, 31))
+                .requiredEndDate(LocalDate.of(2026, 5, 31)).build();
+    }
 }

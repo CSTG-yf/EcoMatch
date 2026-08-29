@@ -31,10 +31,10 @@ public final class BankFreeSqlPromptComposer {
     public static final String PROMPT_VERSION = "bank-free-sql-sys-v7-fields-examples";
 
     /**
-     * Version tag of the controlled free-SQL fallback prefix (design v1: bank-free-sql-v1). Bump
-     * when {@link #FREE_FALLBACK_SYSTEM_PREFIX} text changes.
+     * Version tag of the controlled free-SQL fallback prefix (design v1). Bump when
+     * {@link #FREE_FALLBACK_SYSTEM_PREFIX} text changes.
      */
-    public static final String FREE_FALLBACK_PROMPT_VERSION = "bank-free-sql-v1";
+    public static final String FREE_FALLBACK_PROMPT_VERSION = "bank-free-sql-v2-branch-filters";
 
     private static final Pattern FORBIDDEN_LONG_TABLE = Pattern
             .compile("(?i)(\\b指标\\b\\s*=|\\bmetric_code\\b|\\bmetric_value\\b|\\borg_code\\b|"
@@ -257,6 +257,9 @@ public final class BankFreeSqlPromptComposer {
                         2. 只允许引用【语义目录】中的表、维度列与指标列；禁止其他任何列。
                         3. 函数白名单：SUM、AVG、MAX、MIN、COUNT、CASE WHEN、ROW_NUMBER、RANK、DENSE_RANK、LAG、LEAD、COALESCE、NULLIF、ROUND、ABS；窗口函数 OVER 允许。
                         4. 时间一律写字面量日期，禁止用函数推导“上个月/去年同期”。
+                        5. 每个 CTE 与子查询分支都必须自带过滤条件（日期范围或机构）或 LIMIT；无过滤条件的
+                           SELECT * 或 SELECT 全表分支在执行层安全策略中一律被拒绝。
+                        6. 日期谓词必须显式写在最外层查询与每个涉及数据表的分支内，不能只写在外层。
 
                         ════════════════════════════════
                         四、输出格式（只输出 JSON，无 Markdown）

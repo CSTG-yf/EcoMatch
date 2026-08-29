@@ -50,6 +50,25 @@ class FixedSystemPrefixLlmCacheTest {
     }
 
     @Test
+    void evictCompletionForcesAFreshRollForPoisonedMemoEntries() {
+        // 截断等 MALFORMED 响应若被 memo 固化，后续同题会毫秒级原样重放并污染修复轮；
+        // 逐出后必须真正重掷一次模型采样。
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn("{\"truncated\":");
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache(
+                BankPlanPromptComposer.SINGLE_PASS_SYSTEM_PREFIX,
+                BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION, 32, false);
+
+        String user = BankPlanPromptComposer.buildSinglePassUserContent("q");
+        cache.generate(model, user, true);
+        cache.evictCompletion(null, user);
+        cache.generate(model, user, true);
+
+        verify(model, times(2)).generate(anyString());
+        assertEquals(0L, cache.stats().get("completionHits"));
+    }
+
+    @Test
     void stageLabelAndSafetyCapAreExposedInStatsAndOptions() {
         FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
                 false, "预热", false, 0, "REQUIREMENTS", 768);

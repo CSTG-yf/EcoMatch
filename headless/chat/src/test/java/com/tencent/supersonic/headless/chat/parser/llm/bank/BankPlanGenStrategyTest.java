@@ -936,6 +936,133 @@ class BankPlanGenStrategyTest {
         assertTrue(prompts.getAllValues().get(1).contains("ZB008"));
     }
 
+    /**
+     * Synthetic additive composite question (两个同单位百分率指标的合计占比): the model that
+     * answers with the canonical additive family contract is accepted in one attempt — the
+     * generic point-ratio gate yields instead of forcing an impossible RATIO fixed point.
+     */
+    @Test
+    void additiveCompositeQuestionAcceptsTheAdditiveFamilyContractInOneAttempt() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省F市农商行在2026-05-31的不良贷款率与逾期贷款率的合计占比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankRequestContract().getDerivedMetrics().get(0).getMetricCode());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankQueryPlan().getDerivedMetrics().get(0).getMetricCode());
+        verify(model, times(1)).generate(anyString());
+    }
+
+    /**
+     * The near-miss RATIO contract a model would first emit for the additive question is a
+     * repairable additive_composite_mismatch, never a silently accepted ratio.
+     */
+    @Test
+    void additiveCompositeQuestionRepairsARatioPlanIntoTheAdditiveFamily() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRatioNearMissRequirementsJson(),
+                        additiveRatioNearMissPlanJson()),
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省F市农商行在2026-05-31的不良贷款率与逾期贷款率的合计占比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("additive_composite_mismatch"), repair);
+        assertTrue(repair.contains("DERIVED_SUM_ZB013_AND_ZB017"), repair);
+    }
+
+    /**
+     * Synthetic shorthand additive question (简称词干「不良/逾期」不在别名表，带着「占贷款比」
+     * 的贷款噪音): the alias evidence alone cannot bind the operands, so the recognizer's
+     * additive-phrase resolution supplies the pair, the slot fires and the canonical additive
+     * contract is accepted in one attempt — the shape that used to exhaust the plan stage. The
+     * accepted contract+plan pair then compiles to the plain point-day sum.
+     */
+    @Test
+    void additiveShorthandQuestionWithShareNoiseResolvesOperandsAndAcceptsTheAdditiveFamily() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("2026年5月末江苏省F市农商行的不良+逾期合计占贷款比是多少？");
+        SemanticIntentHints admission = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB002", "ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build();
+        request.setSemanticIntentHints(admission);
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankRequestContract().getDerivedMetrics().get(0).getMetricCode());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankQueryPlan().getDerivedMetrics().get(0).getMetricCode());
+        verify(model, times(1)).generate(anyString());
+
+        BankQueryPlanCompiler compiler = new BankQueryPlanCompiler();
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(response.getBankQueryPlan(),
+                response.getBankRequestContract().toPlanHints(admission), additiveSchema());
+        assertTrue(compiled.getS2sql()
+                .startsWith("SELECT bank_organization, ZB013 + ZB017 AS metric_value"),
+                compiled.getS2sql());
+        assertTrue(compiled.getS2sql().contains("bank_organization = 'ORG006'"),
+                compiled.getS2sql());
+    }
+
+    /**
+     * The same shorthand question never dead-ends: a wrong-family first answer comes back as the
+     * repairable additive_composite_mismatch contract (with the resolved canonical derived code)
+     * instead of a plan-stage exhaustion loop.
+     */
+    @Test
+    void additiveShorthandQuestionRepairsAWrongFamilyPlanInsteadOfExhausting() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRatioNearMissRequirementsJson(),
+                        additiveRatioNearMissPlanJson()),
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("2026年5月末江苏省F市农商行的不良+逾期合计占贷款比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB002", "ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("additive_composite_mismatch"), repair);
+        assertTrue(repair.contains("DERIVED_SUM_ZB013_AND_ZB017"), repair);
+    }
+
     @Test
     void endpointDirectionReturnsIntentMismatchToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
@@ -1785,6 +1912,69 @@ class BankPlanGenStrategyTest {
                 "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
                 """
                 .formatted(intent);
+    }
+
+    /** Canonical additive composite contract (两个同单位百分率指标的合计点查, synthetic). */
+    private String additiveRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metricCodes":["ZB013","ZB017"],
+                "derivedMetrics":[{"metricCode":"DERIVED_SUM_ZB013_AND_ZB017","numerator":"ZB013","denominator":"ZB017","name":"不良贷款率与逾期贷款率合计"}],
+                "organizationCodes":["ORG006"],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
+                """;
+    }
+
+    private String additivePlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB013","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[{"metricCode":"DERIVED_SUM_ZB013_AND_ZB017","numerator":"ZB013","denominator":"ZB017","name":"不良贷款率与逾期贷款率合计"}],
+                "dimensions":["bank_organization"],"organizations":[{"code":"ORG006","bizName":null}],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB013","ZB017"],"orderSensitive":false}}
+                """;
+    }
+
+    /** Near-miss twin: the RATIO contract that cannot be numerically equivalent to the sum. */
+    private String additiveRatioNearMissRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metricCodes":["ZB013","ZB017"],"derivedMetrics":[],"organizationCodes":["ORG006"],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
+                """;
+    }
+
+    private String additiveRatioNearMissPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metrics":[{"bizName":"ZB013","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG006","bizName":null}],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB017"},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB013","ZB017"],"orderSensitive":true}}
+                """;
+    }
+
+    /** Minimal live schema for compiling the accepted additive contract end-to-end. */
+    private LLMReq.LLMSchema additiveSchema() {
+        LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
+        schema.setDataSetId(12L);
+        schema.setDataSetName("银行指标数据集");
+        schema.setMetrics(List.of(
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("不良贷款率").bizName("ZB013").build(),
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("逾期贷款率").bizName("ZB017").build()));
+        schema.setDimensions(List.of(
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("机构").bizName("bank_organization").build()));
+        schema.setPartitionTime(com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                .name("数据日期").bizName("bank_data_date").build());
+        return schema;
     }
 
     private String genericPointRatioPlanJson() {

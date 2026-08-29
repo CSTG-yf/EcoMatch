@@ -31,6 +31,8 @@ public class BankQueryPlanValidator {
                     + "truncate|join|union|from|where|with)\\b)");
     private static final Pattern DERIVED_METRIC_CODE =
             Pattern.compile("DERIVED_([A-Z0-9]+)_DIV_([A-Z0-9]+)");
+    private static final Pattern ADDITIVE_DERIVED_METRIC_CODE =
+            Pattern.compile("DERIVED_SUM_([A-Z0-9]+)_AND_([A-Z0-9]+)");
     private static final Pattern BASE_METRIC_CODE = Pattern.compile("ZB\\d{3}");
     private static final Pattern NUMERIC_THRESHOLD = Pattern.compile("-?\\d+(?:\\.\\d+)?%?");
     private static final Set<String> ABSOLUTE_THRESHOLD_OPERATORS =
@@ -680,6 +682,11 @@ public class BankQueryPlanValidator {
      * calculation or a point RATIO with a RATIO calculation, and the plan derived metrics match
      * the mapper evidence exactly in content and order. Missing,
      * duplicate, extra, reordered or illegal entries are all rejected.
+     *
+     * <p>The additive composite family ({@code DERIVED_SUM_<M1>_AND_<M2>}, two percent-unit
+     * catalog metrics summed as one virtual point metric) is admitted beside those ratio shapes
+     * on its own whitelist; the family shape itself is pinned by
+     * {@link #validateAdditiveCompositeFamilyShape}.
      */
     private void validateDerivedMetrics(BankQueryPlan plan, SemanticIntentHints hints,
             List<ValidationError> errors) {
@@ -696,10 +703,17 @@ public class BankQueryPlanValidator {
         List<BankQueryPlan.DerivedMetric> single =
                 derived.stream().filter(item -> !isCompositeDerivedMetric(item))
                         .collect(Collectors.toList());
+        List<BankQueryPlan.DerivedMetric> additive =
+                single.stream().filter(BankQueryPlanValidator::isAdditiveDerivedMetric)
+                        .collect(Collectors.toList());
         // Composite-numerator ratios (sum of K base metrics over one denominator) have no
         // catalog-derived evidence to match; they are admitted on their own whitelist shape.
-        // Any single-numerator derived metric still requires exact mapper evidence.
-        if (required.isEmpty() && !single.isEmpty()) {
+        // Any single-numerator derived metric still requires exact mapper evidence. Additive
+        // composite metrics carry their own whitelist below and need no evidence either — any
+        // DERIVED_SUM_-prefixed code is validated by the additive whitelist even when the code
+        // itself is malformed, so repair always names the legal additive shape.
+        if (required.isEmpty() && !single.isEmpty()
+                && single.stream().noneMatch(BankQueryPlanValidator::looksAdditiveDerivedMetric)) {
             errors.add(error("DERIVED_METRIC_UNEXPECTED",
                     "plan contains a derived metric outside mapper evidence"));
             return;
@@ -710,7 +724,8 @@ public class BankQueryPlanValidator {
         boolean pointRatio = plan.getIntent() == BankIntentType.RATIO
                 && plan.getCalculation() != null
                 && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RATIO;
-        if (!rankingDirect && !pointRatio) {
+        boolean additiveComposite = !additive.isEmpty() && additive.size() == single.size();
+        if (!rankingDirect && !pointRatio && !additiveComposite) {
             errors.add(error("DERIVED_METRIC_INTENT_REQUIRED",
                     "derived metrics require RANKING/DIRECT or RATIO/RATIO"));
         }
@@ -718,7 +733,10 @@ public class BankQueryPlanValidator {
         for (BankQueryPlan.DerivedMetric item : derived) {
             validateDerivedMetricItem(item, seen, errors);
         }
-        if (single.isEmpty()) {
+        if (additiveComposite && required.isEmpty()) {
+            // Pure additive whitelist: no mapper evidence exists for a virtual sum metric, so
+            // only the code shape/operand checks above apply.
+        } else if (single.isEmpty()) {
             if (!required.isEmpty()) {
                 errors.add(error("DERIVED_METRIC_MISMATCH",
                         "plan derived metrics must match the recognized derived metric specifications"));
@@ -756,6 +774,26 @@ public class BankQueryPlanValidator {
         }
     }
 
+    /**
+     * Shape predicate for the additive composite derived metric: the exact canonical code
+     * {@code DERIVED_SUM_<M1>_AND_<M2>} (lexicographic operand order, no _DIV_ suffix) with no
+     * composite numeratorOperands. Shared with the compiler routing table.
+     */
+    static boolean isAdditiveDerivedMetric(BankQueryPlan.DerivedMetric item) {
+        return item != null && !isCompositeDerivedMetric(item)
+                && BankSemanticRegistry.isAdditiveDerivedMetricCode(item.getMetricCode());
+    }
+
+    /**
+     * Loose prefix twin of {@link #isAdditiveDerivedMetric}: a non-composite item whose code at
+     * least carries the {@code DERIVED_SUM_} prefix. Such items never take the generic
+     * "outside mapper evidence" exit so the whitelist can name the exact legal additive shape.
+     */
+    private static boolean looksAdditiveDerivedMetric(BankQueryPlan.DerivedMetric item) {
+        return item != null && !isCompositeDerivedMetric(item)
+                && item.getMetricCode() != null && item.getMetricCode().startsWith("DERIVED_SUM_");
+    }
+
     private static boolean isCompositeDerivedMetric(BankQueryPlan.DerivedMetric item) {
         return item != null && item.getNumeratorOperands() != null
                 && !item.getNumeratorOperands().isEmpty();
@@ -778,6 +816,10 @@ public class BankQueryPlanValidator {
         }
         if (isCompositeDerivedMetric(item)) {
             validateCompositeDerivedMetricItem(item, errors);
+            return;
+        }
+        if (BankSemanticRegistry.isAdditiveDerivedMetricCode(code)) {
+            validateAdditiveDerivedMetricItem(item, errors);
             return;
         }
         Matcher matcher = DERIVED_METRIC_CODE.matcher(code);
@@ -872,6 +914,44 @@ public class BankQueryPlanValidator {
         if (!expectedCode.equals(code)) {
             errors.add(error("DERIVED_METRIC_INVALID",
                     "composite derived metric code must be " + expectedCode + ": " + code));
+        }
+    }
+
+    /**
+     * Whitelist for the additive composite derived metric {@code DERIVED_SUM_<M1>_AND_<M2>}
+     * (两个同单位百分率指标的合计虚拟指标): both operands must be distinct registered catalog
+     * metrics carrying the percent unit (%), and the code must be the canonical form — operands
+     * sorted lexicographically, the smaller one repeated as numerator, the larger as
+     * denominator, with no _DIV_ suffix. Percent values are already stored in %, so this virtual
+     * metric is a plain point-day sum, never a scaled ratio. Every violation is a repairable
+     * error that names the legal shape.
+     */
+    private void validateAdditiveDerivedMetricItem(BankQueryPlan.DerivedMetric item,
+            List<ValidationError> errors) {
+        String code = item.getMetricCode();
+        String numerator = item.getNumerator();
+        String denominator = item.getDenominator();
+        if (!BankSemanticRegistry.metricCodes().contains(numerator)
+                || !BankSemanticRegistry.metricCodes().contains(denominator)
+                || numerator.equals(denominator)
+                || !BankSemanticRegistry.isPercentUnitMetric(numerator)
+                || !BankSemanticRegistry.isPercentUnitMetric(denominator)) {
+            errors.add(error("ADDITIVE_OPERAND_INVALID",
+                    "additive derived metric operands must be two distinct registered "
+                            + "percent-unit (%) catalog metrics, got numerator=" + numerator
+                            + ", denominator=" + denominator + " in " + code
+                            + "；合法形状：DERIVED_SUM_<M1>_AND_<M2>，M1/M2 为两个互异、单位为 % 的目录指标"));
+            return;
+        }
+        String canonical = BankSemanticRegistry.additiveDerivedMetricCode(numerator, denominator);
+        Matcher matcher = ADDITIVE_DERIVED_METRIC_CODE.matcher(code);
+        boolean fieldsAlignedWithCode = matcher.matches()
+                && matcher.group(1).equals(numerator) && matcher.group(2).equals(denominator);
+        if (!canonical.equals(code) || !fieldsAlignedWithCode) {
+            errors.add(error("UNSUPPORTED_DERIVED_SHAPE",
+                    "additive derived metric code must be the canonical form " + canonical
+                            + " (operands sorted lexicographically, numerator=M1, "
+                            + "denominator=M2, no _DIV_ suffix): " + code));
         }
     }
 
@@ -1036,6 +1116,82 @@ public class BankQueryPlanValidator {
         validateChangePopulationDimension(plan, errors);
         validateTrendQuarterEndWindow(plan, errors);
         validatePercentMetricRangeAggregation(plan, errors);
+        validateAdditiveCompositeFamilyShape(plan, errors);
+    }
+
+    /**
+     * Family audit guard for the additive composite point query (两个同单位百分率指标的合计点查).
+     * A plan that declares additive derived metrics must be exactly the point family shape —
+     * POINT_QUERY/DIRECT with no time comparison, one organization, a single observation day,
+     * only the organization dimension, the two operands as the only selected metrics, and no
+     * filter/order/limit — because that is the only shape the compiler owns a template for. Any
+     * other shape (or mixing additive with ratio derived metrics) is a guaranteed dead end and
+     * fails closed with a repairable error instead of silently degrading into a near-miss family.
+     */
+    private void validateAdditiveCompositeFamilyShape(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        List<BankQueryPlan.DerivedMetric> derived =
+                safe(plan.getDerivedMetrics()).collect(Collectors.toList());
+        if (derived.stream().noneMatch(BankQueryPlanValidator::isAdditiveDerivedMetric)) {
+            return;
+        }
+        if (!derived.stream().allMatch(BankQueryPlanValidator::isAdditiveDerivedMetric)) {
+            errors.add(error("UNSUPPORTED_DERIVED_SHAPE",
+                    "additive composite derived metrics must not be mixed with ratio derived "
+                            + "metrics in one plan"));
+            return;
+        }
+        if (plan.getIntent() != BankIntentType.POINT_QUERY || plan.getCalculation() == null
+                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT) {
+            errors.add(error("ADDITIVE_FAMILY_INTENT_REQUIRED",
+                    "additive composite metrics require intent=POINT_QUERY with "
+                            + "calculation.type=DIRECT"));
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null || time.getComparison() != BankQueryPlan.TimeComparison.NONE
+                || time.getStartDate() == null || !time.getStartDate().equals(time.getEndDate())) {
+            errors.add(error("ADDITIVE_FAMILY_SINGLE_DAY_REQUIRED",
+                    "additive composite metrics are a single-day point sum: time.comparison must "
+                            + "be NONE and startDate must equal endDate"));
+        }
+        List<String> organizations = safe(plan.getOrganizations())
+                .map(BankQueryPlan.Organization::getCode).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toList());
+        if (organizations.size() != 1) {
+            errors.add(error("ADDITIVE_FAMILY_SINGLE_ORGANIZATION_REQUIRED",
+                    "additive composite metrics require exactly one selected organization"));
+        }
+        if (!safe(plan.getDimensions()).filter(StringUtils::isNotBlank)
+                .collect(Collectors.toList()).equals(List.of("bank_organization"))) {
+            errors.add(error("ADDITIVE_FAMILY_ORGANIZATION_DIMENSION_REQUIRED",
+                    "additive composite metrics require dimensions exactly "
+                            + "[bank_organization]"));
+        }
+        List<String> metrics = safe(plan.getMetrics()).map(BankQueryPlan.Metric::getBizName)
+                .filter(StringUtils::isNotBlank).toList();
+        Set<String> expectedOperands = new LinkedHashSet<>();
+        for (BankQueryPlan.DerivedMetric item : derived) {
+            expectedOperands.add(item.getNumerator());
+            expectedOperands.add(item.getDenominator());
+        }
+        if (metrics.size() != expectedOperands.size()
+                || !new LinkedHashSet<>(metrics).equals(expectedOperands)) {
+            errors.add(error("ADDITIVE_FAMILY_OPERANDS_REQUIRED",
+                    "additive composite metrics require exactly the derived operands as the "
+                            + "only selected metrics: " + expectedOperands));
+        }
+        if (safe(plan.getFilters()).findAny().isPresent()) {
+            errors.add(error("ADDITIVE_FAMILY_FILTER_FORBIDDEN",
+                    "additive composite point queries must not carry filters"));
+        }
+        if (safe(plan.getOrderBy()).findAny().isPresent()) {
+            errors.add(error("ADDITIVE_FAMILY_NO_ORDER_REQUIRED",
+                    "additive composite point queries must not carry ordering"));
+        }
+        if (plan.getLimit() != null) {
+            errors.add(error("ADDITIVE_FAMILY_NO_LIMIT_REQUIRED",
+                    "additive composite point queries must not carry a TopN limit"));
+        }
     }
 
     /**
