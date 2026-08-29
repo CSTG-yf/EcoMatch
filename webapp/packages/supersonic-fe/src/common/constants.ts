@@ -3,7 +3,7 @@ export const AUTH_TOKEN_KEY = process.env.APP_TARGET === 'inner' ? 'TME_TOKEN' :
 // 记录上次访问页面
 export const FROM_URL_KEY = 'FROM_URL';
 
-export const BASE_TITLE = 'Supersonic';
+export const BASE_TITLE = '银行问数';
 
 export const PRIMARY_COLOR = '#f87653';
 export const CHART_BLUE_COLOR = '#446dff';

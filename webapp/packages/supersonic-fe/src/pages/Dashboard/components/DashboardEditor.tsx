@@ -49,10 +49,7 @@ import {
 import { Dashboard, DashboardAccessScope, DashboardComponent, DashboardConfig } from '../types';
 import DashboardCard from './DashboardCard';
 import styles from '../style.less';
-import {
-  ShareCreateDialog,
-  ShareManagementDialog,
-} from '../../ControlledShare';
+import { ShareCreateDialog, ShareManagementDialog } from '../../ControlledShare';
 import {
   CreateExport,
   buildDashboardExportRequest,
@@ -143,7 +140,17 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
       if (response?.code != null && Number(response.code) !== 200) {
         throw response;
       }
-      setRuntime((current) => ({ ...current, [component.id]: response?.data || response }));
+      const rawResult = response?.data || response;
+      const result = {
+        ...rawResult,
+        // dashboardQueryData 返回 SemanticQueryResp，不带 chat 的 queryState；
+        // HTTP 200 且无 errorMsg 即视为语义查询成功，空 rows 再由卡片显示“暂无数据”。
+        queryState: rawResult?.queryState || 'SUCCESS',
+      };
+      if (result?.queryState !== 'SUCCESS' || result?.errorMsg) {
+        throw new Error(result.errorMsg || `查询失败（${result.queryState}）`);
+      }
+      setRuntime((current) => ({ ...current, [component.id]: result }));
       setRuntimeErrors((current) => {
         const next = { ...current };
         delete next[component.id];
@@ -413,14 +420,17 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
               }}
             />
           </Form.Item>
-          <Form.Item label="访问范围">
+          <Form.Item
+            label="看板可见范围"
+            extra="看板可见范围不等于数据权限。组件每次刷新、导出或分享时，仍按当前用户的模型、机构、行、列和脱敏权限重新查询。"
+          >
             <Select<DashboardAccessScope>
               disabled={readOnly}
               value={draft.accessScope}
               options={[
-                { label: '仅自己', value: 'PRIVATE' },
-                { label: '本机构', value: 'ORGANIZATION' },
-                { label: '主题域成员', value: 'DOMAIN' },
+                { label: '仅自己可见', value: 'PRIVATE' },
+                { label: '本机构成员可见', value: 'ORGANIZATION' },
+                { label: '主题域成员可见', value: 'DOMAIN' },
               ]}
               onChange={(accessScope) => {
                 setDraft({ ...draft, accessScope });
@@ -550,7 +560,7 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
           {draft.status === 'DRAFT' ? (
             <Popconfirm
               title="确认发布当前看板？"
-              description="发布前请确认至少包含一个有效组件和正确的访问范围。"
+              description="发布前请确认至少包含一个有效组件和正确的看板可见范围。"
               onConfirm={() => changeStatus('publish')}
             >
               <Button
@@ -616,10 +626,7 @@ const DashboardEditor: React.FC<Props> = ({ dashboard, editable, onBack, onUpdat
         dashboardName={draft.name}
         onClose={() => setShareCreateOpen(false)}
       />
-      <ShareManagementDialog
-        open={shareManageOpen}
-        onClose={() => setShareManageOpen(false)}
-      />
+      <ShareManagementDialog open={shareManageOpen} onClose={() => setShareManageOpen(false)} />
 
       <div className={styles.editorBody}>
         <aside className={styles.componentRail}>

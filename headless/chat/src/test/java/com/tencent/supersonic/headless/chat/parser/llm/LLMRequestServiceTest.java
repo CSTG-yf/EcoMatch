@@ -35,6 +35,20 @@ class LLMRequestServiceTest {
     }
 
     @Test
+    void shouldRetainSharedBankOrganizationDimensionWithoutDatasetId() {
+        SchemaElement matchedDate = SchemaElement.builder().dataSetId(97L).bizName("bank_data_date")
+                .name("数据日期").build();
+        SchemaElement sharedBankOrganization = SchemaElement.builder()
+                .bizName("bank_organization").name("机构").build();
+
+        List<SchemaElement> dimensions = LLMRequestService.ensureBankOrganizationDimension(
+                List.of(matchedDate), List.of(matchedDate, sharedBankOrganization), 97L);
+
+        assertEquals(List.of("bank_data_date", "bank_organization"),
+                dimensions.stream().map(SchemaElement::getBizName).toList());
+    }
+
+    @Test
     void shouldRouteOnlyDetectedBankDatasetsToConstrainedPlanWhenEnabled() {
         SchemaElement bankDate = SchemaElement.builder().dataSetId(33L).bizName("bank_data_date")
                 .name("data_date").build();

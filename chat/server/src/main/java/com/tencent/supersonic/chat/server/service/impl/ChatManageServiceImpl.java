@@ -9,6 +9,7 @@ import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.api.pojo.response.ShowCaseResp;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatParseDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
@@ -17,9 +18,11 @@ import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryReposi
 import com.tencent.supersonic.chat.server.persistence.repository.ChatRepository;
 import com.tencent.supersonic.chat.server.pojo.ChatMemory;
 import com.tencent.supersonic.chat.server.security.ChatObjectAccessPolicy;
+import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.chat.server.service.ChatManageService;
 import com.tencent.supersonic.chat.server.service.MemoryService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.common.util.JsonUtil;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
@@ -46,11 +49,15 @@ public class ChatManageServiceImpl implements ChatManageService {
             Set.of("KPI_CARD", "TABLE", "LINE", "BAR", "PIE", "COMBO");
     private static final Set<String> CHART_FEEDBACK_SOURCES =
             Set.of("CHART_SELECTOR", "DATA_VIEW_TOGGLE");
+    private static final int ONLINE_AGENT_STATUS = 1;
+    private static final String LEGACY_CHAT_NAME = "新问答对话";
 
     @Autowired
     private ChatRepository chatRepository;
     @Autowired
     private ChatQueryRepository chatQueryRepository;
+    @Autowired
+    private AgentService agentService;
     @Autowired
     private MemoryService memoryService;
     @Autowired
@@ -59,16 +66,37 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public Long addChat(User user, String chatName, Integer agentId) {
+        Agent agent = getAuthorizedOnlineAgent(user, agentId);
         ChatDO chatDO = new ChatDO();
-        chatDO.setChatName(chatName);
+        chatDO.setChatName(normalizeChatName(chatName, agent.getName()));
         chatDO.setCreator(user.getName());
         chatDO.setCreateTime(getCurrentTime());
         chatDO.setIsDelete(0);
         chatDO.setLastTime(getCurrentTime());
         chatDO.setLastQuestion("Hello, welcome to using supersonic");
         chatDO.setIsTop(0);
-        chatDO.setAgentId(agentId);
+        chatDO.setAgentId(agent.getId());
         return chatRepository.createChat(chatDO);
+    }
+
+    private Agent getAuthorizedOnlineAgent(User user, Integer agentId) {
+        if (user == null || StringUtils.isBlank(user.getName()) || agentId == null) {
+            throw new InvalidPermissionException(
+                    "Creating a chat requires an authenticated user and an agent");
+        }
+        Agent agent = agentService.getAgents(user, AuthType.VIEWER).stream()
+                .filter(candidate -> Objects.equals(agentId, candidate.getId())).findFirst()
+                .orElseThrow(() -> new InvalidPermissionException(
+                        "No permission to access agent " + agentId));
+        if (!Objects.equals(ONLINE_AGENT_STATUS, agent.getStatus())) {
+            throw new InvalidPermissionException("Agent is offline: " + agentId);
+        }
+        return agent;
+    }
+
+    private String normalizeChatName(String chatName, String agentName) {
+        return StringUtils.isBlank(chatName) || LEGACY_CHAT_NAME.equals(chatName) ? agentName
+                : chatName;
     }
 
     @Override
@@ -159,8 +187,21 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public Long createChatQuery(ChatParseReq chatParseReq) {
-        Integer chatId = chatParseReq.getChatId();
-        checkChatAccess(chatId == null ? null : chatId.longValue(), chatParseReq.getUser());
+        Integer requestChatId = chatParseReq.getChatId();
+        Long chatId = requestChatId == null ? null : requestChatId.longValue();
+        if (chatId != null && chatId > 0) {
+            ChatDO chat = getAuthorizedChat(chatId, chatParseReq.getUser());
+            if (chat.getAgentId() == null) {
+                throw new InvalidPermissionException("Chat is not bound to an agent: " + chatId);
+            }
+            if (!Objects.equals(chat.getAgentId(), chatParseReq.getAgentId())) {
+                throw new InvalidPermissionException(
+                        "Query agent does not match chat agent: " + chatId);
+            }
+            chatParseReq.setAgentId(chat.getAgentId());
+        } else {
+            checkChatAccess(chatId, chatParseReq.getUser());
+        }
         return chatQueryRepository.createChatQuery(chatParseReq);
     }
 
@@ -316,24 +357,33 @@ public class ChatManageServiceImpl implements ChatManageService {
 
     @Override
     public void checkChatAccess(Long chatId, User user) {
+        if (chatId != null && chatId > 0) {
+            getAuthorizedChat(chatId, user);
+            return;
+        }
         if (chatId == null) {
             IllegalArgumentException failure = new IllegalArgumentException("Chat id is required");
             publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
                     AuditOutcome.DENIED, "CHAT_ID_REQUIRED", failure);
             throw failure;
         }
-        if (chatId <= 0) {
-            if (user == null || !user.isSuperAdmin()) {
-                InvalidPermissionException failure = new InvalidPermissionException(
-                        "System chat access requires a super administrator");
-                publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
-                        AuditOutcome.DENIED, "SYSTEM_CHAT_ACCESS_DENIED", failure);
-                throw failure;
-            }
-            auditEventPublisher
-                    .publishBestEffort(chatAccessEvent(chatId, AuditEventType.OBJECT_ACCESS_ALLOWED,
-                            AuditOutcome.SUCCESS, "SYSTEM_CHAT_ACCESS_ALLOWED"), user);
-            return;
+        if (user == null || !user.isSuperAdmin()) {
+            InvalidPermissionException failure = new InvalidPermissionException(
+                    "System chat access requires a super administrator");
+            publishChatDecision(chatId, user, AuditEventType.OBJECT_ACCESS_DENIED,
+                    AuditOutcome.DENIED, "SYSTEM_CHAT_ACCESS_DENIED", failure);
+            throw failure;
+        }
+        auditEventPublisher
+                .publishBestEffort(chatAccessEvent(chatId, AuditEventType.OBJECT_ACCESS_ALLOWED,
+                        AuditOutcome.SUCCESS, "SYSTEM_CHAT_ACCESS_ALLOWED"), user);
+    }
+
+    @Override
+    public ChatDO getAuthorizedChat(Long chatId, User user) {
+        if (chatId == null || chatId <= 0) {
+            checkChatAccess(chatId, user);
+            return null;
         }
         ChatDO chat = chatRepository.getChat(chatId);
         if (chat == null) {
@@ -353,6 +403,7 @@ public class ChatManageServiceImpl implements ChatManageService {
         auditEventPublisher.publishBestEffort(chatAccessEvent(chatId,
                 AuditEventType.OBJECT_ACCESS_ALLOWED, AuditOutcome.SUCCESS, "CHAT_ACCESS_ALLOWED"),
                 user);
+        return chat;
     }
 
     private void publishChatDecision(Long chatId, User user, AuditEventType eventType,

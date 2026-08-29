@@ -63,7 +63,7 @@
 |------|--------|
 | 模型只产出受约束 **plan JSON** | 模型直接写最终 SQL / free-SQL 当主路径 |
 | 每种问法对应一种**查询族模板** | 按 train 题号 / 题面硬编码 builder |
-| 编译失败则 repair / 拒答 / soft-fallback（有开关） | 假成功、脏 SQL 进执行器 |
+| 编译失败则结构化 repair / cold-replan / 拒答 | 假成功、脏 SQL 进执行器 |
 | 结果事实与实体绑定可审计，对齐 `resultExact` | 列随便长，靠碰巧出现正确数字 |
 | 扩展 `BankS2SqlTemplateFactory` 等编译层 | 在 prompt 里贴 gold SQL 或标准答案数字 |
 
@@ -76,17 +76,28 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 以下行为视为**作弊 / 泄漏答案**，默认禁止：
 
 1. **按 train / dev / test 样本 id 或完整题面写死 plan/SQL**（如 `VAL-*` / `TRAIN-H-04` 专用 builder）。
-2. **把训练集 / 验证集 NL 或 gold SQL 当 few-shot 塞进 plan / free-SQL prompt**。
-3. **把 gold 行、标准答案数字、官方 SQL 字符串写进运行时逻辑或提示词**。
-4. **为刷分默认打开「预模型规则短路」**，用表面句式匹配代替模型+编译路径（见 §4）。
-5. **改评测协议骗人**：向 parse/execute 请求夹带 gold 字段；覆盖官方 `train/dev/test.jsonl` 金标；把 SQL 字符串相似度当主分。
+2. **把 gold 行、标准答案数字、官方 SQL 字符串写进运行时逻辑或提示词**（few-shot 只示范契约形态，见下方「few-shot 例外」）。
+3. **为刷分默认打开「预模型规则短路」**，用表面句式匹配代替模型+编译路径（见 §4）。
+4. **改评测协议骗人**：向 parse/execute 请求夹带 gold 字段；覆盖官方 `train/dev/test.jsonl` 金标；把 SQL 字符串相似度当主分。
+
+### few-shot 例外（2026-08-22 业主修订）
+
+允许**适度**在 prompt 中加入高价值 few-shot 示例，边界如下：
+
+- **总量**：全局 5–8 个示例，每个查询族至多 2 个；优先覆盖高失败、高复杂度查询族。
+- **内容**：只包含合成/改写问句及对应 requirements / plan JSON 的契约形态；禁止 gold SQL、答案数值、题号和官方评测题完整原文。
+- **注入方式**：只放动态用户内容区并按 family 条件注入，禁止进入固定 system prefix，以免破坏 llama.cpp 前缀 KV 缓存。
+- **启用门禁**：默认关闭；只有固定 smoke、dev A/B 和 train 回归证明准确率提升且时延可接受后，才可调整复现默认值。
+
+该例外只适用于 few-shot；其余红线保持不变。
 
 允许且推荐：
 
 - **抽象骨架 / 查询族**（与具体题号无关）：如「单机构 + 多指标 + 日点 → aggregation summary 模板」。
 - **结构化多步 repair**：校验错误回灌模型，改 plan JSON，不贴答案。
-- **cold-replan / 受控 soft-fallback**（白名单规则 plan，仍不开放 unconstrained free-SQL）。
+- **cold-replan / 结构化 repair**（错误反馈交给模型修正 plan，仍不开放 unconstrained free-SQL）。
 - 单测用**合成**问句与 hints，不依赖冻结集原题全文当唯一路径。
+- 上述边界内的动态 few-shot 契约形态示例。
 
 用户明确要求「不要作弊、不要训练集当样例」时，**优先执行本红线**，不得用「提分」绕过。
 
@@ -120,14 +131,17 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 | 开关 | 推荐默认 | 说明 |
 |------|----------|------|
 | `s2.parser.bank.plan.deterministic-short-circuit.enable` | **false** | 预模型规则短路：提分有限、掩盖模型路径、泛化差；仅消融/时延实验可开 |
-| `s2.parser.bank.plan.soft-fallback.enable` | **true** | 模型候选与 cold-replan 全拒后，白名单规则兜底；关闭会造成已知运行时回归 |
 | `s2.parser.bank.max-candidates` | **1** | 多候选未证明正式评分收益，且时延近倍增；仅诊断失败模式时再升 |
 | `s2.parser.bank.plan.thinking.enable` | **false**（除非专项 A/B） | 短路开启时 thinking 无效；主线不默认开 |
 | `s2.parser.bank.constrained-plan.enable` | bank-on 评测时 **true** | 与 free-SQL 路径消融对照时显式切换 |
+| `s2.parser.bank.few-shot.enable` | **false** | 仅用于 P4 受控 A/B；未通过 smoke、dev 和 train 回归前不得改为默认开启 |
+
+旧的 `s2.parser.bank.plan.soft-fallback.enable` 已随规则计划回退路径移除，不再是可配置参数。
+模型候选失败后只能走结构化 repair / cold-replan，仍不可满足时明确拒答或请求澄清。
 
 消融要求：
 
-- 报告记录 `planSource`（DETERMINISTIC / MODEL / MODEL_COLD_REPLAN / SOFT_FALLBACK）。  
+- 报告记录 `planSource`（DETERMINISTIC / MODEL / MODEL_COLD_REPLAN / MODEL_TOOL_REPAIR）。
 - 对比用同一 `ids-file`、同一 agent、同一数据集冻结版本。  
 - 脚本与产物可放 `.local-dev/bank-nl2sql/ablation/`（不提交大日志亦可）。  
 - 主指标：Fact v3 `caseAccuracy`（全分母，等于 `resultExact`）；最终回答不参与计分；不把 SQL 文本或表形态当分数。
@@ -140,7 +154,7 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 
 1. **Compiler / Template / Projector**（可执行 + 结果事实/实体契约）
 2. **Validator / AliasNormalizer / plan 规范化**（路由到正确查询族）  
-3. **Prompt 抽象骨架 + repair**（无题号、无 gold、无 train NL few-shot）  
+3. **Prompt 抽象骨架 + repair**（无题号、无 gold；few-shot 仅使用 §2 允许的合成契约形态）
 4. **摘要 / 最终回答**（不挡结果事实契约）
 5. 最后才考虑 free-SQL 或提高候选数
 
@@ -191,8 +205,8 @@ SQL 是**编译产物**，不是模型作文。可审计标识优先：`planSour
 s2.parser.bank.constrained-plan.enable              = true
 s2.parser.bank.max-candidates                       = 1
 s2.parser.bank.plan.deterministic-short-circuit.enable = false
-s2.parser.bank.plan.soft-fallback.enable            = true
 s2.parser.bank.plan.thinking.enable                 = false
+s2.parser.bank.few-shot.enable                      = false
 agent 33: BANK_CONSTRAINED_PLAN=on; EXECUTION_SQL_CORRECTOR=on（建议）
 ```
 
@@ -200,8 +214,8 @@ JVM 建议：
 
 ```text
 -Ds2.parser.bank.plan.deterministic-short-circuit.enable=false
--Ds2.parser.bank.plan.soft-fallback.enable=true
 -Ds2.parser.bank.plan.thinking.enable=false
+-Ds2.parser.bank.few-shot.enable=false
 ```
 
 ### 7.4 工程复现入口
@@ -228,7 +242,7 @@ powershell -ExecutionPolicy Bypass -File evaluation/bank_nl2sql/Run-OfficialBank
 ## 8. 一句话备忘
 
 > **提分靠：抽象 plan → 白名单校验 → 查询族编译 → 结果契约。**  
-> **不靠：背题、贴 gold、train few-shot、预短路刷分。**
+> **不靠：背题、贴 gold、官方题原文 few-shot、预短路刷分。**
 
 以后凡 bank NL2SQL「优化 / 修题 / 消融」：先读 **§1–§3** 与 **§7（复现参数）**，再动代码。
 ---

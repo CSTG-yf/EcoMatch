@@ -1,8 +1,9 @@
 import { PlusOutlined } from '@ant-design/icons';
 
-// 银行问数专用系统：助理唯一（银行问数 SQL 基座），不开放新建/删除，仅保留配置编辑。
-// 多助理能力保留在代码与数据层（评测、Copilot 仍依赖），此处只做界面收口。
-const SINGLE_AGENT_MODE = true;
+// 银行问数专用系统：以"银行问数"SQL 基座为主，删除入口保持收口（防止误删基座助理）；
+// 新建助理按钮按 2026-08-22 用户要求恢复展示，多助理能力底层代码与数据层始终保留。
+const SINGLE_AGENT_MODE = true; // 仅控制"删除"入口
+const SHOW_AGENT_CREATE = true; // "新建助理"入口恢复展示
 import { Button, Popconfirm, Switch, Table } from 'antd';
 import moment from 'moment';
 import { useEffect, useState } from 'react';
@@ -130,7 +131,7 @@ const AgentsSection: React.FC<Props> = ({
     <div className={styles.agentsSection}>
       <div className={styles.content}>
         <div className={styles.searchBar}>
-          {!SINGLE_AGENT_MODE && (
+          {SHOW_AGENT_CREATE && (
             <Button
               type="primary"
               onClick={() => {

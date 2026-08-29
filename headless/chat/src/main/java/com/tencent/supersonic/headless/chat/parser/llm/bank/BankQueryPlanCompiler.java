@@ -41,6 +41,9 @@ public class BankQueryPlanCompiler {
     private static final String ORGANIZATION_DIMENSION = "bank_organization";
     private static final String TIME_DIMENSION = "bank_data_date";
     private static final int DAILY_AVERAGE_RANKING_MAX_LIMIT = 10_000;
+    private static final Set<String> OUTPUT_CONTRACT_ERRORS = Set.of(
+            "OUTPUT_REQUIRED", "OUTPUT_EXTRA_COLUMN", "OUTPUT_MISSING_METRIC",
+            "OUTPUT_MISSING_DIMENSION");
 
     private final BankQueryPlanValidator validator;
     private final BankS2SqlTemplateFactory templateFactory;
@@ -59,8 +62,11 @@ public class BankQueryPlanCompiler {
             LLMReq.LLMSchema schema) {
         BankQueryPlanValidator.ValidationResult validation = validator.validate(plan, hints);
         if (!validation.isValid()) {
-            throw new BankPlanCompilationException(BankPlanCompilationException.Reason.INVALID_PLAN,
-                    validation.summary());
+            BankPlanCompilationException.Reason reason = validation.codes().stream()
+                    .anyMatch(OUTPUT_CONTRACT_ERRORS::contains)
+                            ? BankPlanCompilationException.Reason.OUTPUT_ORDER_MISMATCH
+                            : BankPlanCompilationException.Reason.INVALID_PLAN;
+            throw new BankPlanCompilationException(reason, validation.summary());
         }
         if (plan.getAction() == BankQueryPlan.PlanAction.CLARIFY) {
             throw new BankPlanCompilationException(
@@ -806,11 +812,10 @@ public class BankQueryPlanCompiler {
         List<String> actual = plan.getOutput().getColumns().stream()
                 .map(column -> canonicalOutputColumn(column, index)).collect(Collectors.toList());
         if (actual.size() != expected.size()
-                || !new LinkedHashSet<>(actual).equals(new LinkedHashSet<>(expected))
-                || !actual.equals(expected)) {
+                || !new LinkedHashSet<>(actual).equals(new LinkedHashSet<>(expected))) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.OUTPUT_ORDER_MISMATCH,
-                    "output columns must be the selected dimensions followed by metrics in plan order");
+                    "output columns must contain each selected dimension and metric exactly once");
         }
         return List.copyOf(expected);
     }
@@ -957,13 +962,19 @@ public class BankQueryPlanCompiler {
         Set<String> explicit = plan.getOrganizations().stream()
                 .map(BankQueryPlan.Organization::getBizName).filter(StringUtils::isNotBlank)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
-        if (explicit.size() > 1) {
+        // Organization.bizName is an optional model-side display label. The organization code is
+        // the value used for filtering; only a value that is itself a live semantic dimension may
+        // select the dimension. Models commonly echo the institution's Chinese display name in
+        // this field, which must not be mistaken for a dimension identifier.
+        Set<String> dimensionCandidates = explicit.stream().filter(index::hasDimension)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (dimensionCandidates.size() > 1) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,
                     "organizations must use one semantic organization dimension");
         }
-        String identifier =
-                explicit.isEmpty() ? ORGANIZATION_DIMENSION : explicit.iterator().next();
+        String identifier = dimensionCandidates.isEmpty() ? ORGANIZATION_DIMENSION
+                : dimensionCandidates.iterator().next();
         if (!index.hasDimension(identifier)) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.ORGANIZATION_DIMENSION_UNAVAILABLE,

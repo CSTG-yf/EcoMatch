@@ -5,11 +5,14 @@ import com.tencent.supersonic.chat.api.pojo.request.ChatExecuteReq;
 import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
+import com.tencent.supersonic.chat.server.agent.Agent;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryRepository;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatRepository;
+import com.tencent.supersonic.chat.server.service.AgentService;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.AuthType;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher;
 import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
@@ -30,6 +33,66 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ChatManageServiceAccessTest {
+
+    @Test
+    void createsAgentBoundChatsWithNormalizedTitles() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AgentService agentService = mock(AgentService.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, agentService,
+                mock(AuditEventPublisher.class));
+        User user = User.get(2L, "alice");
+        Agent agent = agent(7, "贷款助理", 1);
+        when(agentService.getAgents(user, AuthType.VIEWER)).thenReturn(java.util.List.of(agent));
+
+        service.addChat(user, null, 7);
+        service.addChat(user, "新问答对话", 7);
+        service.addChat(user, "季度分析", 7);
+
+        ArgumentCaptor<ChatDO> chats = ArgumentCaptor.forClass(ChatDO.class);
+        verify(chatRepository, org.mockito.Mockito.times(3)).createChat(chats.capture());
+        assertEquals(java.util.List.of("贷款助理", "贷款助理", "季度分析"),
+                chats.getAllValues().stream().map(ChatDO::getChatName).toList());
+        chats.getAllValues().forEach(chat -> {
+            assertEquals("alice", chat.getCreator());
+            assertEquals(7, chat.getAgentId());
+        });
+    }
+
+    @Test
+    void rejectsUnauthorizedOrOfflineAgentBeforeCreatingChat() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AgentService agentService = mock(AgentService.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, agentService,
+                mock(AuditEventPublisher.class));
+        User user = User.get(2L, "alice");
+        when(agentService.getAgents(user, AuthType.VIEWER)).thenReturn(java.util.List.of());
+
+        assertThrows(InvalidPermissionException.class, () -> service.addChat(user, "季度分析", 7));
+
+        when(agentService.getAgents(user, AuthType.VIEWER))
+                .thenReturn(java.util.List.of(agent(7, "贷款助理", 0)));
+        assertThrows(InvalidPermissionException.class, () -> service.addChat(user, "季度分析", 7));
+        assertThrows(InvalidPermissionException.class, () -> service.addChat(null, "季度分析", 7));
+        verify(chatRepository, never()).createChat(any());
+    }
+
+    @Test
+    void rejectsQueryAgentMismatchBeforeRepositoryWrite() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository);
+        ChatDO chat = chat(10L, "alice");
+        chat.setAgentId(7);
+        when(chatRepository.getChat(10L)).thenReturn(chat);
+        ChatParseReq request =
+                ChatParseReq.builder().chatId(10).agentId(8).user(User.get(2L, "alice")).build();
+
+        assertThrows(InvalidPermissionException.class, () -> service.createChatQuery(request));
+
+        verify(queryRepository, never()).createChatQuery(any());
+    }
 
     @Test
     void rejectsCrossUserHistoryBeforeReadingQueries() {
@@ -187,9 +250,16 @@ class ChatManageServiceAccessTest {
 
     private ChatManageServiceImpl service(ChatRepository chatRepository,
             ChatQueryRepository queryRepository, AuditEventPublisher publisher) {
+        return service(chatRepository, queryRepository, mock(AgentService.class), publisher);
+    }
+
+    private ChatManageServiceImpl service(ChatRepository chatRepository,
+            ChatQueryRepository queryRepository, AgentService agentService,
+            AuditEventPublisher publisher) {
         ChatManageServiceImpl service = new ChatManageServiceImpl();
         ReflectionTestUtils.setField(service, "chatRepository", chatRepository);
         ReflectionTestUtils.setField(service, "chatQueryRepository", queryRepository);
+        ReflectionTestUtils.setField(service, "agentService", agentService);
         ReflectionTestUtils.setField(service, "auditEventPublisher", publisher);
         return service;
     }
@@ -199,5 +269,13 @@ class ChatManageServiceAccessTest {
         chat.setChatId(chatId);
         chat.setCreator(owner);
         return chat;
+    }
+
+    private Agent agent(Integer id, String name, Integer status) {
+        Agent agent = new Agent();
+        agent.setId(id);
+        agent.setName(name);
+        agent.setStatus(status);
+        return agent;
     }
 }

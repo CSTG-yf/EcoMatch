@@ -16,6 +16,7 @@ import com.tencent.supersonic.common.util.SensitiveLogUtils;
 import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
 import com.tencent.supersonic.headless.api.pojo.Dimension;
 import com.tencent.supersonic.headless.api.pojo.MetaFilter;
+import com.tencent.supersonic.headless.api.pojo.SqlInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.SemanticType;
 import com.tencent.supersonic.headless.api.pojo.request.*;
 import com.tencent.supersonic.headless.api.pojo.response.*;
@@ -152,6 +153,7 @@ public class S2SemanticLayerService implements SemanticLayerService {
         TaskStatusEnum state = TaskStatusEnum.SUCCESS;
         long queryStart = System.nanoTime();
         String auditSql = getRequestSql(queryReq);
+        boolean failureAudited = false;
         log.info("semantic query request [{}]", SensitiveLogUtils.summarize(queryReq));
         publishQueryStarted(queryReq, user, auditSql);
         try {
@@ -199,12 +201,15 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 }
             }
 
-            if (Objects.isNull(queryResp)) {
+            if (queryResp == null) {
                 state = TaskStatusEnum.ERROR;
-            } else {
-                queryResp.appendErrorMsg(queryStatement.getErrMsg());
-                maskBeforeCache(queryReq, queryResp, user);
+                publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_EXECUTOR", null);
+                failureAudited = true;
+                throw new IllegalStateException("未找到可用的查询执行器");
             }
+
+            queryResp.appendErrorMsg(queryStatement.getErrMsg());
+            maskBeforeCache(queryReq, queryResp, user);
 
             // 5.reset cache and set stateInfo
             Boolean setCacheSuccess = queryCache.put(queryReq, cacheKey, queryResp);
@@ -213,20 +218,17 @@ public class S2SemanticLayerService implements SemanticLayerService {
                 statUtils.updateResultCacheKey(cacheKey);
             }
 
-            if (queryResp == null) {
-                publishQueryFailed(queryReq, user, auditSql, queryStart, "NO_QUERY_RESULT", null);
-            } else {
-                publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, false);
-            }
-
+            publishQuerySucceeded(queryReq, queryResp, user, auditSql, queryStart, false);
             return queryResp;
         } catch (Exception e) {
             log.error("Exception in semantic query [{}]: type={}, error=[{}]",
                     SensitiveLogUtils.summarize(queryReq), e.getClass().getSimpleName(),
                     SensitiveLogUtils.summarize(e));
             state = TaskStatusEnum.ERROR;
-            publishQueryFailed(queryReq, user, auditSql, queryStart, "QUERY_EXCEPTION",
-                    e.getClass().getSimpleName());
+            if (!failureAudited) {
+                publishQueryFailed(queryReq, user, auditSql, queryStart, "QUERY_EXCEPTION",
+                        e.getClass().getSimpleName());
+            }
             throw e;
         } finally {
             statUtils.statInfo2DbAsync(state);
@@ -235,6 +237,12 @@ public class S2SemanticLayerService implements SemanticLayerService {
 
     private void maskBeforeCache(SemanticQueryReq queryReq, SemanticQueryResp queryResp,
             User user) {
+        if (!queryReq.isNeedAuth()) {
+            queryResp.setDataMasked(false);
+            queryResp.setMaskedColumns(Set.of());
+            queryResp.setMaskingPolicyVersion(0L);
+            return;
+        }
         SchemaFilterReq filter = new SchemaFilterReq();
         filter.setModelIds(queryReq.getModelIds());
         filter.setDataSetId(queryReq.getDataSetId());
@@ -527,15 +535,22 @@ public class S2SemanticLayerService implements SemanticLayerService {
         if (semanticQueryReq instanceof QueryMultiStructReq) {
             queryStatement = buildMultiStructQueryStatement((QueryMultiStructReq) semanticQueryReq);
         }
-        if (Objects.nonNull(queryStatement) && Objects.nonNull(semanticQueryReq.getSqlInfo())
-                && StringUtils.isNotBlank(semanticQueryReq.getSqlInfo().getQuerySQL())) {
-            queryStatement.setSql(semanticQueryReq.getSqlInfo().getQuerySQL());
+        boolean rowPermissionApplied = semanticQueryReq instanceof QuerySqlReq querySqlReq
+                && querySqlReq.isRowPermissionApplied();
+        SqlInfo sqlInfo = semanticQueryReq.getSqlInfo();
+        boolean hasCorrectedPhysicalSql = sqlInfo != null
+                && StringUtils.isNotBlank(sqlInfo.getCorrectedQuerySQL());
+        boolean trustedCompiledSql = semanticQueryReq.isTrustedCompiledSql()
+                && !hasCorrectedPhysicalSql;
+        if (Objects.nonNull(queryStatement) && !rowPermissionApplied && hasCorrectedPhysicalSql) {
+            queryStatement.setSql(sqlInfo.getCorrectedQuerySQL());
+            queryStatement.setIsTranslated(true);
+        } else if (Objects.nonNull(queryStatement) && !rowPermissionApplied && trustedCompiledSql
+                && sqlInfo != null && StringUtils.isNotBlank(sqlInfo.getQuerySQL())) {
+            queryStatement.setSql(sqlInfo.getQuerySQL());
             queryStatement.setIsTranslated(true);
         }
         if (queryStatement != null) {
-            boolean trustedCompiledSql = semanticQueryReq.isTrustedCompiledSql()
-                    && (semanticQueryReq.getSqlInfo() == null || StringUtils
-                            .isBlank(semanticQueryReq.getSqlInfo().getCorrectedQuerySQL()));
             queryStatement.setTrustedCompiledSql(trustedCompiledSql);
             queryStatement.setUser(user);
         }

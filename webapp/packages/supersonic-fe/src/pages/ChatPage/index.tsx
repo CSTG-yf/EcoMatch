@@ -4,7 +4,7 @@ import queryString from 'query-string';
 import { Chat, DashboardQuerySource } from 'supersonic-chat-sdk';
 import { canViewDeveloperDiagnostics } from '@/utils/developerAccess';
 import { message } from 'antd';
-import { getDashboardModel } from '../Dashboard/service';
+import { getDashboardDataSetDomain, getDashboardModel } from '../Dashboard/service';
 import { buildQueryExportRequest } from '../ExportCenter';
 
 const ChatPage = () => {
@@ -12,25 +12,40 @@ const ChatPage = () => {
   const { initialState } = useModel('@@initialState');
   const query = queryString.parse(location.search) || {};
   const { agentId } = query;
+  const initialAgentId = Number(agentId);
 
+  // 保存到看板只需要 domainId。两条路径都只使用 VIEWER 权限接口：
+  //  1) 有 modelId：model -> domain（getModelListByIds）
+  //  2) modelId 缺失但有 dataSetId：dataSet -> domain
   const saveToDashboard = async (source: DashboardQuerySource) => {
     try {
       const modelId = Number(source.modelId || source.semanticQuery?.modelId);
-      if (!Number.isInteger(modelId) || modelId <= 0) {
-        throw new Error('无法确认问数结果所属模型');
+      const dataSetId = Number(source.dataSetId || source.semanticQuery?.dataSetId);
+      let domainId = NaN;
+
+      if (Number.isInteger(modelId) && modelId > 0) {
+        const response: any = await getDashboardModel(modelId);
+        if (response?.code != null && Number(response.code) !== 200) {
+          throw new Error(response?.msg || '无该模型的数据权限，无法保存到看板');
+        }
+        const models = response?.data || response;
+        domainId = Number(Array.isArray(models) ? models[0]?.domainId : models?.domainId);
+      } else if (Number.isInteger(dataSetId) && dataSetId > 0) {
+        const response: any = await getDashboardDataSetDomain(dataSetId);
+        if (response?.code != null && Number(response.code) !== 200) {
+          throw new Error(response?.msg || '当前用户不可见该数据集，无法保存到看板');
+        }
+        domainId = Number(response?.data ?? response);
+      } else {
+        throw new Error('无法识别该问数结果所属的数据模型，暂不能保存到看板');
       }
-      const response: any = await getDashboardModel(modelId);
-      if (response?.code != null && Number(response.code) !== 200) {
-        throw response;
-      }
-      const models = response?.data || response;
-      const domainId = Number(Array.isArray(models) ? models[0]?.domainId : models?.domainId);
+
       if (!Number.isInteger(domainId) || domainId <= 0) {
-        throw new Error('无法确认问数结果所属主题域');
+        throw new Error('无法识别该结果所属的主题域，暂不能保存到看板');
       }
       history.push('/dashboard', { source: { ...source, domainId } });
     } catch (error: any) {
-      message.error(error?.msg || error?.message || '无法确认问数结果所属主题域');
+      message.error(error?.msg || error?.message || '保存到看板失败');
     }
   };
 
@@ -46,8 +61,9 @@ const ChatPage = () => {
 
   return (
     <Chat
-      initialAgentId={agentId ? +agentId : undefined}
-      defaultAgentName="银行问数"
+      initialAgentId={
+        Number.isInteger(initialAgentId) && initialAgentId > 0 ? initialAgentId : undefined
+      }
       token={getToken() || ''}
       isDeveloper={canViewDeveloperDiagnostics(initialState?.currentUser)}
       onSaveToDashboard={saveToDashboard}

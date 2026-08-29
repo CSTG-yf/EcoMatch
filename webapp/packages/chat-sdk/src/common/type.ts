@@ -148,6 +148,7 @@ export type ChatContextType = {
   queryMode: string;
   queryType: ChatContextTypeQueryTypeEnum;
   dimensionFilters: FilterItemType[];
+  metricFilters?: FilterItemType[];
   properties: any;
   sqlInfo: SqlInfoType;
   sqlEvaluation?: SqlEvaluationType;
@@ -206,6 +207,7 @@ export type MsgDataType = {
   recommendedChart?: ChartRecommendationType;
   candidateCharts?: ChartRecommendationType[];
   businessExplanation?: BusinessExplanationType;
+  bankIntentResult?: BankIntentResultType;
 };
 
 export type DashboardSemanticQuery = {
@@ -217,6 +219,7 @@ export type DashboardSemanticQuery = {
   metrics?: FieldType[];
   dateInfo?: DateInfoType;
   dimensionFilters?: FilterItemType[];
+  metricFilters?: FilterItemType[];
 };
 
 export type DashboardQuerySource = {
@@ -247,6 +250,7 @@ export type ParseDataType = {
   selectedParses: ChatContextType[];
   candidateParses: ChatContextType[];
   similarSolvedQuery: SimilarQuestionType[];
+  bankIntentResult?: BankIntentResultType;
   multiTurnContext?: MultiTurnContextType;
 };
 

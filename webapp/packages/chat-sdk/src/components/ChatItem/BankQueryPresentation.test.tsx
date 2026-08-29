@@ -1,10 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import BankQueryOverview from './BankQueryOverview';
+import BankAnswerWorkflow from './BankAnswerWorkflow';
 import BankClarificationPanel from './BankClarificationPanel';
 import BusinessInsightPanel from './BusinessInsightPanel';
 import MultiTurnContextBar from './MultiTurnContextBar';
-import QueryStageStatus from './QueryStageStatus';
-import TrustExplanationPanel from './TrustExplanationPanel';
+import TechnicalDiagnosticsModal from './TechnicalDiagnosticsModal';
+import BankAnswerToolbar from './BankAnswerToolbar';
+
+jest.mock('./index', () => {
+  const React = jest.requireActual('react');
+  return {
+    ChartItemContext: React.createContext({ register: jest.fn(), call: jest.fn() }),
+  };
+});
 
 beforeEach(() => {
   window.matchMedia = jest.fn().mockImplementation(query => ({
@@ -19,10 +26,16 @@ beforeEach(() => {
   }));
 });
 
+const openWorkflow = () => {
+  fireEvent.click(screen.getByRole('status'));
+};
+
 describe('bank query presentation', () => {
-  it('renders the model-owned requirements contract instead of a rule preflight intent', () => {
+  it('renders the model-owned requirements contract in the understand stage', () => {
     render(
-      <BankQueryOverview
+      <BankAnswerWorkflow
+        question="对比各机构存款"
+        workflowStage="completed"
         parseInfo={
           {
             properties: {
@@ -44,19 +57,19 @@ describe('bank query presentation', () => {
       />
     );
 
-    expect(screen.getByRole('region', { name: '模型理解的查询需求' })).toHaveTextContent(
-      '对比分析'
-    );
-    expect(screen.getByText('ZB001、ZB002')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('问数完成');
+    openWorkflow();
+    expect(screen.getAllByText('对比分析').length).toBeGreaterThan(0);
+    expect(screen.getByText('指标、机构、时间')).toBeInTheDocument();
     expect(screen.getByText('ORG004')).toBeInTheDocument();
     expect(screen.getByText('2025-07-31')).toBeInTheDocument();
     expect(screen.getByText('VALUE、PROVINCE_AVERAGE、GAP_VALUE')).toBeInTheDocument();
   });
 
-  it('renders status, chart recommendation, explanation evidence and warnings', () => {
+  it('shows the explaining status in the workflow summary', () => {
     render(
       <>
-        <QueryStageStatus stage="explaining" />
+        <BankAnswerWorkflow question="贷款余额趋势" workflowStage="explaining" />
         <BusinessInsightPanel
           recommendation={
             {
@@ -85,16 +98,93 @@ describe('bank query presentation', () => {
     expect(screen.getByText('结果已按权限脱敏')).toBeInTheDocument();
   });
 
+  it('only shows SQL versions when developer debug access is enabled', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      sqlInfo: {
+        parsedS2SQL: 'SELECT 贷款余额 FROM 贷款主题',
+        querySQL: 'SELECT loan_balance FROM loan_fact',
+      },
+    } as any;
+
+    const { unmount } = render(
+      <BankAnswerWorkflow
+        question="查询贷款余额"
+        workflowStage="completed"
+        parseInfo={parseInfo}
+        isDeveloper={false}
+        isDebugMode
+      />
+    );
+    openWorkflow();
+    expect(screen.queryByRole('tab', { name: '最终执行 SQL' })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <BankAnswerWorkflow
+        question="查询贷款余额"
+        workflowStage="completed"
+        parseInfo={parseInfo}
+        isDeveloper
+        isDebugMode
+      />
+    );
+    openWorkflow();
+    expect(screen.getByRole('tab', { name: '最终执行 SQL' })).toBeInTheDocument();
+  });
+
+  it('hides diagnostics and log export from non-developer users', () => {
+    const parseInfo = {
+      queryMode: 'LLM_S2SQL',
+      sqlInfo: { querySQL: 'SELECT loan_balance FROM loan_fact' },
+    } as any;
+    const props = {
+      msg: '查询贷款余额',
+      queryId: 1,
+      parseInfo,
+      workflowStage: 'completed' as const,
+    };
+
+    const { rerender } = render(<BankAnswerToolbar {...props} isDeveloper={false} />);
+    expect(screen.queryByRole('button', { name: '技术详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '导出日志' })).not.toBeInTheDocument();
+
+    rerender(<BankAnswerToolbar {...props} isDeveloper />);
+    expect(screen.getByRole('button', { name: '技术详情' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导出日志' })).toBeInTheDocument();
+  });
+
   it('does not render empty optional panels', () => {
     const { container } = render(
       <>
-        <QueryStageStatus stage="idle" />
-        <BankQueryOverview />
+        <BankAnswerWorkflow question="测试" workflowStage="idle" />
         <BusinessInsightPanel />
       </>
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders clarification inside the understand stage and keeps later stages pending', () => {
+    render(
+      <BankAnswerWorkflow
+        question="最近贷款情况怎么样"
+        workflowStage="clarifying"
+        intent={
+          {
+            clarificationRequired: true,
+            clarifications: [
+              { type: 'METRIC', question: '您希望查询哪个指标？', options: ['贷款余额'] },
+            ],
+          } as any
+        }
+      />
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('等待补充查询条件');
+    expect(screen.getByRole('region', { name: '问题澄清' })).toBeInTheDocument();
+    expect(screen.getAllByText('等待').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('待澄清')).toHaveLength(1);
   });
 
   it('collects official clarification options before resubmitting', () => {
@@ -173,7 +263,7 @@ describe('bank query presentation', () => {
     expect(screen.getByText(/已超过 30 分钟/)).toBeInTheDocument();
   });
 
-  it('shows business trust evidence and gates technical diagnostics', () => {
+  it('shows confidence, correction records and SQL versions in the diagnostics drawer', () => {
     const parseInfo = {
       queryMode: 'LLM_S2SQL',
       metrics: [{ id: 1, name: '不良贷款率', description: '不良贷款余额除以贷款余额' }],
@@ -184,6 +274,7 @@ describe('bank query presentation', () => {
         {
           detectWord: '不良贷款率',
           similarity: 0.9,
+          llmMatched: true,
           element: { id: 1, name: '不良贷款率', type: 'METRIC' },
         },
       ],
@@ -199,30 +290,26 @@ describe('bank query presentation', () => {
         features: ['SINGLE_TABLE'],
       },
     } as any;
-    const { rerender } = render(
-      <TrustExplanationPanel
+
+    render(
+      <TechnicalDiagnosticsModal
+        open
         question="查询南京分行不良贷款率"
         parseInfo={parseInfo}
         workflowStage="completed"
+        onClose={() => {}}
       />
     );
 
-    expect(screen.getByRole('region', { name: '查询可信度' })).toHaveTextContent('映射 90.0%');
-    expect(screen.getByText('不良贷款余额除以贷款余额')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /诊断/ })).not.toBeInTheDocument();
-
-    rerender(
-      <TrustExplanationPanel
-        question="查询南京分行不良贷款率"
-        parseInfo={parseInfo}
-        workflowStage="completed"
-        isDeveloper
-      />
-    );
-    fireEvent.click(screen.getByRole('button', { name: /诊断/ }));
-    expect(screen.getByText('SQL 解释与诊断')).toBeInTheDocument();
-    expect(screen.getByText('Schema 映射证据')).toBeInTheDocument();
+    expect(screen.getByText('技术详情')).toBeInTheDocument();
+    expect(screen.getByText('90.0% · 高')).toBeInTheDocument();
+    expect(screen.getByText('100.0%')).toBeInTheDocument();
+    expect(screen.getByText('校验通过')).toBeInTheDocument();
     expect(screen.getByText('转换与修正记录')).toBeInTheDocument();
+    expect(screen.getByText('Schema 映射证据')).toBeInTheDocument();
+    expect(screen.getByText('LLM 映射')).toBeInTheDocument();
+    expect(screen.getByText('SQL 版本')).toBeInTheDocument();
+    expect(screen.getByText('最终执行 SQL')).toBeInTheDocument();
   });
 
   it('shows the sanitized bank plan tool trace without exposing SQL or private reasoning', () => {
@@ -284,20 +371,22 @@ describe('bank query presentation', () => {
     } as any;
 
     render(
-      <TrustExplanationPanel
+      <TechnicalDiagnosticsModal
+        open
         question="查询贷款余额排名"
         parseInfo={parseInfo}
         workflowStage="completed"
+        onClose={() => {}}
       />
     );
 
-    const trace = screen.getByRole('region', { name: '银行查询工具执行过程' });
-    expect(trace).toHaveTextContent('第 1 次计划');
-    expect(trace).toHaveTextContent('正在重新生成完整计划');
-    expect(trace).toHaveTextContent('数据库执行失败');
-    expect(trace).toHaveTextContent('第 2 次计划');
-    expect(trace).toHaveTextContent('计划执行及结果语义检查通过');
-    expect(trace).not.toHaveTextContent(/select\s/i);
-    expect(trace).not.toHaveTextContent(/思维|推理过程|chain.of.thought/i);
+    expect(screen.getByText('工具执行记录')).toBeInTheDocument();
+    expect(screen.getByText('第 1 次计划')).toBeInTheDocument();
+    expect(screen.getByText(/正在重新生成完整计划/)).toBeInTheDocument();
+    expect(screen.getAllByText(/数据库执行失败/).length).toBeGreaterThan(0);
+    expect(screen.getByText('第 2 次计划')).toBeInTheDocument();
+    expect(screen.getByText(/计划执行及结果语义检查通过/)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/select\s/i);
+    expect(document.body).not.toHaveTextContent(/思维|推理过程|chain.of.thought/i);
   });
 });

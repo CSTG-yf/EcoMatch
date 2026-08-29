@@ -8,6 +8,7 @@ const Settings: DefaultSetting = {
   colorPrimary: '#296DF3',
   layout: 'mix',
   splitMenus: true,
+  siderWidth: 200,
   contentWidth: 'Fluid',
   fixedHeader: false,
   fixSiderbar: true,
@@ -15,11 +16,6 @@ const Settings: DefaultSetting = {
   title: '',
   pwa: false,
   iconfontUrl: '//at.alicdn.com/t/c/font_4120566_x5c4www9bqm.js',
-  // splitMenus: true,
-  // menu: {
-  //   autoClose: false,
-  //   ignoreFlatMenu: true,
-  // },
 };
 export const publicPath = '/webapp/';
 export const basePath = '/webapp/';

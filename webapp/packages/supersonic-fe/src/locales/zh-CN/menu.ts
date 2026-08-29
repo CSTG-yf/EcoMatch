@@ -8,7 +8,7 @@ export default {
   'menu.exception.not-find': '404',
   'menu.exception.server-error': '500',
   'menu.semanticModel': '语义建模',
-  'menu.metric': '指标市场',
+  'menu.metric': '指标知识库',
   'menu.governance': '指标治理',
   'menu.metric.metricDetail': '指标详情页',
   'menu.metricEdit': '指标编辑',
@@ -26,4 +26,5 @@ export default {
   'menu.dashboard': '分析看板',
   'menu.exports': '导出中心',
   'menu.agent': '问数配置',
+  'menu.adminCenter': '管理中心',
 };

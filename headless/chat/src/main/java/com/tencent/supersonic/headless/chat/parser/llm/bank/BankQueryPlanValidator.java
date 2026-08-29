@@ -472,9 +472,11 @@ public class BankQueryPlanValidator {
             List<String> expectedOutput = List.of("bank_organization", metrics.get(0));
             List<String> actualOutput = plan.getOutput() == null ? List.of()
                     : safe(plan.getOutput().getColumns()).collect(Collectors.toList());
-            if (!actualOutput.equals(expectedOutput)) {
+            if (actualOutput.size() != expectedOutput.size()
+                    || !containsAllIgnoreCase(new LinkedHashSet<>(actualOutput),
+                            new LinkedHashSet<>(expectedOutput))) {
                 errors.add(error("ABSOLUTE_THRESHOLD_OUTPUT_REQUIRED",
-                        "absolute threshold output.columns must be exactly " + expectedOutput));
+                        "absolute threshold output.columns must contain exactly " + expectedOutput));
             }
         }
     }

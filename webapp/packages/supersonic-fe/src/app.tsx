@@ -1,7 +1,7 @@
-import RightContent from '@/components/RightContent';
-import S2Icon, { ICON } from '@/components/S2Icon';
-import { Space, Spin, ConfigProvider } from 'antd';
+import AvatarDropdown from '@/components/RightContent/AvatarDropdown';
+import { Spin, ConfigProvider } from 'antd';
 import ScaleLoader from 'react-spinners/ScaleLoader';
+import { ControlOutlined, MenuOutlined } from '@ant-design/icons';
 import { history, RunTimeLayoutConfig } from '@umijs/max';
 import defaultSettings from '../config/defaultSettings';
 import settings from '../config/themeSettings';
@@ -121,20 +121,53 @@ export function onRouteChange() {
   }, 100);
 }
 
+const MobileLayoutHeader: React.FC<{
+  collapsed?: boolean;
+  onCollapse?: (collapsed: boolean) => void;
+}> = ({ collapsed, onCollapse }) => (
+  <div className="mobile-layout-header">
+    <button
+      type="button"
+      className="mobile-menu-trigger"
+      aria-label={collapsed ? '打开主导航' : '关闭主导航'}
+      aria-expanded={!collapsed}
+      onClick={() => onCollapse?.(!collapsed)}
+    >
+      <MenuOutlined />
+    </button>
+    <span className="mobile-brand-logo" role="img" aria-label="银行问数">
+      <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" />
+      <img src={`${publicPath}branding/bank-query-text.svg`} alt="" />
+    </span>
+  </div>
+);
+
 /**
- * 银行问数前端重构（第一步：仅菜单归组，不增删路由/页面）。
- * 用户：问数、分析看板、指标市场、导出中心；
+ * 银行问数前端菜单（按角色渲染，不增删路由/页面）。
+ * 用户：问数、分析看板、指标知识库、导出中心；
  * 管理员（superAdmin）：额外看到"管理中心"顶级入口，点击进入后左侧边栏平铺展示
- * 全部管理页面（不使用多级级联菜单）；安全审计码持有者可看到安全运营。
+ * 全部管理页面（无分组标题、无多级级联，2026-08-22 用户确认）；安全审计码持有者可看到安全运营。
  * 所有路由保持注册不变，管理员直连 URL 仍可访问，普通用户按权限拦截。
  */
+// 管理中心包含的管理页路径（侧边栏平铺顺序）
+const ADMIN_MENU_PATHS = [
+  '/agent',
+  '/plugin',
+  '/model',
+  '/governance',
+  '/tag',
+  '/database',
+  '/llm',
+  '/system',
+  '/security',
+  '/evaluation',
+];
+
 const buildRoleMenu = (menuData: any[], initialState: any) => {
   const byPath = (path: string) =>
     menuData.find(
       (item: any) =>
-        (item.path === path || item.path === `${path}/`) &&
-        !item.hideInMenu &&
-        !item.redirect,
+        (item.path === path || item.path === `${path}/`) && !item.hideInMenu && !item.redirect,
     );
   const pick = (paths: string[]) => paths.map(byPath).filter(Boolean);
 
@@ -149,61 +182,97 @@ const buildRoleMenu = (menuData: any[], initialState: any) => {
     return hasSecurityAudit ? [...userItems, ...pick(['/security'])] : userItems;
   }
 
-  // 管理中心：侧边栏平铺全部管理页，顺序按职责域排列（问数配置 / 数据与口径 /
-  // 平台与连接 / 安全与评估），不做多级目录。
-  const adminItems = pick([
-    '/agent',
-    '/plugin',
-    '/model',
-    '/governance',
-    '/tag',
-    '/database',
-    '/llm',
-    '/system',
-    '/security',
-    '/evaluation',
-  ]);
+  // 管理中心：侧边栏平铺全部管理页（无分组标题），顺序按职责域排列。
+  const adminItems = pick(ADMIN_MENU_PATHS);
 
   return [
     ...userItems,
-    // path 落在第一个管理页（助理管理）：点击进入后侧边栏平铺全部管理项
+    // path 落在第一个管理页（问数配置）：点击进入后侧边栏平铺全部管理项
     ...(adminItems.length > 0
-      ? [{ name: '管理中心', path: '/agent', children: adminItems }]
+      ? [
+          {
+            name: '管理中心',
+            locale: 'menu.adminCenter',
+            icon: <ControlOutlined />,
+            path: '/agent',
+            children: adminItems,
+          },
+        ]
       : []),
   ];
 };
 
 export const layout: RunTimeLayoutConfig = (params) => {
-  const { initialState } = params as any;
+  const { initialState, setInitialState } = params as any;
+  const siderCollapsed = Boolean((initialState as any)?.siderCollapsed);
   return {
     menuDataRender: (menuData: any[]) => buildRoleMenu(menuData, initialState),
     onMenuHeaderClick: (e) => {
       e.preventDefault();
       history.push(replaceRoute);
     },
+    // 不传 menuHeaderRender：mix 布局下 ProLayout 顶栏用默认 logo 渲染，
+    // 侧边栏不再重复显示 logo（SiderMenu 在 mix 模式下默认不渲染侧栏头部），
+    // 同时移除收缩按钮（2026-08-22 用户确认）。移动端抽屉由 MobileLayoutHeader 提供品牌与开关。
+    collapsed: siderCollapsed,
+    onCollapse: (collapsed) => setInitialState({ ...initialState, siderCollapsed: collapsed }),
+    collapsedButtonRender: false,
     logo: (
-      <Space>
-        <S2Icon
-          icon={ICON.iconlogobiaoshi}
-          size={30}
-          color="#1672fa"
-          style={{ display: 'inline-block', marginTop: 8 }}
+      <span className="brand-logo">
+        <img src={`${publicPath}branding/bank-query-icon.svg`} alt="" className="brand-logo-mark" />
+        <img
+          src={`${publicPath}branding/bank-query-text.svg`}
+          alt="银行问数"
+          className="brand-logo-text-img"
         />
-        <div className="logo" style={{ position: 'relative', top: '-2px' }}>
-          SuperSonic
-        </div>
-      </Space>
+      </span>
     ),
-    contentStyle: { ...(initialState?.contentStyle || {}) },
-    rightContentRender: () => <RightContent />,
+    contentStyle: { background: '#fff', ...(initialState?.contentStyle || {}) },
+    // 桌面端 mix 布局：一级导航在顶栏，必须用 ProLayout 默认头部——自定义 headerRender 会整体
+    // 替换 Header 内容（pro-layout Header/index.js: headerRender(props, defaultDom) 的返回值即顶栏），
+    // 返回 null 会导致顶栏与一级菜单消失，故桌面端不传 headerRender。
+    // 移动端保留位于 Drawer 外部的主导航入口。
+    ...(isMobile
+      ? {
+          headerRender: (props: any) => (
+            <MobileLayoutHeader collapsed={props.collapsed} onCollapse={props.onCollapse} />
+          ),
+        }
+      : {}),
+    // 侧边栏底部账户入口仅移动端抽屉需要（移动端顶栏被 MobileLayoutHeader 整体替换，不含账户）；
+    // 桌面端账户在顶栏右侧（rightContentRender），不重复渲染。
+    ...(isMobile
+      ? {
+          menuFooterRender: (props: any) =>
+            props?.collapsed ? (
+              <div className="sider-account" style={{ textAlign: 'center' }}>
+                <AvatarDropdown hideName />
+              </div>
+            ) : (
+              <div className="sider-account" style={{ padding: '0 16px' }}>
+                <AvatarDropdown />
+              </div>
+            ),
+        }
+      : {}),
+    // 账户入口（访问令牌/修改密码/退出登录）固定展示在顶栏右侧；
+    // umi 默认 rightRender 只在 initialState.name/avatar 存在时才显示，本项目用 currentUser，故需显式渲染。
+    rightContentRender: () => <AvatarDropdown />,
     disableContentMargin: true,
-    // menuHeaderRender: undefined,
     childrenRender: (dom) => {
       return (
         <ConfigProvider theme={configProviderTheme}>
           <div
             style={{
-              height: location.pathname.includes('chat') ? 'calc(100vh - 56px)' : undefined,
+              // mix 布局桌面端多出 56px 顶栏（pro-layout 默认 heightLayoutHeader），
+              // 聊天页高度需扣除，否则整页出现纵向滚动条；移动端行为保持原样。
+              // overflow hidden 兜底：/chat 整页不滚动，只有对话区内部滚动，历史面板位置固定。
+              height: location.pathname.includes('chat')
+                ? isMobile
+                  ? '100vh'
+                  : 'calc(100vh - 56px)'
+                : undefined,
+              overflow: location.pathname.includes('chat') ? 'hidden' : undefined,
             }}
           >
             {/* <AppPage dom={dom} /> */}

@@ -21,6 +21,7 @@ import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.SqlErrorType;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
 import com.tencent.supersonic.headless.api.pojo.response.MapResp;
+import com.tencent.supersonic.headless.chat.intent.BankIntentResult;
 import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
@@ -85,6 +86,19 @@ class NL2SQLParserTest {
         NL2SQLParser.copyParseResponse(source, target);
 
         assertNull(target.getBankRoutingAttemptTelemetry());
+    }
+
+    @Test
+    void forwardsBankIntentResult() {
+        ParseResp source = new ParseResp("safe");
+        BankIntentResult intent = new BankIntentResult();
+        intent.setClarificationRequired(true);
+        source.setBankIntentResult(intent);
+        ChatParseResp target = new ChatParseResp(1L);
+
+        NL2SQLParser.copyParseResponse(source, target);
+
+        assertEquals(intent, target.getBankIntentResult());
     }
 
     @Test

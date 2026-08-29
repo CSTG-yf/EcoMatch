@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, message, Form, Space, Drawer, Input, Select } from 'antd';
+import { Button, message, Form, Space, Modal, Input, Select } from 'antd';
 import { ProCard } from '@ant-design/pro-components';
 import { useModel } from '@umijs/max';
 import { createGroupAuth, updateGroupAuth } from '../../service';
@@ -20,12 +20,7 @@ type Props = {
 };
 const FormItem = Form.Item;
 const TextArea = Input.TextArea;
-const PermissionCreateDrawer: React.FC<Props> = ({
-  visible,
-  permissonData,
-  onCancel,
-  onSubmit,
-}) => {
+const PermissionCreateModal: React.FC<Props> = ({ visible, permissonData, onCancel, onSubmit }) => {
   const modelModel = useModel('SemanticModel.modelData');
   const dimensionModel = useModel('SemanticModel.dimensionData');
   const metricModel = useModel('SemanticModel.metricData');
@@ -181,17 +176,17 @@ const PermissionCreateDrawer: React.FC<Props> = ({
 
   return (
     <>
-      <Drawer
-        width={'100%'}
-        className={styles.permissionDrawer}
+      <Modal
+        width={1280}
+        className={styles.permissionModal}
         destroyOnClose
-        title={'权限组信息'}
+        title={permissonData?.groupId ? '编辑授权' : '新建授权'}
         maskClosable={false}
         open={visible}
         footer={renderFooter()}
-        onClose={onCancel}
+        onCancel={onCancel}
       >
-        <div style={{ overflow: 'auto', margin: '0 auto', width: '1200px' }}>
+        <div style={{ margin: '0 auto', width: '100%' }}>
           <Space direction="vertical" style={{ width: '100%' }} size={20}>
             <ProCard title="基本信息" bordered>
               <PermissionCreateForm
@@ -306,9 +301,9 @@ const PermissionCreateDrawer: React.FC<Props> = ({
             </ProCard>
           </Space>
         </div>
-      </Drawer>
+      </Modal>
     </>
   );
 };
 
-export default PermissionCreateDrawer;
+export default PermissionCreateModal;

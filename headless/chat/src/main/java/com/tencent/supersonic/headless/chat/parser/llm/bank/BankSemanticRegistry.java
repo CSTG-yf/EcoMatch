@@ -45,9 +45,14 @@ public final class BankSemanticRegistry {
             Set<String> supportedIntents, String outputColumn) {}
 
     private static final Set<String> PLAN_ACTIONS = enumNames(BankQueryPlan.PlanAction.class);
+    private static final Set<String> REQUIREMENT_ACTIONS =
+            enumNames(BankRequestContract.Action.class);
     private static final Set<String> INTENTS =
             Arrays.stream(BankIntentType.values()).filter(value -> value != BankIntentType.UNKNOWN)
                     .map(Enum::name).collect(Collectors.toCollection(LinkedHashSet::new));
+    private static final Set<String> REQUIREMENT_INTENTS = enumNames(BankIntentType.class);
+    private static final Set<String> ANSWER_FACT_TYPES =
+            enumNames(BankRequestContract.AnswerFactType.class);
     private static final Set<String> AGGREGATIONS = enumNames(BankQueryPlan.Aggregation.class);
     private static final Set<String> TIME_GRANULARITIES =
             enumNames(BankQueryPlan.TimeGranularity.class);
@@ -178,7 +183,7 @@ public final class BankSemanticRegistry {
     public static String jsonSchema() {
         return """
                 {"type":"object","additionalProperties":false,"required":["version","action","intent",
-                "metrics","dimensions","organizations","time","filters","calculation","orderBy",
+                "metrics","derivedMetrics","dimensions","organizations","time","filters","calculation","orderBy",
                 "limit","output"],"properties":{"version":{"const":"1.0"},
                 "action":{"enum":%s},"intent":{"enum":%s},"metrics":{"type":"array",
                 "items":{"type":"object","additionalProperties":false,"required":["bizName",
@@ -188,10 +193,10 @@ public final class BankSemanticRegistry {
                 "additionalProperties":false,"required":["code"],"properties":{"code":{"enum":%s},
                 "bizName":{"type":["string","null"]}}}},"time":{"type":"object",
                 "additionalProperties":false,"required":["startDate","endDate","granularity",
-                "comparison"],"properties":{"startDate":{"type":"string","format":"date"},
-                "endDate":{"type":"string","format":"date"},"granularity":{"enum":%s},
+                "comparison"],"properties":{"startDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},
+                "endDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},"granularity":{"enum":%s},
                 "comparison":{"enum":%s},"baselineStartDate":{"type":["string","null"],
-                "format":"date"},"baselineEndDate":{"type":["string","null"],"format":"date"}}},
+                "format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},"baselineEndDate":{"type":["string","null"],"format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"}}},
                 "filters":{"type":"array","items":{"type":"object","additionalProperties":false,
                 "required":["field","operator"],"properties":{"field":{"enum":%s},
                 "operator":{"enum":%s},"value":{"type":["string","null"]},"values":{"type":"array",
@@ -216,6 +221,41 @@ public final class BankSemanticRegistry {
                         jsonArray(FILTER_OPERATORS), jsonArray(CALCULATION_TYPES),
                         jsonArray(SORT_DIRECTIONS), jsonArray(derivedMetricCodes()),
                         jsonArray(metricCodes()), jsonArray(metricCodes()))
+                .strip();
+    }
+
+    /**
+     * Strict REQUIREMENTS-stage schema. It constrains JSON shape and published identifiers, while
+     * {@link BankRequestContractResponseParser} remains responsible for semantic cross-field rules.
+     */
+    public static String requestContractJsonSchema() {
+        return """
+                {"type":"object","additionalProperties":false,"required":["version","action","intent",
+                "metricCodes","derivedMetrics","organizationCodes","time","filters","requiredLimit",
+                "answerFactTypes","clarification"],"properties":{"version":{"const":"1.0"},
+                "action":{"enum":%s},"intent":{"enum":%s},"metricCodes":{"type":"array",
+                "items":{"enum":%s}},"derivedMetrics":{"type":"array","items":{"type":"object",
+                "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
+                "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},"denominator":{"enum":%s},
+                "name":{"type":"string"}}}},"organizationCodes":{"type":"array","items":{"enum":%s}},
+                "time":{"type":["object","null"],"additionalProperties":false,"required":["startDate",
+                "endDate","granularity","comparison","baselineStartDate","baselineEndDate"],"properties":{
+                "startDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},
+                "endDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},
+                "granularity":{"enum":%s},"comparison":{"enum":%s},"baselineStartDate":{"type":["string","null"],
+                "format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},"baselineEndDate":{"type":["string","null"],
+                "format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"}}},"filters":{"type":"array",
+                "items":{"type":"object","additionalProperties":false,"required":["field","operator","value","values"],
+                "properties":{"field":{"enum":%s},"operator":{"enum":%s},"value":{"type":["string","null"]},
+                "values":{"type":"array","items":{"type":"string"}}}}},"requiredLimit":{"type":["integer","null"],"minimum":1},
+                "answerFactTypes":{"type":"array","items":{"enum":%s}},"clarification":{"type":["string","null"]}}}
+                """
+                .formatted(jsonArray(REQUIREMENT_ACTIONS), jsonArray(REQUIREMENT_INTENTS),
+                        jsonArray(metricCodes()), jsonArray(derivedMetricCodes()),
+                        jsonArray(metricCodes()), jsonArray(metricCodes()),
+                        jsonArray(organizationCodes()), jsonArray(TIME_GRANULARITIES),
+                        jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
+                        jsonArray(FILTER_OPERATORS), jsonArray(ANSWER_FACT_TYPES))
                 .strip();
     }
 

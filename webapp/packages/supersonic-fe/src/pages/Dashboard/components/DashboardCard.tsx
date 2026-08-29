@@ -25,13 +25,14 @@ const DashboardCard: React.FC<Props> = ({
   onSelect,
 }) => {
   const rows = Array.isArray(result?.queryResults) ? result.queryResults : [];
+  const hasSuccessfulResult = result?.queryState === 'SUCCESS';
   const columns = Array.isArray(result?.queryColumns)
-      ? result.queryColumns.slice(0, 8).map((column: any) => ({
-          title: column.bizName || column.name,
-          dataIndex: dashboardColumnKey(column),
-          key: dashboardColumnKey(column),
-          ellipsis: true,
-        }))
+    ? result.queryColumns.slice(0, 8).map((column: any) => ({
+        title: column.bizName || column.name,
+        dataIndex: dashboardColumnKey(column),
+        key: dashboardColumnKey(column),
+        ellipsis: true,
+      }))
     : [];
   const dimensionColumn = columns[0];
   const metricColumns = columns.slice(1);
@@ -120,7 +121,10 @@ const DashboardCard: React.FC<Props> = ({
               />
             )
           ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="等待刷新查询结果" />
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={hasSuccessfulResult ? '暂无数据' : '等待刷新查询结果'}
+            />
           )}
         </Spin>
       </div>

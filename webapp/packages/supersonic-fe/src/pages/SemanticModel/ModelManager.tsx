@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { history, useParams, useModel } from '@umijs/max';
+import { useParams, useModel } from '@umijs/max';
 import ModelManagerTab from './components/ModelManagerTab';
-import { toModelList } from '@/pages/SemanticModel/utils';
+import { normalizeModelMenuKey, toModelList } from '@/pages/SemanticModel/utils';
 
 type Props = {};
 
 const ModelManager: React.FC<Props> = ({}) => {
-  const defaultTabKey = 'overview';
+  const defaultTabKey = 'metric';
   const params: any = useParams();
   const modelId = params.modelId;
   const domainModel = useModel('SemanticModel.domainData');
@@ -17,14 +17,18 @@ const ModelManager: React.FC<Props> = ({}) => {
   const { selectModelId, modelList } = modelModel;
   const { MrefreshDimensionList } = dimensionModel;
   const { MrefreshMetricList } = metricModel;
-  const menuKey = params.menuKey ? params.menuKey : !Number(modelId) ? defaultTabKey : '';
+  const menuKey = normalizeModelMenuKey(params.menuKey) || defaultTabKey;
   const [activeKey, setActiveKey] = useState<string>(menuKey);
 
   const initModelConfig = () => {
     const currentMenuKey = menuKey === defaultTabKey ? '' : menuKey;
     toModelList(selectDomainId, selectModelId!, currentMenuKey);
-    setActiveKey(currentMenuKey);
+    setActiveKey(menuKey);
   };
+
+  useEffect(() => {
+    setActiveKey(menuKey);
+  }, [menuKey]);
 
   useEffect(() => {
     if (!selectModelId || `${selectModelId}` === `${modelId}`) {
@@ -40,8 +44,9 @@ const ModelManager: React.FC<Props> = ({}) => {
       activeKey={activeKey}
       modelList={modelList}
       onMenuChange={(menuKey) => {
-        setActiveKey(menuKey);
-        toModelList(selectDomainId, selectModelId!, menuKey);
+        const normalizedMenuKey = normalizeModelMenuKey(menuKey) || defaultTabKey;
+        setActiveKey(normalizedMenuKey);
+        toModelList(selectDomainId, selectModelId!, normalizedMenuKey);
       }}
     />
   );

@@ -12,6 +12,7 @@ import { history } from '@umijs/max';
 export type GlobalHeaderRightProps = {
   menu?: boolean;
   onClickLogin?: () => void;
+  hideName?: boolean;
 };
 
 /**
@@ -26,7 +27,7 @@ const loginOut = async () => {
 
 const { APP_TARGET } = process.env;
 
-const AvatarDropdown: React.FC<GlobalHeaderRightProps> = () => {
+const AvatarDropdown: React.FC<GlobalHeaderRightProps> = ({ hideName }) => {
   const { initialState = {}, setInitialState } = useModel('@@initialState');
   const { currentUser = {} } = initialState as any;
   const changePasswordModalRef = useRef<IRefChangePasswordModal>(null);
@@ -90,7 +91,7 @@ const AvatarDropdown: React.FC<GlobalHeaderRightProps> = () => {
       >
         <span className={`${styles.action} ${styles.account}`}>
           <TMEAvatar className={styles.avatar} size="small" staffName={currentUser.staffName} />
-          <span className={styles.userName}>{currentUser.staffName}</span>
+          {!hideName && <span className={styles.userName}>{currentUser.staffName}</span>}
         </span>
       </HeaderDropdown>
       <ChangePasswordModal ref={changePasswordModalRef} />

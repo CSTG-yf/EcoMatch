@@ -100,6 +100,7 @@ const sanitizeSemanticQuery = (query: any = {}) => ({
   dimensionFilters: Array.isArray(query.dimensionFilters)
     ? query.dimensionFilters.map(semanticFilter)
     : [],
+  metricFilters: Array.isArray(query.metricFilters) ? query.metricFilters.map(semanticFilter) : [],
 });
 
 const normalizeDashboardFilterOperator = (operator: unknown) => {

@@ -80,7 +80,6 @@
 | `s2.parser.bank.max-candidates` | `1` |
 | `s2.parser.bank.plan.thinking.enable` | `false` |
 | `s2.parser.bank.plan.deterministic-short-circuit.enable` | `false` |
-| `s2.parser.bank.plan.soft-fallback.enable` | `true` |
 | Agent 33 `BANK_CONSTRAINED_PLAN` | 启用 |
 | Agent 33 `EXECUTION_SQL_CORRECTOR` | 建议启用 |
 
@@ -89,7 +88,7 @@
 - hard20 与 reg21 仅保留为历史局部工程观察，不能导出当前效果结论。
 - 这些是局部消融证据，不等于 TRAIN 119、DEV 40 或 TEST 40 的全量正式成绩。
 - 当前记录显示 `max-candidates=2` 没有改善历史局部结果，但增加了延迟。
-- 当前记录显示关闭 `soft-fallback` 会造成历史局部解析和执行回归。
+- 历史 `soft-fallback` 消融对应已删除的规则回退实现，不能解释当前 model-led 链路。
 
 ### 3.3 当前全量 TRAIN 报告
 
@@ -137,7 +136,7 @@
 4. 已存在一个具体漂移：JSON Schema 支持 `HALF_YEAR`，当前系统提示词的粒度目录没有列出 `HALF_YEAR`。
 5. `filters` 的字段、操作符和值域没有完整枚举。
 6. `output.columns` 不能完整表达当前值、基期值、变化额、变化率、全省均值、排名等输出事实角色。
-7. 当前实现仍保留规则 `soft-fallback`，模型全拒后可能由规则计划接管。
+7. 规则 `soft-fallback` 已移除；模型全拒后只允许结构化 repair / cold-replan，仍失败则明确拒答或请求澄清。
 8. 当前桌面 `experiment/bank-path-ablation` 工作树包含未提交修改；本文不吸收、覆盖或提交这些修改。
 
 ## 4. 目标架构
@@ -554,7 +553,7 @@ Task 0 合规与产品分叉定稿
 - Owner/Boundary：产品与竞赛合规；只更新方案/准则，不改运行时代码。
 - 依赖：本文 §7 和 §12。
 - Mode：SIMPLE。
-- Verification/Stop：明确“原始 TRAIN NL few-shot 是否允许”和“soft-fallback 最终策略”；未定稿则停止实施。
+- Verification/Stop：明确“原始 TRAIN NL few-shot 是否允许”；规则 `soft-fallback` 已确定删除，不再作为产品分叉。
 
 ### Task 1：建立唯一语义注册表
 
@@ -615,17 +614,9 @@ Task 0 合规与产品分叉定稿
 
 ### 决策 B：`soft-fallback` 如何处理
 
-现有事实：当前 hard20 证据显示关闭它会显著掉分。目标愿景：模型失败后不应由旧规则悄悄接管。
-
-推荐过渡策略：
-
-1. 保留开关和现有实现作为 baseline/回滚锚点，不立即删除。
-2. 新路线所有 trace 必须标记 `planSource`。
-3. 核心消融同时测 `soft-fallback=true/false`。
-4. 只有 pure-model + repair 在 TRAIN/DEV 达到晋级线，才把正式默认切为 false。
-5. 若 false 仍显著掉分，继续优化模型目录与 repair，不用删除回滚锚点制造假完成。
-
-需要用户确认：是否接受“先保留、达标后关闭”的迁移方式。
+已定稿：规则回退实现和无消费者的配置参数一并删除，不再作为 baseline、回滚锚点或消融变量。
+历史 hard20 结果属于旧实现，不能用来解释当前链路。所有可恢复失败通过结构化错误回送模型并
+执行 cold-replan；仍不可满足时明确拒答或请求澄清，禁止后台规则悄悄接管计划。
 
 ### 决策 C：三次失败后的产品行为
 

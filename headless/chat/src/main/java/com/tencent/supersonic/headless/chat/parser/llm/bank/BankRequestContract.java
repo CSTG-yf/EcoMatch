@@ -30,6 +30,9 @@ public class BankRequestContract {
     public static final String CURRENT_VERSION = "1.0";
     public static final String PROPERTY_KEY = "bank.nl2sql.requirements";
 
+    /** Strict response schema used by llama.cpp constrained decoding in the REQUIREMENTS stage. */
+    public static final String JSON_SCHEMA = BankSemanticRegistry.requestContractJsonSchema();
+
     @Builder.Default
     private String version = CURRENT_VERSION;
     private Action action;

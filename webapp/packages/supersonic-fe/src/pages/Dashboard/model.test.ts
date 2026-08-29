@@ -100,6 +100,17 @@ describe('dashboard model', () => {
             sqlInfo: { sql: 'select 1' },
             token: 'secret',
             metrics: [{ bizName: '存款余额' }],
+            metricFilters: [
+              {
+                bizName: '存款余额',
+                operator: '>',
+                value: {
+                  threshold: 100,
+                  sql: 'select * from metric_filter_secret',
+                  secret: 'never-persist-this',
+                },
+              },
+            ],
           } as any,
         },
       ],
@@ -116,12 +127,22 @@ describe('dashboard model', () => {
             parseId: 17,
             modelId: 3,
             metrics: [{ bizName: '存款余额' }],
+            metricFilters: [
+              {
+                bizName: '存款余额',
+                operator: '>',
+                value: { threshold: 100 },
+              },
+            ],
           },
         },
       ],
     });
-    expect(JSON.stringify(serialized).toLowerCase()).not.toContain('sql');
-    expect(JSON.stringify(serialized).toLowerCase()).not.toContain('token');
+    const serializedJson = JSON.stringify(serialized).toLowerCase();
+    expect(serializedJson).not.toContain('sql');
+    expect(serializedJson).not.toContain('token');
+    expect(serializedJson).not.toContain('secret');
+    expect(serializedJson).not.toContain('never-persist-this');
     expect(serialized.globalFilters[0].value).toEqual({ safe: '对公' });
     expect(serialized.globalFilters[0].operator).toBe('=');
     expect(typeof serializeDashboardWriteConfig(config)).toBe('string');

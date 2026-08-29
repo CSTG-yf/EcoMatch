@@ -34,6 +34,7 @@ export type MessageItem = {
 
 export type ConversationDetailType = {
   chatId: number;
+  agentId: number;
   chatName: string;
   createTime?: string;
   creator?: string;

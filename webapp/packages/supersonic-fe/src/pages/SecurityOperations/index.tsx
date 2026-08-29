@@ -29,6 +29,9 @@ const SecurityOperations: React.FC = () => {
             <span>{currentUser?.staffName || currentUser?.name || '-'}</span>
             <span>{organization || '全局范围'}</span>
           </div>
+          <div className={styles.description}>
+            安全运营：审计 / 告警 / 异常规则。此处不用于配置主题域、模型、Agent 数据访问权限。
+          </div>
         </div>
         <Tag color={canWrite ? 'blue' : 'default'}>{canWrite ? '安全管理员' : '只读审计'}</Tag>
       </header>

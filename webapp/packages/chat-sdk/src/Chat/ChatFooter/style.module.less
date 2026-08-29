@@ -3,19 +3,34 @@
   z-index: 10;
   display: flex;
   flex-direction: column;
-  margin: 6px 20px 20px;
+  width: min(760px, 100% - 40px);
+  margin: 6px auto 24px;
+  padding: 10px 12px 12px;
+  background: #fff;
+  border: 1px solid var(--border-color-base, #e5e6eb);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover,
+  &:focus-within {
+    border-color: #c4c7ce;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+  }
 
   .tools {
     display: flex;
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     column-gap: 8px;
 
     .toolItem {
       display: flex;
       align-items: center;
       padding: 2px 6px;
+      border: 0;
       color: var(--text-color-secondary);
+      font-family: inherit;
       font-size: 12px;
       column-gap: 6px;
       background-color: #f6f6f6;
@@ -25,38 +40,17 @@
       &:hover {
         background-color: #f1f1f1;
       }
+
+      &:focus-visible {
+        outline: 2px solid var(--chat-blue);
+        outline-offset: 2px;
+      }
     }
   }
 
   .composer {
     display: flex;
-    height: 70px;
-
-    .collapseBtn {
-      height: 46px;
-      margin: 0 10px;
-      color: var(--text-color-third);
-      font-size: 20px;
-      line-height: 46px;
-      cursor: pointer;
-
-      &:hover {
-        color: var(--chat-blue);
-      }
-    }
-
-    .addConversation {
-      height: 46px;
-      margin: 0 20px 0 10px;
-      color: var(--text-color-fourth);
-      font-size: 26px;
-      line-height: 54px;
-      cursor: pointer;
-
-      &:hover {
-        color: var(--chat-blue);
-      }
-    }
+    height: 76px;
 
     .composerInputWrapper {
       position: relative;
@@ -64,24 +58,25 @@
 
       .composerInput {
         width: 100%;
-        height: 100%;
+        height: 40px;
+
         :global {
           .ant-select-selector {
             box-sizing: border-box;
-            height: 100%;
+            height: 40px;
             overflow: hidden;
             color: rgba(0, 0, 0, 0.87);
             font-size: 14px;
             word-break: break-all;
-            background: #f9f9f9;
-            border: 0;
-            border-radius: 8px;
-            transition: border-color 0.15s ease-in-out;
+            background: transparent !important;
+            border: 0 !important;
+            border-radius: 0;
+            box-shadow: none !important;
             resize: none;
 
             .ant-select-selection-search-input {
               height: 40px !important;
-              padding: 0 12px;
+              padding: 0 4px;
             }
 
             .ant-select-selection-search {
@@ -91,27 +86,50 @@
 
             .ant-select-selection-placeholder {
               line-height: 40px;
-              margin-bottom: 30px;
             }
-          }
-
-          .ant-select-clear {
-            right: auto;
-            left: 500px;
-            width: 16px;
-            height: 16px;
-            margin-top: -8px;
-            font-size: 16px;
           }
         }
       }
 
-      :global {
-        .ant-select-focused {
-          .ant-select-selector {
-            box-shadow: rgb(74, 114, 245) 0px 0px 3px !important;
-          }
+      .composerActions {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        max-width: calc(100% - 48px);
+        align-items: center;
+        column-gap: 8px;
+      }
+
+      .agentSelector {
+        display: inline-flex;
+        height: 28px;
+        align-items: center;
+        padding: 0 8px;
+        border: 0;
+        color: var(--chat-blue);
+        font: inherit;
+        background: transparent;
+        border-radius: 6px;
+        cursor: pointer;
+        column-gap: 4px;
+
+        &:hover {
+          background: #f4f6ff;
         }
+
+        &:focus-visible {
+          outline: 2px solid var(--chat-blue);
+          outline-offset: 1px;
+        }
+      }
+
+      .agentStatus {
+        overflow: hidden;
+        color: var(--text-color-third);
+        font-size: 12px;
+        white-space: nowrap;
+        text-overflow: ellipsis;
       }
     }
   }
@@ -134,39 +152,110 @@
 
     &.sendBtnActive {
       background-color: var(--chat-blue);
+      cursor: pointer;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--chat-blue);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
     }
   }
 
   &.mobile {
     margin: 6px 10px 10px;
 
-    .addConversation {
-      height: 40px;
-      margin: 0 12px 0 4px;
+    .tools {
+      gap: 8px;
+      flex-wrap: wrap;
+
+      .toolItem {
+        width: 44px;
+        height: 44px;
+        justify-content: center;
+        padding: 0;
+
+        .toolLabel {
+          display: none;
+        }
+      }
     }
 
     .composer {
-      height: 40px;
+      height: 72px;
+
       :global {
         .ant-select-selector {
           font-size: 14px !important;
         }
 
         .ant-select-selection-search-input {
-          padding: 0 10px !important;
+          padding: 0 4px !important;
         }
+      }
 
-        .ant-select-selection-placeholder {
-          margin-bottom: 0 !important;
-          padding-left: 0 !important;
-          line-height: 38px !important;
-        }
+      .agentStatus {
+        max-width: 46vw;
       }
     }
 
     .sendBtn {
       right: 4px;
-      bottom: 6px;
+      bottom: 0;
+      width: 36px;
+      height: 36px;
+    }
+  }
+}
+
+.agentSelectorContent {
+  display: flex;
+  width: 280px;
+  max-height: 320px;
+  flex-direction: column;
+  overflow-y: auto;
+  row-gap: 6px;
+
+  .agentState {
+    padding: 12px;
+    color: var(--text-color-third);
+    text-align: center;
+  }
+
+  .agentOption {
+    display: flex;
+    min-height: 44px;
+    flex-direction: column;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    color: var(--text-color);
+    font: inherit;
+    text-align: left;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    row-gap: 3px;
+
+    span {
+      overflow: hidden;
+      color: var(--text-color-third);
+      font-size: 12px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    &:hover,
+    &.agentOptionActive {
+      border-color: #d9e1ff;
+      background: #f4f6ff;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--chat-blue);
+      outline-offset: -2px;
     }
   }
 }

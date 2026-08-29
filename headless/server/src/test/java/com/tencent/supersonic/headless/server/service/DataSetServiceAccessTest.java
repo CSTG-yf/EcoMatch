@@ -8,6 +8,7 @@ import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.request.DataSetReq;
 import com.tencent.supersonic.headless.api.pojo.response.DataSetResp;
+import com.tencent.supersonic.headless.api.pojo.response.DomainResp;
 import com.tencent.supersonic.headless.server.persistence.dataobject.DataSetDO;
 import com.tencent.supersonic.headless.server.persistence.mapper.DataSetDOMapper;
 import com.tencent.supersonic.headless.server.service.impl.DataSetServiceImpl;
@@ -70,6 +71,41 @@ class DataSetServiceAccessTest {
 
         assertThrows(InvalidPermissionException.class,
                 () -> service.getDataSet(1L, User.getVisitUser()));
+
+        verifyNoInteractions(domainService);
+    }
+
+    @Test
+    void domainViewerCanReadOnlyDataSetDomainId() {
+        DataSetDO dataSet = dataSet(1L, 10L, "owner");
+        dataSet.setDataSetDetail("not-json");
+        User viewer = User.get(2L, "analyst");
+        DomainResp domain = new DomainResp();
+        domain.setId(10L);
+        when(mapper.selectById(1L)).thenReturn(dataSet);
+        when(domainService.getDomainAuthSet(viewer, AuthType.VIEWER)).thenReturn(Set.of(domain));
+
+        assertEquals(10L, service.getDataSetDomainId(1L, viewer));
+
+        verify(mapper).selectById(1L);
+        verifyNoMoreInteractions(mapper);
+    }
+
+    @Test
+    void userWithoutDataSetOrDomainViewerPermissionCannotReadDomainId() {
+        User analyst = User.get(2L, "analyst");
+        when(mapper.selectById(1L)).thenReturn(dataSet(1L, 10L, "owner"));
+        when(domainService.getDomainAuthSet(analyst, AuthType.VIEWER)).thenReturn(Set.of());
+
+        assertThrows(InvalidPermissionException.class,
+                () -> service.getDataSetDomainId(1L, analyst));
+    }
+
+    @Test
+    void explicitDataSetAdminCanReadDomainIdWithoutDomainPermission() {
+        when(mapper.selectById(1L)).thenReturn(dataSet(1L, 10L, "analyst"));
+
+        assertEquals(10L, service.getDataSetDomainId(1L, User.get(2L, "analyst")));
 
         verifyNoInteractions(domainService);
     }

@@ -32,6 +32,28 @@ class SemanticQueryRequestSecurityTest {
     }
 
     @Test
+    void externalSqlJsonCannotSupplyPhysicalSqlInfo() throws Exception {
+        QuerySqlReq request = objectMapper.readValue("{\"sql\":\"select 1\",\"sqlInfo\":{"
+                + "\"querySQL\":\"select secret from physical_table\","
+                + "\"correctedQuerySQL\":\"select repaired from physical_table\"}}",
+                QuerySqlReq.class);
+
+        assertTrue(request.getSqlInfo() != null);
+        assertTrue(request.getSqlInfo().getQuerySQL() == null);
+        assertTrue(request.getSqlInfo().getCorrectedQuerySQL() == null);
+    }
+
+    @Test
+    void externalSqlJsonCannotClaimRowPermissionWasApplied() throws Exception {
+        QuerySqlReq request = objectMapper.readValue(
+                "{\"sql\":\"select 1\",\"rowPermissionApplied\":true}", QuerySqlReq.class);
+
+        assertFalse(request.isRowPermissionApplied());
+        request.setRowPermissionApplied(true);
+        assertTrue(request.isRowPermissionApplied());
+    }
+
+    @Test
     void externalDataSetJsonCannotDisableAuthorization() throws Exception {
         QueryDataSetReq request = objectMapper.readValue("{\"dataSetId\":1,\"needAuth\":false}",
                 QueryDataSetReq.class);

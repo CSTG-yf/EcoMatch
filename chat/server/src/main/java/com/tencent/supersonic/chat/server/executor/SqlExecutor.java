@@ -94,6 +94,9 @@ public class SqlExecutor implements ChatQueryExecutor {
         QuerySqlReq sqlReq = QuerySqlReq.builder().sql(scopeSql).build();
         sqlReq.setSqlInfo(parseInfo.getSqlInfo());
         sqlReq.setDataSetId(parseInfo.getDataSetId());
+        // resultOnly is the trusted, server-side official evaluation mode. It must capture the
+        // actual typed facts rather than an authorization-masked presentation response.
+        sqlReq.setNeedAuth(!executeContext.getRequest().isResultOnly());
         sqlReq.setTrustedCompiledSql(StringUtils
                 .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
 
@@ -108,7 +111,8 @@ public class SqlExecutor implements ChatQueryExecutor {
         boolean repairAttempted = false;
         if (queryResp != null && StringUtils.isNotBlank(originalError)
                 && LLMSqlQuery.QUERY_MODE.equals(parseInfo.getQueryMode())
-                && executeContext.getAgent() != null) {
+                && executeContext.getAgent() != null
+                && shouldAttemptPhysicalSqlRepair(parseInfo)) {
             String repairedSql = LLMPhysicalSqlCorrector.repairExecutionError(
                     executeContext.getAgent().getChatAppConfig()
                             .get(LLMPhysicalSqlCorrector.EXECUTION_APP_KEY),
@@ -148,6 +152,21 @@ public class SqlExecutor implements ChatQueryExecutor {
         }
 
         return queryResult;
+    }
+
+    /**
+     * Bank constrained plans must be repaired by regenerating the plan and recompiling it. They
+     * must never be handed to the legacy physical-SQL corrector, which would let a model mutate a
+     * compiler-produced SQL string outside the plan contract. Other query modes retain the
+     * existing optional physical-SQL correction behavior.
+     */
+    static boolean shouldAttemptPhysicalSqlRepair(SemanticParseInfo parseInfo) {
+        if (parseInfo == null || parseInfo.getProperties() == null) {
+            return true;
+        }
+        // Presence of the marker is authoritative. A malformed marker must fail closed rather
+        // than reopening the legacy physical-SQL model path.
+        return !parseInfo.getProperties().containsKey(BankPlanToolResult.PROPERTY_KEY);
     }
 
     private void persistExecutionTelemetry(SemanticParseInfo parseInfo,

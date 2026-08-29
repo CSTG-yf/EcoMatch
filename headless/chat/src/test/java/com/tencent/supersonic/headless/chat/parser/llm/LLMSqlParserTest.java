@@ -175,7 +175,7 @@ class LLMSqlParserTest {
             new LLMSqlParser().parse(queryCtx);
         }
 
-        verify(requestService, times(3)).runText2SQL(llmReq);
+        verify(requestService, times(2)).runText2SQL(llmReq);
         verify(responseService, never()).addParseInfo(any(), any(), any(), anyDouble(), any());
         assertEquals(ParseResp.ParseState.FAILED, parseResp.getState());
         assertTrue(BankNl2SqlError.isTerminalParserError(parseResp.getErrorMsg()));
