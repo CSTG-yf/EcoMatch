@@ -569,3 +569,56 @@ H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11
   meets=1）；smoke **r14 = 5/5** 干净过门（caseAccuracy 1.0，errorCategories 全 NONE）。
 - **注意**：r6 分数不含本方向修复（H-10 仍计 fail）。是否重跑 test r7 以反映修复
   属成本决策，待用户定夺。
+
+### 2026-08-29｜train 全量首跑 = 119/119 满分（方向修复 jar）
+
+- **train r1**（glm53low-train-20260829-r1）：**119/119，caseAccuracy = 1.0**，
+  用时 20m21s，串行。errorCategories 全 NONE×119，parse / execution 100%，
+  无一次瞬时 modelFailure（对照 08-28 当日 4 次）。源码版本 `5941882`
+  （= 方向感知 meets 修复 + RUN_RECORDS 文档后的 HEAD）。
+- 运行形态：v61 提示词 + 方向感知 meets jar（runtime-fallbackhook-r7 部署，
+  smoke r14 5/5 门禁后执行）；协议 fact-contract-v3，全分母。
+- **解读**：dev 39/40（唯一失败=瞬时模型故障）+ train 119/119 全对 →
+  训练侧已无系统性缺陷。test 侧剩余 H-10（方向修复未计分）/ M-19 / S-07 中，
+  M-19 / S-07 的病灶形态（复合比率不收敛、非月末单日最值路由）在 train/dev
+  无同形题，属 test 特有难例；按用户要求**后续优化验证一律以 train/dev 为准，
+  test 仅作冻结终验，不再对着 test 刷**。
+- RUN_RECORDS 本节暂未提交（本批未授权 commit）。
+
+### 2026-08-29｜train r2 = 116/119：3 失败全为端点抖动，非族修复批回归（已归因）
+
+- **train r2**（glm53low-train-20260829-r2，family-guards 修复批 jar + smoke 5/5 门禁后）：
+  **116/119，caseAccuracy = 0.97479**，用时 17m22s，串行。
+- **归因结论（铁证）**：3 个失败（TRAIN-S-05 / S-10 / S-17）在评测数据里全部是
+  `candidateRejectionState=PLAN_EXCEPTION` + `llmCandidateCreated=false`——模型候选
+  根本没创建，族守卫/模板/编译器**均未执行到**；r2 全场 119 题恰好只有这 3 题带
+  PLAN_EXCEPTION 态，其余 116 题与 r1 完全一致。这是已知的模型端点抖动签名
+  （"bank query plan model generation failed"，39 字符，多轮重试全数失败，
+  parseMs 24–44s；对照 r1 当日零抖动）。
+- **回放复核**：S-05 重放即过（errorMsg=None）；S-10 重放再次抖动（服务暂不可用）；
+  S-17 重放撞上 strategy 层既有的全省排名严格契约
+  （province_wide_institution_ranking_mismatch，非本批改动）后兜底 SQL 被
+  SqlSafetyPolicy 拒绝——定性：SqlExecutor.java:101-106 设计上把 free-SQL 兜底输出
+  按 model-written 强制走非受信策略路径，兜底模型写出无界 `SELECT *` 分支即被正确
+  拒绝，属 M-19/S-07 同族「兜底不收敛」开放缺陷，不在任何计分路径上，登记 backlog
+  （候选改进：把策略拒绝原因回灌兜底修复 prompt，归入「输出后反馈全覆盖」改造）。
+- **处置**：同 jar 同参数重跑 **train r3**（结果见下节）；本节先固化归因，
+  防止把环境抖动误读为修复批回归。
+- RUN_RECORDS 本节暂未提交（本批未授权 commit）。
+
+### 2026-08-29｜train r3 = 118/119（修复批 jar 定版验证；唯一失败=replay 3/3 的端点抖动）
+
+- **train r3**（glm53low-train-20260829-r3，同 r2 的 family-guards jar、同参数）：
+  **118/119，caseAccuracy = 0.9916**，用时仅 4m51s（端点健康窗口），串行。
+  全场 119 题唯一拒绝态 = TRAIN-H-22 的 PLAN_EXCEPTION（parseMs 33.4s，
+  llmCandidateCreated=false）；**其余 118 题全部通过——凡模型响应成功的题
+  parse/execute/resultExact = 100%，修复批零语义回归**。
+- **H-22 replay 3/3 通过**（每次 ~6s，errorMsg=None），按 dev r10 同一协议判定为
+  瞬时 modelFailure，非代码问题。
+- **抖动跨 run 随机性（回归理论终证）**：r2 的 3 个抖动题（S-05/S-10/S-17）与 r3 的
+  1 个（H-22）互不重叠、题目随机分布；r1=0/119、r2=3/119、r3=1/119，与 08-28 当日
+  4 次瞬时故障同一环境签名。train 侧不重跑刷 119/119（遵循 dev r10=39/40 定版先例：
+  唯一失败=瞬时抖动 + replay 3/3 即定版）；如需满分记录可择机重跑，属成本决策。
+- **修复批验证闭环达成**：族审计修复批（方向对象入模板 + 守卫收口 + 差分测试加固）
+  smoke 5/5 → train r3 118/119（有效题 100%）→ 本节 + r2 归因节存档。
+  13 文件修复批 + 本记录 **commit 待用户批准**。
