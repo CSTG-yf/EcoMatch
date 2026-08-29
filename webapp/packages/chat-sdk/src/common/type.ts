@@ -207,6 +207,7 @@ export type MsgDataType = {
   recommendedChart?: ChartRecommendationType;
   candidateCharts?: ChartRecommendationType[];
   businessExplanation?: BusinessExplanationType;
+  bankIntentResult?: BankIntentResultType;
 };
 
 export type DashboardSemanticQuery = {
@@ -249,6 +250,7 @@ export type ParseDataType = {
   selectedParses: ChatContextType[];
   candidateParses: ChatContextType[];
   similarSolvedQuery: SimilarQuestionType[];
+  bankIntentResult?: BankIntentResultType;
   multiTurnContext?: MultiTurnContextType;
 };
 

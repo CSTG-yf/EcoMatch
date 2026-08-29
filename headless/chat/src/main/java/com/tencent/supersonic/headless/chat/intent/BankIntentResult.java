@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-public class BankIntentResult implements Serializable {
+public class BankIntentResult implements com.tencent.supersonic.headless.api.pojo.response.BankIntentResult {
 
     private static final long serialVersionUID = 1L;
 
