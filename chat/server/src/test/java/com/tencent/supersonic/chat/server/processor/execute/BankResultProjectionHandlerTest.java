@@ -41,6 +41,8 @@ class BankResultProjectionHandlerTest {
         assertTrue(applied);
         assertEquals(List.of("org_code", "org_name", "metric_code", "metric_value"),
                 result.getQueryColumns().stream().map(column -> column.getBizName()).toList());
+        assertEquals(List.of("STRING", "STRING", "STRING", "NUMBER"), result.getQueryColumns()
+                .stream().map(column -> column.getType()).toList());
         assertEquals(List.of("CATEGORY", "CATEGORY", "CATEGORY", "NUMBER"), result.getQueryColumns()
                 .stream().map(column -> column.getShowType()).toList());
         assertEquals(List.of(row("org_code", "ORG008", "org_name", "江苏省H市农商行", "metric_code",
@@ -77,6 +79,10 @@ class BankResultProjectionHandlerTest {
                 List.of("org_code", "org_name", "numerator_value", "denominator_value",
                         "ratio_percent"),
                 result.getQueryColumns().stream().map(column -> column.getBizName()).toList());
+        assertEquals(List.of("STRING", "STRING", "NUMBER", "NUMBER", "NUMBER"),
+                result.getQueryColumns().stream().map(column -> column.getType()).toList());
+        assertEquals(List.of("CATEGORY", "CATEGORY", "NUMBER", "NUMBER", "NUMBER"),
+                result.getQueryColumns().stream().map(column -> column.getShowType()).toList());
         assertEquals(List.of(row("org_code", "ORG004", "org_name", "江苏省D市农商行", "numerator_value",
                 new BigDecimal("25.75"), "denominator_value", new BigDecimal("48.50"),
                 "ratio_percent", new BigDecimal("53.0928"))), result.getQueryResults());
@@ -103,7 +109,45 @@ class BankResultProjectionHandlerTest {
         assertEquals(List.of("data_date", "metric_value", "quarter_change"), result.getQueryColumns()
                 .stream().map(column -> column.getBizName()).toList());
         assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
+                .map(column -> column.getType()).toList());
+        assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
                 .map(column -> column.getShowType()).toList());
+    }
+
+    @Test
+    void shouldMarkPerCapitaProfitColumnsAsNumbers() {
+        SemanticParseInfo parseInfo = new SemanticParseInfo();
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.RATIO)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG003", "江苏省C市农商行"))
+                .selectedOrganizationCodes(List.of("ORG003"))
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb011")
+                                .metricCode("ZB011").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("zb018")
+                                .metricCode("ZB018").build()))
+                .build();
+        parseInfo.getProperties().put(BankResultProjector.CONTRACT_PROPERTY,
+                JsonUtil.objectToMap(contract));
+        QueryResult result = new QueryResult();
+        result.setChatContext(parseInfo);
+        result.setQueryResults(List.of(row("numerator_value", new BigDecimal("271.69"),
+                "denominator_value", new BigDecimal("288"), "ratio_percent",
+                new BigDecimal("0.943368"))));
+
+        assertTrue(new BankResultProjectionHandler().apply(result));
+
+        assertEquals(List.of("org_code", "org_name", "net_profit", "employee_count",
+                "per_capita_profit"), result.getQueryColumns().stream()
+                        .map(column -> column.getBizName()).toList());
+        assertEquals(List.of("STRING", "STRING", "NUMBER", "NUMBER", "NUMBER"),
+                result.getQueryColumns().stream().map(column -> column.getType()).toList());
+        assertEquals(List.of("CATEGORY", "CATEGORY", "NUMBER", "NUMBER", "NUMBER"),
+                result.getQueryColumns().stream().map(column -> column.getShowType()).toList());
+        assertEquals(List.of(row("org_code", "ORG003", "org_name", "江苏省C市农商行",
+                "net_profit", new BigDecimal("271.69"), "employee_count", new BigDecimal("288"),
+                "per_capita_profit", new BigDecimal("0.94"))), result.getQueryResults());
     }
 
     @Test
@@ -122,6 +166,8 @@ class BankResultProjectionHandlerTest {
 
         assertTrue(new BankResultProjectionHandler().apply(result));
 
+        assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
+                .map(column -> column.getType()).toList());
         assertEquals(List.of("DATE", "NUMBER", "NUMBER"), result.getQueryColumns().stream()
                 .map(column -> column.getShowType()).toList());
     }

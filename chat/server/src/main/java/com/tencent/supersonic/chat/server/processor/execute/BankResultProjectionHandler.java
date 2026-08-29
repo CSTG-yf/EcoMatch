@@ -18,8 +18,9 @@ public class BankResultProjectionHandler implements ExecuteResultProcessor {
     private static final Set<String> NUMERIC_COLUMNS = Set.of("absolute_change", "absolute_gap",
             "aggregate_value", "baseline_value", "current_value", "daily_average",
             "days_above_average", "denominator_value", "deposit_per_outlet_wanyuan",
-            "deposit_value", "gap_value", "max_value", "metric_value", "min_value",
-            "numerator_value", "observation_count", "outlet_count", "percent_change",
+            "deposit_value", "employee_count", "gap_value", "max_value", "metric_value",
+            "min_value", "net_profit", "numerator_value", "observation_count", "outlet_count",
+            "per_capita_profit", "percent_change",
             "provincial_average", "quarter_change", "rank_position", "ratio_percent",
             "total_days", "value_difference");
 
