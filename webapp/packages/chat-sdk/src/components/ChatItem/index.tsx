@@ -18,7 +18,6 @@ import { message, Spin } from 'antd';
 import AssistantAvatar from '../AssistantAvatar';
 import ExpandParseTip from './ExpandParseTip';
 import ExecuteItem from './ExecuteItem';
-import PlainTextAnswerCard from './PlainTextAnswerCard';
 import { isMobile } from '../../utils/utils';
 import classNames from 'classnames';
 import { AgentType } from '../../Chat/type';
@@ -550,7 +549,6 @@ const ChatItem: React.FC<Props> = ({
   const contentClass = classNames(`${prefixCls}-content`, {
     [`${prefixCls}-content-mobile`]: isMobile,
   });
-  const isPlainTextAnswer = parseInfo?.queryMode === 'PLAIN_TEXT';
 
   const { llmReq, llmResp } = parseInfo?.properties?.CONTEXT || {};
 
@@ -615,29 +613,25 @@ const ChatItem: React.FC<Props> = ({
             </>
 
             {executeMode && workflowStage !== 'clarifying' && (
-              isPlainTextAnswer && data ? (
-                <PlainTextAnswerCard text={data.textResult} />
-              ) : (
-                <Spin spinning={entitySwitchLoading}>
-                  <div style={{ minHeight: 50 }}>
-                    <ExecuteItem
-                      isSimpleMode={isSimpleMode}
-                      queryId={parseInfo?.queryId}
-                      question={actualQueryText}
-                      queryMode={parseInfo?.queryMode}
-                      executeLoading={executeLoading}
-                      executeTip={executeTip}
-                      executeErrorMsg={executeErrorMsg}
-                      chartIndex={0}
-                      data={data}
-                      triggerResize={triggerResize}
-                      executeItemNode={executeItemNode}
-                      isDeveloper={isDeveloper}
-                      renderCustomExecuteNode={renderCustomExecuteNode}
-                    />
-                  </div>
-                </Spin>
-              )
+              <Spin spinning={entitySwitchLoading}>
+                <div style={{ minHeight: 50 }}>
+                  <ExecuteItem
+                    isSimpleMode={isSimpleMode}
+                    queryId={parseInfo?.queryId}
+                    question={actualQueryText}
+                    queryMode={parseInfo?.queryMode}
+                    executeLoading={executeLoading}
+                    executeTip={executeTip}
+                    executeErrorMsg={executeErrorMsg}
+                    chartIndex={0}
+                    data={data}
+                    triggerResize={triggerResize}
+                    executeItemNode={executeItemNode}
+                    isDeveloper={isDeveloper}
+                    renderCustomExecuteNode={renderCustomExecuteNode}
+                  />
+                </div>
+              </Spin>
             )}
             {(parseTip !== '' || (executeMode && !executeLoading)) &&
               workflowStage !== 'clarifying' &&
