@@ -100,6 +100,19 @@ class BankFinancialIntentRecognizerTest {
     }
 
     @Test
+    void shouldExecuteAnnualOperatingOverviewWithoutClarification() {
+        BankIntentResult result = recognizer.recognize(
+                "帮我分析一下江苏省D市农商行2025年的经营情况。", LocalDate.of(2026, 8, 31));
+
+        assertEquals(BankIntentType.POINT_QUERY, result.getIntent());
+        assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
+                metricCodes(result));
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
+        assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
     void shouldKeepTheTopThreeFilterForGoodPerformanceOnly() {
         BankIntentResult result =
                 recognizer.recognize("江苏省F市农商行在2025-11-30的指标中哪些表现较好？", LocalDate.of(2026, 7, 22));

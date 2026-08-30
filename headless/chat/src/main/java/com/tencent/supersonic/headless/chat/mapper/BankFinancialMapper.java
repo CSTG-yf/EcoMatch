@@ -31,15 +31,8 @@ public class BankFinancialMapper extends BaseMapper {
 
     @Override
     public void doMap(ChatQueryContext context) {
-        BankIntentResult intent =
-                recognizer.recognize(context.getRequest().getQueryText(), LocalDate.now());
-        context.setBankIntentResult(intent);
-        context.getRequest().setQueryText(intent.getNormalizedText());
-        for (Map.Entry<Long, DataSetSchema> entry : context.getSemanticSchema()
-                .getDataSetSchemaMap().entrySet()) {
-            mapMetrics(context, entry.getKey(), entry.getValue(), intent);
-            mapOrganizations(context, entry.getKey(), entry.getValue(), intent);
-        }
+        // Bank questions are interpreted by the constrained model prompt. Do not run the local
+        // heuristic intent recognizer or emit heuristic clarification state before model planning.
     }
 
     private void mapMetrics(ChatQueryContext context, Long dataSetId, DataSetSchema schema,

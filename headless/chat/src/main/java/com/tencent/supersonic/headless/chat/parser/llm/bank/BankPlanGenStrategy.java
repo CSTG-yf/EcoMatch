@@ -255,6 +255,24 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return modelConfig;
     }
 
+    /** Warms only the local llama.cpp fixed prefix during application startup. */
+    public boolean warmLocalPrefixAtStartup(ChatModelConfig modelConfig) {
+        if (!FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(modelConfig)) {
+            return false;
+        }
+        ChatModelConfig configured = configureModel(modelConfig);
+        return prefixCache.warmPrefix(getChatLanguageModel(configured), configured);
+    }
+
+    /** Restores and verifies the local fixed prefix when the user creates a new chat. */
+    public boolean refreshLocalPrefixForSession(ChatModelConfig modelConfig) {
+        if (!FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(modelConfig)) {
+            return false;
+        }
+        ChatModelConfig configured = configureModel(modelConfig);
+        return prefixCache.refreshPrefix(getChatLanguageModel(configured), configured);
+    }
+
     /**
      * One model roll for the current attempt. A transient transport fault (timeout, connection
      * reset, gateway 502/503/504, ...) — an endpoint blip that never produced a model answer —
@@ -1609,37 +1627,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     private String clarificationRecheckMessage(String queryText) {
-        BankIntentResult evidence =
-                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
-        List<String> slots = new ArrayList<>();
-        if (!evidence.getOrganizations().isEmpty()) {
-            slots.add("organizationCodes=" + evidence.getOrganizations().stream()
-                    .map(org -> org.getCode() + "(" + org.getName() + ")").toList());
-        }
-        if (!evidence.getMetrics().isEmpty()) {
-            slots.add("metricCodes=" + evidence.getMetrics().stream()
-                    .map(metric -> metric.getCode() + "(" + metric.getName() + ")").toList());
-        }
-        if (!evidence.getDerivedMetrics().isEmpty()) {
-            slots.add("derivedMetrics=" + evidence.getDerivedMetrics().stream()
-                    .map(metric -> metric.getCode() + "(" + metric.getName() + "="
-                            + metric.getNumerator() + "/" + metric.getDenominator() + ")")
-                    .toList());
-        }
-        if (evidence.getTime() != null && evidence.getTime().getStartDate() != null
-                && evidence.getTime().getEndDate() != null) {
-            slots.add("time=" + evidence.getTime().getStartDate() + ".."
-                    + evidence.getTime().getEndDate() + " granularity="
-                    + evidence.getTime().getGranularity());
-        }
-        if (slots.isEmpty()) {
-            return null;
-        }
         return CLARIFICATION_RECHECK_MESSAGE
-                + " Deterministic catalog validation found these explicit slots in the original "
-                + "question: " + String.join("; ", slots) + ". Treat this only as validation "
-                + "feedback: regenerate the entire requirements JSON yourself, include all listed "
-                + "base operands for each derived metric, and do not return CLARIFY for these slots.";
+                + " Do not delegate interpretation to a local heuristic recognizer. Infer the "
+                + "complete executable contract directly from the original question and the fixed "
+                + "semantic registry, then return the full EXECUTE response.";
     }
 
     private BankPlanningResponse parseAndValidatePlanningResponse(LLMReq llmReq,

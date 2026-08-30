@@ -15,6 +15,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -37,8 +39,10 @@ public class FixedSystemPrefixLlmCache {
     private final boolean autoWarm;
     private final Set<String> warmedModelKeys = ConcurrentHashMap.newKeySet();
     private final AtomicLong prefixWarmAttempts = new AtomicLong();
+    private final AtomicLong prefixWarmVerificationFailures = new AtomicLong();
     private final AtomicLong completionHits = new AtomicLong();
     private final AtomicLong completionMisses = new AtomicLong();
+    private final AtomicLong coalescedCompletionWaiters = new AtomicLong();
     private final AtomicLong modelCalls = new AtomicLong();
     private final AtomicLong providerCalls = new AtomicLong();
     private final AtomicLong llamaCppCalls = new AtomicLong();
@@ -53,6 +57,8 @@ public class FixedSystemPrefixLlmCache {
     private final String stageLabel;
     private final int safetyMaxTokens;
     private final Map<String, String> completionMemo;
+    private final Map<String, CompletableFuture<String>> inFlightCompletions =
+            new ConcurrentHashMap<>();
     private final LlamaCppPrefixChatClient openAiCompatibleClient =
             new LlamaCppPrefixChatClient();
 
@@ -113,33 +119,57 @@ public class FixedSystemPrefixLlmCache {
         return prefixVersion;
     }
 
-    public void warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
+    public synchronized boolean warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return warmPrefix(model, config, false);
+    }
+
+    /** Replays and verifies the fixed prefix when a new chat is created. */
+    public synchronized boolean refreshPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return warmPrefix(model, config, true);
+    }
+
+    private boolean warmPrefix(ChatLanguageModel model, ChatModelConfig config, boolean force) {
         boolean llamaCpp = usesLlamaCppPrefixTransport(config);
         if (!autoWarm && !llamaCpp) {
-            return;
+            return false;
         }
         String modelKey = modelIdentity(config);
-        if (!warmedModelKeys.add(modelKey)) {
-            return;
+        if (!force && warmedModelKeys.contains(modelKey)) {
+            return true;
         }
         prefixWarmAttempts.incrementAndGet();
         try {
+            long cacheHitsBefore = llamaCppCacheHits.get();
             callModel(model, config, warmUserProbe,
                     LlamaCppPrefixChatClient.ChatOptions.warmup(enableThinking));
+            if (llamaCpp) {
+                // The first request populates llama.cpp's KV cache. The second identical probe is
+                // the acceptance check: only a reported cache_n hit counts as warmed.
+                callModel(model, config, warmUserProbe,
+                        LlamaCppPrefixChatClient.ChatOptions.warmup(enableThinking));
+                if (llamaCppCacheHits.get() <= cacheHitsBefore) {
+                    throw new IllegalStateException(
+                            "llama.cpp warm-up verification returned no cache_n hit");
+                }
+            }
+            warmedModelKeys.add(modelKey);
             KEY_PIPELINE.info(
-                    "FixedSystemPrefixLlmCache warmed fixed system prefix version={} via={}",
-                    prefixVersion, llamaCpp ? "llama.cpp" : "langchain4j");
+                    "FixedSystemPrefixLlmCache verified fixed system prefix version={} via={} force={}",
+                    prefixVersion, llamaCpp ? "llama.cpp" : "langchain4j", force);
+            return true;
         } catch (RuntimeException ex) {
             warmedModelKeys.remove(modelKey);
+            prefixWarmVerificationFailures.incrementAndGet();
             LOG.warn("Fixed system prefix warm-up failed version={}: type={}, error=[{}]",
                     prefixVersion, ex.getClass().getSimpleName(),
                     ex.getMessage() == null ? ""
                             : ex.getMessage().substring(0, Math.min(160, ex.getMessage().length())));
+            return false;
         }
     }
 
-    public void warmPrefix(ChatLanguageModel model) {
-        warmPrefix(model, null);
+    public boolean warmPrefix(ChatLanguageModel model) {
+        return warmPrefix(model, null);
     }
 
     public String generate(ChatLanguageModel model, String dynamicUserContent, boolean useMemo) {
@@ -169,15 +199,50 @@ public class FixedSystemPrefixLlmCache {
             completionMisses.incrementAndGet();
         }
 
+        if (useMemo) {
+            CompletableFuture<String> mine = new CompletableFuture<>();
+            CompletableFuture<String> existing = inFlightCompletions.putIfAbsent(memoKey, mine);
+            if (existing != null) {
+                coalescedCompletionWaiters.incrementAndGet();
+                return awaitCompletion(existing);
+            }
+            try {
+                String text = callAndMemoize(model, config, dynamicUserContent, memoKey);
+                mine.complete(text);
+                return text;
+            } catch (RuntimeException ex) {
+                mine.completeExceptionally(ex);
+                throw ex;
+            } finally {
+                inFlightCompletions.remove(memoKey, mine);
+            }
+        }
+        return callAndMemoize(model, config, dynamicUserContent, null);
+    }
+
+    private String callAndMemoize(ChatLanguageModel model, ChatModelConfig config,
+            String dynamicUserContent, String memoKey) {
         modelCalls.incrementAndGet();
         String text = callModel(model, config, dynamicUserContent);
-        if (useMemo && text != null && !text.isBlank()) {
+        if (memoKey != null && text != null && !text.isBlank()) {
             completionMemo.put(memoKey, text);
         }
         KEY_PIPELINE.info(
                 "FixedSystemPrefixLlmCache completion MISS prefixVersion={} modelCalls={} memoSize={} llamaCppCacheHits={}",
                 prefixVersion, modelCalls.get(), completionMemo.size(), llamaCppCacheHits.get());
         return text;
+    }
+
+    private String awaitCompletion(CompletableFuture<String> future) {
+        try {
+            return future.join();
+        } catch (CompletionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw ex;
+        }
     }
 
     /**
@@ -206,8 +271,10 @@ public class FixedSystemPrefixLlmCache {
         stats.put("prefixWarmModelCount", warmedModelKeys.size());
         stats.put("autoWarm", autoWarm);
         stats.put("prefixWarmAttempts", prefixWarmAttempts.get());
+        stats.put("prefixWarmVerificationFailures", prefixWarmVerificationFailures.get());
         stats.put("completionHits", completionHits.get());
         stats.put("completionMisses", completionMisses.get());
+        stats.put("coalescedCompletionWaiters", coalescedCompletionWaiters.get());
         stats.put("modelCalls", modelCalls.get());
         stats.put("providerCalls", providerCalls.get());
         stats.put("llamaCppCalls", llamaCppCalls.get());

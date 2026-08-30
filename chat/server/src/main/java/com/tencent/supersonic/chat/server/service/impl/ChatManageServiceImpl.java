@@ -10,6 +10,7 @@ import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.api.pojo.response.ShowCaseResp;
 import com.tencent.supersonic.chat.server.agent.Agent;
+import com.tencent.supersonic.chat.server.config.BankPlanSessionWarmupCoordinator;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatParseDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
@@ -62,6 +63,8 @@ public class ChatManageServiceImpl implements ChatManageService {
     private MemoryService memoryService;
     @Autowired
     private AuditEventPublisher auditEventPublisher;
+    @Autowired
+    private BankPlanSessionWarmupCoordinator bankPlanSessionWarmupCoordinator;
     private final ChatObjectAccessPolicy objectAccessPolicy = new ChatObjectAccessPolicy();
 
     @Override
@@ -76,7 +79,11 @@ public class ChatManageServiceImpl implements ChatManageService {
         chatDO.setLastQuestion("Hello, welcome to using supersonic");
         chatDO.setIsTop(0);
         chatDO.setAgentId(agent.getId());
-        return chatRepository.createChat(chatDO);
+        Long chatId = chatRepository.createChat(chatDO);
+        if (chatId != null && bankPlanSessionWarmupCoordinator != null) {
+            bankPlanSessionWarmupCoordinator.warmAsync(chatId, agent);
+        }
+        return chatId;
     }
 
     private Agent getAuthorizedOnlineAgent(User user, Integer agentId) {

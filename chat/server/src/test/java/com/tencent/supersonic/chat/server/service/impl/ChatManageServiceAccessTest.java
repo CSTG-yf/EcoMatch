@@ -6,6 +6,7 @@ import com.tencent.supersonic.chat.api.pojo.request.ChatParseReq;
 import com.tencent.supersonic.chat.api.pojo.request.PageQueryInfoReq;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.chat.server.agent.Agent;
+import com.tencent.supersonic.chat.server.config.BankPlanSessionWarmupCoordinator;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatDO;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatQueryRepository;
@@ -33,6 +34,25 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ChatManageServiceAccessTest {
+
+    @Test
+    void schedulesPrefixWarmupAfterCreatingANewChat() {
+        ChatRepository chatRepository = mock(ChatRepository.class);
+        ChatQueryRepository queryRepository = mock(ChatQueryRepository.class);
+        AgentService agentService = mock(AgentService.class);
+        BankPlanSessionWarmupCoordinator warmup = mock(BankPlanSessionWarmupCoordinator.class);
+        ChatManageServiceImpl service = service(chatRepository, queryRepository, agentService,
+                mock(AuditEventPublisher.class));
+        ReflectionTestUtils.setField(service, "bankPlanSessionWarmupCoordinator", warmup);
+        User user = User.get(2L, "alice");
+        Agent agent = agent(7, "贷款助理", 1);
+        when(agentService.getAgents(user, AuthType.VIEWER)).thenReturn(java.util.List.of(agent));
+        when(chatRepository.createChat(any())).thenReturn(42L);
+
+        assertEquals(42L, service.addChat(user, null, 7));
+
+        verify(warmup).warmAsync(42L, agent);
+    }
 
     @Test
     void createsAgentBoundChatsWithNormalizedTitles() {
