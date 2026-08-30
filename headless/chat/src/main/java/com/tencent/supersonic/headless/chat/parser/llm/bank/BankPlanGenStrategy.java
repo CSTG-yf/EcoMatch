@@ -27,9 +27,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Model-owned constrained bank planning.
@@ -109,12 +111,11 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             } else {
                 dynamicUser = BankPlanPromptComposer.buildSinglePassRepairUserContent(
                         llmReq.getQueryText(), previousCandidate,
-                        lastError == null ? "planning response is invalid" : lastError.getMessage(),
-                        familyExamples);
+                        repairValidationMessage(lastError, attempt), familyExamples);
             }
             try {
-                String candidate = prefixCache.generate(model, modelConfig,
-                        BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, attempt == 0);
+                String candidate = generateSinglePassCandidate(model, modelConfig, dynamicUser,
+                        attempt == 0);
                 previousCandidate = candidate;
                 BankPlanningResponse planning = parseAndValidatePlanningResponse(llmReq,
                         candidate);
@@ -133,6 +134,19 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         throw BankNl2SqlError.afterSingleRepair(lastError);
                     }
                     throw BankNl2SqlError.clarificationRequired(requirements.getClarification());
+                }
+                // Question-vs-plan organization cross-check (catalog evidence only): a plan that
+                // binds a legal-but-wrong organization stays valid downstream and returns
+                // non-empty rows, so no validator or executor ever sees the mistake. The guard
+                // fires only when the question names exactly one catalog organization and the
+                // plan binds a different one; surfacing it here routes the plan back through the
+                // structured repair loop with a directive message.
+                Optional<String> bindingConflict = BankOrgBindingGuard.conflict(
+                        llmReq.getQueryText(), planOrganizationCodes(planning.getPlan()));
+                if (bindingConflict.isPresent()) {
+                    throw new BankQueryPlanParseException(
+                            BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                            bindingConflict.get());
                 }
                 SemanticIntentHints planHints = requirements.toPlanHints(admissionHints);
                 llmReq.setBankRequestContract(requirements);
@@ -167,6 +181,16 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     prefixCache.evictCompletion(modelConfig, BankPlanLlmPrefixCache.Stage.SINGLE_PASS,
                             dynamicUser);
                 }
+                if (attempt == MAX_MODEL_ATTEMPTS - 1 && repeatsLastCode(repairCodes)) {
+                    // One escalation attempt (third model roll), granted only when both
+                    // base-budget failures carry the SAME error code: either the model keeps
+                    // re-violating one shape gate (the escalated message then demands a shape
+                    // change, not another slot tweak) or both rounds were MALFORMED_JSON
+                    // sampling truncations (the escalated round re-samples with the same
+                    // message; the memo eviction above already forces a fresh roll). Any other
+                    // two-failure pattern stays terminal after one structured repair.
+                    maxAttempts = MAX_MODEL_ATTEMPTS + 1;
+                }
             } catch (BankPlanCompilationException exception) {
                 // Terminal compiler-class rejection from a plan-shape gate (e.g. a question shape
                 // no query family can express). It is not a model failure and owns no structured
@@ -178,6 +202,22 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         : BankNl2SqlError.modelFailure(exception);
             }
         }
+        // Terminal plan-stage exhaustion. The BankNl2SqlError envelope text "bank query plan
+        // remained invalid after one structured repair" is a fixed message signature shared by
+        // both exhaustion shapes: the base budget (initial + one structured repair) and the
+        // escalated budget (initial + two structured repairs, granted only for a repeated error
+        // code or a MALFORMED_JSON sampling loop). Do not repurpose or pattern-match that old
+        // signature for the two-repair case; if the envelope is ever reworded to name the
+        // two-repair exhaustion explicitly, that wording must ship as a NEW message signature
+        // instead of overloading this string. Until then the two cases are distinguished by the
+        // keyPipeline terminal line below plus the dynamic diagnostics: the envelope's
+        // planFailureCode carries the last gate code, and accepted responses record the exact
+        // roll count under bank.nl2sql.modelAttempts.
+        KEY_PIPELINE_LOG.info(
+                "BankPlanGenStrategy plan stage exhausted modelAttempts={} lastCode={} escalationUsed={}",
+                maxAttempts,
+                repairCodes.isEmpty() ? "NONE" : repairCodes.get(repairCodes.size() - 1),
+                maxAttempts > MAX_MODEL_ATTEMPTS);
         throw BankNl2SqlError.afterSingleRepair(lastError == null
                 ? new BankQueryPlanParseException(
                         BankQueryPlanParseException.Reason.VALIDATION_FAILED,
@@ -216,6 +256,38 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     /**
+     * One model roll for the current attempt. A transient transport fault (timeout, connection
+     * reset, gateway 502/503/504, ...) — an endpoint blip that never produced a model answer —
+     * gets exactly one immediate re-roll of the same dynamic user content before the failure
+     * falls through to the environment-fault terminal path; official runs lose questions to such
+     * blips that an immediate replay answers every time. Hard provider faults (auth, quota,
+     * rate limit, 500) and a second consecutive failure propagate untouched into the existing
+     * terminal state. The re-roll is orthogonal to the structured repair budget: it never
+     * consumes a repair round and never advances {@code bank.nl2sql.modelAttempts}.
+     */
+    private String generateSinglePassCandidate(ChatLanguageModel model, ChatModelConfig modelConfig,
+            String dynamicUser, boolean useMemo) {
+        try {
+            return prefixCache.generate(model, modelConfig,
+                    BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, useMemo);
+        } catch (RuntimeException exception) {
+            if (!BankEnvironmentFaultClassifier.isTransientTransportFault(exception)) {
+                throw exception;
+            }
+            String detail = exception.getMessage() == null ? ""
+                    : exception.getMessage().substring(0,
+                            Math.min(160, exception.getMessage().length()));
+            KEY_PIPELINE_LOG.warn(
+                    "BankPlanGenStrategy transient transport fault on single-pass model call, "
+                            + "re-rolling once: category={} type={} error=[{}]",
+                    BankEnvironmentFaultClassifier.transientTransportCategory(exception),
+                    exception.getClass().getSimpleName(), detail);
+            return prefixCache.generate(model, modelConfig,
+                    BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, useMemo);
+        }
+    }
+
+    /**
      * Extracts the stable error code that prefixes validator messages ({@code snake_case: ...}).
      * Structured repair diagnostics must never collapse into a bare {@code VALIDATION_FAILED}.
      */
@@ -244,6 +316,75 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 "BankPlanGenStrategy repair stage={} attempt={} code={} reason={} detail=[{}]",
                 stage, attempt, code, exception == null ? "NONE" : exception.getReason().name(),
                 message.length() > 160 ? message.substring(0, 160) : message);
+    }
+
+    /**
+     * Builds the repair-round validation message. Every repair round appends the registered
+     * shape skeleton of the failing code, so the model receives the correct overall shape and
+     * not only the violated slot (the positive-skeleton pattern of the clarification recheck).
+     * The escalation round additionally demands a shape change, because the previous two rounds
+     * failed with the same code and slot-level tweaks have no accepting fixed point. A
+     * MALFORMED_JSON loop keeps the plain message: its repair is a fresh sample (the completion
+     * memo is evicted on every malformed failure), not a different plan shape.
+     */
+    private String repairValidationMessage(BankQueryPlanParseException lastError, int attempt) {
+        String message = lastError == null || lastError.getMessage() == null
+                ? "planning response is invalid" : lastError.getMessage();
+        StringBuilder validationMessage = new StringBuilder(message);
+        String skeleton = shapeSkeleton(lastError);
+        if (skeleton != null) {
+            validationMessage.append('\n').append(skeleton);
+        }
+        if (attempt >= MAX_MODEL_ATTEMPTS && !isMalformedJson(lastError)) {
+            validationMessage.append('\n')
+                    .append("升级提示：上一轮与上上轮为同一错误码（")
+                    .append(repairErrorCode(lastError))
+                    .append("），必须改变形状，不得只微调槽位；请改按上述整体形状骨架重新生成完整 JSON，"
+                            + "不得重复此前已被拒绝的槽位组合。");
+        }
+        return validationMessage.toString();
+    }
+
+    /**
+     * The registered skeleton for this failure, resolved in three tiers: by the recovered error
+     * code first; then by the raw leading {@code CODE:} message token, because
+     * {@code repairErrorCode} only recovers lowercase snake_case prefixes and the plan
+     * validator's UPPER_CASE codes (PROVINCE_AVERAGE_BENCHMARK_*, COMPOUND_BENCHMARK_*...)
+     * degrade to VALIDATION_FAILED there; then by the stable message signature for the
+     * prefix-less requirements-contract parser failures. Null when no skeleton is registered;
+     * the repair message then stays exactly as emitted.
+     */
+    private static String shapeSkeleton(BankQueryPlanParseException lastError) {
+        if (lastError == null) {
+            return null;
+        }
+        return BankRepairShapeGuidance.forCode(repairErrorCode(lastError))
+                .or(() -> BankRepairShapeGuidance.forRawCodePrefix(lastError.getMessage()))
+                .or(() -> BankRepairShapeGuidance.forMessage(lastError.getMessage()))
+                .orElse(null);
+    }
+
+    private static boolean isMalformedJson(BankQueryPlanParseException exception) {
+        return exception != null
+                && exception.getReason() == BankQueryPlanParseException.Reason.MALFORMED_JSON;
+    }
+
+    /** True when the two most recent failures share one error code. */
+    private static boolean repeatsLastCode(List<String> repairCodes) {
+        return repairCodes.size() >= 2
+                && repairCodes.get(repairCodes.size() - 1)
+                        .equals(repairCodes.get(repairCodes.size() - 2));
+    }
+
+    /** Blank-free organization codes bound by the plan, in plan order. */
+    private static List<String> planOrganizationCodes(BankQueryPlan plan) {
+        if (plan == null || plan.getOrganizations() == null) {
+            return List.of();
+        }
+        return plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode)
+                .filter(code -> code != null && !code.isBlank())
+                .collect(Collectors.toList());
     }
 
     /**

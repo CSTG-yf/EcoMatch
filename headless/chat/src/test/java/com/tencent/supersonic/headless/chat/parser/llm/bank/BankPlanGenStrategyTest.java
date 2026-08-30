@@ -10,6 +10,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.SocketTimeoutException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -603,6 +604,193 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void repairRoundsCarryTheRegisteredShapeSkeletonForTheFailingCode() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                        loanToDepositPivotPlanJson()),
+                planningResponse(loanToDepositRatioRequirementsJson(),
+                        loanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("derived_point_ratio_mismatch"));
+        assertTrue(repair.contains("正确整体形状骨架"));
+        assertTrue(repair.contains("intent=RATIO"));
+        // The base-budget repair round carries the skeleton but no escalation demand.
+        assertFalse(repair.contains("升级提示"));
+    }
+
+    @Test
+    void upperCaseValidatorCodeFailureGetsItsRegisteredSkeletonInRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // A malformed plan benchmark filter trips the plan validator's UPPER_CASE code; that
+        // code degrades to VALIDATION_FAILED in repairErrorCode, so only the raw message prefix
+        // fallback can resolve its skeleton.
+        String failingPlan = validPlanJson().replace(
+                "\"field\":\"benchmark\",\"operator\":\"COMPARE\"",
+                "\"field\":\"benchmark\",\"operator\":\"GT\"");
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(requirementsJson(), failingPlan),
+                planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
+
+        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED"));
+        assertTrue(repair.contains("正确整体形状骨架"));
+        assertTrue(repair.contains("PROVINCE_AVERAGE 只允许三类基准形态"));
+        assertFalse(repair.contains("升级提示"));
+    }
+
+    @Test
+    void repeatedSameCodeFailureEscalatesToAThirdAttemptDemandingAShapeChange() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String failing = planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                loanToDepositPivotPlanJson());
+        when(model.generate(anyString())).thenReturn(failing, failing,
+                planningResponse(loanToDepositRatioRequirementsJson(),
+                        loanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(3, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        String escalated = prompts.getAllValues().get(2);
+        assertTrue(escalated.contains("正确整体形状骨架"));
+        assertTrue(escalated.contains("升级提示"));
+        assertTrue(escalated.contains("必须改变形状，不得只微调槽位"));
+    }
+
+    @Test
+    void repeatedMalformedJsonEscalatesToAFreshThirdSample() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn("not a json object", "{\"requirements\":",
+                planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
+
+        assertEquals(3, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        // The malformed loop keeps the plain message; no shape skeleton or escalation demand.
+        assertTrue(prompts.getAllValues().get(2)
+                .contains("model response is not complete strict JSON"));
+        assertFalse(prompts.getAllValues().get(2).contains("升级提示"));
+    }
+
+    @Test
+    void twoDifferentFailureCodesStayTerminalAfterOneStructuredRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                        loanToDepositPivotPlanJson()),
+                "not a json object");
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertTrue(error.isPlanStageExhausted());
+        // The envelope carries the LAST failure's code: the differing second failure closed the
+        // base budget without an escalation.
+        assertEquals("MALFORMED_JSON", error.getPlanFailureCode());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
+    void escalationGrantsExactlyOneExtraAttemptBeforeTheTerminalState() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String failing = planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                loanToDepositPivotPlanJson());
+        when(model.generate(anyString())).thenReturn(failing, failing, failing);
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertTrue(error.isPlanStageExhausted());
+        verify(model, times(3)).generate(anyString());
+    }
+
+    @Test
+    void transientTransportFaultOnTheFirstRollIsReRolledOnceWithoutConsumingTheRepairBudget() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("chat model call failed",
+                        new SocketTimeoutException("Read timed out")))
+                .thenReturn(planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMReq request = request();
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        // The re-roll belongs to the same attempt: no repair round is consumed and the
+        // accepted response still records a single model roll.
+        assertEquals(1, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
+    void hardProviderFaultStaysTerminalWithoutAnyReRoll() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("Error 401: Invalid API key provided"));
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request()));
+
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, error.getCategory());
+        verify(model, times(1)).generate(anyString());
+    }
+
+    @Test
+    void twoConsecutiveTransientTransportFaultsStayTerminal() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("Connection refused: api.example.com"))
+                .thenThrow(new RuntimeException("chat model call failed",
+                        new SocketTimeoutException("Read timed out")));
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request()));
+
+        // Second transient failure is rethrown untouched into the existing terminal state.
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, error.getCategory());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
     void yearStartBaselineDriftIsReturnedToTheModelForRequirementsRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(
@@ -730,8 +918,11 @@ class BankPlanGenStrategyTest {
         assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
         assertEquals("rank_change_plan_contract_required", exception.getPlanFailureCode());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
-        verify(model, times(2)).generate(prompts.capture());
+        // The stubbed model repeats the same near-miss plan, so both base-budget rounds fail
+        // with the same code and the escalation grants exactly one third roll before terminal.
+        verify(model, times(3)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("rank_change_plan_contract_required"));
+        assertTrue(prompts.getAllValues().get(2).contains("rank_change_plan_contract_required"));
         // The rejected attempt is pinned so the parser's COMPILE tool-repair round can rebuild
         // its previous candidate instead of degenerating without a plan.
         assertNotNull(request.getBankRequestContract());

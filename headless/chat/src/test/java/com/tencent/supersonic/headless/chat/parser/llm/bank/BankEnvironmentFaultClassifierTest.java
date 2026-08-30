@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,5 +52,49 @@ class BankEnvironmentFaultClassifierTest {
     void plainNumbersWithoutHttpCueDoNotTriggerTheStatusRule() {
         assertFalse(BankEnvironmentFaultClassifier.isEnvironmentFault(null,
                 "limit must be 429 but was 401 rows"));
+    }
+
+    @Test
+    void transientTransportFaultsIsolateTheReRollableSubset() {
+        RuntimeException wrappedTimeout = new RuntimeException(
+                "chat model call failed", new SocketTimeoutException("Read timed out after 300s"));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault(wrappedTimeout));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null,
+                "Connection reset by peer"));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null,
+                "Connection refused: api.example.com"));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null,
+                "Provider returned http status 502: Bad Gateway"));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null,
+                "Provider returned http status 503: Service Unavailable"));
+        assertTrue(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null,
+                "Provider returned http status 504"));
+        assertEquals("timeout",
+                BankEnvironmentFaultClassifier.transientTransportCategory(wrappedTimeout));
+        // Transient transport faults stay inside the terminal environment bucket.
+        assertTrue(BankEnvironmentFaultClassifier.isEnvironmentFault(wrappedTimeout));
+    }
+
+    @Test
+    void hardProviderFaultsAreNeverTransientAndStayTerminalEnvironmentFaults() {
+        String[] hardFaults = {
+                "Error 401: Invalid API key provided",
+                "429 Too Many Requests: rate limit exceeded, insufficient_quota",
+                "Provider returned http status 500: Internal Server Error",
+                "Provider returned http status 403: permission denied"
+        };
+        for (String fault : hardFaults) {
+            assertFalse(BankEnvironmentFaultClassifier.isTransientTransportFault(null, fault),
+                    fault);
+            assertTrue(BankEnvironmentFaultClassifier.isEnvironmentFault(null, fault), fault);
+        }
+    }
+
+    @Test
+    void ordinaryModelExceptionsAreNeitherEnvironmentFaultsNorTransient() {
+        RuntimeException normal = new RuntimeException("model returned a non-executable plan shape");
+        assertFalse(BankEnvironmentFaultClassifier.isEnvironmentFault(normal));
+        assertFalse(BankEnvironmentFaultClassifier.isTransientTransportFault(normal));
+        assertFalse(BankEnvironmentFaultClassifier.isTransientTransportFault((String) null, null));
     }
 }

@@ -270,6 +270,10 @@ public final class BankPlanPromptComposer {
                        如果用户文本与权威目录中的机构名称或别名（包括目录中的字母城市占位名称）完整匹配，
                        必须直接映射到该机构代码；不得因为名称看起来像匿名样例、不是现实行政区划或可以展开成别的城市，
                        就把一个唯一目录命中误判为机构歧义并 action=CLARIFY。只有没有目录精确命中或确实命中多个机构时才澄清。
+                       organizationCodes 必须绑定题面文字中逐字出现的目录机构（名称或别名）：
+                       题面中的城市字母与某个唯一目录机构名称一致时，必须绑定该机构码，
+                       不得绑定其他任何机构码，即使那些机构码同样是目录合法机构；只有全省/各家等全体
+                       机构范围才使用 []。
                        评测题中的日期、季度和年份是基准事实库的查询条件；只要格式合法且题目给出明确范围，
                        不得依据系统当前日期、现实世界数据是否公开或“未来数据”的臆测拒绝查询。若确实没有结果，
                        交由校验/执行工具返回事实错误后再修正。
@@ -383,6 +387,20 @@ public final class BankPlanPromptComposer {
                        人均利润的 PLAN 使用同一受控点值比率形状：metrics 按 ZB011、ZB018 排列，
                        derivedMetrics=[]，calculation.type=RATIO、baseline="ZB018"，dimensions 包含
                        bank_organization，output.columns=["bank_organization","ZB011","ZB018"]。
+                       正向判例（目录发布派生指标点值比率）：题面点名目录已发布的比率类派生指标
+                       （存贷比、人均利润等形态），恰好命中其分子、分母两个基础指标、一个机构和
+                       一个明确日期时一次写对：action=EXECUTE、intent=RATIO；metricCodes 恰为该
+                       派生项按目录序排列的两个基础指标——分子在前、分母在后（存贷比形态即
+                       ["ZB002","ZB001"]）；derivedMetrics 恰含该发布派生项一项，逐字段照目录填写：
+                       metricCode=DERIVED_<分子 ZB###>_DIV_<分母 ZB###>，numerator、denominator、
+                       name 逐字照目录，不得自造派生码；plan 侧 metrics 按 [分子 ZB###,分母 ZB###]
+                       排列、derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，
+                       dimensions=["bank_organization"]、output.columns=["bank_organization",
+                       "<分子 ZB###>","<分母 ZB###>"]，编译器会返回 numerator_value、
+                       denominator_value、ratio_percent 三列比率事实。漏写派生项、交换分子分母或
+                       写成 DIRECT 都会被拒绝并要求按本形状重写。区分：目录没有对应发布派生指标
+                       的两个基础指标相除，才使用规则 3e 的 derivedMetrics=[] 直选形；目录已发布
+                       对应派生指标时必须用本派生形，不得退化成直选形。
                        存款结构双分项不使用 RATIO 计划：metrics 按 ZB003、ZB004、ZB001 排列，
                        calculation.type=DIRECT，output.orderSensitive=true；投影器会以 ZB001 为共同分母。
                        同一时点两个基础指标的绝对差值也不使用 RATIO 或 CHANGE：metrics 保留题干中的两个指标，
@@ -440,6 +458,15 @@ public final class BankPlanPromptComposer {
                         百分率操作数永远不进除法：两率之和再除以任何金额指标在量纲与数值上都是
                         错误口径；calculation.type=RATIO（含 calculation.baseline）只接受金额单位
                         的分子与分母。
+                        负向判例（“合计”不是比率）：“A与B的合计/之和/共计”这类两个同单位百分率
+                        指标的合计问法不是比率：不得因“合计”二字写比率形 derivedMetrics——
+                        禁止 _DIV_ 派生码、禁止除法、禁止把第二个加数当除数分母；也不得退化成
+                        不带派生指标的双指标点查，合计值事实必须保留。正确形状一次写对：
+                        requirements.metricCodes 恰为两个加数的目录指标直选并按字典序排列，
+                        derivedMetrics 恰为一个 DERIVED_SUM_<M1>_AND_<M2>，其中 numerator 填
+                        字典序较小的加数、denominator 填字典序较大的加数，两个字段只承载加数、
+                        不表示除法；intent=POINT_QUERY。比率形或空 derivedMetrics 都会被
+                        拒绝并要求按本形状重写。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -499,6 +526,14 @@ public final class BankPlanPromptComposer {
                        LTE/1（不是机构过滤）；同时对直接指标
                        用该指标的 ZB### 代码填写 orderBy，不能手填物理字段或结果别名；只有派生指标排名才由编译器
                        决定 orderBy=[]。
+                       正向判例（全省哪家极值选择）：“全省/全体机构中哪家（农商行/机构）某指标
+                       最高/最低/最多/最少”槽位完整时一次写对：action=EXECUTE、intent=RANKING、
+                       organizationCodes=[]（“哪家”就是全省范围，不是缺机构）、单一目录指标直选进
+                       metricCodes、time 为题面给出的单日日期（startDate=endDate，YYYY-MM-DD 原样
+                       保留）、filters 恰好一个名次过滤器——字段按目录方向两步映射取 rank 或
+                       rank_from_bottom、operator=LTE、value=题面名次 N（极值单选时 N=1）——
+                       requiredLimit 与该名次值同值。多写第二个名次过滤器、把任意一家机构写进
+                       organizationCodes 或漏掉 requiredLimit，都会被拒绝并要求按本形状重写。
                     10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                        聚合成一个值再比较。必须使用 intent=AGGREGATION、单一机构、单一指标、
                        granularity=DAY、comparison=NONE，并保留 requirements 中已声明的
@@ -541,6 +576,12 @@ public final class BankPlanPromptComposer {
                         - output.aggregationMode 的强制规则：题面含“日均值/平均值”且未同时问最高值和最低值时，
                           必须填 "AVERAGE_ONLY"；题面同时询问最高值和最低值时必须填 "WITH_EXTREMA"；
                           其余场景恒为 null。该字段不是可省略的装饰品，校验器按上述规则逐条核对。
+                          正向判例（极值并列输出）：题面同时要求“日均值/平均值”和“最高/最低（最大/最小）”
+                          的 AGGREGATION 查询（单机构、单指标、DAY 完整日期范围）一次写对：
+                          output.aggregationMode 必须精确为 "WITH_EXTREMA"，让编译器同时返回聚合值与
+                          极值列（aggregate_value、min_value、max_value、observation_count）；
+                          只填 "AVERAGE_ONLY" 的纯聚合均值形状会被拒绝并要求按本形状重写。反过来，
+                          极值词消失、只问日均值/平均值时必须回到 "AVERAGE_ONLY"。
                         - time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”
                           且所填日期恰好是该自然期期末时才允许；否则一律 DAY（聚合周期语义不属于 granularity）。
                         - metrics[].alias、organizations[].bizName、derivedMetrics[].name 一律填 null 或
@@ -666,13 +707,13 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v64-compound-benchmark";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v66-first-shot-judgments";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;
 
     /** Version of the REQUIREMENTS stage prefix; part of the stage cache key. */
-    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v8-stage-split";
+    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v9-org-binding";
 
     /** Version of the PLAN stage prefix; part of the cache key. */
     public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v57-stage-split";
