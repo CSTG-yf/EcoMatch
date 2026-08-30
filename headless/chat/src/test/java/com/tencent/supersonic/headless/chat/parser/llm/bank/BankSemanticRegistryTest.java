@@ -111,6 +111,42 @@ class BankSemanticRegistryTest {
     }
 
     @Test
+    void ratioScalesAreRegistryOwnedAndConsistentAcrossOperandCase() {
+        // Percent-style catalog ratio (存贷比 = ZB002 / ZB001).
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB002", "ZB001"));
+        // Raw quotient (人均利润 = 净利润(万元) / 员工人数(人)) must not inflate by 100.
+        assertEquals(1.0, BankSemanticRegistry.ratioScale("ZB011", "ZB018"));
+        // Unit conversion (网点平均存款规模: 亿元 deposits -> 万元 per outlet).
+        assertEquals(10000.0, BankSemanticRegistry.ratioScale("ZB001", "ZB019"));
+        // Unknown pairs fall back to the percent default; matching is case-insensitive.
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB013", "ZB001"));
+        assertEquals(1.0, BankSemanticRegistry.ratioScale("zb011", "zb018"));
+    }
+
+    @Test
+    void netProfitMarginScaleIsLockedAt100ByThe20260829DataEvidence() {
+        // 2026-08-29 数据实证：逐机构 ZB011(净利润)/ZB009(营业收入) 比值 ≈ 47–55%，
+        // 与 percent 缩放 100 一致（存储层分子分母单位一致）。catalog 的 万元/亿元 标注
+        // 与实际存储不符，禁止按 catalog 单位把净利润率缩放改成 1.0 或 10000。
+        assertEquals(100.0, BankSemanticRegistry.ratioScale("ZB011", "ZB009"));
+    }
+
+    @Test
+    void derivedRatioCatalogStaysFreeOfLowerIsBetterMetricsForTheDescHardcodedTemplate() {
+        // compileDerivedMetricRanking (BankS2SqlTemplateFactory ~line 789) hardcodes "DESC" for
+        // every derived-ratio row. The invariant below locks the current catalog state: every
+        // derived ratio is higher-is-better (or neutral), so the hardcode is correct. If a
+        // lower-is-better derived ratio is ever added, factory:789 must read
+        // BankResultProjector.rankingDirection semantics for derived codes in the same change —
+        // this test goes red first.
+        BankSemanticRegistry.derivedMetrics().forEach((code, metric) ->
+                assertNotEquals(BankSemanticRegistry.Direction.LOWER_BETTER, metric.direction(),
+                        code + " is lower-is-better but the derived ranking template hardcodes "
+                                + "DESC; update BankS2SqlTemplateFactory.compileDerivedMetricRanking "
+                                + "before adding it"));
+    }
+
+    @Test
     void sharedCatalogListsEveryMetricDerivedAndOrganizationExactlyOnce() {
         String shared = BankSemanticRegistry.sharedCatalog();
 
@@ -161,8 +197,37 @@ class BankSemanticRegistryTest {
         assertTrue(capabilities.contains("sort direction"));
         assertTrue(capabilities.contains("filter field/operator/value contract"));
         assertTrue(capabilities.contains("benchmark + COMPARE 仅允许 value=PROVINCE_AVERAGE"));
+        assertTrue(capabilities.contains("limit 与 aggregationMode 语义补充"),
+                "display-only limit/aggregationMode explanation must ship with plan fields");
+        assertTrue(capabilities.contains("禁止把机构总数当作 limit"));
+        assertTrue(capabilities.contains("AVERAGE_ONLY；同时要求最高值与最低值时填"));
         assertFalse(capabilities.contains("unit=亿元"),
                 "metric units stay in the shared catalog only");
+    }
+
+    @Test
+    void planCapabilityCatalogStaysFreeOfFamilyProseDuplicates() {
+        // 防再弱化闸门：RANK_CHANGE / 复合分子比率的教学文案只允许出现在
+        // BankPlanPromptComposer 的专用规则段落（与每个含目录的 PLAN 提示词同现），
+        // 目录必须保持 v58 的篇幅与版式，防止家族散文挤占枚举速查区、
+        // 弱化日期锚定与基期选择判例的相对显著性（v59 官方 smoke 回归根因之一）。
+        String capabilities = BankSemanticRegistry.planCapabilityCatalog();
+        String shared = BankSemanticRegistry.sharedCatalog();
+
+        assertFalse(capabilities.contains("numeratorOperands"),
+                "compound-ratio prose belongs to composer rule 3i, not the catalog");
+        assertFalse(capabilities.contains("DERIVED_SUM"));
+        assertFalse(capabilities.contains("跨期排名变化"),
+                "RANK_CHANGE prose belongs to the composer family block, not the catalog");
+        assertFalse(shared.contains("RANK_CHANGE"));
+        assertFalse(shared.contains("numeratorOperands"));
+
+        // 能力发现靠枚举速览而非目录散文：calculation type 枚举仍必须列出 RANK_CHANGE。
+        assertTrue(BankSemanticRegistry.calculationTypes().contains("RANK_CHANGE"));
+        assertTrue(capabilities.contains("RANK_CHANGE"),
+                "the calculation-type enum listing must still expose RANK_CHANGE");
+        // 复合分子比率仍作为 schema 形状契约对模型开放（允许该字段存在），但目录不重复教学。
+        assertTrue(BankQueryPlan.JSON_SCHEMA.contains("numeratorOperands"));
     }
 
     @Test
@@ -171,6 +236,13 @@ class BankSemanticRegistryTest {
 
         assertTrue(contract.contains("field categories"));
         assertTrue(contract.contains("operators"));
+        assertTrue(contract.contains("非 EQ 运算符的使用场景"),
+                "operator usage scenarios are part of the contract");
+        assertTrue(contract.contains("IN 命中列表内任一值"));
+        assertTrue(contract.contains("NOT_IN 排除列表内全部值"));
+        assertTrue(contract.contains("CONTAINS 名称包含匹配"));
+        assertTrue(contract.contains("\"values\":[\"ORG001\",\"ORG002\"]"),
+                "list operators need a synthetic non-empty values example");
         BankSemanticRegistry.filterOperators().forEach(
                 operator -> assertTrue(contract.contains(operator), operator + " missing"));
         BankSemanticRegistry.filterFields()

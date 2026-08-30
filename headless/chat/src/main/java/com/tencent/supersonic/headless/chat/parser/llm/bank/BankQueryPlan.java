@@ -65,7 +65,9 @@ public class BankQueryPlan {
     }
 
     public enum CalculationType {
-        DIRECT, CHANGE, RATIO, COUNT_DAYS_ABOVE_PROVINCE_AVERAGE
+        DIRECT, CHANGE, RATIO, COUNT_DAYS_ABOVE_PROVINCE_AVERAGE,
+        /** Cross-period rank change: current-period rank joined with baseline-period rank per org. */
+        RANK_CHANGE
     }
 
     public enum SortDirection {
@@ -95,6 +97,12 @@ public class BankQueryPlan {
         private String numerator;
         private String denominator;
         private String name;
+        /**
+         * Optional composite numerator: when present with two or more catalog metric codes the
+         * derived ratio sums every operand as its numerator. Absent or empty keeps the legacy
+         * single-numerator contract where {@code numerator} is the only operand.
+         */
+        private List<String> numeratorOperands;
     }
 
     @Data

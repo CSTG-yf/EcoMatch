@@ -13,7 +13,9 @@ import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
 import com.tencent.supersonic.headless.chat.corrector.SemanticCorrector;
 import com.tencent.supersonic.headless.chat.mapper.SchemaMapper;
 import com.tencent.supersonic.headless.chat.parser.SemanticParser;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankNl2SqlError;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
@@ -25,7 +27,10 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -156,6 +161,8 @@ public class ChatWorkflowEngine {
                     parseResult.setState(ParseResp.ParseState.COMPLETED);
                 } else {
                     parseResult.setState(ParseResp.ParseState.FAILED);
+                    persistBankTranslateFailure(parseInfo, "SEMANTIC_TRANSLATE_REJECTED",
+                            explain == null ? null : explain.getErrMsg());
                 }
                 if (StringUtils.isNotBlank(explain.getErrMsg())) {
                     errorMsg.add(explain.getErrMsg());
@@ -179,12 +186,58 @@ public class ChatWorkflowEngine {
                         e.getClass().getSimpleName(), root.getClass().getSimpleName(),
                         StringUtils.left(String.valueOf(root.getMessage()), 800),
                         StringUtils.left(String.valueOf(e.getMessage()), 800));
+                parseResult.setState(ParseResp.ParseState.FAILED);
+                persistBankTranslateFailure(parseInfo, root.getClass().getName(),
+                        root.getMessage());
                 errorMsg.add("Semantic query translation failed");
             }
         });
         if (!errorMsg.isEmpty()) {
             parseResult.setErrorMsg(String.join("\n", errorMsg));
         }
+    }
+
+    /**
+     * Translation used to be the only failure stage that vanished without bank tool feedback. For
+     * constrained bank plans this persists a FAILED TRANSLATE tool result so the downstream repair
+     * loop can regenerate the plan from real facts instead of silently losing the round.
+     */
+    private void persistBankTranslateFailure(SemanticParseInfo parseInfo, String rootType,
+            String rootMessage) {
+        Map<String, Object> properties = parseInfo.getProperties();
+        if (properties == null
+                || !properties.containsKey(BankPlanToolResult.PLAN_PROPERTY_KEY)) {
+            return;
+        }
+        BankPlanToolResult previous =
+                BankPlanToolResult.from(properties.get(BankPlanToolResult.PROPERTY_KEY));
+        int attempt = previous == null ? 1 : previous.getAttempt() + 1;
+        String traceId = previous == null || StringUtils.isBlank(previous.getTraceId())
+                ? UUID.randomUUID().toString() : previous.getTraceId();
+        String message = StringUtils.left(StringUtils.defaultString(rootMessage), 200);
+        List<String> hints = List.of("failed_layer=" + classifyTranslationLayer(rootType, message),
+                "root_type=" + StringUtils.defaultString(rootType), "root_message=" + message,
+                "根据 failed_layer/root_type 修正计划中的机构、指标、时间或查询族组合后，"
+                        + "重新输出完整 BankPlanningResponse。");
+        properties.put(BankPlanToolResult.PROPERTY_KEY, BankPlanToolResult.failed(attempt, traceId,
+                previous == null ? null : previous.getPreviousPlanFingerprint(),
+                BankPlanToolResult.Stage.TRANSLATE, "TRANSLATION_FAILED", Map.of(), hints));
+    }
+
+    private String classifyTranslationLayer(String rootType, String message) {
+        String normalized = (StringUtils.defaultString(rootType) + " "
+                + StringUtils.defaultString(message)).toLowerCase(Locale.ROOT);
+        if (BankEnvironmentFaultClassifier.isEnvironmentFault(null, normalized)) {
+            return BankEnvironmentFaultClassifier.CODE;
+        }
+        if (normalized.contains("calcite")) {
+            return "CALCITE_VALIDATE";
+        }
+        if (normalized.contains("jdbc") || normalized.contains("syntax")
+                || normalized.contains("column \"") || normalized.contains("sqlgrammar")) {
+            return "JDBC_GRAMMAR";
+        }
+        return "OTHER_TRANSLATION";
     }
 
     private void performPhysicalSqlCorrecting(ChatQueryContext queryCtx) {

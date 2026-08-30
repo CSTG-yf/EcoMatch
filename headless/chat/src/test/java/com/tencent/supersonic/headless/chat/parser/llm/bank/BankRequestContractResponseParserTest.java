@@ -41,6 +41,31 @@ class BankRequestContractResponseParserTest {
     }
 
     @Test
+    void redirectsCanonicalAdditiveCodesOverAmountOperandsToThePlainMetricContract() {
+        // 金额类合计（如两项亿元指标的“之和”）没有派生指标可写：反馈必须给可满足的
+        // 重定向（删派生、并列加数），而不是复述模型无法满足的百分率要求。
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(executeContractJson().replace("\"derivedMetrics\":[]",
+                                "\"derivedMetrics\":[{\"metricCode\":\"DERIVED_SUM_ZB007_AND_ZB008\","
+                                        + "\"numerator\":\"ZB007\",\"denominator\":\"ZB008\"}]"),
+                        admissionHints()));
+
+        assertTrue(exception.getMessage().contains("plain multi-metric queries"));
+        assertTrue(exception.getMessage().contains("remove this derivedMetrics entry"));
+    }
+
+    @Test
+    void stillDemandsTheCanonicalFormForMalformedAdditiveCodes() {
+        BankQueryPlanParseException exception = assertThrows(BankQueryPlanParseException.class,
+                () -> parser.parse(executeContractJson().replace("\"derivedMetrics\":[]",
+                                "\"derivedMetrics\":[{\"metricCode\":\"DERIVED_SUM_ZB014_AND_ZB013\","
+                                        + "\"numerator\":\"ZB014\",\"denominator\":\"ZB013\"}]"),
+                        admissionHints()));
+
+        assertTrue(exception.getMessage().contains("canonical code"));
+    }
+
+    @Test
     void canonicalizesRecognizableProvinceAverageComparisonSlots() {
         String contract = executeContractJson().replace("\"field\":\"benchmark\"",
                 "\"field\":\"metric_value\"");
