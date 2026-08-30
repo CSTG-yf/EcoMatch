@@ -1,8 +1,11 @@
 package com.tencent.supersonic.headless.chat.parser.llm.bank;
 
+import com.tencent.supersonic.headless.api.pojo.bank.BankDataDomain;
 import com.tencent.supersonic.headless.chat.intent.BankIntentType;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.SemanticIntentHints;
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -13,6 +16,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -20,6 +24,9 @@ import java.util.stream.Stream;
 
 /** Enforces mapper evidence before a BankQueryPlan can reach a compiler or executor. */
 public class BankQueryPlanValidator {
+
+    private static final Logger KEY_PIPELINE_LOG =
+            LoggerFactory.getLogger(BankDataDomain.KEY_PIPELINE_LOGGER_NAME);
 
     private static final Set<String> ORGANIZATION_DIMENSIONS = Set.of("bank_organization");
     private static final Set<String> TIME_DIMENSIONS = Set.of("bank_data_date");
@@ -62,6 +69,7 @@ public class BankQueryPlanValidator {
         validateDimensions(plan, hints, errors);
         validateOrganizations(plan, hints, errors);
         validateTime(plan, hints, errors);
+        validateDatesWithinDataDomain(plan, errors);
         validateFilters(plan, hints, errors);
         validateCalculation(plan, hints, errors);
         validateDerivedMetrics(plan, hints, errors);
@@ -321,6 +329,55 @@ public class BankQueryPlanValidator {
         return (hints.getRequiredStartDate() == null && hints.getRequiredEndDate() == null)
                 || Objects.equals(hints.getRequiredStartDate(), time.getStartDate())
                         && Objects.equals(hints.getRequiredEndDate(), time.getEndDate());
+    }
+
+    /** One keyPipeline note per process when the guard runs before the domain was observed. */
+    private static final AtomicBoolean DATA_DOMAIN_SKIP_NOTED = new AtomicBoolean(false);
+
+    /**
+     * Family-level date-hallucination guard: every date slot of the plan time object (current
+     * window and comparison baseline) must fall inside the dataset's real {@code data_date}
+     * domain. A slot outside the domain provably matches no data row, so period-over-period and
+     * other baseline joins would silently return empty results. This rejects only provable
+     * errors — any in-domain plan shape is unaffected — and falls open (with a single keyPipeline
+     * note) while the execution path has not yet observed the domain, so first parses are never
+     * blocked by an uninitialized cache.
+     */
+    private void validateDatesWithinDataDomain(BankQueryPlan plan, List<ValidationError> errors) {
+        BankDataDomain domain = BankDataDomain.current();
+        if (domain == null) {
+            if (DATA_DOMAIN_SKIP_NOTED.compareAndSet(false, true)) {
+                KEY_PIPELINE_LOG.info("BankQueryPlanValidator date-domain guard fell open: "
+                        + "BankDataDomain is not initialized yet (no executed query has observed "
+                        + "the data_date range); date slots are not checked until then");
+            }
+            return;
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        if (time == null) {
+            // Missing time is already reported by TIME_REQUIRED.
+            return;
+        }
+        rejectDateOutsideDataDomain("time.startDate", time.getStartDate(), domain, errors);
+        rejectDateOutsideDataDomain("time.endDate", time.getEndDate(), domain, errors);
+        rejectDateOutsideDataDomain("time.baselineStartDate", time.getBaselineStartDate(), domain,
+                errors);
+        rejectDateOutsideDataDomain("time.baselineEndDate", time.getBaselineEndDate(), domain,
+                errors);
+    }
+
+    private void rejectDateOutsideDataDomain(String slot, LocalDate value, BankDataDomain domain,
+            List<ValidationError> errors) {
+        if (value == null || domain.contains(value)) {
+            return;
+        }
+        errors.add(error("DATE_OUT_OF_DATA_DOMAIN", slot + "=" + value
+                + " is outside the dataset's real data_date domain " + domain + "; no data rows "
+                + "exist on that date, so the query provably returns an empty result. Replace "
+                + slot + " with a real in-domain date consistent with the question's time wording"
+                + "；" + slot + "=" + value + " 不在数据集真实数据域 " + domain
+                + " 内，该日期无任何数据，查询必然返回空结果（日期幻觉）；请把 " + slot
+                + " 修正为数据域内、与题面时间措辞一致的真实日期"));
     }
 
     private static boolean isFullCalendarYear(BankQueryPlan.TimeRange time) {
