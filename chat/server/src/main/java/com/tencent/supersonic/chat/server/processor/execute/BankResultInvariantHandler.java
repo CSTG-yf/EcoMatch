@@ -24,8 +24,8 @@ import java.util.TreeSet;
  * Fail-closed invariant audit over the projected bank result. Runs after
  * {@link BankResultProjectionHandler} and re-derives every assertion from the persisted
  * {@link BankResultProjector#CONTRACT_PROPERTY} only: a rank slice cardinality/continuity check,
- * an organization no-phantom check and a selected-dates range check. An assertion whose contract
- * fields are missing or empty is skipped, and an empty result
+ * an organization no-phantom check, a selected-dates range check and the FREE declared-column
+ * check. An assertion whose contract fields are missing or empty is skipped, and an empty result
  * is an honest "no data" answer, never a violation — legitimate family outputs are therefore
  * never rejected here. A violation withholds the rows and re-enters the existing repairable
  * {@code RESULT_SEMANTIC} failure path (no new failure state).
@@ -37,6 +37,7 @@ public class BankResultInvariantHandler implements ExecuteResultProcessor {
     static final String RANK_VIOLATION_CODE = "INVARIANT_VIOLATION_RANK";
     static final String ORGANIZATION_VIOLATION_CODE = "INVARIANT_VIOLATION_ORG";
     static final String DATE_VIOLATION_CODE = "INVARIANT_VIOLATION_DATE";
+    static final String FREE_COLUMN_VIOLATION_CODE = "INVARIANT_VIOLATION_FREE_COLUMNS";
 
     private static final String ORG_COLUMN = "org_code";
     private static final String DATE_COLUMN = "data_date";
@@ -77,7 +78,10 @@ public class BankResultInvariantHandler implements ExecuteResultProcessor {
             return true;
         }
         Set<String> columns = projectedColumns(queryResult, rows);
-        Invariant violation = organizationInvariant(contract, columns, rows);
+        Invariant violation = freeColumnInvariant(contract, columns);
+        if (violation == null) {
+            violation = organizationInvariant(contract, columns, rows);
+        }
         if (violation == null) {
             violation = dateInvariant(contract, columns, rows);
         }
@@ -88,6 +92,24 @@ public class BankResultInvariantHandler implements ExecuteResultProcessor {
             return true;
         }
         return reject(queryResult, violation);
+    }
+
+    /**
+     * FREE passthrough contract: every declared canonical column must appear in the projected
+     * result columns.
+     */
+    private Invariant freeColumnInvariant(BankResultProjector.Contract contract,
+            Set<String> columns) {
+        if (contract.getType() != BankResultProjector.ProjectionType.FREE) {
+            return null;
+        }
+        List<String> missing = BankResultProjector.freeSqlDeclaredColumns(contract).stream()
+                .filter(column -> !columns.contains(normalize(column))).toList();
+        if (missing.isEmpty()) {
+            return null;
+        }
+        return new Invariant(FREE_COLUMN_VIOLATION_CODE,
+                List.of("结果缺少声明的列: " + missing));
     }
 
     /** Organization no-phantom: projected org values must stay inside the selected set. */

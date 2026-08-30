@@ -68,12 +68,70 @@ public class BankResultProjector {
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
             case DERIVED_RANKING -> projectDerivedRanking(contract, sourceRows);
             case RANK_CHANGE_LONG_FORM -> projectRankChangeLongForm(contract, sourceRows);
+            case FREE -> projectFree(contract, sourceRows);
         };
     }
 
     static String rankingDirection(String metricCode) {
         return LOWER_VALUE_IS_BETTER_METRICS.contains(StringUtils.upperCase(metricCode)) ? "ASC"
                 : "DESC";
+    }
+
+    /** Declared canonical output columns of a FREE passthrough contract, in declared order. */
+    public static List<String> freeSqlDeclaredColumns(Contract contract) {
+        if (contract == null || contract.getType() != ProjectionType.FREE) {
+            return List.of();
+        }
+        return contract.getMetrics().stream()
+                .map(BankResultProjector.MetricBinding::getSemanticColumn)
+                .filter(StringUtils::isNotBlank).toList();
+    }
+
+    /**
+     * Fail-closed dual-output check for the fallback channel: the physical result column
+     * metadata must name exactly the declared canonical columns (case-insensitive, order
+     * irrelevant). Returns true when there is no metadata evidence to contradict the
+     * declaration (empty or missing columns).
+     */
+    public static boolean freeSqlColumnsConsistent(Contract contract,
+            List<String> resultColumnNames) {
+        List<String> declared = freeSqlDeclaredColumns(contract);
+        if (declared.isEmpty()) {
+            return false;
+        }
+        if (resultColumnNames == null || resultColumnNames.isEmpty()) {
+            return true;
+        }
+        Set<String> declaredSet = declared.stream().map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Set<String> actualSet = resultColumnNames.stream().filter(Objects::nonNull)
+                .map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return declaredSet.equals(actualSet);
+    }
+
+    /**
+     * FREE passthrough projection: rows are returned verbatim under their declared canonical
+     * column names. Any row key outside the declared set (execution result diverging from the
+     * whitelisted statement shape) fails the projection so the handler can refuse the answer.
+     */
+    private Projection projectFree(Contract contract, List<Map<String, Object>> sourceRows) {
+        List<String> declared = freeSqlDeclaredColumns(contract);
+        if (declared.isEmpty()) {
+            return Projection.notApplied();
+        }
+        Set<String> declaredSet = declared.stream()
+                .map(name -> name.strip().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            for (String key : sourceRow.keySet()) {
+                if (key == null || !declaredSet.contains(key.strip().toLowerCase(Locale.ROOT))) {
+                    return Projection.notApplied();
+                }
+            }
+        }
+        return Projection.applied(declared, sourceRows == null ? List.of() : sourceRows);
     }
 
     private Projection projectTrend(Contract contract, List<Map<String, Object>> sourceRows) {
@@ -1733,7 +1791,9 @@ public class BankResultProjector {
         MULTI_METRIC_CHANGE,
         DERIVED_RANKING,
         /** Cross-period rank change long form: metric_code + baseline/current ranks and delta. */
-        RANK_CHANGE_LONG_FORM
+        RANK_CHANGE_LONG_FORM,
+        /** Controlled free-SQL fallback passthrough; metrics bindings declare the output columns. */
+        FREE
     }
 
     @Data

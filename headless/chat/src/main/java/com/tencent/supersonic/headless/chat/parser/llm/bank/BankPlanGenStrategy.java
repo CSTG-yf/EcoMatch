@@ -135,6 +135,19 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                     }
                     throw BankNl2SqlError.clarificationRequired(requirements.getClarification());
                 }
+                // Question-vs-plan organization cross-check (catalog evidence only): a plan that
+                // binds a legal-but-wrong organization stays valid downstream and returns
+                // non-empty rows, so no validator or executor ever sees the mistake. The guard
+                // fires only when the question names exactly one catalog organization and the
+                // plan binds a different one; surfacing it here routes the plan back through the
+                // structured repair loop with a directive message.
+                Optional<String> bindingConflict = BankOrgBindingGuard.conflict(
+                        llmReq.getQueryText(), planOrganizationCodes(planning.getPlan()));
+                if (bindingConflict.isPresent()) {
+                    throw new BankQueryPlanParseException(
+                            BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                            bindingConflict.get());
+                }
                 SemanticIntentHints planHints = requirements.toPlanHints(admissionHints);
                 llmReq.setBankRequestContract(requirements);
                 llmReq.setSemanticIntentHints(planHints);
@@ -182,7 +195,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 // Terminal compiler-class rejection from a plan-shape gate (e.g. a question shape
                 // no query family can express). It is not a model failure and owns no structured
                 // repair: propagate untouched so the terminal error cause chain keeps the exact
-                // reason for diagnostics and caller-side classification.
+                // Reason for candidate ranking and the controlled free-SQL fallback admission.
                 throw exception;
             } catch (RuntimeException exception) {
                 throw exception instanceof BankNl2SqlError bankError ? bankError
@@ -197,8 +210,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // signature for the two-repair case; if the envelope is ever reworded to name the
         // two-repair exhaustion explicitly, that wording must ship as a NEW message signature
         // instead of overloading this string. Until then the two cases are distinguished by the
-        // keyPipeline terminal line below plus the dynamic diagnostics, while accepted responses
-        // record the exact roll count under bank.nl2sql.modelAttempts.
+        // keyPipeline terminal line below plus the dynamic diagnostics: the envelope's
+        // planFailureCode carries the last gate code, and accepted responses record the exact
+        // roll count under bank.nl2sql.modelAttempts.
         KEY_PIPELINE_LOG.info(
                 "BankPlanGenStrategy plan stage exhausted modelAttempts={} lastCode={} escalationUsed={}",
                 maxAttempts,
@@ -360,6 +374,17 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return repairCodes.size() >= 2
                 && repairCodes.get(repairCodes.size() - 1)
                         .equals(repairCodes.get(repairCodes.size() - 2));
+    }
+
+    /** Blank-free organization codes bound by the plan, in plan order. */
+    private static List<String> planOrganizationCodes(BankQueryPlan plan) {
+        if (plan == null || plan.getOrganizations() == null) {
+            return List.of();
+        }
+        return plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode)
+                .filter(code -> code != null && !code.isBlank())
+                .collect(Collectors.toList());
     }
 
     /**

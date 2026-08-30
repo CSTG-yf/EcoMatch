@@ -17,6 +17,7 @@ import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankFreeSqlFallbackStrategy;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
@@ -98,8 +99,11 @@ public class SqlExecutor implements ChatQueryExecutor {
         // resultOnly is the trusted, server-side official evaluation mode. It must capture the
         // actual typed facts rather than an authorization-masked presentation response.
         sqlReq.setNeedAuth(!executeContext.getRequest().isResultOnly());
-        sqlReq.setTrustedCompiledSql(
-                StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
+        // Controlled free-SQL fallback output is model-written: it must take the non-trusted
+        // safety path (SqlSafetyPolicy without the compiled-CTE exemption) through the gateway.
+        boolean freeSqlFallback = BankFreeSqlFallbackStrategy.isFreeSqlFallbackParse(parseInfo);
+        sqlReq.setTrustedCompiledSql(StringUtils
+                .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()) && !freeSqlFallback);
 
         long startTime = System.currentTimeMillis();
         QueryResult queryResult = new QueryResult();
@@ -158,12 +162,18 @@ public class SqlExecutor implements ChatQueryExecutor {
     /**
      * Bank constrained plans must be repaired by regenerating the plan and recompiling it. They
      * must never be handed to the legacy physical-SQL corrector, which would let a model mutate a
-     * compiler-produced SQL string outside the plan contract. Other query modes retain the
-     * existing optional physical-SQL correction behavior.
+     * compiler-produced SQL string outside the plan contract. Controlled free-SQL fallback output
+     * is likewise frozen after whitelist validation. Other query modes retain the existing
+     * optional physical-SQL correction behavior.
      */
     static boolean shouldAttemptPhysicalSqlRepair(SemanticParseInfo parseInfo) {
         if (parseInfo == null || parseInfo.getProperties() == null) {
             return true;
+        }
+        // A whitelisted fallback statement stays exactly as validated; a model rewrite here would
+        // bypass the whitelist + column contract and silently reopen the free-SQL path.
+        if (BankFreeSqlFallbackStrategy.isFreeSqlFallbackParse(parseInfo)) {
+            return false;
         }
         // Presence of the marker is authoritative. A malformed marker must fail closed rather
         // than reopening the legacy physical-SQL model path.
