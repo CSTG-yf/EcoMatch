@@ -14,10 +14,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BankPlanToolResultTest {
 
     @Test
-    void exposesTheSevenStableExecutionStages() {
-        assertEquals(List.of("PLAN_SCHEMA", "PLAN_SEMANTIC", "COMPILE", "SQL_SAFETY",
-                "DATABASE_PREPARE", "DATABASE_EXECUTE", "RESULT_SEMANTIC"),
+    void exposesTheEightStableExecutionStages() {
+        assertEquals(List.of("PLAN_SCHEMA", "PLAN_SEMANTIC", "COMPILE", "TRANSLATE",
+                        "SQL_SAFETY", "DATABASE_PREPARE", "DATABASE_EXECUTE", "RESULT_SEMANTIC"),
                 List.of(BankPlanToolResult.Stage.values()).stream().map(Enum::name).toList());
+    }
+
+    @Test
+    void translationFailureCarriesRootCauseHintsThroughRepairFeedback() {
+        BankPlanToolResult result = BankPlanToolResult.started(1, "trace-t1", null,
+                        "S2SQL_TEMPLATE", List.of("bank_organization", "ZB001"))
+                .fail(BankPlanToolResult.Stage.TRANSLATE, "TRANSLATION_FAILED", Map.of(),
+                        List.of("failed_layer=CALCITE_VALIDATE", "root_type=CalciteContextException",
+                                "root_message=No match found for function rank_over"));
+
+        assertEquals(BankPlanToolResult.Status.FAILED, result.getStatus());
+        assertEquals(BankPlanToolResult.Stage.TRANSLATE, result.getFailedStage());
+        assertEquals("TRANSLATION_FAILED", result.getErrorCode());
+        assertEquals("语义翻译或物理编译失败，请按根因提示修正完整计划。", result.getMessage());
+        String feedback = result.toRepairFeedback();
+        assertTrue(feedback.contains("\"failedStage\":\"TRANSLATE\""));
+        assertTrue(feedback.contains("CALCITE_VALIDATE"));
+        assertFalse(feedback.toLowerCase().contains("select "));
     }
 
     @Test

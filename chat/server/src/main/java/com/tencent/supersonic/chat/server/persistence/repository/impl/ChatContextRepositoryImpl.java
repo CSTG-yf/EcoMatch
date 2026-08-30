@@ -1,6 +1,5 @@
 package com.tencent.supersonic.chat.server.persistence.repository.impl;
 
-import com.google.gson.Gson;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatContextDO;
 import com.tencent.supersonic.chat.server.persistence.mapper.ChatContextMapper;
 import com.tencent.supersonic.chat.server.persistence.repository.ChatContextRepository;
@@ -57,8 +56,7 @@ public class ChatContextRepositoryImpl implements ChatContextRepository {
         chatContextDO.setQueryText(chatContext.getQueryText());
         chatContextDO.setQueryUser(chatContext.getUser());
         if (chatContext.getParseInfo() != null) {
-            Gson g = new Gson();
-            chatContextDO.setSemanticParse(g.toJson(chatContext.getParseInfo()));
+            chatContextDO.setSemanticParse(JsonUtil.toString(chatContext.getParseInfo()));
         }
         return chatContextDO;
     }

@@ -86,6 +86,13 @@ class BankFewShotExemplarCatalogTest {
         assertTrue(ratio.planJson().contains("\"bizName\":\"ZB002\""));
         assertTrue(ratio.planJson().contains("\"bizName\":\"ZB001\""));
         assertTrue(ratio.planJson().contains("\"type\":\"RATIO\""));
+
+        // ZB013 is lower-is-better; catalog ordering must follow registry direction (3f).
+        BankFewShotExemplarCatalog.Exemplar bottom = exemplar(
+                BankFewShotExemplarCatalog.QueryFamily.BOTTOM_RANKING);
+        assertTrue(bottom.planJson().contains("\"direction\":\"ASC\""),
+                "bottom-ranking exemplar must order a lower-is-better metric ASC");
+        assertFalse(bottom.planJson().contains("\"direction\":\"DESC\""));
     }
 
     @Test

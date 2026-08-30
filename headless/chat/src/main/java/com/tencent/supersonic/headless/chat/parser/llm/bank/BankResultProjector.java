@@ -16,7 +16,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -46,6 +48,10 @@ public class BankResultProjector {
             case COMPARISON -> projectComparison(contract, sourceRows);
             case PROVINCIAL_AVERAGE_THRESHOLD -> projectProvinceAverageThreshold(contract,
                     sourceRows);
+            case MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD ->
+                projectMultiMetricProvinceAverageThreshold(contract, sourceRows);
+            case COMPOUND_BENCHMARK_THRESHOLD -> projectCompoundBenchmarkThreshold(contract,
+                    sourceRows);
             case MULTI_METRIC_PROVINCIAL_AVERAGE -> projectMultiMetricProvinceAverage(contract,
                     sourceRows);
             case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
@@ -61,6 +67,7 @@ public class BankResultProjector {
             case MOM_YOY_CHANGE -> projectMomYoyChange(contract, sourceRows);
             case MULTI_METRIC_CHANGE -> projectMultiMetricChange(contract, sourceRows);
             case DERIVED_RANKING -> projectDerivedRanking(contract, sourceRows);
+            case RANK_CHANGE_LONG_FORM -> projectRankChangeLongForm(contract, sourceRows);
         };
     }
 
@@ -145,9 +152,9 @@ public class BankResultProjector {
                     BigDecimal part = decimal(value.value());
                     row.put("ratio_percent",
                             part == null || totalNumeric == null
-                                    || totalNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
-                                            : part.multiply(BigDecimal.valueOf(100)).divide(
-                                                    totalNumeric, 15, RoundingMode.HALF_UP));
+                            || totalNumeric.compareTo(BigDecimal.ZERO) == 0 ? null
+                                    : part.multiply(BigDecimal.valueOf(100)).divide(
+                                            totalNumeric, 2, RoundingMode.HALF_UP));
                     if (totalNumeric != null) {
                         row.put("numerator_value", value.value());
                         row.put("denominator_value", totalNumeric);
@@ -366,7 +373,7 @@ public class BankResultProjector {
             row.put("denominator_value", total);
             row.put("ratio_percent",
                     num == null || total == null || total.compareTo(BigDecimal.ZERO) == 0 ? null
-                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 15,
+                            : num.multiply(BigDecimal.valueOf(100)).divide(total, 2,
                                     RoundingMode.HALF_UP));
             out.add(row);
         }
@@ -835,8 +842,10 @@ public class BankResultProjector {
      * restricts the selected organization outside that ranking, so this projection preserves the
      * source rank_position verbatim instead of recomputing ranks from the returned rows. A missing
      * source field or a non-usable source rank fails closed; no row is ever dropped or re-ranked
-     * silently. The emitted rows are re-ordered to the deterministic metric_code ASC, org_code ASC
-     * contract.
+     * silently. When the contract carries a top/bottom rank slice, the requested ranks are cut
+     * from the source ordinals per metric (the template returns the complete ranked population per
+     * metric, so the highest source rank is the population size). Without a slice the emitted rows
+     * keep the deterministic metric_code ASC, org_code ASC contract.
      */
     private Projection projectDerivedRanking(Contract contract,
             List<Map<String, Object>> sourceRows) {
@@ -866,6 +875,66 @@ public class BankResultProjector {
             row.put("rank_position", rankPosition.value());
             rows.add(row);
         }
+        if (contract.getTopRankLimit() != null || contract.getBottomRankLimit() != null) {
+            rows = sliceDerivedRankingRows(contract, rows);
+        } else {
+            rows.sort((left, right) -> {
+                int metricOrder = String.valueOf(left.get("metric_code"))
+                        .compareTo(String.valueOf(right.get("metric_code")));
+                if (metricOrder != 0) {
+                    return metricOrder;
+                }
+                return String.valueOf(left.get("org_code"))
+                        .compareTo(String.valueOf(right.get("org_code")));
+            });
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Cross-period rank-change passthrough: the SQL already computed each metric's baseline and
+     * current ROW_NUMBER ranks over the full population and joined them per organization, so the
+     * projector only re-attaches organization identity and metric codes — it never recomputes
+     * ranks in memory. Rows outside the selected organizations are dropped.
+     */
+    private Projection projectRankChangeLongForm(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        Set<String> configuredMetricCodes = contract.getMetrics().stream()
+                .map(MetricBinding::getMetricCode).filter(StringUtils::isNotBlank)
+                .map(StringUtils::upperCase).collect(Collectors.toSet());
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup baselineRank = value(sourceRow, "baseline_rank");
+            ValueLookup currentRank = value(sourceRow, "current_rank");
+            ValueLookup rankChange = value(sourceRow, "rank_change");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !baselineRank.found()
+                    || decimal(baselineRank.value()) == null || !currentRank.found()
+                    || decimal(currentRank.value()) == null || !rankChange.found()
+                    || decimal(rankChange.value()) == null) {
+                return Projection.notApplied();
+            }
+            String code = StringUtils.upperCase(String.valueOf(metricCode.value()));
+            if (!configuredMetricCodes.isEmpty() && !configuredMetricCodes.contains(code)) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("metric_code", code);
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("baseline_rank", baselineRank.value());
+            row.put("current_rank", currentRank.value());
+            row.put("rank_change", rankChange.value());
+            rows.add(row);
+        }
         rows.sort((left, right) -> {
             int metricOrder = String.valueOf(left.get("metric_code"))
                     .compareTo(String.valueOf(right.get("metric_code")));
@@ -876,6 +945,37 @@ public class BankResultProjector {
                     .compareTo(String.valueOf(right.get("org_code")));
         });
         return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Cuts the requested top/bottom ranks from the SQL rank ordinals, grouped per metric code in
+     * metric_code ASC order. Bottom-only slices keep the published rank_position DESC presentation
+     * (worst first); combined top+bottom slices keep the natural ascending rank order.
+     */
+    private List<Map<String, Object>> sliceDerivedRankingRows(Contract contract,
+            List<Map<String, Object>> rows) {
+        Map<String, Integer> populationByMetric = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String metricCode = String.valueOf(row.get("metric_code"));
+            int rank = decimal(row.get("rank_position")).intValue();
+            populationByMetric.merge(metricCode, rank, Math::max);
+        }
+        List<Map<String, Object>> sliced = new ArrayList<>();
+        for (Map.Entry<String, Integer> population : populationByMetric.entrySet()) {
+            List<Map<String, Object>> metricRows = rows.stream()
+                    .filter(row -> String.valueOf(row.get("metric_code"))
+                            .equals(population.getKey()))
+                    .filter(row -> isRequestedRankSlice(contract,
+                            decimal(row.get("rank_position")).intValue(), population.getValue()))
+                    .sorted(Comparator.comparingInt(row -> decimal(row.get("rank_position"))
+                            .intValue()))
+                    .collect(Collectors.toList());
+            if (isBottomOnlyRanking(contract)) {
+                Collections.reverse(metricRows);
+            }
+            sliced.addAll(metricRows);
+        }
+        return sliced;
     }
 
     private Projection projectComparison(Contract contract, List<Map<String, Object>> sourceRows) {
@@ -964,6 +1064,107 @@ public class BankResultProjector {
             return Projection.applied(pointAggregateColumns(), rows);
         }
         return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Multi-metric org vs province mean threshold (W4a defect 2). The SQL threshold template
+     * already computed each metric's provincial average, gap and meets_condition over the full
+     * population; this projection passes those per-metric threshold facts through with
+     * organization identity so the answer can list which organizations satisfy the benchmark.
+     */
+    private Projection projectMultiMetricProvinceAverageThreshold(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup metricCode = value(sourceRow, "metric_code");
+            ValueLookup metricValue = value(sourceRow, "metric_value");
+            ValueLookup provincialAverage = value(sourceRow, "provincial_average");
+            ValueLookup gap = value(sourceRow, "gap_value");
+            ValueLookup meetsCondition = value(sourceRow, "meets_condition");
+            if (StringUtils.isBlank(organizationCode) || !metricCode.found()
+                    || metricCode.value() == null || !metricValue.found()
+                    || !provincialAverage.found() || !meetsCondition.found()) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            row.put("metric_code", StringUtils.upperCase(String.valueOf(metricCode.value())));
+            row.put("metric_value", metricValue.value());
+            row.put("provincial_average", provincialAverage.value());
+            row.put("gap_value", gap.found() ? gap.value() : null);
+            row.put("meets_condition", meetsCondition.value());
+            rows.add(row);
+        }
+        rows.sort((left, right) -> {
+            int metricOrder = String.valueOf(left.get("metric_code"))
+                    .compareTo(String.valueOf(right.get("metric_code")));
+            if (metricOrder != 0) {
+                return metricOrder;
+            }
+            return String.valueOf(left.get("org_code"))
+                    .compareTo(String.valueOf(right.get("org_code")));
+        });
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /**
+     * Compound benchmark threshold (多指标复合基准阈值). The SQL template already pivoted every
+     * metric's value and provincial average and AND-combined the direction-aware comparisons
+     * into one meets_condition flag over the full population; this projection passes those wide
+     * facts through with organization identity, one row per organization, keeping the canonical
+     * ordinal column contract (first_value, first_average, second_value, second_average, ...).
+     */
+    private Projection projectCompoundBenchmarkThreshold(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().isEmpty()) {
+            return Projection.notApplied();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup meetsCondition = value(sourceRow, "meets_condition");
+            if (StringUtils.isBlank(organizationCode) || !meetsCondition.found()) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            for (MetricBinding metric : contract.getMetrics()) {
+                ValueLookup metricValue = value(sourceRow, metric.getSemanticColumn());
+                ValueLookup provincialAverage =
+                        value(sourceRow, compoundAverageColumn(metric.getSemanticColumn()));
+                if (!metricValue.found() || !provincialAverage.found()) {
+                    return Projection.notApplied();
+                }
+                row.put(metric.getSemanticColumn(), metricValue.value());
+                row.put(compoundAverageColumn(metric.getSemanticColumn()),
+                        provincialAverage.value());
+            }
+            row.put("meets_condition", meetsCondition.value());
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /** The per-metric companion average column of an ordinal compound value column. */
+    private static String compoundAverageColumn(String valueColumn) {
+        return valueColumn != null && valueColumn.endsWith("_value")
+                ? valueColumn.substring(0, valueColumn.length() - "_value".length()) + "_average"
+                : valueColumn + "_average";
     }
 
     /**
@@ -1436,6 +1637,19 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_value", "provincial_average",
                     "meets_condition");
         }
+        if (contract.getType() == ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD) {
+            return List.of("org_code", "org_name", "metric_code", "metric_value",
+                    "provincial_average", "gap_value", "meets_condition");
+        }
+        if (contract.getType() == ProjectionType.COMPOUND_BENCHMARK_THRESHOLD) {
+            List<String> columns = new ArrayList<>(List.of("org_code", "org_name"));
+            for (MetricBinding metric : contract.getMetrics()) {
+                columns.add(metric.getSemanticColumn());
+                columns.add(compoundAverageColumn(metric.getSemanticColumn()));
+            }
+            columns.add("meets_condition");
+            return List.copyOf(columns);
+        }
         if (contract.getType() == ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE) {
             return List.of("org_code", "org_name", "metric_code", "metric_value",
                     "provincial_average", "gap_value", "absolute_gap");
@@ -1469,6 +1683,10 @@ public class BankResultProjector {
         if (contract.getType() == ProjectionType.DERIVED_RANKING) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
         }
+        if (contract.getType() == ProjectionType.RANK_CHANGE_LONG_FORM) {
+            return List.of("metric_code", "org_code", "org_name", "baseline_rank", "current_rank",
+                    "rank_change");
+        }
         if (contract.getType() == ProjectionType.RANKED_LONG_FORM
                 && rankedMetricCodeFirst(contract)) {
             return List.of("metric_code", "org_code", "org_name", "metric_value", "rank_position");
@@ -1498,6 +1716,12 @@ public class BankResultProjector {
         RATIO,
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
+        MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
+        /**
+         * Compound benchmark threshold (多指标复合基准阈值): wide per-organization rows with one
+         * ordinal value/average pair per metric plus the AND-combined meets_condition flag.
+         */
+        COMPOUND_BENCHMARK_THRESHOLD,
         MULTI_METRIC_PROVINCIAL_AVERAGE,
         ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,
@@ -1507,7 +1731,9 @@ public class BankResultProjector {
         TREND,
         MOM_YOY_CHANGE,
         MULTI_METRIC_CHANGE,
-        DERIVED_RANKING
+        DERIVED_RANKING,
+        /** Cross-period rank change long form: metric_code + baseline/current ranks and delta. */
+        RANK_CHANGE_LONG_FORM
     }
 
     @Data

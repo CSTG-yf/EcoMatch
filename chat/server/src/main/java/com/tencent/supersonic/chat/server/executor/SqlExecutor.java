@@ -16,6 +16,7 @@ import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.response.QueryState;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
 import com.tencent.supersonic.headless.chat.corrector.LLMPhysicalSqlCorrector;
+import com.tencent.supersonic.headless.chat.parser.llm.bank.BankEnvironmentFaultClassifier;
 import com.tencent.supersonic.headless.chat.parser.llm.bank.BankPlanToolResult;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
@@ -97,8 +98,8 @@ public class SqlExecutor implements ChatQueryExecutor {
         // resultOnly is the trusted, server-side official evaluation mode. It must capture the
         // actual typed facts rather than an authorization-masked presentation response.
         sqlReq.setNeedAuth(!executeContext.getRequest().isResultOnly());
-        sqlReq.setTrustedCompiledSql(StringUtils
-                .isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
+        sqlReq.setTrustedCompiledSql(
+                StringUtils.isBlank(parseInfo.getSqlInfo().getCorrectedQuerySQL()));
 
         long startTime = System.currentTimeMillis();
         QueryResult queryResult = new QueryResult();
@@ -206,8 +207,18 @@ public class SqlExecutor implements ChatQueryExecutor {
         if (stage.ordinal() > BankPlanToolResult.Stage.DATABASE_PREPARE.ordinal()) {
             toolResult.succeed(BankPlanToolResult.Stage.DATABASE_PREPARE);
         }
-        String errorCode = failureLayer == null ? "DATABASE_EXECUTION_FAILED" : failureLayer;
-        toolResult.fail(stage, errorCode, Map.of(), correctionHints(stage));
+        // Unclassified failures are checked for provider/infra outage signatures first: those get
+        // ENVIRONMENT_FAULT, which is intentionally absent from the repair whitelist, so the loop
+        // stops instead of spending another model round on a dead endpoint.
+        String rawErrorMsg = queryResp == null ? null : queryResp.getErrorMsg();
+        String errorCode = failureLayer;
+        if (errorCode == null) {
+            errorCode = BankEnvironmentFaultClassifier.isEnvironmentFault(null, rawErrorMsg)
+                    ? BankEnvironmentFaultClassifier.CODE
+                    : "DATABASE_EXECUTION_FAILED";
+        }
+        toolResult.fail(stage, errorCode, Map.of(),
+                correctionHints(stage, errorCode, rawErrorMsg));
         parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
     }
 
@@ -230,12 +241,28 @@ public class SqlExecutor implements ChatQueryExecutor {
         return BankPlanToolResult.Stage.DATABASE_EXECUTE;
     }
 
-    private List<String> correctionHints(BankPlanToolResult.Stage stage) {
+    /**
+     * Dynamic root-cause channel for the repair loop (the toolResult {@code message} field stays
+     * the generic contract text on purpose). The hints carry the failure layer plus the truncated
+     * raw execution error — SqlSafetyPolicy rejections are static-constant texts and JDBC
+     * diagnostics only reference schema-known identifiers, so a 200-char pass-through is safe and
+     * mirrors the TRANSLATE-stage precedent in ChatWorkflowEngine.
+     */
+    private List<String> correctionHints(BankPlanToolResult.Stage stage, String errorCode,
+            String rawMessage) {
+        String rootMessage = StringUtils.left(
+                StringUtils.defaultIfBlank(StringUtils.normalizeSpace(rawMessage), "无错误详情"),
+                200);
+        return List.of("failed_layer=" + StringUtils.defaultIfBlank(errorCode, "UNKNOWN"),
+                "root_message=" + rootMessage, staticCorrectionHint(stage));
+    }
+
+    private String staticCorrectionHint(BankPlanToolResult.Stage stage) {
         return switch (stage) {
-            case SQL_SAFETY -> List.of("只修正 BankQueryPlan，不要直接生成或修改物理 SQL");
-            case DATABASE_PREPARE -> List.of("检查计划的机构、指标、时间与查询族组合");
-            case DATABASE_EXECUTE -> List.of("根据失败阶段重新生成完整 BankQueryPlan");
-            default -> List.of("重新生成符合语义目录约束的完整 BankQueryPlan");
+            case SQL_SAFETY -> "只修正 BankQueryPlan，不要直接生成或修改物理 SQL";
+            case DATABASE_PREPARE -> "检查计划的机构、指标、时间与查询族组合";
+            case DATABASE_EXECUTE -> "根据失败阶段重新生成完整 BankQueryPlan";
+            default -> "重新生成符合语义目录约束的完整 BankQueryPlan";
         };
     }
 }

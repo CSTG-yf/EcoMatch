@@ -30,6 +30,12 @@ public class ChatModelConfig implements Serializable {
     private Boolean enableSearch = false;
     private Boolean jsonFormat = false;
     private String jsonFormatType = "json_schema";
+    /**
+     * Optional OpenAI-style reasoning budget for reasoning models (e.g. GLM/DeepSeek gates):
+     * {@code low} pins always-thinking models to a near-zero reasoning spend. Blank keeps the
+     * provider default; never sent for providers that do not accept the parameter.
+     */
+    private String reasoningEffort;
 
     public String keyDecrypt() {
         return AESEncryptionUtil.aesDecryptECB(getApiKey());

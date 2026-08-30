@@ -199,6 +199,7 @@ public class BankPlanToolResult {
             case PLAN_SCHEMA -> "计划结构校验通过。";
             case PLAN_SEMANTIC -> "计划语义校验通过。";
             case COMPILE -> "查询编译通过。";
+            case TRANSLATE -> "语义翻译与物理编译通过。";
             case SQL_SAFETY -> "SQL 安全检查通过。";
             case DATABASE_PREPARE -> "数据库预检查通过。";
             case DATABASE_EXECUTE -> "数据库执行通过。";
@@ -211,6 +212,7 @@ public class BankPlanToolResult {
             case PLAN_SCHEMA -> "计划结构不符合约束，请修正完整计划。";
             case PLAN_SEMANTIC -> "计划语义不符合业务能力，请根据允许值修正完整计划。";
             case COMPILE -> "查询编译失败，请修正不受支持的计划组合。";
+            case TRANSLATE -> "语义翻译或物理编译失败，请按根因提示修正完整计划。";
             case SQL_SAFETY -> "SQL 安全检查失败，请修正计划而不是直接生成 SQL。";
             case DATABASE_PREPARE -> "数据库预检查失败，请根据错误码修正完整计划。";
             case DATABASE_EXECUTE -> "数据库执行失败，请根据允许值修正完整计划。";
@@ -223,8 +225,8 @@ public class BankPlanToolResult {
     }
 
     public enum Stage {
-        PLAN_SCHEMA, PLAN_SEMANTIC, COMPILE, SQL_SAFETY, DATABASE_PREPARE, DATABASE_EXECUTE,
-        RESULT_SEMANTIC
+        PLAN_SCHEMA, PLAN_SEMANTIC, COMPILE, TRANSLATE, SQL_SAFETY, DATABASE_PREPARE,
+        DATABASE_EXECUTE, RESULT_SEMANTIC
     }
 
     public enum StageStatus {

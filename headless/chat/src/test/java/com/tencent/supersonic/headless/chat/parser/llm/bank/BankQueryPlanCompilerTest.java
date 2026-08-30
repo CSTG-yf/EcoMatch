@@ -231,6 +231,62 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
+    void shouldCompileDerivedRankingOfPerCapitaProfitWithoutPercentageScaling() {
+        BankQueryPlan plan = derivedRankingPlan();
+        plan.setMetrics(List.of(metric("ZB011"), metric("ZB018")));
+        plan.setOrderBy(List.of());
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB011", "ZB018"));
+        plan.setDerivedMetrics(List.of(
+                BankQueryPlan.DerivedMetric.builder().metricCode("DERIVED_ZB011_DIV_ZB018")
+                        .numerator("ZB011").denominator("ZB018").name("人均利润").build()));
+        LLMReq.LLMSchema perCapitaSchema = schema();
+        perCapitaSchema.setMetrics(List.of(
+                SchemaElement.builder().name("净利润").bizName("ZB011").defaultAgg("SUM").build(),
+                SchemaElement.builder().name("员工人数").bizName("ZB018").defaultAgg("SUM").build()));
+        SemanticIntentHints hints = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.RANKING)
+                .allowedMetrics(Set.of("ZB011", "ZB018"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB011", "ZB018"))
+                .requiredOrganizationCodes(Set.of("ORG004"))
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredDerivedMetrics(List.of(new SemanticIntentHints.DerivedMetricSpec(
+                        "DERIVED_ZB011_DIV_ZB018", "ZB011", "ZB018", "人均利润")))
+                .maxLimit(100).build();
+
+        BankQueryPlanCompiler.CompiledQuery compiled =
+                compiler.compile(plan, hints, perCapitaSchema);
+
+        // 人均利润 = 净利润(万元) / 员工人数(人) is a raw quotient: the derived ranking route
+        // must read the same registry scale as the point-ratio route (1.0), never inflate the
+        // value by 100.
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("SUM(ZB011) / NULLIF(SUM(ZB018), 0) * 1.0 AS metric_value"));
+        assertFalse(sql.contains("SUM(ZB011) / NULLIF(SUM(ZB018), 0) * 100.0"));
+    }
+
+    @Test
+    void shouldRejectARatioPlanWhoseOperandsResolveToTheSameCatalogMetric() {
+        // A ratio of an operand to itself is a silent constant. compile() re-runs the plan
+        // validator first, so the constant-ratio gate must fail compilation closed with the
+        // repairable Chinese directive instead of emitting SUM(x)/SUM(x).
+        BankQueryPlan plan = ratioPlan();
+        plan.setMetrics(List.of(metric("ZB001"), metric("ZB001")));
+        plan.setDimensions(List.of("bank_organization"));
+        plan.getCalculation().setBaseline("ZB001");
+        plan.getOutput().setColumns(List.of("bank_organization", "ZB001"));
+
+        BankPlanCompilationException exception = assertThrows(
+                BankPlanCompilationException.class,
+                () -> compiler.compile(plan, ratioHints(), schema()));
+
+        assertEquals(BankPlanCompilationException.Reason.INVALID_PLAN, exception.getReason());
+        assertTrue(exception.getMessage().contains("RATIO_OPERAND_IDENTICAL"));
+        assertTrue(exception.getMessage().contains("ZB001"));
+    }
+
+    @Test
     void shouldRankLowerIsBetterDirectMetricsAscendingInsideTheDerivedTemplate() {
         LLMReq.LLMSchema schema = schema();
         schema.setMetrics(List.of(
@@ -475,8 +531,10 @@ class BankQueryPlanCompilerTest {
         assertTrue(compiled.getS2sql().contains("'2025-04-30'"));
         assertTrue(compiled.getS2sql().contains("mom_baseline_value"));
         assertTrue(compiled.getS2sql().contains("yoy_baseline_value"));
+        // Declaration must be truthful: the template returns current + two ordered baselines
+        // (mom_baseline_value/yoy_baseline_value) and the projector reads exactly those columns.
         assertEquals(
-                List.of("current_value", "baseline_value", "absolute_change", "percent_change"),
+                List.of("current_value", "mom_baseline_value", "yoy_baseline_value"),
                 compiled.getOutputColumns());
         assertEquals(BankResultProjector.ProjectionType.MOM_YOY_CHANGE,
                 compiled.getResultContract().getType());
@@ -685,11 +743,19 @@ class BankQueryPlanCompilerTest {
     @Test
     void shouldPreserveAnInFilterWhenThePlannerProvidesOneScalarValue() {
         BankQueryPlan plan = thresholdPlan();
+        // POINT_QUERY keeps this a plain struct-direct plan: THRESHOLD plans are now guarded
+        // (THRESHOLD_UNANCHORED) and the absolute-threshold contract pins orgs/dims/output.
+        plan.setIntent(BankIntentType.POINT_QUERY);
         plan.setFilters(List.of(BankQueryPlan.Filter.builder().field("bank_organization")
                 .operator("IN").value("ORG004").build()));
 
-        BankQueryPlanCompiler.CompiledQuery compiled =
-                compiler.compile(plan, thresholdHints(), schema());
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan,
+                SemanticIntentHints.builder().expectedIntent(BankIntentType.POINT_QUERY)
+                        .allowedMetrics(Set.of("ZB001", "ZB002"))
+                        .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                        .requiredMetrics(Set.of("ZB001")).requiredStartDate(LocalDate.of(2026, 3, 31))
+                        .requiredEndDate(LocalDate.of(2026, 3, 31)).maxLimit(100).build(),
+                schema());
 
         assertEquals(FilterOperatorEnum.IN,
                 compiled.getStructReq().getDimensionFilters().get(0).getOperator());
@@ -823,9 +889,11 @@ class BankQueryPlanCompilerTest {
     }
 
     @Test
-    void shouldCompileSingleOrgMultiMetricProvinceThresholdToComparisonContract() {
-        // The SQL gathers the complete institution population; the result projector then derives
-        // each metric's provincial average and target gap from those aggregation rows.
+    void shouldCompileSingleOrgMultiMetricProvinceThresholdToThresholdContract() {
+        // W4a defect 2: a threshold intent asks which organizations satisfy the benchmark, so the
+        // multi-metric shape compiles through the threshold template. The SQL gathers the complete
+        // institution population, restricts the selected organization only in the outer WHERE, and
+        // publishes an explicit meets_condition per metric.
         BankQueryPlan plan = thresholdPlan();
         plan.setIntent(BankIntentType.THRESHOLD);
         plan.setMetrics(List.of(metric("ZB001"), metric("ZB002")));
@@ -848,13 +916,17 @@ class BankQueryPlanCompilerTest {
         BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(plan, hints, schema());
 
         assertEquals(BankQueryPlanCompiler.CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
-        assertTrue(compiled.getS2sql().contains("bank_daily_values_0 AS"));
-        assertTrue(compiled.getS2sql().contains("bank_aggregation_0 AS"));
-        assertTrue(compiled.getS2sql().contains("'ZB001' AS metric_code"));
-        assertFalse(compiled.getS2sql().contains("WHERE bank_organization = 'ORG004'"));
-        assertEquals(List.of("bank_organization", "metric_code", "aggregate_value", "min_value",
-                "max_value", "observation_count"), compiled.getOutputColumns());
-        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE,
+        String s2sql = compiled.getS2sql();
+        assertTrue(s2sql.contains("WITH bank_org AS"));
+        assertTrue(s2sql.contains("'ZB001' AS metric_code"));
+        assertTrue(s2sql.contains("province_average.provincial_average AS provincial_average"));
+        assertTrue(s2sql.contains("AS meets_condition"));
+        // Full-population average: the organization restriction appears once, outside the CTEs.
+        assertEquals(1, occurrences(s2sql, "bank_organization = 'ORG004'"));
+        assertEquals(List.of("bank_organization", "metric_code", "metric_value",
+                "provincial_average", "gap_value", "meets_condition"),
+                compiled.getOutputColumns());
+        assertEquals(BankResultProjector.ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
                 compiled.getResultContract().getType());
     }
 

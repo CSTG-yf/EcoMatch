@@ -27,6 +27,7 @@ public class BankPlanCompilationException extends RuntimeException {
         ORDER_FIELD_NOT_SELECTED,
         UNSUPPORTED_FILTER,
         UNSUPPORTED_CALCULATION,
-        S2SQL_RENDER_FAILED
+        S2SQL_RENDER_FAILED,
+        UNSUPPORTED_QUERY_SHAPE
     }
 }
