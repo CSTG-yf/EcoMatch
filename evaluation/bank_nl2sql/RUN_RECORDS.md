@@ -864,3 +864,106 @@ H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11
   37/40；差 1 题的构成 = plan 指令跟随弱 2 题（M-19/S-07）− 实体绑定滑误
   1 题（M-02）+ Qwen 自己填对 H-09 日期（GLM 在此滑误）。既有已知项
   TST-M-19 计分契约错配（GOLD_CONTRACT_ISSUES.md）在两模型下均不可计分。
+
+### 2026-08-30｜修复反馈骨架 + 升级重试 + 机构绑定守卫 + v65 批：test r9 = 39/40（新最优）
+
+- **批次内容**（3 owner 并行交付，逐个审查后收口；bank 506 测试全绿）：
+  1. **修复轮形状骨架**（新 `BankRepairShapeGuidance`）：21 个错误码（strategy 族 gate 码 +
+     validator UPPER 码 + COMPOUND_BENCHMARK 全族）的正向整体形状骨架，全部从 gate 实际
+     判定条件转录（加合族骨架=DERIVED_SUM 规范形，非空派生）；每个修复轮自动追加对应骨架，
+     UPPER 码经消息原始前缀兜底解析（`repairErrorCode` 正则只认小写首字母的缺陷已补）。
+  2. **升级重试**：仅当两轮失败同码 → 第三轮（同码非 MALFORMED 附「必须改变形状」升级句；
+     MALFORMED 两连=同消息全新采样）。异码两连维持两次终态。
+  3. **机构绑定守卫**（新 `BankOrgBindingGuard`，接入 strategy 修复循环）：题面唯一命中目录
+     机构而 plan 绑其他合法机构 → 可修复 `org_binding_conflict`（小写码保证 repairCodes 可提取）；
+     唯一性门槛 fail-open（0/多命中、全省、超集绑定均静默）。
+  4. **v65 提示词**：加合族负向判例（"合计"≠比率，DERIVED_SUM 规范形一次写对）+
+     requirements 机构绑定逐字核对指令；PREFIX v64→v65，REQUIREMENTS 段 v8→v9。
+- **部署**：headless-chat jar 单模块替换（其余模块与本批无关），重启 9081 后 memo 清空。
+- **官方运行（Fact v3 caseAccuracy，全分母，GLM 1985 串行）**：
+  | Run | 结果 | 备注 |
+  |-----|------|------|
+  | smoke 20260830-r2 | 5/5 | v65 jar 门禁 |
+  | train r9（glm53low-train-20260830-r9） | 116/119 | 3 失败全为端点抖动（parseMs≈6s、零策略日志），replay 3/3 全过 → **零语义回归** |
+  | **test r9（glm53low-test-20260830-r9）** | **39/40（0.975）新最优** | r6 37 → r7 35 → r8 38 → r9 39 |
+- **重试归因（新批核心验证，retry_analysis.py 对齐官方运行日志）**：
+  - **train r9：12 题首掷校验失败 → 12/12 一轮修复全部收敛**（derived_point_ratio ×3、
+    aggregation_extrema ×3、province_wide ×2、explicit_year_end_range ×2、
+    explicit_province_bottom ×1、SCHEMA_VIOLATION ×1）；0 耗尽、升级轮未需触发。
+  - **test r9：8 题首掷失败 → 8/8 一轮修复收敛**。头条：**TST-H-09 首掷被
+    `DATE_OUT_OF_DATA_DOMAIN` 拦截**（baselineStartDate=2023-12-31 ∉ 域
+    [2024-12-31..2026-04-30]，正是 r8 的误填形态），修复消息带真实域范围自愈——
+    日期守卫在官方 run 走通「静默错误→可修复→自愈」闭环，**H-09 翻转即 +1 新纪录来源**。
+    其余：S-07 province_wide 骨架收敛、M-13/14/15 比率族骨架收敛、H-04 排名方向、
+    S-01 MALFORMED 重采样。
+  - **首掷失败原因分布（两集合合并 20 例）**：形状近似错误（族 gate 近失）17 例 100% 收敛；
+    采样截断 1 例收敛；端点抖动 3 例（重掷即过）；日期域误填 1 例守卫拦截收敛。
+  - **TST-M-19 仍为唯一失败**：roll1=比率形 derivedMetrics（VALIDATION_FAILED）→
+    roll2=additive_composite_mismatch → **异码交替不满足同码升级条件**，基础预算耗尽
+    （escalationUsed=false）。升级窄触发的已知边界（同族双码交替形态不覆盖）；且该题即使
+    事实精确（r8=2.25）仍卡计分器列契约（金标侧缺陷，见 GOLD_CONTRACT_ISSUES.md），
+    运行时不可达。
+  - org_binding_conflict 本轮 0 触发（GLM 实体绑定全对，守卫待武装状态）。
+- **结论**：修复反馈从「只说哪里错」升级为「错在哪+正确整体形状」，两集合 20 个可修复
+  失败 100% 一轮收敛（此前 Qwen/GLM 均有同码两连耗尽形态）；日期守卫把最后一名
+  日期滑误题转为自愈。剩余失败 = 端点抖动（可自愈）+ M-19（异码交替边界 + 金标契约，
+  均 runtime 不可达）。后续可选：升级触发扩到「同骨架族双码交替」（时延代价待权衡）。
+
+### 2026-08-30｜v66 批：瞬态传输重掷 + 三条首轮判例：train r10 = 118/119 + 链路时延审查
+
+- **批次内容**（D/E 双 owner 并行交付，审查收口；bank 513 测试全绿）：
+  1. **瞬态传输重掷**（`BankEnvironmentFaultClassifier.isTransientTransportFault` +
+     `BankPlanGenStrategy.generateSinglePassCandidate`）：超时/连接断/网关 502/503/504/
+     overloaded 等未产出模型答案的传输故障，同 prompt 立即重掷一次（不烧修复轮、不推进
+     modelAttempts、`maxRetries=0` 防底层重试叠加结构化修复预算）；硬故障（auth/quota/
+     限流/500）保持终态，第二次连败照旧透传。
+  2. **v66 三条首轮判例**（`BankPlanPromptComposer` PREFIX v65→v66
+     `bank-plan-sys-v66-first-shot-judgments`）：具名派生比率判别句（「存贷比」类必须
+     `DERIVED_ZB002_DIV_ZB001`，与一般两操作数比率划界，纠正 v65 批 E 判例写错族的问题）、
+     WITH_EXTREMA 判例、全省排名判例；v65 的加合负向判例与机构绑定指令保留。
+  3. **机构绑定守卫接入**：`BankOrgBindingGuard.conflict` 在 strategy CLAUIDE 后按 plan
+     实际绑定机构校验题面唯一命中（v65 批只建类未接线）。
+- **部署**：headless-chat jar 替换 + 9081 重启（memo 清空）；smoke 20260830-r3 = 4/5，
+  唯一失败 TRAIN-H-07（MALFORMED→VALIDATION_FAILED 交替，输出级），按协议 replay ×3
+  全过 → 方差非回归（H-07 为已知最高方差长尾题）。
+- **官方运行（GLM 1985 串行，Fact v3 caseAccuracy）**：
+  | Run | 结果 | 备注 |
+  |-----|------|------|
+  | **train r10（glm53low-train-20260830-r10）** | **118/119（0.9916）train 新高**（r8 119 满/119 含 3 抖动 → r9 116/119 → r10 118/119） | r9 三个抖动题 H-20/M-09/M-12 全部转绿 |
+  | **dev r1（glm53low-dev-20260830-r1）** | **40/40（1.0）dev 首次满分** | 40/40 parse 成功、0 契约失败、0 修复轮残留 |
+- **瞬态重掷实战首胜（dev r1 内 14:23 抖动窗口）**：两次触发（category=timeout、
+  connection reset，异常类型 IllegalStateException「llama.cpp chat request failed」，
+  分类靠 cause 链的 socketTimeout/connectionReset 标记）→ 同 prompt 重掷全部自愈。
+  VAL-S-06 parseMs=328s = 首轮挂满 300s 超时 → 重掷 ~28s 成功（planSource=MODEL，
+  计入 40/40）；VAL-H-04 36s 同获救。**若无重掷，dev r1 预计 38/40**——机制按设计
+  工作且不烧修复轮（attempts=0）。与 H-26 对比：H-26 的故障形态（快败、39 字符消息
+  无标记）不在词表，单次重掷也救不了分钟级宕机；两者互补，词表缺口仍在（遗留项）。
+- **H-26 唯一失败 = AutoDL 端点宕机窗口（13:44–14:03），零语义回归**：
+  - 证据链：`backendError="银行指标查询服务暂时不可用"`（环境故障终态横幅）+
+    `candidateRejectionState=PLAN_EXCEPTION` + `llmCandidateCreated=false` +
+    parseMs=6.4s + 零 strategy 日志；异常文本未命中瞬态标记 → 重掷未触发（39 字符
+    脱敏消息，分类器词表缺口，见下）；宕机持续数分钟 > 单次重掷设计覆盖范围，且
+    正确未烧修复轮。
+  - 宕机窗口实证：14:01 探针 3 连快败（1.2s，无模型调用无 memo 记录），14:03:05 首
+    次真实 GLM 轮成功（memoSize 119=118+H-26）。memo 固化后 replay ×3 全部返回正确
+    结果行（ORG003 七指标+存贷比 81.53+rank_position 完整）→ plan 语义可得分。
+  - **分类器词表缺口（遗留）**：网关宕机的实际异常文本未含 timeout/connection/bad
+    gateway 等标记（消息被日志脱敏仅知 39 字符），`isTransientTransportFault` 漏判
+    → 不重掷直接终态。后续可：抓取 AutoDL 宕机期真实异常文本（客户端侧临时日志）
+    补词表；或对 PLAN_EXCEPTION+零策略日志形态统一加一次重掷（需防与修复预算叠加）。
+- **耗时对照（train r9 → r10，119 题墙钟）**：22.3 → 22.0min；parse p50 9.3 → 8.0s
+  （**首轮判例把中位首掷拉快 ~1.3s**，双轮案例 16 → 14）；parse p95 17.6 → 21.7s、
+  max 36.5 → 40.0s（尾部变差=端点天气，含 H-26 6.4s 快败与宕机期慢轮）；引擎固定段
+  execute 0.92 → 1.10s、post 0.87 → 1.04s（负载漂移，待观察）。
+- **链路时延审查结论（本次专项）**：92% 墙钟在 parse；单轮 LLM 调用 = 预填充 0.87s
+  （16,728 tokens 中 16,667 命中服务端前缀缓存，动态仅 ~54 tokens——**prompt 长度
+  已被前缀缓存消解，砍 prompt 无收益**）+ 解码 ~9.9s（completion p50 542 tokens ≈
+  55 tok/s，**解码占单轮 92%**）；`reasoning_effort=low` 未关思考，reasoning_chars
+  p50=100/p90=584/max=6,528（586 响应累计 14.2 万字符），p90 长思考轮是 p95 尾部
+  主因；引擎固定开销 1.8s/案（翻译+校验 0.9 + 投影+落盘 0.9），DB 仅 27ms。
+  优化杠杆排序：**减少轮次（首轮判例=提分与省时同向）> 压制思考 token 长尾（需
+  A/B 精度门槛，`reasoning_effort:"minimal"` 未测）> 引擎缓存（上限 ~3.5min/run，
+  正确性风险不值先动）**；禁区：max-candidates>1（纪律+时延倍增）、评测并行（协议
+  串行）、砍 prompt/压缩契约。数量级提速只能来自更高吞吐推理端点（环境决策）。
+  现实下限：三项全落地 train 墙钟约 18–19min。
+- **test r10：未运行**（按「train 优化、dev/test 验证」分工，test 冻结待用户指令）。
