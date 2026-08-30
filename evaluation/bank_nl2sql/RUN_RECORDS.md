@@ -764,3 +764,69 @@ H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11
   SafetyPolicy 反馈回灌、兜底收敛性）+ 验证期发现的两个同病类缺陷修复
   （M-58 词表泄漏 v63、memo 固化逐出）+ 兜底解码上限 4096，**train r7 = 118/119
   定版**。终版 jar 计 ~28 文件，**commit 待用户批准**；push 从未授权。
+
+### 2026-08-30 凌晨｜test r7 = 35/40；S-07 修复首次计分通过；暴露复合阈值族缺口
+
+- **test r7**（glm53low-test-20260829-r7，9081 = 兜底收敛终版 jar：v63 提示词 +
+  方向感知 meets + memo 逐出 + 兜底 4096）：**35/40（caseAccuracy 0.875）**，
+  约 12 分钟串行，executionSuccessRate 0.875，warmup 首次出现 FAILED（不计分）。
+  **低于 r6 的 37/40**，分解如下（对照 r6 剩余 H-10/M-19/S-07）。
+- **S-07：修复生效转通过**（r4/r5/r6 连败 → 本次计分通过，方向感知路由修复的
+  test 首次正向计分）。
+- **H-03 / H-04 / H-12：plan 阶段方差损失，非回归**。三题 r4–r6 均过；本次
+  attempt1 端点返回截断/乱码（MALFORMED_JSON）+ attempt2 校验未收敛 → chars=60
+  planStageExhausted。replay：H-04/H-12 attempt2 恢复，H-03 memo 命中，三题
+  实际行值与金标**逐值一致**（回放脚本轮询比对；粗比对 DIFF 为数组/字典形态差，
+  误报）。
+- **H-10：plan 阶段系统性失败（新形态），方向修复仍未获计分验证**。本次官方 +
+  replay 3/3 = 连续 4 次 planStageExhausted，validator 拒因 =
+  `PROVINCE_AVERAGE may only be a benchmark`（模型把全省均值放进非法槽位且两轮
+  修不回）。**判别实验**：用 train 族指标/日期合成「同时满足成本收入比低于全省
+  均值且净利润高于全省均值」复合问句 → 2/2 无候选拒答。而单指标全省均值阈值族
+  （TRAIN-M-40/41/42、TRAIN-S-19/20、TRAIN-H-31/32/33）train r7 全过 →
+  **「多指标复合同时满足 vs 全省均值」族缺失**（单指标版有模板，复合 AND 形态
+  无 query family / 提示词指引），非端点方差、非 v63 词表收窄直接回退。
+- **M-19：系统性语义缺口（与 r4–r6 同因，非回归）**。「不良+逾期合计占贷款比」
+  = 金额和/贷款余额比率；模型反复尝试 derivedMetrics 声明 → v63 重定向（DERIVED_SUM
+  仅收 % 对，金额和=普通多指标）→ 但普通多指标产出两个 % 值 ≠ 金标的单一比率 →
+  无可满足族。replay 3/3 无候选。属既有病灶族（同值比率/分母口径，M-15/S-04 同
+  类），与 train 侧 M-19（% 加数和=2.25）不同形。
+- **兜底通道新观察**：失败题的自由 SQL 兜底出现 `reasoningChars=4096` 恰打满
+  新上限（reasoning 单独烧满解码预算，JSON 答案仍被截断）——4096 上限对最硬
+  长输出题仍不够；另有兜底 SQL 撞 SqlSafetyPolicy（unbounded SELECT，按设计拒）。
+- **结论与去向**：本批真实效果 = +S-07（净 +1）；H-03/04/12 方差可回落；
+  H-10 需新增**复合基准阈值族**（模板+validator 路由+提示词判例，单测用合成
+  复合问句锁定）；M-19 需评估是否开辟**金额和比率族**（注意金标口径需与
+  s2sql 证据核对，防 M-58 式误扩）。两项均为族级缺口，动工与回归成本待用户
+  决策；test 不重跑刷分。
+
+### 2026-08-30 凌晨｜复合基准族 + v64 词表批：test r8 = 38/40（新最优）
+
+- **修复内容**（HEAD 未提交，待用户批准）：①新增 COMPOUND_BENCHMARK 族
+  （validator 守卫族 + 宽透视模板 + 编译路由 + 提示词 v64 独立族块 + 10 合成
+  契约测试）；②v64 加合词表补「A+B 合计占XX比」尾巴变体（% 加数和口径，
+  禁止引入除法；取证报告钉死 TST-M-19 金标=ZB013+ZB017=2.25 无除法）；③兜底
+  解码上限 4096→8192（test r7 观测 reasoning 单独打满 4096）。bank 505 测试全绿。
+- **部署**：headless-api/chat-api/chat-server/headless-chat 四 jar 同步替换
+  （单换 headless-chat 曾因 main 合并引入的 BankIntentResult 缺类秒退——多模块
+  jar 必须成套更新）。重启后 memo 清空。
+- **smoke r1 = 5/5**（caseAccuracy 1.0）；probe 双验证：复合合成问句（修复前
+  2/2 无候选）现编译宽透视模板 `first_value/second_value`（方向序正确）；
+  占比尾巴合成问句现产出 `zb013 + zb017` 加合族（修复前无候选）。
+- **train r8（glm53low-train-20260830-r8）= 119/119 满分**（caseAccuracy 1.0，
+  约 17 分钟串行），errorCategories 全 NONE，无瞬时故障——超越 r7 基线 118/119
+  （S-08 本次亦过），v64 零回归。
+- **test r8（glm53low-test-20260830-r8）= 38/40（0.95），新最优**（r6 37 →
+  r7 35 → r8 38）。parse/execution 40/40 全成功，仅 2 个 RESULT_FACT_MISMATCH：
+  - **TST-H-10 转过**：复合基准族首次计分即通过，方向感知 meets 修复（1b926bf）
+    至此获得计分验证（此前担心的金标 meets 全 0 quirk 未影响计分）。
+  - **TST-M-19**：v64 词表修复后 plan 正确路由加合族，事实值精确
+    （DERIVED_SUM_ZB013_AND_ZB017 = 2.25）；仍 fail 纯因计分器要求
+    nonperforming_rate/overdue_rate/combined_rate 三个全数据集唯一列名——
+    金标/计分契约与族输出契约错配，评测 owner 裁决项（候选方案：金标行补
+    metric_code 列或接受已知 fail；运行时注入目录 slug 属红线边缘，未做）。
+  - **TST-H-09（新落）**：日期槽位误填「2024年末」→2023-12-31（金标/r7 均为
+    2024-12-31），空结果行；该题 r4–r7 连续 4 过，本窗口 2 次实掷同错——
+    观察项，非 v64 结构回归（下次 run 关注是否自愈）。
+- **有效净变化 vs r6 定版**：+H-10（复合族）+方差回落（H-03/04/12 全过）=
+  38/40；M-19 转为「事实正确、计分契约错配」的诚实已知项。
