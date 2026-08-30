@@ -208,6 +208,8 @@ public class BankRequestContractResponseParser {
             }
             boolean provinceAverageBenchmark = isProvinceAverageBenchmark(filter);
             boolean provinceAverageDirection = isProvinceAverageDirection(filter);
+            boolean metricBenchmarkCondition =
+                    BankQueryPlanValidator.isMetricBenchmarkCondition(filter);
             if (("benchmark".equals(filter.getField()) || "COMPARE".equals(filter.getOperator()))
                     && !provinceAverageBenchmark) {
                 errors.add("province average must use exact filter "
@@ -215,13 +217,17 @@ public class BankRequestContractResponseParser {
                         + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}");
             }
             if ("PROVINCE_AVERAGE".equals(filter.getValue()) && !provinceAverageBenchmark
-                    && !provinceAverageDirection) {
-                errors.add("PROVINCE_AVERAGE may only be a benchmark or metric_value direction");
+                    && !provinceAverageDirection && !metricBenchmarkCondition) {
+                errors.add("PROVINCE_AVERAGE may only be a benchmark filter, a metric_value "
+                        + "direction object, or a per-metric benchmark condition "
+                        + "{\"field\":\"<ZB###>\",\"operator\":\"GT|GTE|LT|LTE\","
+                        + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}");
             }
-            if (provinceAverageDirection && !hasProvinceAverageBenchmark) {
+            if ((provinceAverageDirection || metricBenchmarkCondition)
+                    && !hasProvinceAverageBenchmark) {
                 errors.add("province-average direction requires the exact benchmark filter");
             }
-            if ((provinceAverageBenchmark || provinceAverageDirection)
+            if ((provinceAverageBenchmark || provinceAverageDirection || metricBenchmarkCondition)
                     && (filter.getValues() == null || !filter.getValues().isEmpty())) {
                 errors.add("province-average filters values must be exactly []");
             }

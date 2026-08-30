@@ -37,6 +37,9 @@ public class BankQueryPlanValidator {
     private static final Pattern NUMERIC_THRESHOLD = Pattern.compile("-?\\d+(?:\\.\\d+)?%?");
     private static final Set<String> ABSOLUTE_THRESHOLD_OPERATORS =
             Set.of("GT", "GTE", "LT", "LTE", "EQ");
+    /** Direction operators that can aim a benchmark condition at PROVINCE_AVERAGE. */
+    private static final Set<String> BENCHMARK_DIRECTION_OPERATORS = Set.of("GT", "GTE", "LT",
+            "LTE");
     private static final Set<String> FILTER_OPERATORS = BankSemanticRegistry.filterOperators();
     private static final Set<String> LOGICAL_FILTER_FIELDS =
             BankSemanticRegistry.logicalFilterFields();
@@ -349,7 +352,10 @@ public class BankQueryPlanValidator {
                         "filter field and supported operator are required"));
             }
             if (StringUtils.isNotBlank(filter.getField())
-                    && !allowedFields.contains(filter.getField())) {
+                    && !allowedFields.contains(filter.getField())
+                    && !looksLikeMetricBenchmarkCondition(filter)) {
+                // A per-metric benchmark direction aimed at PROVINCE_AVERAGE gets its own
+                // repairable family guard below instead of the generic unknown-field error.
                 errors.add(error("UNKNOWN_FILTER_FIELD",
                         "filter field must be a semantic identifier or approved logical field"));
             }
@@ -359,17 +365,25 @@ public class BankQueryPlanValidator {
             }
             boolean provinceAverageBenchmark = isProvinceAverageBenchmark(filter);
             boolean provinceAverageDirection = isProvinceAverageDirection(filter);
+            boolean metricBenchmarkCondition = isMetricBenchmarkCondition(filter);
+            boolean malformedMetricBenchmark =
+                    !metricBenchmarkCondition && looksLikeMetricBenchmarkCondition(filter);
             if (("benchmark".equals(filter.getField()) || "COMPARE".equals(filter.getOperator()))
                     && !provinceAverageBenchmark) {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province average must use exact benchmark/COMPARE/PROVINCE_AVERAGE"));
             }
             if ("PROVINCE_AVERAGE".equals(filter.getValue()) && !provinceAverageBenchmark
-                    && !provinceAverageDirection) {
+                    && !provinceAverageDirection && !metricBenchmarkCondition
+                    && !malformedMetricBenchmark) {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
-                        "PROVINCE_AVERAGE may only be a benchmark or metric_value direction"));
+                        "PROVINCE_AVERAGE may only be a benchmark filter, a metric_value "
+                                + "direction object, or a per-metric benchmark condition "
+                                + "{\"field\":\"<ZB###>\",\"operator\":\"GT|GTE|LT|LTE\","
+                                + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}"));
             }
-            if (provinceAverageDirection && !hasProvinceAverageBenchmark) {
+            if ((provinceAverageDirection || metricBenchmarkCondition)
+                    && !hasProvinceAverageBenchmark) {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                         "province-average direction requires the exact benchmark filter"));
             }
@@ -382,7 +396,7 @@ public class BankQueryPlanValidator {
                                 + "with a non-NONE comparison), operator=LTE, a positive "
                                 + "integer value, and values=[]"));
             }
-            if ((provinceAverageBenchmark || provinceAverageDirection)
+            if ((provinceAverageBenchmark || provinceAverageDirection || metricBenchmarkCondition)
                     && safe(filter.getValues()).findAny().isPresent()) {
                 errors.add(error("PROVINCE_AVERAGE_BENCHMARK_VALUES_FORBIDDEN",
                         "province-average benchmark values must be empty"));
@@ -417,6 +431,30 @@ public class BankQueryPlanValidator {
                 && ("GT".equals(filter.getOperator()) || "GTE".equals(filter.getOperator())
                         || "LT".equals(filter.getOperator()) || "LTE".equals(filter.getOperator()))
                 && "PROVINCE_AVERAGE".equals(filter.getValue());
+    }
+
+    /**
+     * Loose shape detector for a per-metric benchmark condition (compound benchmark family):
+     * a direction operator aimed at PROVINCE_AVERAGE from any slot outside the reserved logical
+     * fields. It deliberately tolerates non-catalog fields so the family guard can answer a
+     * malformed field with a repairable message instead of the generic unknown-field error.
+     */
+    static boolean looksLikeMetricBenchmarkCondition(BankQueryPlan.Filter filter) {
+        return filter != null && "PROVINCE_AVERAGE".equals(filter.getValue())
+                && BENCHMARK_DIRECTION_OPERATORS.contains(filter.getOperator())
+                && !LOGICAL_FILTER_FIELDS.contains(filter.getField());
+    }
+
+    /**
+     * Exact per-metric benchmark condition of the compound benchmark family: the field is a
+     * registered ZB### catalog metric carrying a direction operator against PROVINCE_AVERAGE
+     * ({@code field=<ZB###>, operator=GT|GTE|LT|LTE, value=PROVINCE_AVERAGE}). One such condition
+     * per selected metric, beside the exact benchmark filter, declares the compound AND shape.
+     */
+    static boolean isMetricBenchmarkCondition(BankQueryPlan.Filter filter) {
+        return looksLikeMetricBenchmarkCondition(filter) && filter.getField() != null
+                && BankSemanticRegistry.metricCodes()
+                        .contains(filter.getField().toUpperCase(Locale.ROOT));
     }
 
     private boolean isRankFilter(BankQueryPlan.Filter filter) {
@@ -1113,6 +1151,7 @@ public class BankQueryPlanValidator {
         validateNoDuplicateMetrics(plan, errors);
         validateThresholdBenchmarkDimensionGate(plan, errors);
         validateThresholdAnchor(plan, errors);
+        validateCompoundBenchmarkFamilyShape(plan, errors);
         validateChangePopulationDimension(plan, errors);
         validateTrendQuarterEndWindow(plan, errors);
         validatePercentMetricRangeAggregation(plan, errors);
@@ -1240,6 +1279,147 @@ public class BankQueryPlanValidator {
                             + "extra dimensions would be silently dropped: "
                             + String.join(",", extraDimensions)
                             + "；dimensions 只允许 [bank_organization] 或空，请移除其余维度"));
+        }
+    }
+
+    /**
+     * Family contract for the compound benchmark threshold (多指标复合基准阈值：每个所选指标各
+     * 一条基准方向条件，结果按 AND 同时满足). The plan declares one exact benchmark filter plus
+     * one per-metric direction condition {@code field=<ZB###>, operator=GT|GTE|LT|LTE,
+     * value=PROVINCE_AVERAGE} per selected metric. The catalog owns the compiled sign
+     * (higher-better metrics meet above the average, lower-better below), so a condition whose
+     * operator contradicts the metric's catalog direction is a repairable model error instead of
+     * a silent inversion. The family scans the full organization population without a baseline
+     * comparison, ordering or TopN slice.
+     */
+    private void validateCompoundBenchmarkFamilyShape(BankQueryPlan plan,
+            List<ValidationError> errors) {
+        List<BankQueryPlan.Filter> conditions = safe(plan.getFilters())
+                .filter(BankQueryPlanValidator::looksLikeMetricBenchmarkCondition).toList();
+        if (conditions.isEmpty()) {
+            return;
+        }
+        for (BankQueryPlan.Filter condition : conditions) {
+            if (!isMetricBenchmarkCondition(condition)) {
+                errors.add(error("COMPOUND_BENCHMARK_METRIC_UNKNOWN",
+                        "compound benchmark condition field must be a registered ZB### catalog "
+                                + "metric, got field=" + condition.getField()
+                                + "；合法组合：一个 benchmark/COMPARE/PROVINCE_AVERAGE 基准对象，"
+                                + "外加每个所选指标各一条 {\"field\":\"<ZB###>\","
+                                + "\"operator\":\"GT|GTE|LT|LTE\",\"value\":\"PROVINCE_AVERAGE\","
+                                + "\"values\":[]} 基准方向条件"));
+            }
+        }
+        if (plan.getIntent() != BankIntentType.THRESHOLD) {
+            errors.add(error("COMPOUND_BENCHMARK_INTENT_REQUIRED",
+                    "compound benchmark conditions require intent=THRESHOLD, got="
+                            + (plan.getIntent() == null ? "null" : plan.getIntent().name())));
+        }
+        List<String> metrics = selectedMetricCodes(plan);
+        if (metrics.size() < 2) {
+            errors.add(error("COMPOUND_BENCHMARK_METRICS_REQUIRED",
+                    "compound benchmark AND requires at least two selected metrics, got="
+                            + metrics.size()
+                            + "；单指标高于/低于全省均值属于单指标 threshold 族，不要追加逐指标基准条件"));
+        }
+        if (plan.getCalculation() == null
+                || plan.getCalculation().getType() != BankQueryPlan.CalculationType.DIRECT) {
+            errors.add(error("COMPOUND_BENCHMARK_DIRECT_CALCULATION_REQUIRED",
+                    "compound benchmark threshold requires calculation.type=DIRECT"));
+        }
+        if (plan.getTime() != null && plan.getTime().getComparison() != null
+                && plan.getTime().getComparison() != BankQueryPlan.TimeComparison.NONE) {
+            errors.add(error("COMPOUND_BENCHMARK_NO_COMPARISON_REQUIRED",
+                    "compound benchmark threshold compares a single observation window; "
+                            + "time.comparison must be NONE"));
+        }
+        if (safe(plan.getDerivedMetrics()).findAny().isPresent()) {
+            errors.add(error("COMPOUND_BENCHMARK_DERIVED_METRIC_FORBIDDEN",
+                    "compound benchmark conditions apply to plain catalog metrics only; "
+                            + "remove every derived metric"));
+        }
+        Set<String> metricKeys = metrics.stream()
+                .map(metric -> metric.toUpperCase(Locale.ROOT))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<String> conditionFields = conditions.stream()
+                .map(BankQueryPlan.Filter::getField).filter(StringUtils::isNotBlank)
+                .map(field -> field.toUpperCase(Locale.ROOT)).toList();
+        for (String metricKey : metricKeys) {
+            long count = conditionFields.stream().filter(metricKey::equals).count();
+            if (count != 1) {
+                errors.add(error("COMPOUND_BENCHMARK_CONDITION_UNPAIRED",
+                        "compound benchmark conditions must pair one-to-one with the selected "
+                                + "metrics: metric " + metricKey + " has " + count
+                                + " benchmark conditions; declare exactly one {field=" + metricKey
+                                + ", operator=GT|GTE|LT|LTE, value=PROVINCE_AVERAGE} per selected "
+                                + "metric"));
+            }
+        }
+        for (String field : conditionFields) {
+            if (!metricKeys.contains(field)) {
+                errors.add(error("COMPOUND_BENCHMARK_CONDITION_UNPAIRED",
+                        "compound benchmark condition field " + field
+                                + " is not a selected metric; conditions may only reference "
+                                + "plan.metrics " + metricKeys + "，禁止为未选指标声明基准条件"));
+            }
+        }
+        for (BankQueryPlan.Filter condition : conditions) {
+            if (!isMetricBenchmarkCondition(condition)) {
+                continue;
+            }
+            String code = condition.getField().toUpperCase(Locale.ROOT);
+            BankSemanticRegistry.MetricDefinition definition =
+                    BankSemanticRegistry.metrics().get(code);
+            if (definition == null) {
+                continue;
+            }
+            boolean declaredHigher = "GT".equals(condition.getOperator())
+                    || "GTE".equals(condition.getOperator());
+            boolean catalogHigher =
+                    definition.direction() != BankSemanticRegistry.Direction.LOWER_BETTER;
+            if (declaredHigher != catalogHigher) {
+                errors.add(error("COMPOUND_BENCHMARK_DIRECTION_CONFLICT",
+                        "benchmark condition " + condition.getField() + " "
+                                + condition.getOperator() + " conflicts with the catalog direction "
+                                + definition.direction() + " (" + definition.name()
+                                + ")；编译符号由目录方向决定：higher-better 指标用 GT/GTE"
+                                + "（高于全省均值），lower-better 指标用 LT/LTE（低于全省均值），"
+                                + "请按目录方向修正该条件"));
+            }
+        }
+        if (safe(plan.getFilters()).anyMatch(this::isProvinceAverageDirection)) {
+            errors.add(error("COMPOUND_BENCHMARK_GLOBAL_DIRECTION_FORBIDDEN",
+                    "compound benchmark conditions replace the single metric_value direction "
+                            + "object; remove field=metric_value and keep exactly one condition "
+                            + "per selected metric"));
+        }
+        if (safe(plan.getFilters()).anyMatch(filter -> "metric_value".equals(filter.getField())
+                && !isProvinceAverageDirection(filter))) {
+            errors.add(error("COMPOUND_BENCHMARK_METRIC_FILTER_FORBIDDEN",
+                    "compound benchmark threshold must not carry a numeric metric_value filter"));
+        }
+        if (safe(plan.getOrganizations()).map(BankQueryPlan.Organization::getCode)
+                .filter(StringUtils::isNotBlank).findAny().isPresent()) {
+            errors.add(error("COMPOUND_BENCHMARK_POPULATION_REQUIRED",
+                    "compound benchmark threshold scans every organization; organizations must "
+                            + "be empty so the benchmark average and the meets_condition flag "
+                            + "cover the full population"));
+        }
+        List<String> dimensions = safe(plan.getDimensions()).filter(StringUtils::isNotBlank)
+                .toList();
+        if (!dimensions.equals(List.of("bank_organization"))) {
+            errors.add(error("COMPOUND_BENCHMARK_DIMENSION_REQUIRED",
+                    "compound benchmark threshold dimensions must be exactly "
+                            + "[bank_organization]"));
+        }
+        if (safe(plan.getOrderBy()).findAny().isPresent()) {
+            errors.add(error("COMPOUND_BENCHMARK_NO_ORDER_REQUIRED",
+                    "compound benchmark ordering is compiler-owned; set orderBy to []"));
+        }
+        if (plan.getLimit() != null) {
+            errors.add(error("COMPOUND_BENCHMARK_NO_LIMIT_REQUIRED",
+                    "compound benchmark threshold returns the full population; limit must be "
+                            + "null"));
         }
     }
 

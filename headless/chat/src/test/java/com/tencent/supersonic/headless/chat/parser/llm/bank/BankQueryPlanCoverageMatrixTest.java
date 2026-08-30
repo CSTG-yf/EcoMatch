@@ -201,6 +201,88 @@ class BankQueryPlanCoverageMatrixTest {
         assertTrue(exception.getMessage().contains("per-metric"), () -> exception.getMessage());
     }
 
+    /**
+     * Compound benchmark threshold family (多指标复合基准阈值): THRESHOLD + the exact benchmark
+     * filter plus one per-metric benchmark direction condition per selected metric routes into
+     * its own wide AND template with the locked ordinal column contract. Every compiled
+     * comparison follows the metric catalog (higher-better {@code >}, lower-better {@code <}),
+     * one row per organization over the full population, and the mention order never changes
+     * the canonical SQL.
+     */
+    @Test
+    void compoundBenchmarkRoutesToItsOwnFamilyWithTheWideOrdinalContract() {
+        PlanAndHints candidate = compoundBenchmark("ZB013", "ZB015");
+        CompiledQuery compiled = assertCompiles(candidate);
+        assertEquals(CompilationRoute.S2SQL_TEMPLATE, compiled.getRoute());
+        assertEquals(BankResultProjector.ProjectionType.COMPOUND_BENCHMARK_THRESHOLD,
+                compiled.getResultContract().getType());
+        // Locked output contract: org column, one ordinal value/average pair per metric in the
+        // canonical order (higher-better first, then metric code ASC: ZB015 DESC -> first,
+        // ZB013 ASC -> second), then the AND-combined meets_condition.
+        assertEquals(List.of("bank_organization", "first_value", "first_average",
+                "second_value", "second_average", "meets_condition"),
+                compiled.getOutputColumns());
+        String sql = compiled.getS2sql();
+        assertTrue(sql.contains("SUM(ZB015) AS first_value"), () -> sql);
+        assertTrue(sql.contains("AVG(first_value) AS first_average"), () -> sql);
+        assertTrue(sql.contains("SUM(ZB013) AS second_value"), () -> sql);
+        assertTrue(sql.contains("AVG(second_value) AS second_average"), () -> sql);
+        // Direction-aware AND: higher-better ZB015 meets above the average, lower-better ZB013
+        // meets below it.
+        assertTrue(sql.contains("CASE WHEN first_value > first_average"
+                + " AND second_value < second_average THEN 1 ELSE 0 END AS meets_condition"),
+                () -> sql);
+        assertTrue(sql.contains("ORDER BY bank_organization ASC"), () -> sql);
+        assertFalse(sql.contains("UNION ALL"), () -> sql);
+        assertFalse(sql.contains("metric_code"), () -> sql);
+
+        // Mention order never changes the canonical, byte-stable template.
+        assertEquals(sql, assertCompiles(compoundBenchmark("ZB015", "ZB013")).getS2sql());
+
+        // End-to-end: the wide SQL rows pass through with organization identity under the
+        // final org_code/org_name ordinal contract.
+        Map<String, Object> wideRow = new java.util.LinkedHashMap<>();
+        wideRow.put("bank_organization", "ORG004");
+        wideRow.put("first_value", new java.math.BigDecimal("210.50"));
+        wideRow.put("first_average", new java.math.BigDecimal("180.25"));
+        wideRow.put("second_value", new java.math.BigDecimal("0.95"));
+        wideRow.put("second_average", new java.math.BigDecimal("1.10"));
+        wideRow.put("meets_condition", 1);
+        BankResultProjector.Projection projection = new BankResultProjector()
+                .project(compiled.getResultContract(), List.of(wideRow));
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("org_code", "org_name", "first_value", "first_average",
+                "second_value", "second_average", "meets_condition"), projection.getColumns());
+        assertEquals("ORG004", projection.getRows().get(0).get("org_code"));
+        assertEquals(new java.math.BigDecimal("210.50"),
+                projection.getRows().get(0).get("first_value"));
+        assertEquals(1, projection.getRows().get(0).get("meets_condition"));
+    }
+
+    /** Synthetic compound benchmark plan: one direction condition per selected metric. */
+    private PlanAndHints compoundBenchmark(String... metricCodes) {
+        List<String> metrics = List.of(metricCodes);
+        List<String> outputColumns = new java.util.ArrayList<>();
+        outputColumns.add("bank_organization");
+        outputColumns.addAll(metrics);
+        List<BankQueryPlan.Filter> filters = new java.util.ArrayList<>(
+                List.of(filter("benchmark", "COMPARE", "PROVINCE_AVERAGE")));
+        for (String metric : metrics) {
+            // Direction follows the metric catalog: lower-is-better metrics (ZB013/ZB017)
+            // declare LT, higher-is-better ones GT.
+            filters.add(filter(metric,
+                    "ZB013".equals(metric) || "ZB017".equals(metric) ? "LT" : "GT",
+                    "PROVINCE_AVERAGE"));
+        }
+        BankQueryPlan plan = basePlan(BankIntentType.THRESHOLD, metrics,
+                List.of("bank_organization"), List.of(),
+                dayTime(BankQueryPlan.TimeComparison.NONE),
+                BankQueryPlan.CalculationType.DIRECT, filters, List.of(), null, outputColumns);
+        return value(plan, BankIntentType.THRESHOLD, metrics, List.of(),
+                List.of(new SemanticIntentHints.RequiredFilter("benchmark", "COMPARE",
+                        "PROVINCE_AVERAGE")));
+    }
+
     /** Comparison intent keeps the long-form aggregation summary + gap contract. */
     @Test
     void multiMetricComparisonKeepsTheLongFormGapContract() {
@@ -497,6 +579,8 @@ class BankQueryPlanCoverageMatrixTest {
                 multiMetricProvinceAverageAggregation());
         assertTemplateFamilyAvoidsSemanticAliases("multiMetricProvinceAverageThreshold",
                 multiMetricProvinceAverageThreshold());
+        assertTemplateFamilyAvoidsSemanticAliases("compoundBenchmark",
+                compoundBenchmark("ZB013", "ZB015"));
         assertTemplateFamilyAvoidsSemanticAliases("multiMetricProvinceAverageComparison",
                 multiMetricProvinceAverageComparison());
         assertTemplateFamilyAvoidsSemanticAliases("absoluteThreshold", absoluteThreshold());

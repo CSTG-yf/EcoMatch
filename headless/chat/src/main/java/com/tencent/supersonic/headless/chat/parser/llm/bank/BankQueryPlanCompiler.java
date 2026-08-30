@@ -147,6 +147,14 @@ public class BankQueryPlanCompiler {
                     .COUNT_DAYS_ABOVE_PROVINCE_AVERAGE) {
                 return SupportedQueryFamily.COUNT_DAYS_ABOVE_PROVINCE_AVERAGE;
             }
+            if (shape.hasProvinceAverageBenchmark()
+                    && shape.hasPerMetricBenchmarkConditions()) {
+                // Compound benchmark threshold (多指标复合基准阈值): one benchmark filter plus one
+                // per-metric direction condition per selected metric. The per-metric conditions
+                // were validated against the catalog, so this shape owns its wide AND template
+                // instead of falling into the long-form multi-metric threshold family.
+                return SupportedQueryFamily.COMPOUND_BENCHMARK;
+            }
             if (shape.hasProvinceAverageBenchmark()) {
                 return SupportedQueryFamily.PROVINCE_AVERAGE;
             }
@@ -270,6 +278,10 @@ public class BankQueryPlanCompiler {
                     templateFactory.compileAbsoluteThreshold(templateContext),
                     List.of(ORGANIZATION_DIMENSION, "metric_value", "meets_condition"),
                     absoluteThresholdResultContract(plan, metrics, index));
+            case COMPOUND_BENCHMARK -> CompiledQuery.s2sql(
+                    templateFactory.compileCompoundBenchmarkThreshold(templateContext),
+                    compoundBenchmarkOutputColumns(templateContext.metrics().size()),
+                    compoundBenchmarkResultContract(plan, templateContext.metrics(), index));
             case AGGREGATION_SUMMARY -> CompiledQuery.s2sql(
                     templateFactory.compileDailyAggregationSummary(templateContext),
                     aggregationSummaryOutputColumns(metrics),
@@ -475,6 +487,8 @@ public class BankQueryPlanCompiler {
         DERIVED_RANKING("多指标/派生指标排名（RANKING/DIRECT+多指标或派生指标）"),
         COUNT_DAYS_ABOVE_PROVINCE_AVERAGE("高于全省均值天数统计（AGGREGATION/COUNT_DAYS+benchmark）"),
         PROVINCE_AVERAGE("省均值对比（THRESHOLD/COMPARISON多指标/AGGREGATION+benchmark）"),
+        COMPOUND_BENCHMARK("多指标复合基准阈值（THRESHOLD/DIRECT+benchmark+逐指标基准方向条件，"
+                + "AND 同时满足，输出 first/second 值与均值对和 meets_condition）"),
         ABSOLUTE_THRESHOLD("单机构单指标绝对阈值（THRESHOLD/DIRECT+单个metric_value过滤）"),
         AGGREGATION_SUMMARY("聚合摘要（AGGREGATION/DIRECT+均值指标）"),
         ORGANIZATION_COMPARISON("多机构同指标对比（COMPARISON/DIRECT+多机构）"),
@@ -508,7 +522,8 @@ public class BankQueryPlanCompiler {
             boolean anyMetricAverage, BankQueryPlan.Aggregation firstMetricAggregation,
             boolean hasDerivedMetrics, boolean allDerivedMetricsAdditive,
             int organizationsCount, List<String> dimensions,
-            int metricFilterCount, boolean hasProvinceAverageBenchmark, boolean hasRankFilter,
+            int metricFilterCount, boolean hasProvinceAverageBenchmark,
+            boolean hasPerMetricBenchmarkConditions, boolean hasRankFilter,
             boolean hasOrderBy, boolean hasLimit) {
 
         static QueryShape of(BankQueryPlan plan, List<ResolvedMetric> metrics,
@@ -526,12 +541,15 @@ public class BankQueryPlanCompiler {
             boolean allDerivedAdditive = !plan.getDerivedMetrics().isEmpty()
                     && plan.getDerivedMetrics().stream()
                             .allMatch(BankQueryPlanValidator::isAdditiveDerivedMetric);
+            boolean perMetricBenchmark = plan.getFilters().stream()
+                    .anyMatch(BankQueryPlanValidator::isMetricBenchmarkCondition);
             return new QueryShape(plan.getIntent(), plan.getCalculation().getType(),
                     plan.getTime().getComparison(), metrics.size(), allAverage, anyAverage,
                     firstAggregation, !plan.getDerivedMetrics().isEmpty(), allDerivedAdditive,
                     plan.getOrganizations().size(), List.copyOf(dimensionIdentifiers),
                     metricFilters.size(), BankQueryPlanCompiler.hasProvinceAverageBenchmark(plan),
-                    rankFilter, plan.getOrderBy() != null && !plan.getOrderBy().isEmpty(),
+                    perMetricBenchmark, rankFilter,
+                    plan.getOrderBy() != null && !plan.getOrderBy().isEmpty(),
                     plan.getLimit() != null);
         }
 
@@ -716,6 +734,44 @@ public class BankQueryPlanCompiler {
     private List<String> multiMetricProvinceAverageThresholdOutputColumns() {
         return List.of(ORGANIZATION_DIMENSION, "metric_code", "metric_value",
                 "provincial_average", "gap_value", "meets_condition");
+    }
+
+    /**
+     * Compound benchmark threshold output contract: the organization dimension, then one ordinal
+     * value/average pair per metric in the template's canonical order, then the AND-combined
+     * meets_condition flag.
+     */
+    private List<String> compoundBenchmarkOutputColumns(int metricCount) {
+        List<String> ordinals = BankS2SqlTemplateFactory.compoundBenchmarkOrdinals(metricCount);
+        List<String> columns = new ArrayList<>();
+        columns.add(ORGANIZATION_DIMENSION);
+        for (String ordinal : ordinals) {
+            columns.add(ordinal + "_value");
+            columns.add(ordinal + "_average");
+        }
+        columns.add("meets_condition");
+        return List.copyOf(columns);
+    }
+
+    /**
+     * The auditable projection contract for the compound benchmark threshold: the SQL already
+     * pivoted every metric's value and provincial average and AND-combined the direction-aware
+     * comparisons into meets_condition over the full population, so the projection only passes
+     * those wide facts through with organization identity under the canonical ordinals.
+     */
+    private BankResultProjector.Contract compoundBenchmarkResultContract(BankQueryPlan plan,
+            List<BankS2SqlTemplateFactory.ResolvedMetric> metrics, SchemaIndex index) {
+        List<BankS2SqlTemplateFactory.ResolvedMetric> ordered =
+                BankS2SqlTemplateFactory.compoundBenchmarkOrder(metrics);
+        List<String> ordinals = BankS2SqlTemplateFactory.compoundBenchmarkOrdinals(ordered.size());
+        List<BankResultProjector.MetricBinding> bindings = new ArrayList<>();
+        for (int position = 0; position < ordered.size(); position++) {
+            bindings.add(BankResultProjector.MetricBinding.builder()
+                    .semanticColumn(ordinals.get(position) + "_value")
+                    .metricCode(ordered.get(position).metricCode()).build());
+        }
+        return provinceAverageContract(plan, index,
+                BankResultProjector.ProjectionType.COMPOUND_BENCHMARK_THRESHOLD, bindings);
     }
 
     /**
@@ -1182,6 +1238,11 @@ public class BankQueryPlanCompiler {
             if ("benchmark".equals(filter.getField())) {
                 continue;
             }
+            if (BankQueryPlanValidator.isMetricBenchmarkCondition(filter)) {
+                // Logical per-metric benchmark direction of the compound benchmark family; it is
+                // consumed by the validator/routing contract, never a physical dimension filter.
+                continue;
+            }
             if ("metric_value".equals(filter.getField())) {
                 // Logical metric_value conditions never become physical dimension filters: the
                 // province-average direction object is captured separately
@@ -1203,6 +1264,11 @@ public class BankQueryPlanCompiler {
         List<Filter> filters = new ArrayList<>();
         for (BankQueryPlan.Filter filter : plan.getFilters()) {
             if (isRankFilter(filter)) {
+                continue;
+            }
+            if (BankQueryPlanValidator.isMetricBenchmarkCondition(filter)) {
+                // Logical per-metric benchmark direction (compound benchmark family): value is
+                // PROVINCE_AVERAGE, so it must never become a numeric metric filter.
                 continue;
             }
             if ("metric_value".equals(filter.getField())) {

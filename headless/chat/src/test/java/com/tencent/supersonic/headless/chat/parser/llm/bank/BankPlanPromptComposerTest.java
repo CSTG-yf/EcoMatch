@@ -620,6 +620,27 @@ class BankPlanPromptComposerTest {
                 "the DERIVED_SUM vocabulary must be scoped to percent-unit operand pairs");
         assertTrue(sys.contains("金额类指标（元/亿元）的“合计/之和”不是派生指标"),
                 "amount-unit sums must be redirected to the plain multi-metric contract");
+        // v64 追加（不升版本）：带“占XX比”措辞尾巴的变体仍是加合族，百分率操作数永不进除法。
+        int variantIdx = sys.indexOf("占语尾巴变体");
+        assertTrue(variantIdx > rule3iStart && variantIdx < rule3iEnd,
+                "the occupation-tail variant guidance must stay inside rule 3i");
+        assertTrue(sys.contains("“A与B的合计/之和占XX比”"),
+                "the abstract occupation-tail phrasing must be described with A/B/XX placeholders");
+        assertTrue(sys.contains("仍属于加合族"),
+                "occupation-tail percent pairs must stay in the additive family");
+        assertTrue(sys.contains("“占XX比”只是措辞修饰，不得据此引入分母、除法或改判比率族"),
+                "the tail wording must not promote a denominator, division, or the ratio family");
+        assertTrue(sys.contains("百分率操作数永远不进除法"),
+                "percent operands must be forbidden from every division");
+        assertTrue(sys.contains("两率之和再除以任何金额指标在量纲与数值上都是"),
+                "summing two rates then dividing by an amount metric must be named wrong");
+        assertTrue(sys.contains("calculation.type=RATIO（含 calculation.baseline）只接受金额单位"),
+                "the ratio family must be scoped to amount-unit numerator and denominator");
+        String variantBlock = sys.substring(variantIdx, rule3iEnd);
+        assertFalse(variantBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the occupation-tail variant guidance must stay date-free");
+        assertTrue(variantBlock.contains("无除法、无 ×100"),
+                "the additive contract must state raw addition with no division and no rescaling");
     }
 
     @Test
@@ -647,14 +668,58 @@ class BankPlanPromptComposerTest {
         // v59 因官方 smoke 回归被 v60 取代；v60 的族块示例日期又污染 requirements 日期槽
         // （VAL-S-06）被 v61 去示例化取代；v62 将极值名次切片改为按目录 direction 的确定性
         // 映射，并在 3i 补充同单位百分率加合词表；v63 把该词表收窄到百分率(%)加数对并给
-        // 金额类合计写明普通多指标重定向（TRAIN-M-58 修复轮死循环教训）。再次 bump 必须
-        // 携带官方证据并同步更新本断言。
-        assertEquals("bank-plan-sys-v63-additive-percent-scope",
+        // 金额类合计写明普通多指标重定向（TRAIN-M-58 修复轮死循环教训）；v64 在专用族块
+        // 追加 COMPOUND_BENCHMARK 多指标复合基准阈值族（逐指标基准方向条件、无日期判例），
+        // 并在 3i 词表就地补充“占XX比”尾巴变体仍属加合族、百分率永不进除法的规则（尚未
+        // 部署，故 v64 不再升版本）。
+        // 再次 bump 必须携带官方证据并同步更新本断言。
+        assertEquals("bank-plan-sys-v64-compound-benchmark",
                 BankPlanPromptComposer.PREFIX_VERSION);
         assertEquals("bank-requirements-sys-v8-stage-split",
                 BankPlanPromptComposer.REQUIREMENTS_PREFIX_VERSION);
         assertEquals("bank-plan-sys-v57-stage-split", BankPlanPromptComposer.PLAN_PREFIX_VERSION);
         assertEquals(BankPlanPromptComposer.PREFIX_VERSION,
                 BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION);
+    }
+
+    @Test
+    void compoundBenchmarkGuidanceStaysInsideItsOwnFamilyBlock() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        // v64：复合 AND 基准族只允许住在专用族块内，独立成段，不混排进编号规则或日期判例。
+        int familyHeader = sys.indexOf("专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）");
+        assertTrue(familyHeader >= 0, "family supplement block must exist");
+        int compoundStart = sys.indexOf("COMPOUND_BENCHMARK 多指标复合基准阈值");
+        assertTrue(compoundStart > familyHeader,
+                "compound benchmark guidance must live inside the family block");
+        int planContract = sys.indexOf("PLAN 严格合同", familyHeader);
+        assertTrue(planContract > compoundStart);
+        String compoundBlock = sys.substring(compoundStart, planContract);
+        int numberedRuleEnd = sys.indexOf("逐字照抄权威目录中的中文名称，禁止自造别名");
+        assertTrue(numberedRuleEnd >= 0 && numberedRuleEnd < familyHeader);
+        assertFalse(sys.substring(numberedRuleEnd, familyHeader).contains("COMPOUND_BENCHMARK"),
+                "compound benchmark must not leak into the numbered PLAN rules");
+
+        // 复合 AND 基准=每个指标各一条基准方向条件 + 方向按目录 + 全省均值禁止写进指标槽位。
+        assertTrue(compoundBlock.contains("每个"),
+                () -> "family block must state the AND condition contract");
+        assertTrue(sys.contains("复合 AND 基准就是每个指标各一条"),
+                "the compound AND sentence must be present verbatim");
+        assertTrue(sys.contains("禁止把全省均值写进 metrics/metricCodes 或任何指标"),
+                "province average must be forbidden inside metric slots");
+        assertTrue(compoundBlock.contains("\"field\":\"<该指标 ZB###>\""),
+                () -> compoundBlock);
+        assertTrue(compoundBlock.contains("HIGHER_BETTER 用"),
+                () -> compoundBlock);
+        assertTrue(compoundBlock.contains("LOWER_BETTER 用 LT/LTE"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("与目录方向"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("禁止用单个"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("meets_condition"), () -> compoundBlock);
+        // 无具体日期槽位的判例描述：族块段落不允许出现字面日期（历史教训：示例日期会污染
+        // 同一生成里的 requirements 日期槽）。
+        assertFalse(compoundBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "compound benchmark guidance must not carry literal example dates");
+        assertFalse(compoundBlock.contains("合成示例"),
+                "compound benchmark guidance stays slot-descriptive, never exemplified");
     }
 }

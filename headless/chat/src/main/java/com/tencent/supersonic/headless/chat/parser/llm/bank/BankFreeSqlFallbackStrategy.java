@@ -76,12 +76,13 @@ public class BankFreeSqlFallbackStrategy {
     /**
      * Explicit decode bound for the {sql, columns} JSON: remote providers apply their own default
      * output cap when max_tokens is absent, which truncates longer fallback SQL. The thinking
-     * gateway spends a large share of the decode budget on reasoning content before any SQL
-     * (observed ~8k reasoning chars against a 2048 bound), so the bound must leave room for
-     * reasoning plus the full statement — 2048 truncated every attempt of long questions and
-     * made the channel structurally non-convergent (TRAIN-H-07/08/09, 2026-08-29).
+     * gateway spends a large share of the decode budget on reasoning content before any SQL, and
+     * the hardest long-output questions burn the entire budget on reasoning alone (observed
+     * reasoning truncated exactly at the 4096 bound with no SQL emitted, test r7 TST-H-03/04,
+     * 2026-08-30; earlier ~8k reasoning chars against the 2048 bound, TRAIN-H-07/08/09). The
+     * bound must cover worst-observed reasoning plus the full statement.
      */
-    static final int FREE_FALLBACK_MAX_OUTPUT_TOKENS = 4096;
+    static final int FREE_FALLBACK_MAX_OUTPUT_TOKENS = 8192;
 
     private final ConcurrentHashMap<String, FixedSystemPrefixLlmCache> fallbackPrefixCaches =
             new ConcurrentHashMap<>();

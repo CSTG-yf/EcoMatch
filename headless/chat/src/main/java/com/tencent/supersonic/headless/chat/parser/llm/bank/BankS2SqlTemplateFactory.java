@@ -581,6 +581,99 @@ final class BankS2SqlTemplateFactory {
                 + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
     }
 
+    /**
+     * Compound benchmark threshold (多指标复合基准阈值：哪些机构同时满足 指标A低于全省均值 且
+     * 指标B高于全省均值). N≥2 catalog metrics are pivoted into one wide row per organization over
+     * the FULL population, and every metric's benchmark comparison is AND-combined into a single
+     * meets_condition flag. Each comparison's sign follows the metric's catalog direction
+     * (higher-better meets above the provincial average, lower-better below) — the same
+     * direction-aware contract the single-metric threshold family proved in evaluation; the
+     * plan's per-metric direction conditions were already validated against the catalog, so the
+     * template never trusts a plan-declared sign. Output contract (locked): bank_organization,
+     * then per metric in canonical order ({@link #compoundBenchmarkOrder}) an ordinal
+     * {@code <ordinal>_value} / {@code <ordinal>_average} pair, then meets_condition, ordered by
+     * organization ASC. No semantic dimension name may appear as an alias target — the outer
+     * SELECT reads the CTE columns unqualified.
+     */
+    String compileCompoundBenchmarkThreshold(TemplateContext context) {
+        if (context.metrics().size() < 2 || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "compound benchmark threshold requires at least two metrics and no metric "
+                            + "filter");
+        }
+        List<ResolvedMetric> ordered = compoundBenchmarkOrder(context.metrics());
+        List<String> ordinals = compoundBenchmarkOrdinals(ordered.size());
+        List<String> pivotSelects = new ArrayList<>();
+        List<String> averageSelects = new ArrayList<>();
+        List<String> wideColumns = new ArrayList<>();
+        List<String> andConditions = new ArrayList<>();
+        for (int index = 0; index < ordered.size(); index++) {
+            ResolvedMetric metric = ordered.get(index);
+            String valueColumn = ordinals.get(index) + "_value";
+            String averageColumn = ordinals.get(index) + "_average";
+            pivotSelects.add("SUM(" + metric.identifier() + ") AS " + valueColumn);
+            averageSelects.add("AVG(" + valueColumn + ") AS " + averageColumn);
+            wideColumns.add(valueColumn);
+            wideColumns.add(averageColumn);
+            // Direction-aware sign from the catalog, exactly like the single-metric threshold
+            // family: DESC (higher-better) meets above the average, ASC meets below it.
+            andConditions.add(valueColumn
+                    + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode()))
+                            ? " > " : " < ")
+                    + averageColumn);
+        }
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        return """
+                WITH bank_org AS (
+                  SELECT bank_organization, %s
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                ), province_average AS (
+                  SELECT %s
+                  FROM bank_org
+                )
+                SELECT bank_organization, %s,
+                       CASE WHEN %s THEN 1 ELSE 0 END AS meets_condition
+                FROM bank_org CROSS JOIN province_average
+                ORDER BY bank_organization ASC
+                """.formatted(String.join(", ", pivotSelects), context.dataSetName(), where,
+                String.join(", ", averageSelects), String.join(", ", wideColumns),
+                String.join(" AND ", andConditions)).trim();
+    }
+
+    /**
+     * Canonical compound-benchmark metric order: higher-better (DESC ranking) metrics take the
+     * lower ordinals first, ties broken by metric code ASC. The order is derived from catalog
+     * metadata only — never from question wording or mention order — so one metric set always
+     * compiles to the same byte-stable column contract regardless of how the plan lists it.
+     */
+    static List<ResolvedMetric> compoundBenchmarkOrder(List<ResolvedMetric> metrics) {
+        return metrics.stream()
+                .sorted(java.util.Comparator
+                        .comparing((ResolvedMetric metric) -> !"DESC".equals(
+                                BankResultProjector.rankingDirection(metric.metricCode())))
+                        .thenComparing(ResolvedMetric::metricCode))
+                .toList();
+    }
+
+    private static final List<String> COMPOUND_BENCHMARK_ORDINALS = List.of("first", "second",
+            "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+            "eleventh", "twelfth");
+
+    /** Ordinal prefixes of the compound benchmark wide columns, in canonical order. */
+    static List<String> compoundBenchmarkOrdinals(int metricCount) {
+        if (metricCount < 2 || metricCount > COMPOUND_BENCHMARK_ORDINALS.size()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "compound benchmark threshold supports between two and "
+                            + COMPOUND_BENCHMARK_ORDINALS.size() + " metrics, got=" + metricCount);
+        }
+        return COMPOUND_BENCHMARK_ORDINALS.subList(0, metricCount);
+    }
+
     String compileAbsoluteThreshold(TemplateContext context) {
         if (context.metrics().size() != 1 || context.metricFilters().size() != 1) {
             throw new BankPlanCompilationException(

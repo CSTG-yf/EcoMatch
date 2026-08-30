@@ -51,10 +51,10 @@ class BankFreeSqlFallbackStrategyTest {
 
     @Test
     void fallbackDecodeBoundLeavesRoomForThinkingGatewayReasoningOverhead() {
-        // 思考型网关会在 SQL 之前消耗大量解码预算（观测 ~8k reasoning 字符对 2048 上限），
-        // 2048 会把长题兜底的每一轮都截成 MALFORMED_JSON，通道结构性不收敛
-        // （TRAIN-H-07/08/09，2026-08-29）。再次调低等于重开该缺陷，必须带官方证据。
-        assertTrue(BankFreeSqlFallbackStrategy.FREE_FALLBACK_MAX_OUTPUT_TOKENS >= 4096,
+        // 思考型网关会在 SQL 之前消耗大量解码预算（观测 ~8k reasoning 字符对 2048 上限，
+        // TRAIN-H-07/08/09；test r7 TST-H-03/04 更是 reasoning 单独打满 4096 上限、SQL
+        // 完全没有输出）。再次调低等于重开该缺陷，必须带官方证据。
+        assertTrue(BankFreeSqlFallbackStrategy.FREE_FALLBACK_MAX_OUTPUT_TOKENS >= 8192,
                 "fallback decode bound must leave room for reasoning plus the full statement");
     }
 

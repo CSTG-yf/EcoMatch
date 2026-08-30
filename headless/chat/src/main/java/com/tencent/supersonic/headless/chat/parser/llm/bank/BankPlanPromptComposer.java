@@ -433,6 +433,13 @@ public final class BankPlanPromptComposer {
                         单位(%)的指标时才允许；金额类指标（元/亿元）的“合计/之和”不是派生指标——
                         derivedMetrics 保持为空，把各加数直接并列写进 metrics 与
                         requirements.metricCodes（普通多指标查询）。
+                        占语尾巴变体：“A与B的合计/之和占XX比”这类带“占XX比”措辞尾巴的问法，
+                        只要 A、B 都是目录中百分率单位(%)的指标，仍属于加合族：derivedMetrics
+                        照写一个 DERIVED_SUM_<M1>_AND_<M2>（两个加数值直接相加，无除法、无 ×100），
+                        “占XX比”只是措辞修饰，不得据此引入分母、除法或改判比率族。
+                        百分率操作数永远不进除法：两率之和再除以任何金额指标在量纲与数值上都是
+                        错误口径；calculation.type=RATIO（含 calculation.baseline）只接受金额单位
+                        的分子与分母。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -561,6 +568,25 @@ public final class BankPlanPromptComposer {
                     rank_change=基期名次-当期名次，正数表示位次上升；不要把这些结果列写进
                     output.columns 或 orderBy。
 
+                    COMPOUND_BENCHMARK 多指标复合基准阈值：“哪些机构的多个指标同时满足——每个
+                    指标分别要求高于或低于全省均值”的 AND 组合问句必须使用本族，不得把多个指标
+                    拆成多个单指标查询或退化成普通排名。plan 槽位形状（本族不提供任何判例，
+                    时间槽一律取题面原词对应的真实日期）：intent=THRESHOLD、organizations=[]、
+                    dimensions=["bank_organization"]、calculation.type=DIRECT、time.comparison=NONE、
+                    orderBy=[]、limit=null，output.columns 只写 ["bank_organization",
+                    "<所选各 ZB###>"]。filters 必须包含精确的 benchmark/COMPARE/PROVINCE_AVERAGE
+                    对象，并且每个所选指标各追加一条基准方向条件
+                    {"field":"<该指标 ZB###>","operator":"GT 或 GTE 或 LT 或 LTE",
+                    "value":"PROVINCE_AVERAGE","values":[]}——复合 AND 基准就是每个指标各一条
+                    benchmark 方向条件；方向按权威目录该指标 direction 列确定：HIGHER_BETTER 用
+                    GT/GTE（高于全省均值），LOWER_BETTER 用 LT/LTE（低于全省均值），与目录方向
+                    矛盾的条件会被拒绝修复。禁止把全省均值写进 metrics/metricCodes 或任何指标
+                    槽位（PROVINCE_AVERAGE 只能出现在基准/方向过滤对象中）；禁止用单个
+                    metric_value 方向对象同时表达多个指标；禁止派生指标与数值 metric_value 过滤。
+                    编译器会返回逐机构 org_code/org_name、每个指标的 <序数>_value/<序数>_average
+                    事实对和 AND 语义的 meets_condition 标志位（序数由目录方向与指标代码规范化
+                    决定）；不要把这些结果列写进 output.columns 或 orderBy。
+
                     ════════════════════════════════
                     PLAN 严格合同
                     ════════════════════════════════
@@ -640,7 +666,7 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v63-additive-percent-scope";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v64-compound-benchmark";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;

@@ -1337,4 +1337,162 @@ class BankQueryPlanValidatorTest {
                 .requiredStartDate(LocalDate.of(2026, 5, 31))
                 .requiredEndDate(LocalDate.of(2026, 5, 31)).build();
     }
+
+    @Test
+    void acceptsACompoundBenchmarkThresholdPlanWithOneConditionPerSelectedMetric() {
+        assertTrue(validator.validate(compoundBenchmarkPlan(),
+                compoundBenchmarkRequirements()).isValid());
+    }
+
+    @Test
+    void rejectsAProvinceAverageValueOutsideTheThreeLegalBenchmarkSlots() {
+        BankQueryPlan plan = compoundBenchmarkPlan();
+        plan.setFilters(new ArrayList<>(List.of(
+                BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("metric_value").operator("EQ")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, compoundBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED"));
+        assertTrue(result.summary().contains("per-metric benchmark condition"),
+                () -> result.summary());
+        assertTrue(result.summary().contains("\"value\":\"PROVINCE_AVERAGE\""),
+                () -> result.summary());
+    }
+
+    @Test
+    void rejectsACompoundBenchmarkConditionThatConflictsWithTheCatalogDirection() {
+        BankQueryPlan plan = compoundBenchmarkPlan();
+        // ZB013 (lower-is-better / ASC catalog) declared with GT: the sign would silently
+        // invert the metric's satisfaction, so the guard demands a catalog-aligned operator.
+        plan.setFilters(new ArrayList<>(List.of(
+                BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB013").operator("GT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB015").operator("GT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, compoundBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("COMPOUND_BENCHMARK_DIRECTION_CONFLICT"));
+        assertTrue(result.summary().contains("ZB013 GT"), () -> result.summary());
+        assertTrue(result.summary().contains("catalog direction"), () -> result.summary());
+        assertTrue(result.summary().contains("higher-better"), () -> result.summary());
+    }
+
+    @Test
+    void rejectsACompoundBenchmarkConditionForAMetricOutsideTheSelectedMetrics() {
+        BankQueryPlan plan = compoundBenchmarkPlan();
+        plan.setFilters(new ArrayList<>(List.of(
+                BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB013").operator("LT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB017").operator("LT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, compoundBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("COMPOUND_BENCHMARK_CONDITION_UNPAIRED"));
+        assertTrue(result.summary().contains("ZB017 is not a selected metric"),
+                () -> result.summary());
+        assertTrue(result.summary().contains("ZB015 has 0 benchmark conditions"),
+                () -> result.summary());
+    }
+
+    @Test
+    void rejectsACompoundBenchmarkConditionWithAFieldOutsideTheMetricCatalog() {
+        BankQueryPlan plan = compoundBenchmarkPlan();
+        plan.setFilters(new ArrayList<>(List.of(
+                BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB013").operator("LT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                BankQueryPlan.Filter.builder().field("ZB999").operator("GT")
+                        .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())));
+
+        BankQueryPlanValidator.ValidationResult result =
+                validator.validate(plan, compoundBenchmarkRequirements());
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("COMPOUND_BENCHMARK_METRIC_UNKNOWN"));
+        assertTrue(result.summary().contains("registered ZB### catalog metric"),
+                () -> result.summary());
+        assertFalse(result.codes().contains("UNKNOWN_FILTER_FIELD"),
+                "the targeted compound guard replaces the generic unknown-field error");
+    }
+
+    @Test
+    void rejectsCompoundBenchmarkConditionsWithASingleSelectedMetric() {
+        BankQueryPlan plan = compoundBenchmarkPlan();
+        plan.setMetrics(new ArrayList<>(List.of(metric("ZB013"))));
+        plan.getOutput().setColumns(new ArrayList<>(List.of("bank_organization", "ZB013")));
+
+        SemanticIntentHints requirements = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.THRESHOLD)
+                .allowedMetrics(Set.of("ZB001", "ZB013", "ZB015", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013"))
+                .requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE"))).build();
+
+        BankQueryPlanValidator.ValidationResult result = validator.validate(plan, requirements);
+
+        assertFalse(result.isValid());
+        assertTrue(result.codes().contains("COMPOUND_BENCHMARK_METRICS_REQUIRED"));
+        assertTrue(result.summary().contains("at least two selected metrics"),
+                () -> result.summary());
+    }
+
+    /** Synthetic compound benchmark plan: ZB013 below and ZB015 above the province average. */
+    private BankQueryPlan compoundBenchmarkPlan() {
+        return BankQueryPlan.builder().version("1.0").action(BankQueryPlan.PlanAction.EXECUTE)
+                .intent(BankIntentType.THRESHOLD)
+                .metrics(new ArrayList<>(List.of(metric("ZB013"), metric("ZB015"))))
+                .derivedMetrics(new ArrayList<>())
+                .dimensions(new ArrayList<>(List.of("bank_organization")))
+                .organizations(new ArrayList<>())
+                .time(BankQueryPlan.TimeRange.builder().startDate(LocalDate.of(2026, 3, 31))
+                        .endDate(LocalDate.of(2026, 3, 31))
+                        .granularity(BankQueryPlan.TimeGranularity.DAY)
+                        .comparison(BankQueryPlan.TimeComparison.NONE).build())
+                .filters(new ArrayList<>(List.of(
+                        BankQueryPlan.Filter.builder().field("benchmark").operator("COMPARE")
+                                .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                        BankQueryPlan.Filter.builder().field("ZB013").operator("LT")
+                                .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build(),
+                        BankQueryPlan.Filter.builder().field("ZB015").operator("GT")
+                                .value("PROVINCE_AVERAGE").values(new ArrayList<>()).build())))
+                .calculation(BankQueryPlan.Calculation.builder()
+                        .type(BankQueryPlan.CalculationType.DIRECT).build())
+                .orderBy(new ArrayList<>()).limit(null)
+                .output(BankQueryPlan.Output.builder()
+                        .columns(new ArrayList<>(List.of("bank_organization", "ZB013", "ZB015")))
+                        .orderSensitive(true).build())
+                .build();
+    }
+
+    private SemanticIntentHints compoundBenchmarkRequirements() {
+        return SemanticIntentHints.builder().expectedIntent(BankIntentType.THRESHOLD)
+                .allowedMetrics(Set.of("ZB001", "ZB013", "ZB015", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date"))
+                .requiredMetrics(Set.of("ZB013", "ZB015"))
+                .requiredOrganizationCodes(Set.of())
+                .requiredStartDate(LocalDate.of(2026, 3, 31))
+                .requiredEndDate(LocalDate.of(2026, 3, 31))
+                .requiredFilters(List.of(new SemanticIntentHints.RequiredFilter("benchmark",
+                        "COMPARE", "PROVINCE_AVERAGE"))).build();
+    }
 }

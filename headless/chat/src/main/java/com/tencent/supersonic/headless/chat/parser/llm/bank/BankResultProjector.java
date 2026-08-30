@@ -50,6 +50,8 @@ public class BankResultProjector {
                     sourceRows);
             case MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD ->
                 projectMultiMetricProvinceAverageThreshold(contract, sourceRows);
+            case COMPOUND_BENCHMARK_THRESHOLD -> projectCompoundBenchmarkThreshold(contract,
+                    sourceRows);
             case MULTI_METRIC_PROVINCIAL_AVERAGE -> projectMultiMetricProvinceAverage(contract,
                     sourceRows);
             case ABSOLUTE_THRESHOLD -> projectAbsoluteThreshold(contract, sourceRows);
@@ -1172,6 +1174,58 @@ public class BankResultProjector {
     }
 
     /**
+     * Compound benchmark threshold (多指标复合基准阈值). The SQL template already pivoted every
+     * metric's value and provincial average and AND-combined the direction-aware comparisons
+     * into one meets_condition flag over the full population; this projection passes those wide
+     * facts through with organization identity, one row per organization, keeping the canonical
+     * ordinal column contract (first_value, first_average, second_value, second_average, ...).
+     */
+    private Projection projectCompoundBenchmarkThreshold(Contract contract,
+            List<Map<String, Object>> sourceRows) {
+        if (contract.getMetrics().isEmpty()) {
+            return Projection.notApplied();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (Map<String, Object> sourceRow : sourceRows == null ? List.<Map<String, Object>>of()
+                : sourceRows) {
+            String organizationCode = resolveOrganizationCode(contract, sourceRow);
+            ValueLookup meetsCondition = value(sourceRow, "meets_condition");
+            if (StringUtils.isBlank(organizationCode) || !meetsCondition.found()) {
+                return Projection.notApplied();
+            }
+            if (!contract.getSelectedOrganizationCodes().isEmpty()
+                    && !contract.getSelectedOrganizationCodes().contains(organizationCode)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("org_code", organizationCode);
+            row.put("org_name", contract.getOrganizationNames().getOrDefault(organizationCode,
+                    organizationCode));
+            for (MetricBinding metric : contract.getMetrics()) {
+                ValueLookup metricValue = value(sourceRow, metric.getSemanticColumn());
+                ValueLookup provincialAverage =
+                        value(sourceRow, compoundAverageColumn(metric.getSemanticColumn()));
+                if (!metricValue.found() || !provincialAverage.found()) {
+                    return Projection.notApplied();
+                }
+                row.put(metric.getSemanticColumn(), metricValue.value());
+                row.put(compoundAverageColumn(metric.getSemanticColumn()),
+                        provincialAverage.value());
+            }
+            row.put("meets_condition", meetsCondition.value());
+            rows.add(row);
+        }
+        return Projection.applied(columns(contract), rows);
+    }
+
+    /** The per-metric companion average column of an ordinal compound value column. */
+    private static String compoundAverageColumn(String valueColumn) {
+        return valueColumn != null && valueColumn.endsWith("_value")
+                ? valueColumn.substring(0, valueColumn.length() - "_value".length()) + "_average"
+                : valueColumn + "_average";
+    }
+
+    /**
      * Multi-metric org vs province mean (H-04). Emits metric_code, org values, provincial mean and
      * absolute gap so answerExact can hit both the printed values and the "低于/高于全省均值X" gaps.
      */
@@ -1645,6 +1699,15 @@ public class BankResultProjector {
             return List.of("org_code", "org_name", "metric_code", "metric_value",
                     "provincial_average", "gap_value", "meets_condition");
         }
+        if (contract.getType() == ProjectionType.COMPOUND_BENCHMARK_THRESHOLD) {
+            List<String> columns = new ArrayList<>(List.of("org_code", "org_name"));
+            for (MetricBinding metric : contract.getMetrics()) {
+                columns.add(metric.getSemanticColumn());
+                columns.add(compoundAverageColumn(metric.getSemanticColumn()));
+            }
+            columns.add("meets_condition");
+            return List.copyOf(columns);
+        }
         if (contract.getType() == ProjectionType.MULTI_METRIC_PROVINCIAL_AVERAGE) {
             return List.of("org_code", "org_name", "metric_code", "metric_value",
                     "provincial_average", "gap_value", "absolute_gap");
@@ -1712,6 +1775,11 @@ public class BankResultProjector {
         COMPARISON,
         PROVINCIAL_AVERAGE_THRESHOLD,
         MULTI_METRIC_PROVINCIAL_AVERAGE_THRESHOLD,
+        /**
+         * Compound benchmark threshold (多指标复合基准阈值): wide per-organization rows with one
+         * ordinal value/average pair per metric plus the AND-combined meets_condition flag.
+         */
+        COMPOUND_BENCHMARK_THRESHOLD,
         MULTI_METRIC_PROVINCIAL_AVERAGE,
         ABSOLUTE_THRESHOLD,
         AGGREGATION_SUMMARY,

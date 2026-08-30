@@ -557,6 +557,68 @@ class BankResultProjectorTest {
     }
 
     @Test
+    void shouldProjectCompoundBenchmarkThresholdRowsWithTheWideOrdinalContract() {
+        // Compound benchmark family (多指标复合基准阈值): the SQL pivoted each metric's value and
+        // provincial average and AND-combined the direction-aware comparisons; the projection
+        // passes those wide facts through with organization identity in canonical ordinal order.
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.COMPOUND_BENCHMARK_THRESHOLD)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "A", "ORG002", "B"))
+                .selectedOrganizationCodes(List.of())
+                .metrics(List.of(
+                        BankResultProjector.MetricBinding.builder().semanticColumn("first_value")
+                                .metricCode("ZB015").build(),
+                        BankResultProjector.MetricBinding.builder().semanticColumn("second_value")
+                                .metricCode("ZB013").build()))
+                .build();
+
+        BankResultProjector.Projection projection = projector.project(contract, List.of(
+                row("bank_organization", "ORG001", "first_value", new BigDecimal("150.25"),
+                        "first_average", new BigDecimal("180.25"), "second_value",
+                        new BigDecimal("1.05"), "second_average", new BigDecimal("1.10"),
+                        "meets_condition", 0),
+                row("bank_organization", "ORG002", "first_value", new BigDecimal("201.75"),
+                        "first_average", new BigDecimal("180.25"), "second_value",
+                        new BigDecimal("0.80"), "second_average", new BigDecimal("1.10"),
+                        "meets_condition", 1)));
+
+        assertTrue(projection.isApplied());
+        assertEquals(List.of("org_code", "org_name", "first_value", "first_average",
+                "second_value", "second_average", "meets_condition"), projection.getColumns());
+        assertEquals(List.of(
+                row("org_code", "ORG001", "org_name", "A", "first_value",
+                        new BigDecimal("150.25"), "first_average", new BigDecimal("180.25"),
+                        "second_value", new BigDecimal("1.05"), "second_average",
+                        new BigDecimal("1.10"), "meets_condition", 0),
+                row("org_code", "ORG002", "org_name", "B", "first_value",
+                        new BigDecimal("201.75"), "first_average", new BigDecimal("180.25"),
+                        "second_value", new BigDecimal("0.80"), "second_average",
+                        new BigDecimal("1.10"), "meets_condition", 1)),
+                projection.getRows());
+    }
+
+    @Test
+    void compoundBenchmarkProjectionFailsClosedWhenAWideColumnIsMissing() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.COMPOUND_BENCHMARK_THRESHOLD)
+                .organizationColumn("bank_organization")
+                .organizationNames(Map.of("ORG001", "A"))
+                .selectedOrganizationCodes(List.of())
+                .metrics(List.of(BankResultProjector.MetricBinding.builder()
+                        .semanticColumn("first_value").metricCode("ZB015").build()))
+                .build();
+
+        // Missing first_average (the per-metric companion column) must refuse the projection
+        // instead of emitting a half-populated row.
+        BankResultProjector.Projection projection = projector.project(contract,
+                List.of(row("bank_organization", "ORG001", "first_value",
+                        new BigDecimal("150.25"), "meets_condition", 1)));
+
+        assertFalse(projection.isApplied());
+    }
+
+    @Test
     void shouldProjectDepositStructureShareWithRatioPercent() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.LONG_FORM)
