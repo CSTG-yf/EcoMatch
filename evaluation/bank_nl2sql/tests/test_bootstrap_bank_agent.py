@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,9 +18,11 @@ from bootstrap_bank_agent import (  # noqa: E402
     build_agent_payload,
     build_bank_model_payload,
     build_domain_payload,
+    assert_expected_h2_database_binding,
     encrypt_login_password,
     ensure_runtime_resources,
     patch_system_config,
+    resolve_model_database_binding,
     select_chat_model,
     select_database,
     unwrap_api_response,
@@ -122,6 +125,36 @@ class BootstrapBankAgentTest(unittest.TestCase):
 
         with self.assertRaisesRegex(BankAgentBootstrapError, "cannot uniquely select a database"):
             select_database(FakeClient())
+
+    def test_model_database_binding_is_resolved_and_must_match_expected_h2_file(self) -> None:
+        class FakeClient:
+            def json(self, method, path, payload=None):
+                responses = {
+                    "GET /api/semantic/model/getModel/33": {"id": 33, "databaseId": 7},
+                    "GET /api/semantic/database/getDatabaseList": [
+                        {
+                            "id": 7,
+                            "name": "bank-runtime",
+                            "type": "H2",
+                            "url": "jdbc:h2:file:C:/runtime/semantic;DATABASE_TO_UPPER=false",
+                        }
+                    ],
+                }
+                return responses[f"{method} {path}"]
+
+        binding = resolve_model_database_binding(FakeClient(), 33)
+        self.assertEqual(binding["id"], 7)
+        self.assertEqual(binding["url"], "jdbc:h2:file:C:/runtime/semantic;DATABASE_TO_UPPER=false")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            expected = Path(temp_dir) / "semantic"
+            matching = {
+                **binding,
+                "url": f"jdbc:h2:file:{expected.as_posix()};DATABASE_TO_UPPER=false",
+            }
+            assert_expected_h2_database_binding(matching, expected)
+            with self.assertRaisesRegex(BankAgentBootstrapError, "does not match"):
+                assert_expected_h2_database_binding(binding, expected)
 
     def test_chat_model_selection_is_only_used_when_explicitly_requested(self) -> None:
         class FakeClient:
@@ -262,6 +295,7 @@ class BootstrapBankAgentTest(unittest.TestCase):
         self.assertIn("Import-OfficialBankData.ps1", launcher)
         self.assertIn("bootstrap_bank_agent.py", launcher)
         self.assertIn("--base-url", launcher)
+        self.assertIn("--expected-h2-database", launcher)
         self.assertIn("--output", launcher)
         self.assertIn("S2_METADATA_DB_PATH", launcher)
         self.assertIn("-m venv", launcher)

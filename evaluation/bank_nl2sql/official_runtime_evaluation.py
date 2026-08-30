@@ -174,8 +174,9 @@ def verify_bootstrap_receipt(
 ) -> dict[str, Any]:
     """Require evidence that this Agent was bootstrapped for the same release.
 
-    The receipt contains IDs and configuration fingerprints only.  It never
-    stores a bearer token, a model endpoint, or a model secret.
+    This receipt proves only the semantic dataset/bootstrap state.  Runtime
+    chat-model selection is verified independently for every evaluation run.
+    The receipt never stores a bearer token, a model endpoint, or a model secret.
     """
 
     receipt = _read_json(Path(receipt_path), label="bootstrap receipt")
@@ -187,9 +188,14 @@ def verify_bootstrap_receipt(
         raise OfficialRuntimeEvaluationError("bootstrap receipt official manifest does not match")
     if receipt.get("agentId") != agent_id:
         raise OfficialRuntimeEvaluationError("bootstrap receipt agentId does not match")
-    for key in ("modelId", "chatModelId", "dataSetId"):
+    for key in ("modelId", "dataSetId"):
         if not isinstance(receipt.get(key), int) or receipt[key] <= 0:
             raise OfficialRuntimeEvaluationError(f"bootstrap receipt {key} is invalid")
+    bootstrap_chat_model_id = receipt.get("chatModelId")
+    if bootstrap_chat_model_id is not None and (
+        not isinstance(bootstrap_chat_model_id, int) or bootstrap_chat_model_id <= 0
+    ):
+        raise OfficialRuntimeEvaluationError("bootstrap receipt chatModelId is invalid")
     for key in ("agentProfileSha256", "systemParametersSha256"):
         value = receipt.get(key)
         if not isinstance(value, str) or len(value) != 64:
@@ -212,11 +218,11 @@ def verify_bootstrap_receipt(
     return {
         "agentId": agent_id,
         "modelId": receipt["modelId"],
-        "chatModelId": receipt["chatModelId"],
+        "bootstrapChatModelId": bootstrap_chat_model_id,
         "dataSetId": receipt["dataSetId"],
         "officialManifestSha256": official_manifest_sha256,
         "semanticImport": {key: semantic_import[key] for key in expected_import_counts},
-        "agentProfileSha256": receipt["agentProfileSha256"],
+        "bootstrapAgentProfileSha256": receipt["agentProfileSha256"],
         "systemParametersSha256": receipt["systemParametersSha256"],
     }
 

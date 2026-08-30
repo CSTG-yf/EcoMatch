@@ -31,15 +31,3 @@ python -m unittest evaluation.bank_nl2sql.public_disclosure.tests.test_public_fa
 预期结果：18 条事实通过字段、单位换算、来源、重复键和目录代码校验；3 组 SQL 全部解析、执行并返回与事实一致的结果，且每条结果保留来源定位。
 
 这组测试证明“公开披露数据可以被指标查询链路使用”，不等同于模型在 360 项上的识别准确率，也不能替代官方 21 项 Fact v3 评测或真实生产库验收。
-
-## Qwen 自然语言盲测
-
-`qwen_blind_eval.py` 提供与上述预置 SQL 测试独立的最小 Agent 闭环：千问仅接收中文问题、公开数据表结构、可用机构、18 项候选指标及可用日期。预置 SQL、标准结果、事实数值和来源定位保留在本地评测器，绝不发送给模型。
-
-推荐从仓库根目录执行本地启动脚本，它会隐藏输入 DashScope Key，且不会把 Key 写入报告：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .local-dev\Run-PublicDisclosureQwenBlindEval.ps1
-```
-
-报告将写入 `.local-dev/public-disclosure/qwen-blind-<timestamp>.json`，并记录 SQL 解析、执行、结果正确、来源可追溯、请求错误和响应延迟。`structuralResultCorrect` 记录是否严格返回预置的“指标代码、数值、单位”行格式；`resultCorrect` 同时接受指标代码与数值均正确的等价宽表结果。该盲测仍是隔离的 `PUBLIC_DISCLOSURE` 数据域，既不修改也不计入官方 21 项评测。

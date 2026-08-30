@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from evaluate_predictions import _json_value
-from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run
+from evaluation_policy import EvaluationAccessError, load_evaluation_records
 
 
 DEFAULT_QUERY_API_PREFIX = "/openapi/chat/query"
@@ -897,7 +897,6 @@ def _load_resumable_items(
     *,
     split: str,
     agent_id: int,
-    runtime_mode: str | None = None,
 ) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -912,11 +911,10 @@ def _load_resumable_items(
         or run.get("split") != split
         or run.get("agentId") != agent_id
         or run.get("captureMethod") != "concurrent-openapi-frontend-chain"
-        or run.get("runtimeMode") != runtime_mode
         or not isinstance(items, list)
     ):
         raise SuperSonicEvaluationError(
-            "Existing checkpoint does not match this split, agent, runtime mode, or API runner"
+            "Existing checkpoint does not match this split, agent, or API runner"
         )
     if not all(isinstance(item, dict) and isinstance(item.get("id"), str) for item in items):
         raise SuperSonicEvaluationError("Existing checkpoint contains invalid items")
@@ -960,14 +958,6 @@ def _legacy_capture_main() -> None:
         type=Path,
         help="Text/JSON file of record ids (one per line, JSON list, or {recordIds:[...]})",
     )
-    parser.add_argument(
-        "--runtime-mode",
-        choices=("bank-on", "bank-off"),
-        help=(
-            "Label for bank constrained-plan ablation. Does not flip the server switch; "
-            "set s2.parser.bank.constrained-plan.enable before running, then label the report."
-        ),
-    )
     parser.add_argument("--keep-conversations", action="store_true")
     parser.add_argument(
         "--resume",
@@ -976,8 +966,6 @@ def _legacy_capture_main() -> None:
         help="Resume completed records from the output checkpoint",
     )
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--acknowledge-final-test", action="store_true")
-    parser.add_argument("--run-registry", type=Path)
     args = parser.parse_args()
 
     if args.concurrency < 1:
@@ -986,8 +974,6 @@ def _legacy_capture_main() -> None:
         parser.error("--network-retries cannot be negative")
     if args.max_records is not None and args.max_records < 1:
         parser.error("--max-records must be at least 1")
-    if args.split == "test" and args.run_registry is None:
-        parser.error("--split test requires --run-registry to audit the final evaluation")
     id_filters = sum(
         int(value is not None) for value in (args.record_id, args.record_ids, args.ids_file)
     )
@@ -997,7 +983,6 @@ def _legacy_capture_main() -> None:
         records = load_evaluation_records(
             args.dataset,
             split=args.split,
-            acknowledge_final_test=args.acknowledge_final_test,
         )
     except EvaluationAccessError as error:
         parser.error(str(error))
@@ -1021,7 +1006,6 @@ def _legacy_capture_main() -> None:
                 args.output,
                 split=args.split,
                 agent_id=args.agent_id,
-                runtime_mode=args.runtime_mode,
             )
             if args.resume
             else []
@@ -1055,7 +1039,6 @@ def _legacy_capture_main() -> None:
             "resumedCount": len(resumed_by_id),
             "status": status,
             "durationSeconds": round(time.time() - started_at, 3),
-            "runtimeMode": args.runtime_mode,
             "selectedRecordIds": [record["id"] for record in records],
         }
         return metadata
@@ -1106,18 +1089,6 @@ def _legacy_capture_main() -> None:
     )
     report = _build_report(ordered_completed_items())
     report["run"] = run_metadata(status="COMPLETED")
-    if args.split == "test":
-        run_entry = record_final_test_run(
-            args.run_registry,
-            run_metadata={
-                "split": "test",
-                "agentId": args.agent_id,
-                "baseUrl": args.base_url,
-                "timestamp": int(started_at),
-                "metrics": report["metrics"],
-            },
-        )
-        report["run"]["finalTestRunNumber"] = run_entry["runNumber"]
     _write_report(args.output, report)
     print(json.dumps({"recordCount": report["recordCount"], "metrics": report["metrics"]}, ensure_ascii=False))
 

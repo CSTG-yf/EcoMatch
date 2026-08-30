@@ -22,6 +22,7 @@ from official_runtime_evaluation import (  # noqa: E402
     load_official_runtime_profile,
     verify_bootstrap_receipt,
     verify_official_runtime_release,
+    verify_source_checkout,
 )
 from run_official_runtime_eval import (  # noqa: E402
     OfficialRuntimeRunError,
@@ -29,6 +30,7 @@ from run_official_runtime_eval import (  # noqa: E402
     _early_stop_state,
     _load_resumed_items,
     _mark_bounded_diagnostic_report,
+    bind_runtime_chat_model,
 )
 
 
@@ -93,6 +95,49 @@ def _capture(sample_id: str = "TRAIN-S-01") -> dict:
 
 
 class OfficialRuntimeEvaluationTest(unittest.TestCase):
+    def test_source_checkout_rejects_uncommitted_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir) / "repo"
+            dataset_dir = repo / "evaluation" / "bank_nl2sql"
+            dataset_dir.mkdir(parents=True)
+            marker = repo / "marker.txt"
+            marker.write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "EcoMatch Test"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(repo), "add", "marker.txt"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "commit", "-m", "fixture"],
+                check=True,
+                capture_output=True,
+            )
+            revision = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            self.assertEqual(
+                verify_source_checkout(
+                    dataset_dir, profile={"minimumSourceCommit": revision}
+                )["sourceRevision"],
+                revision,
+            )
+            marker.write_text("dirty\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                OfficialRuntimeEvaluationError, "clean Git worktree"
+            ):
+                verify_source_checkout(
+                    dataset_dir, profile={"minimumSourceCommit": revision}
+                )
+
     def test_emits_only_full_denominator_fact_v3_metrics(self) -> None:
         report = build_official_runtime_report(_capture(), [_record()])
 
@@ -183,7 +228,8 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
             )
 
             self.assertEqual(receipt["agentId"], 33)
-            self.assertEqual(receipt["agentProfileSha256"], "a" * 64)
+            self.assertEqual(receipt["bootstrapAgentProfileSha256"], "a" * 64)
+            self.assertEqual(receipt["bootstrapChatModelId"], 1)
             with self.assertRaises(OfficialRuntimeEvaluationError):
                 verify_bootstrap_receipt(
                     path,
@@ -199,8 +245,80 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertIn("run_official_runtime_eval.py", launcher)
         self.assertNotIn("run_supersonic_eval.py", launcher)
         self.assertNotIn("--concurrency", launcher)
+        self.assertIn("ChatModelId", launcher)
+        self.assertIn("--chat-model-id", launcher)
         self.assertIn("MaxFailures", launcher)
         self.assertIn("--max-failures", launcher)
+        self.assertIn("AcknowledgeFinalTest", launcher)
+        self.assertIn("RunRegistry", launcher)
+        self.assertIn("--acknowledge-final-test", launcher)
+        self.assertIn("--run-registry", launcher)
+
+    def test_runtime_model_binding_updates_only_enabled_bank_apps_and_reads_back(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.models = [
+                    {
+                        "id": 7,
+                        "name": "cloud compatible model",
+                        "config": {
+                            "provider": "OPEN_AI",
+                            "baseUrl": "https://cloud.example.com/v1",
+                            "modelName": "cloud-model",
+                            "apiKey": "must-not-enter-receipt",
+                        },
+                    }
+                ]
+                self.agent = {
+                    "id": 33,
+                    "name": "银行问数",
+                    "chatAppConfig": {
+                        "BANK_CONSTRAINED_PLAN": {
+                            "enable": True,
+                            "chatModelId": 1,
+                        },
+                        "BANK_FINAL_ANSWER": {
+                            "enable": True,
+                            "chatModelId": 1,
+                        },
+                        "S2SQL_PARSER": {
+                            "enable": False,
+                            "chatModelId": 2,
+                        },
+                        "UNRELATED_APP": {
+                            "enable": True,
+                            "chatModelId": 3,
+                        },
+                    },
+                }
+                self.put_count = 0
+
+            def json(self, method: str, path: str, payload: dict | None = None):
+                if method == "GET" and path == "/api/chat/model/getModelList":
+                    return deepcopy(self.models)
+                if method == "GET" and path.startswith("/api/chat/agent/getAgentList"):
+                    return [deepcopy(self.agent)]
+                if method == "PUT" and path == "/api/chat/agent":
+                    self.put_count += 1
+                    self.agent = deepcopy(payload)
+                    return deepcopy(self.agent)
+                raise AssertionError((method, path))
+
+        client = FakeClient()
+        receipt = bind_runtime_chat_model(client, agent_id=33, chat_model_id=7)
+
+        self.assertEqual(client.put_count, 1)
+        self.assertEqual(receipt["chatModelId"], 7)
+        self.assertEqual(receipt["provider"], "OPEN_AI")
+        self.assertEqual(receipt["modelName"], "cloud-model")
+        self.assertEqual(
+            receipt["readBackChatModelIds"],
+            {"BANK_CONSTRAINED_PLAN": 7, "BANK_FINAL_ANSWER": 7},
+        )
+        self.assertEqual(client.agent["chatAppConfig"]["S2SQL_PARSER"]["chatModelId"], 2)
+        self.assertEqual(client.agent["chatAppConfig"]["UNRELATED_APP"]["chatModelId"], 3)
+        self.assertNotIn("cloud.example.com", json.dumps(receipt))
+        self.assertNotIn("must-not-enter-receipt", json.dumps(receipt))
 
     def test_early_stop_requires_more_than_the_failure_budget(self) -> None:
         scored_items = [
@@ -466,9 +584,7 @@ class OfficialRuntimeEvaluationTest(unittest.TestCase):
         self.assertIn("caseAccuracy", readme)
         public_guides = (
             ROOT / "README.md",
-            ROOT / "RUNTIME_ABLATION.md",
             ROOT / "repro" / "BEST_BANK_ON.md",
-            ROOT / "LLM_AGENT_SCORE_IMPROVEMENT_FACT_PLAN.md",
             ROOT.parents[1] / "AGENTS.md",
         )
         legacy_names = ("answerExact", "tableEX", "resultAccuracy")

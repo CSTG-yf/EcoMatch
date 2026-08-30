@@ -174,6 +174,7 @@ New-Item -ItemType Directory -Path $ReceiptDirectory -Force | Out-Null
 Write-Host "Applying the bank Agent through the HTTP bootstrap API..."
 & $PythonEntry $BootstrapEntry $DatasetDirectory `
     --base-url $BaseUrl `
+    --expected-h2-database $MetadataDatabase `
     --output $ReceiptPath
 if ($LASTEXITCODE -ne 0) {
     throw "HTTP bank Agent bootstrap failed with exit code $LASTEXITCODE"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Access policy and audit registry for DATA-02 evaluation runs."""
+"""Access policy and local audit registry for Bank NL2SQL evaluation runs."""
 
 from __future__ import annotations
 
@@ -28,11 +28,10 @@ def load_evaluation_records(
     split: str,
     acknowledge_final_test: bool = False,
 ) -> list[dict[str, Any]]:
-    """Read one approved split for a concrete evaluation run.
+    """Read one split without coupling it to prerequisite runs.
 
-    Development runs can read only train or dev.  Reading the frozen test set
-    requires an explicit final-evaluation acknowledgement; callers must also
-    register that run with :func:`record_final_test_run`.
+    Train and dev are directly available. Reading the frozen test gold remains
+    an explicit action and the caller must register the run locally.
     """
 
     normalized_split = split.strip().lower()
@@ -53,7 +52,7 @@ def record_final_test_run(
     *,
     run_metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    """Append a final-test run to a local audit registry and return its entry."""
+    """Append one frozen-test attempt to a local audit registry."""
 
     path = Path(registry_path).resolve()
     if path.exists():
@@ -70,5 +69,8 @@ def record_final_test_run(
     entry["runNumber"] = len(registry["runs"]) + 1
     registry["runs"].append(entry)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     return entry
