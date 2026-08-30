@@ -634,9 +634,8 @@ class BankPlanGenStrategyTest {
     @Test
     void upperCaseValidatorCodeFailureGetsItsRegisteredSkeletonInRepair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
-        // A malformed plan benchmark filter trips the plan validator's UPPER_CASE code; that
-        // code degrades to VALIDATION_FAILED in repairErrorCode, so only the raw message prefix
-        // fallback can resolve its skeleton.
+        // A malformed plan benchmark filter trips the plan validator's UPPER_CASE code; repair
+        // must preserve that code and resolve its registered skeleton.
         String failingPlan = validPlanJson().replace(
                 "\"field\":\"benchmark\",\"operator\":\"COMPARE\"",
                 "\"field\":\"benchmark\",\"operator\":\"GT\"");
@@ -654,6 +653,15 @@ class BankPlanGenStrategyTest {
         assertTrue(repair.contains("正确整体形状骨架"));
         assertTrue(repair.contains("PROVINCE_AVERAGE 只允许三类基准形态"));
         assertFalse(repair.contains("升级提示"));
+    }
+
+    @Test
+    void upperCaseValidatorCodeIsPreservedForRepairDiagnostics() {
+        BankQueryPlanParseException exception = new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "PERCENT_METRIC_RANGE_SUM: percent-unit metrics must not be summed across a date range");
+
+        assertEquals("PERCENT_METRIC_RANGE_SUM", BankPlanGenStrategy.repairErrorCode(exception));
     }
 
     @Test

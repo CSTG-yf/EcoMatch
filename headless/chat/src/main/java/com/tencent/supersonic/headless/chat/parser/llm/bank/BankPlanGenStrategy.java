@@ -288,8 +288,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     /**
-     * Extracts the stable error code that prefixes validator messages ({@code snake_case: ...}).
-     * Structured repair diagnostics must never collapse into a bare {@code VALIDATION_FAILED}.
+     * Extracts the stable error code that prefixes validator messages ({@code CODE: ...}),
+     * preserving its original case. Structured repair diagnostics must never collapse a valid
+     * validator code into a bare {@code VALIDATION_FAILED}.
      */
     static String repairErrorCode(BankQueryPlanParseException exception) {
         if (exception == null) {
@@ -300,7 +301,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             int colon = message.indexOf(':');
             if (colon > 0) {
                 String candidate = message.substring(0, colon).trim();
-                if (candidate.matches("[a-z][a-z0-9_]{2,63}")) {
+                if (candidate.matches("[A-Za-z][A-Za-z0-9_]{2,63}")) {
                     return candidate;
                 }
             }
@@ -347,12 +348,9 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     /**
      * The registered skeleton for this failure, resolved in three tiers: by the recovered error
-     * code first; then by the raw leading {@code CODE:} message token, because
-     * {@code repairErrorCode} only recovers lowercase snake_case prefixes and the plan
-     * validator's UPPER_CASE codes (PROVINCE_AVERAGE_BENCHMARK_*, COMPOUND_BENCHMARK_*...)
-     * degrade to VALIDATION_FAILED there; then by the stable message signature for the
-     * prefix-less requirements-contract parser failures. Null when no skeleton is registered;
-     * the repair message then stays exactly as emitted.
+     * code first; then by the raw leading {@code CODE:} message token as a compatibility fallback;
+     * then by the stable message signature for prefix-less requirements-contract parser failures.
+     * Null when no skeleton is registered; the repair message then stays exactly as emitted.
      */
     private static String shapeSkeleton(BankQueryPlanParseException lastError) {
         if (lastError == null) {
