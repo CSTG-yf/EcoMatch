@@ -24,6 +24,9 @@ param(
     [int]$AgentId,
 
     [Parameter(Mandatory = $true)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$ChatModelId,
+
     [string]$ModelLabel,
 
     [Parameter(Mandatory = $true)]
@@ -77,9 +80,12 @@ $RunnerArgs = @(
     "--run-id", $RunId,
     "--base-url", $BaseUrl,
     "--agent-id", "$AgentId",
-    "--model-label", $ModelLabel,
+    "--chat-model-id", "$ChatModelId",
     "--bootstrap-receipt", $BootstrapReceipt
 )
+if (-not [string]::IsNullOrWhiteSpace($ModelLabel)) {
+    $RunnerArgs += @("--model-label", $ModelLabel)
+}
 if (-not [string]::IsNullOrWhiteSpace($EvidenceRoot)) {
     $RunnerArgs += @("--evidence-root", $EvidenceRoot)
 }

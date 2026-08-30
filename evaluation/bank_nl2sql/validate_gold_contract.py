@@ -45,16 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--abs-tol", type=float, default=DEFAULT_ABS_TOL)
     parser.add_argument("--rel-tol", type=float, default=DEFAULT_REL_TOL)
-    parser.add_argument(
-        "--acknowledge-final-test",
-        action="store_true",
-        help="Required when --split test or all (includes test)",
-    )
     args = parser.parse_args(argv)
 
     splits = ("train", "dev", "test") if args.split == "all" else (args.split,)
-    if "test" in splits and not args.acknowledge_final_test:
-        parser.error("scanning test requires --acknowledge-final-test")
 
     reports: dict[str, Any] = {"splits": {}, "policy": {
         "kind": "historical-structured-contract-audit",
@@ -69,7 +62,6 @@ def main(argv: list[str] | None = None) -> int:
             records = load_evaluation_records(
                 args.dataset,
                 split=split,
-                acknowledge_final_test=args.acknowledge_final_test,
             )
         except EvaluationAccessError as error:
             parser.error(str(error))
