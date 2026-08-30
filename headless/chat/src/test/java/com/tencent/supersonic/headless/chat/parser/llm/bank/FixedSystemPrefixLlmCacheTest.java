@@ -4,6 +4,12 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import com.tencent.supersonic.common.pojo.ChatModelConfig;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +20,40 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class FixedSystemPrefixLlmCacheTest {
+
+    @Test
+    void coalescesConcurrentIdenticalCompletionMisses() throws Exception {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(model.generate(anyString())).thenAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return "{}";
+        });
+        FixedSystemPrefixLlmCache cache =
+                new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32, false);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<String> first = executor.submit(() -> cache.generate(model, "同一问题", true));
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            Future<String> second = executor.submit(() -> cache.generate(model, "同一问题", true));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (((Long) cache.stats().get("coalescedCompletionWaiters")) == 0L
+                    && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            assertEquals(1L, cache.stats().get("coalescedCompletionWaiters"));
+            release.countDown();
+
+            assertEquals("{}", first.get(5, TimeUnit.SECONDS));
+            assertEquals("{}", second.get(5, TimeUnit.SECONDS));
+            verify(model, times(1)).generate(anyString());
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     void planPrefixStartsPromptWithFixedSystem() {

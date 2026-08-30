@@ -44,6 +44,7 @@ public class BankFinancialIntentRecognizer {
     private static final Pattern MONTH_END = Pattern.compile("(20\\d{2})年(\\d{1,2})月(?:末|底)");
     private static final Pattern YEAR_END = Pattern.compile("(20\\d{2})年(?:末|底|年末|年底)");
     private static final Pattern FULL_YEAR = Pattern.compile("(20\\d{2})年(?:全年|年度)");
+    private static final Pattern BARE_YEAR = Pattern.compile("(20\\d{2})年");
     private static final Pattern QUARTER_END = Pattern.compile("(20\\d{2})年?(?:第)?([一二三四1-4])季度末?");
     private static final Pattern HALF_YEAR_END = Pattern.compile("(20\\d{2})年([上下])半年末");
     private static final Pattern THRESHOLD =
@@ -234,7 +235,8 @@ public class BankFinancialIntentRecognizer {
                             .build());
         }
         addCompositeMetrics(text, matches);
-        if (isComprehensivePerformanceRanking(text)) {
+        if (isComprehensivePerformanceRanking(text) || isComprehensivePerformanceOverview(text)
+                || (matches.isEmpty() && isComprehensiveAnnualYearOverYear(text))) {
             for (String code : COMPREHENSIVE_PERFORMANCE_METRICS) {
                 addMetric(matches, code, "comprehensive performance profile");
             }
@@ -288,6 +290,21 @@ public class BankFinancialIntentRecognizer {
     private boolean isComprehensivePerformanceRanking(String text) {
         return text.contains("\u6307\u6807")
                 && containsAny(text, "\u8868\u73b0\u8f83\u597d", "\u8868\u73b0\u8f83\u5dee");
+    }
+
+    private boolean isComprehensivePerformanceOverview(String text) {
+        return containsAny(text, "经营情况", "经营状况", "经营表现", "经营分析");
+    }
+
+    /**
+     * A named institution plus a bare year and year-over-year wording is a complete request for the
+     * fixed operating profile when no metric was named. It must not fall back to metric
+     * clarification merely because the user omitted the eight catalog labels.
+     */
+    private boolean isComprehensiveAnnualYearOverYear(String text) {
+        return text != null && BARE_YEAR.matcher(text).find()
+                && containsAny(text, "同比", "较上年同期", "较去年同期", "较同期")
+                && containsAny(text, "增长", "增幅", "变化", "变动", "下降", "增加", "减少", "多少");
     }
 
     private List<OrganizationSlot> extractOrganizations(String text) {
@@ -391,6 +408,15 @@ public class BankFinancialIntentRecognizer {
                 "上".equals(matcher.group(2)) ? 6 : 12, "上".equals(matcher.group(2)) ? 30 : 31),
                 "HALF_YEAR");
         addImplicitYearEndForExplicitRange(text, hits);
+
+        if (hits.isEmpty() && (isComprehensivePerformanceOverview(text)
+                || isComprehensiveAnnualYearOverYear(text))) {
+            Matcher year = BARE_YEAR.matcher(text);
+            if (year.find()) {
+                LocalDate yearEnd = LocalDate.of(integer(year, 1), 12, 31);
+                hits.add(new DateHit(year.group(), yearEnd, yearEnd, "YEAR"));
+            }
+        }
 
         if (hits.stream().findFirst().isPresent() && text.contains("年初")) {
             int year = hits.get(0).start().getYear();
@@ -622,7 +648,9 @@ public class BankFinancialIntentRecognizer {
     private void addClarifications(BankIntentResult result, String text) {
         boolean broadMetric = BROAD_METRIC.matcher(text).find();
         if ((result.getMetrics().isEmpty() || broadMetric)
-                && !isComprehensivePerformanceRanking(text)) {
+                && !isComprehensivePerformanceRanking(text)
+                && !isComprehensivePerformanceOverview(text)
+                && !isComprehensiveAnnualYearOverYear(text)) {
             List<String> options;
             if (text.contains("贷款")) {
                 options = metricNames("ZB002", "ZB013", "ZB014", "ZB017");
@@ -671,7 +699,7 @@ public class BankFinancialIntentRecognizer {
         double time =
                 result.getTime() == null ? 0.45D : result.getTime().isAmbiguous() ? 0.4D : 0.97D;
         double score = intent * 0.30D + metric * 0.30D + organization * 0.20D + time * 0.20D;
-        if (BROAD_METRIC.matcher(text).find()) {
+        if (BROAD_METRIC.matcher(text).find() && !isComprehensivePerformanceOverview(text)) {
             score = Math.min(score, 0.64D);
         }
         return round(score);

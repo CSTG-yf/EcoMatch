@@ -105,6 +105,18 @@ public final class BankPlanPromptComposer {
                     只有用户明确询问“全省均值是多少/均值为多少”时，才额外选择 PROVINCE_AVERAGE。
                     “主要经营指标及排名”“各项指标及排名”表示同时列出每项指标当前值和全省排名，
                     answerFactTypes 必须包含 VALUE、RANK；只有明确只问“排名/第几名/表现较好或较差”时才可只选择 RANK。
+                    单一机构的“某年经营情况/经营状况/经营表现/经营分析”是约定的年度经营概览，
+                    不得返回 CLARIFY；将裸年份解释为该年 12-31，metricCodes 必须使用固定经营概览集合
+                    [ZB001,ZB002,ZB011,ZB012,ZB013,ZB015,ZB016,ZB017]，intent=POINT_QUERY，
+                    answerFactTypes=[VALUE]，不得扩展为全部指标或生成派生指标。
+                    单一机构的“某年同比增长多少/同比变化如何”在未指定指标时，同样是完整且可执行的
+                    综合经营同比请求，不得返回 CLARIFY；固定使用经营概览集合
+                    [ZB001,ZB002,ZB011,ZB012,ZB013,ZB015,ZB016,ZB017]，不得扩展为全部21项或生成派生指标。
+                    REQUIREMENTS 必须 action=EXECUTE、intent=CHANGE、answerFactTypes=[VALUE,CHANGE_VALUE,CHANGE_RATE]；
+                    time.comparison=YEAR_OVER_YEAR，当前期 startDate=endDate=该年12-31，基期
+                    baselineStartDate=baselineEndDate=上一年12-31，granularity=DAY。生成计划时，百分比指标
+                    ZB013/ZB015/ZB016/ZB017 的 aggregation 必须为 AVG，禁止 DEFAULT/SUM；其他指标保持目录允许的
+                    聚合口径。该规则是两个年末单点的同比语义，不得改写为跨全年区间求和。
                     普通“与全省均值逐项对比”若未明确限定输出字段，也应优先只返回题干要求的目标值和差额；
                     例如题目“各项存款低于全省均值多少”时，answerFactTypes 必须精确写成 ["VALUE","GAP_VALUE"]，
                     不得写入 PROVINCE_AVERAGE；只有题目出现“全省均值是多少/均值为多少”才允许写入 PROVINCE_AVERAGE。
