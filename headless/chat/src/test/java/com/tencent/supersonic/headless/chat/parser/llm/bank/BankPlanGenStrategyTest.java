@@ -716,8 +716,10 @@ class BankPlanGenStrategyTest {
         BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
                 () -> new TestBankPlanGenStrategy(model).generate(request));
 
-        assertEquals(BankNl2SqlError.Stage.PLAN, error.getStage());
-        assertEquals(BankNl2SqlError.Category.MALFORMED_JSON, error.getCategory());
+        assertTrue(error.isPlanStageExhausted());
+        // The envelope carries the LAST failure's code: the differing second failure closed the
+        // base budget without an escalation.
+        assertEquals("MALFORMED_JSON", error.getPlanFailureCode());
         verify(model, times(2)).generate(anyString());
     }
 
@@ -737,7 +739,7 @@ class BankPlanGenStrategyTest {
         BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
                 () -> new TestBankPlanGenStrategy(model).generate(request));
 
-        assertEquals(BankNl2SqlError.Stage.PLAN, error.getStage());
+        assertTrue(error.isPlanStageExhausted());
         verify(model, times(3)).generate(anyString());
     }
 
@@ -914,9 +916,7 @@ class BankPlanGenStrategyTest {
                 () -> new TestBankPlanGenStrategy(model).generate(request));
 
         assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
-        assertTrue(exception.getCause() instanceof BankQueryPlanParseException);
-        assertTrue(exception.getCause().getMessage()
-                .startsWith("rank_change_plan_contract_required:"));
+        assertEquals("rank_change_plan_contract_required", exception.getPlanFailureCode());
         ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
         // The stubbed model repeats the same near-miss plan, so both base-budget rounds fail
         // with the same code and the escalation grants exactly one third roll before terminal.

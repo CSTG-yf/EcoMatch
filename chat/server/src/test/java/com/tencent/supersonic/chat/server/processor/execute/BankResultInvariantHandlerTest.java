@@ -161,6 +161,32 @@ class BankResultInvariantHandlerTest {
     }
 
     @Test
+    void rejectsFreeContractMissingADeclaredColumn() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.FREE)
+                .metrics(List.of(metric("zb007", "ZB007"), metric("zb008", "ZB008"))).build();
+        QueryResult result = result(contract, List.of("zb007"),
+                List.of(row("zb007", new BigDecimal("10"))));
+
+        assertFalse(new BankResultInvariantHandler().apply(result));
+        assertEquals("INVARIANT_VIOLATION_FREE_COLUMNS", toolResult(result).getErrorCode());
+        assertTrue(toolResult(result).getCorrectionHints().get(0).contains("zb008"));
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+    }
+
+    @Test
+    void passesFreeContractWithAllDeclaredColumnsPresent() {
+        BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
+                .type(BankResultProjector.ProjectionType.FREE)
+                .metrics(List.of(metric("zb007", "ZB007"), metric("zb008", "ZB008"))).build();
+        QueryResult result = result(contract, List.of("ZB008", "ZB007"),
+                List.of(row("zb007", new BigDecimal("10"), "zb008", new BigDecimal("20"))));
+
+        assertTrue(new BankResultInvariantHandler().apply(result));
+        assertEquals(BankPlanToolResult.Status.SUCCEEDED, toolResult(result).getStatus());
+    }
+
+    @Test
     void skipsEveryAssertionWhenTheContractFieldsAreMissing() {
         BankResultProjector.Contract contract = BankResultProjector.Contract.builder()
                 .type(BankResultProjector.ProjectionType.AGGREGATION_SUMMARY)
