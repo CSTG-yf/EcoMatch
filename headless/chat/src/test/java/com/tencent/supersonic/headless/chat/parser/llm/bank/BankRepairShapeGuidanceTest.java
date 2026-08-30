@@ -31,6 +31,7 @@ class BankRepairShapeGuidanceTest {
                 "generic_point_ratio_mismatch",
                 "derived_point_ratio_mismatch",
                 "per_capita_profit_mismatch",
+                "PERCENT_METRIC_RANGE_SUM",
                 "PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                 "PROVINCE_AVERAGE_BENCHMARK_VALUES_FORBIDDEN",
                 "COMPOUND_BENCHMARK_METRIC_UNKNOWN",
@@ -77,6 +78,13 @@ class BankRepairShapeGuidanceTest {
         // The legacy per-capita code shares the derived-ratio family skeleton.
         assertEquals(derived,
                 BankRepairShapeGuidance.forCode("per_capita_profit_mismatch").orElseThrow());
+
+        String percentSeries = BankRepairShapeGuidance.forCode("PERCENT_METRIC_RANGE_SUM")
+                .orElseThrow();
+        assertTrue(percentSeries.contains("intent=TREND"));
+        assertTrue(percentSeries.contains("\"aggregation\":\"AVG\""));
+        assertTrue(percentSeries.contains("granularity=DAY"));
+        assertTrue(percentSeries.contains("bank_data_date"));
 
         String benchmark = BankRepairShapeGuidance
                 .forCode("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED").orElseThrow();

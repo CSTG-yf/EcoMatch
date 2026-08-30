@@ -23,11 +23,9 @@ import java.util.regex.Pattern;
  *
  * <p>
  * Lookup is {@link #forCode(String)} with the code recovered by
- * {@code BankPlanGenStrategy#repairErrorCode} (the {@code snake_case:} message prefix, falling
- * back to the parse reason). That recovery regex only accepts a lowercase first letter, so the
- * plan validator's UPPER_CASE codes ({@code PROVINCE_AVERAGE_BENCHMARK_*},
- * {@code COMPOUND_BENCHMARK_*}, ...) degrade to {@code VALIDATION_FAILED} there;
- * {@link #forRawCodePrefix(String)} re-extracts the raw leading token of the message for those.
+ * {@code BankPlanGenStrategy#repairErrorCode} (the case-preserved {@code CODE:} message prefix,
+ * falling back to the parse reason). {@link #forRawCodePrefix(String)} remains as a compatibility
+ * fallback for callers that supply the original validation message directly.
  * Messages produced by the requirements-contract parser carry no code prefix at all;
  * {@link #forMessage(String)} matches those by their stable message signature instead.
  */
@@ -135,6 +133,26 @@ public final class BankRepairShapeGuidance {
             numerator/denominator 完全对应；加合形 {"metricCode":"DERIVED_SUM_<M1>_AND_<M2>"} 仅\
             用于两个同单位(%)指标的字典序规范形；不得自造目录外的派生码。""";
 
+    /**
+     * Percent-unit metric over a date range. Gate:
+     * {@code BankQueryPlanValidator#validatePercentMetricRangeAggregation}. The common point-series
+     * case is a TREND plan grouped by the semantic date dimension at DAY grain; AVG then preserves
+     * each date's point value and the result contract selects the quarter-end rows. Other query
+     * families may use AVG only when the question asks for a period average, or DEFAULT on a true
+     * single-day window.
+     */
+    private static final String PERCENT_METRIC_RANGE = """
+            正确整体形状骨架（百分率时间序列）：题目要求逐季/各季度末序列时，使用 action=EXECUTE、\
+            intent=TREND；metrics 恰好一个百分率目录指标 \
+            [{"bizName":"ZB###","aggregation":"AVG"}]（禁止 DEFAULT/SUM 跨日期相加）；\
+            dimensions=["bank_data_date"]；organizations 只保留题面机构；time.startDate/endDate \
+            保留题面完整起止范围、granularity=DAY、comparison=NONE、baselineStartDate/\
+            baselineEndDate=null；filters=[]；calculation.type=DIRECT；orderBy=[{"field":\
+            "bank_data_date","direction":"ASC"}]；limit=null；output.columns=["bank_data_date",\
+            "ZB###"]、orderSensitive=true。DAY 分组下 AVG 保留每天的点值，结果投影再选季度末日期。\
+            若原题确实问期间均值，则保留原查询族并使用 AVG；若原题只问单日，则必须 \
+            startDate=endDate。不得缩短题面时间范围来规避校验。""";
+
     private static final Map<String, String> SKELETONS = buildSkeletons();
 
     private BankRepairShapeGuidance() {
@@ -199,6 +217,7 @@ public final class BankRepairShapeGuidance {
         skeletons.put("derived_point_ratio_mismatch", DERIVED_POINT_RATIO);
         // Legacy per-capita code emitted by the same derived-ratio family gate.
         skeletons.put("per_capita_profit_mismatch", DERIVED_POINT_RATIO);
+        skeletons.put("PERCENT_METRIC_RANGE_SUM", PERCENT_METRIC_RANGE);
         skeletons.put("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED",
                 PROVINCE_AVERAGE_BENCHMARK_CONTRACT);
         skeletons.put("PROVINCE_AVERAGE_BENCHMARK_VALUES_FORBIDDEN",
