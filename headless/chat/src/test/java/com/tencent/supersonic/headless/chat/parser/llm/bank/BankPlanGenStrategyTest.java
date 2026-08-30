@@ -10,6 +10,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.SocketTimeoutException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -603,6 +604,449 @@ class BankPlanGenStrategyTest {
     }
 
     @Test
+    void repairRoundsCarryTheRegisteredShapeSkeletonForTheFailingCode() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                        loanToDepositPivotPlanJson()),
+                planningResponse(loanToDepositRatioRequirementsJson(),
+                        loanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("derived_point_ratio_mismatch"));
+        assertTrue(repair.contains("正确整体形状骨架"));
+        assertTrue(repair.contains("intent=RATIO"));
+        // The base-budget repair round carries the skeleton but no escalation demand.
+        assertFalse(repair.contains("升级提示"));
+    }
+
+    @Test
+    void upperCaseValidatorCodeFailureGetsItsRegisteredSkeletonInRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // A malformed plan benchmark filter trips the plan validator's UPPER_CASE code; that
+        // code degrades to VALIDATION_FAILED in repairErrorCode, so only the raw message prefix
+        // fallback can resolve its skeleton.
+        String failingPlan = validPlanJson().replace(
+                "\"field\":\"benchmark\",\"operator\":\"COMPARE\"",
+                "\"field\":\"benchmark\",\"operator\":\"GT\"");
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(requirementsJson(), failingPlan),
+                planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
+
+        assertEquals(2, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("PROVINCE_AVERAGE_BENCHMARK_CONTRACT_REQUIRED"));
+        assertTrue(repair.contains("正确整体形状骨架"));
+        assertTrue(repair.contains("PROVINCE_AVERAGE 只允许三类基准形态"));
+        assertFalse(repair.contains("升级提示"));
+    }
+
+    @Test
+    void repeatedSameCodeFailureEscalatesToAThirdAttemptDemandingAShapeChange() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String failing = planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                loanToDepositPivotPlanJson());
+        when(model.generate(anyString())).thenReturn(failing, failing,
+                planningResponse(loanToDepositRatioRequirementsJson(),
+                        loanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(3, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        String escalated = prompts.getAllValues().get(2);
+        assertTrue(escalated.contains("正确整体形状骨架"));
+        assertTrue(escalated.contains("升级提示"));
+        assertTrue(escalated.contains("必须改变形状，不得只微调槽位"));
+    }
+
+    @Test
+    void repeatedMalformedJsonEscalatesToAFreshThirdSample() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn("not a json object", "{\"requirements\":",
+                planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request());
+
+        assertEquals(3, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(3)).generate(prompts.capture());
+        // The malformed loop keeps the plain message; no shape skeleton or escalation demand.
+        assertTrue(prompts.getAllValues().get(2)
+                .contains("model response is not complete strict JSON"));
+        assertFalse(prompts.getAllValues().get(2).contains("升级提示"));
+    }
+
+    @Test
+    void twoDifferentFailureCodesStayTerminalAfterOneStructuredRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                        loanToDepositPivotPlanJson()),
+                "not a json object");
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertTrue(error.isPlanStageExhausted());
+        // The envelope carries the LAST failure's code: the differing second failure closed the
+        // base budget without an escalation.
+        assertEquals("MALFORMED_JSON", error.getPlanFailureCode());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
+    void escalationGrantsExactlyOneExtraAttemptBeforeTheTerminalState() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        String failing = planningResponse(incompleteLoanToDepositRatioRequirementsJson(),
+                loanToDepositPivotPlanJson());
+        when(model.generate(anyString())).thenReturn(failing, failing, failing);
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertTrue(error.isPlanStageExhausted());
+        verify(model, times(3)).generate(anyString());
+    }
+
+    @Test
+    void transientTransportFaultOnTheFirstRollIsReRolledOnceWithoutConsumingTheRepairBudget() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("chat model call failed",
+                        new SocketTimeoutException("Read timed out")))
+                .thenReturn(planningResponse(requirementsJson(), validPlanJson()));
+
+        LLMReq request = request();
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertNotNull(response.getBankQueryPlan());
+        // The re-roll belongs to the same attempt: no repair round is consumed and the
+        // accepted response still records a single model roll.
+        assertEquals(1, response.getBankCandidateDiagnostics().get("bank.nl2sql.modelAttempts"));
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
+    void hardProviderFaultStaysTerminalWithoutAnyReRoll() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("Error 401: Invalid API key provided"));
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request()));
+
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, error.getCategory());
+        verify(model, times(1)).generate(anyString());
+    }
+
+    @Test
+    void twoConsecutiveTransientTransportFaultsStayTerminal() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString()))
+                .thenThrow(new RuntimeException("Connection refused: api.example.com"))
+                .thenThrow(new RuntimeException("chat model call failed",
+                        new SocketTimeoutException("Read timed out")));
+
+        BankNl2SqlError error = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request()));
+
+        // Second transient failure is rethrown untouched into the existing terminal state.
+        assertEquals(BankNl2SqlError.Category.MODEL_FAILURE, error.getCategory());
+        verify(model, times(2)).generate(anyString());
+    }
+
+    @Test
+    void yearStartBaselineDriftIsReturnedToTheModelForRequirementsRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(yearStartRequirementsJson("PERIOD_OVER_PERIOD", "2025-01-01"),
+                        yearStartPlanJson("PERIOD_OVER_PERIOD", "2025-01-01")),
+                planningResponse(yearStartRequirementsJson("START_OF_YEAR", "2024-12-31"),
+                        yearStartPlanJson("START_OF_YEAR", "2024-12-31")));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行的各项存款余额从年初到2025-04-30变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankQueryPlan.TimeComparison.START_OF_YEAR,
+                response.getBankRequestContract().getTime().getComparison());
+        assertEquals(LocalDate.of(2024, 12, 31),
+                response.getBankRequestContract().getTime().getBaselineStartDate());
+        assertEquals(LocalDate.of(2024, 12, 31),
+                response.getBankRequestContract().getTime().getBaselineEndDate());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("start_of_year_baseline_mismatch"));
+        // The directive names the conflicting slots and the legal baseline explicitly.
+        assertTrue(prompts.getAllValues().get(1).contains("2024-12-31"));
+    }
+
+    @Test
+    void startOfYearQuestionWithPriorYearEndBaselinePassesInASinglePass() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(yearStartRequirementsJson("START_OF_YEAR", "2024-12-31"),
+                        yearStartPlanJson("START_OF_YEAR", "2024-12-31")));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行的各项存款余额较年初变化了多少？截至2025-04-30。");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankQueryPlan.TimeComparison.START_OF_YEAR,
+                response.getBankRequestContract().getTime().getComparison());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+    }
+
+    @Test
+    void yearStartPlanDivergenceIsReturnedToTheModelForPlanRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // Runtime shape observed in dev r3 (VAL-M-02/M-03): requirements and plan BOTH carry
+        // PERIOD_OVER_PERIOD with a current-year 01-01 baseline — mutually consistent, so the
+        // plan-vs-requirements cross-checks stay quiet; the year-start family gate must catch it.
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(yearStartRequirementsJson("PERIOD_OVER_PERIOD", "2025-01-01"),
+                        yearStartPlanJson("PERIOD_OVER_PERIOD", "2025-01-01")),
+                planningResponse(yearStartRequirementsJson("START_OF_YEAR", "2024-12-31"),
+                        yearStartPlanJson("START_OF_YEAR", "2024-12-31")));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行的各项存款余额从年初到2025-04-30变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankQueryPlan.TimeComparison.START_OF_YEAR,
+                response.getBankRequestContract().getTime().getComparison());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("start_of_year"));
+        assertTrue(prompts.getAllValues().get(1).contains("2024-12-31"));
+    }
+
+    @Test
+    void namedRatioPlanDegradedToPointQueryPivotIsReturnedForPlanRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        // Runtime shape (VAL-M-13): requirements and plan both degrade to a two-metric pivot —
+        // mutually consistent, so plan-vs-requirements cross-checks stay quiet; the family gate
+        // must reject the degradation and drive the repair.
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(loanToDepositPivotRequirementsJson(),
+                        loanToDepositPivotPlanJson()),
+                planningResponse(loanToDepositRatioRequirementsJson(),
+                        loanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2026年3月末的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(List.of("ZB002", "ZB001"), response.getBankRequestContract().getMetricCodes());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("derived_point_ratio"));
+    }
+
+    @Test
+    void rankChangeAcrossPeriodsNearMissPlanIsRoutedIntoTheRankChangeFamilyWithRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(rankChangeRequirementsJson(), rankChangePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText(
+                "从2024年末到2026年4月末，某农商行存款、贷款、不良率、净利润的排名分别变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB017", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        // The near-miss CHANGE plan is no longer a terminal UNSUPPORTED_QUERY_SHAPE: the shape
+        // owns the RANK_CHANGE family now, so the gate returns a repairable failure whose message
+        // tells the model to declare calculation.type=RANK_CHANGE on the plan only.
+        BankNl2SqlError exception = assertThrows(BankNl2SqlError.class,
+                () -> new TestBankPlanGenStrategy(model).generate(request));
+
+        assertEquals(BankNl2SqlError.Category.VALIDATION_FAILED, exception.getCategory());
+        assertEquals("rank_change_plan_contract_required", exception.getPlanFailureCode());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        // The stubbed model repeats the same near-miss plan, so both base-budget rounds fail
+        // with the same code and the escalation grants exactly one third roll before terminal.
+        verify(model, times(3)).generate(prompts.capture());
+        assertTrue(prompts.getAllValues().get(1).contains("rank_change_plan_contract_required"));
+        assertTrue(prompts.getAllValues().get(2).contains("rank_change_plan_contract_required"));
+        // The rejected attempt is pinned so the parser's COMPILE tool-repair round can rebuild
+        // its previous candidate instead of degenerating without a plan.
+        assertNotNull(request.getBankRequestContract());
+        assertNotNull(request.getPreviousBankQueryPlanJson());
+    }
+
+    @Test
+    void plainValueChangeAcrossTheSameBaselineIsNotRejectedByTheRankChangeGate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(rankChangeRequirementsJson(), rankChangePlanJson()));
+
+        LLMReq request = request();
+        // Baseline + change wording but no rank word: the near-miss shape that must keep
+        // compiling through the value CHANGE family.
+        request.setQueryText("某农商行从2024年末到2026年4月末，存款和贷款的余额分别变化了多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002", "ZB017", "ZB011"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.CHANGE, response.getBankQueryPlan().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+        assertFalse(prompts.getAllValues().get(0).contains("rank_change_across_periods"));
+    }
+
+    @Test
+    void singlePeriodTopRankingIsNotRejectedByTheRankChangeGate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(planningResponse(
+                singlePeriodRankingRequirementsJson(), singlePeriodRankingPlanJson()));
+
+        LLMReq request = request();
+        // Rank wording + a year-end anchor but no change wording: single-period rankings stay in
+        // the RANKING family.
+        request.setQueryText("2024年末，各家农商行存款余额排名前三的有哪些？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB001"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RANKING, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+        assertFalse(prompts.getAllValues().get(0).contains("rank_change_across_periods"));
+    }
+
+    @Test
+    void explicitYearEndBaselineRangeIsNotInterceptedByTheYearStartGate() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(julyExplicitYearEndRequirementsJson(), julyExplicitYearEndPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省B市农商行的对公存款余额从2024年末到2025-07-31，增幅是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN).allowedMetrics(Set.of("ZB003"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(LocalDate.of(2024, 12, 31),
+                response.getBankRequestContract().getTime().getBaselineStartDate());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        // The explicit-baseline family is legal: one model call, no repair round.
+        verify(model, times(1)).generate(prompts.capture());
+    }
+
+    @Test
+    void degenerateNamedRatioPivotIsReturnedToTheModelForRequirementsRepair() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(degenerateNamedRatioRequirementsJson(),
+                        degenerateNamedRatioPlanJson()),
+                planningResponse(rangeLoanToDepositRatioRequirementsJson("RATIO"),
+                        rangeLoanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2025年1月1日至2025年3月31日的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RATIO, response.getBankRequestContract().getIntent());
+        assertEquals(List.of("ZB002", "ZB001"),
+                response.getBankRequestContract().getMetricCodes());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        // The two-metric pivot must be rejected as a ratio-family intent mismatch, even though
+        // both operands are present and the question is not a standalone point ratio context.
+        assertTrue(prompts.getAllValues().get(1).contains("derived_point_ratio_mismatch"));
+    }
+
+    @Test
+    void nonStandaloneNamedRatioWithTheRightFamilyPassesInASinglePass() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(rangeLoanToDepositRatioRequirementsJson("RATIO"),
+                        rangeLoanToDepositRatioPlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省C市农商行2025年1月1日至2025年3月31日的存贷比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB001", "ZB002"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.RATIO, response.getBankRequestContract().getIntent());
+        assertEquals(LocalDate.of(2025, 1, 1),
+                response.getBankRequestContract().getTime().getStartDate());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(1)).generate(prompts.capture());
+    }
+
+    @Test
     void metricPairGapGeneralizesBeyondTheRiskRatePair() {
         ChatLanguageModel model = mock(ChatLanguageModel.class);
         when(model.generate(anyString())).thenReturn(planningResponse(coveragePairRequirementsJson("COMPARISON"), coveragePairPlanJson()),
@@ -681,6 +1125,133 @@ class BankPlanGenStrategyTest {
         verify(model, times(2)).generate(prompts.capture());
         assertTrue(prompts.getAllValues().get(1).contains("generic_point_ratio_mismatch"));
         assertTrue(prompts.getAllValues().get(1).contains("ZB008"));
+    }
+
+    /**
+     * Synthetic additive composite question (两个同单位百分率指标的合计占比): the model that
+     * answers with the canonical additive family contract is accepted in one attempt — the
+     * generic point-ratio gate yields instead of forcing an impossible RATIO fixed point.
+     */
+    @Test
+    void additiveCompositeQuestionAcceptsTheAdditiveFamilyContractInOneAttempt() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省F市农商行在2026-05-31的不良贷款率与逾期贷款率的合计占比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankRequestContract().getDerivedMetrics().get(0).getMetricCode());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankQueryPlan().getDerivedMetrics().get(0).getMetricCode());
+        verify(model, times(1)).generate(anyString());
+    }
+
+    /**
+     * The near-miss RATIO contract a model would first emit for the additive question is a
+     * repairable additive_composite_mismatch, never a silently accepted ratio.
+     */
+    @Test
+    void additiveCompositeQuestionRepairsARatioPlanIntoTheAdditiveFamily() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRatioNearMissRequirementsJson(),
+                        additiveRatioNearMissPlanJson()),
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("江苏省F市农商行在2026-05-31的不良贷款率与逾期贷款率的合计占比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("additive_composite_mismatch"), repair);
+        assertTrue(repair.contains("DERIVED_SUM_ZB013_AND_ZB017"), repair);
+    }
+
+    /**
+     * Synthetic shorthand additive question (简称词干「不良/逾期」不在别名表，带着「占贷款比」
+     * 的贷款噪音): the alias evidence alone cannot bind the operands, so the recognizer's
+     * additive-phrase resolution supplies the pair, the slot fires and the canonical additive
+     * contract is accepted in one attempt — the shape that used to exhaust the plan stage. The
+     * accepted contract+plan pair then compiles to the plain point-day sum.
+     */
+    @Test
+    void additiveShorthandQuestionWithShareNoiseResolvesOperandsAndAcceptsTheAdditiveFamily() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("2026年5月末江苏省F市农商行的不良+逾期合计占贷款比是多少？");
+        SemanticIntentHints admission = SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB002", "ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build();
+        request.setSemanticIntentHints(admission);
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankRequestContract().getDerivedMetrics().get(0).getMetricCode());
+        assertEquals("DERIVED_SUM_ZB013_AND_ZB017",
+                response.getBankQueryPlan().getDerivedMetrics().get(0).getMetricCode());
+        verify(model, times(1)).generate(anyString());
+
+        BankQueryPlanCompiler compiler = new BankQueryPlanCompiler();
+        BankQueryPlanCompiler.CompiledQuery compiled = compiler.compile(response.getBankQueryPlan(),
+                response.getBankRequestContract().toPlanHints(admission), additiveSchema());
+        assertTrue(compiled.getS2sql()
+                .startsWith("SELECT bank_organization, ZB013 + ZB017 AS metric_value"),
+                compiled.getS2sql());
+        assertTrue(compiled.getS2sql().contains("bank_organization = 'ORG006'"),
+                compiled.getS2sql());
+    }
+
+    /**
+     * The same shorthand question never dead-ends: a wrong-family first answer comes back as the
+     * repairable additive_composite_mismatch contract (with the resolved canonical derived code)
+     * instead of a plan-stage exhaustion loop.
+     */
+    @Test
+    void additiveShorthandQuestionRepairsAWrongFamilyPlanInsteadOfExhausting() {
+        ChatLanguageModel model = mock(ChatLanguageModel.class);
+        when(model.generate(anyString())).thenReturn(
+                planningResponse(additiveRatioNearMissRequirementsJson(),
+                        additiveRatioNearMissPlanJson()),
+                planningResponse(additiveRequirementsJson(), additivePlanJson()));
+
+        LLMReq request = request();
+        request.setQueryText("2026年5月末江苏省F市农商行的不良+逾期合计占贷款比是多少？");
+        request.setSemanticIntentHints(SemanticIntentHints.builder()
+                .expectedIntent(BankIntentType.UNKNOWN)
+                .allowedMetrics(Set.of("ZB002", "ZB013", "ZB017"))
+                .allowedDimensions(Set.of("bank_organization", "bank_data_date")).build());
+
+        LLMResp response = new TestBankPlanGenStrategy(model).generate(request);
+
+        assertEquals(BankIntentType.POINT_QUERY, response.getBankRequestContract().getIntent());
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(model, times(2)).generate(prompts.capture());
+        String repair = prompts.getAllValues().get(1);
+        assertTrue(repair.contains("additive_composite_mismatch"), repair);
+        assertTrue(repair.contains("DERIVED_SUM_ZB013_AND_ZB017"), repair);
     }
 
     @Test
@@ -1449,6 +2020,30 @@ class BankPlanGenStrategyTest {
                 """;
     }
 
+    /** Degraded plan for a named-ratio question: a two-metric pivot with no ratio calculation. */
+    private String loanToDepositPivotPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG003","bizName":null}],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB002","ZB001"],"orderSensitive":false}}
+                """;
+    }
+
+    /** Degraded requirements twin: two metrics requested separately, no derived ratio. */
+    private String loanToDepositPivotRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metricCodes":["ZB002","ZB001"],
+                "derivedMetrics":[],
+                "organizationCodes":["ORG003"],
+                "time":{"startDate":"2026-03-31","endDate":"2026-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
+                """;
+    }
+
     private String coveragePairRequirementsJson(String intent) {
         return """
                 {"version":"1.0","action":"EXECUTE","intent":"%s",
@@ -1508,6 +2103,69 @@ class BankPlanGenStrategyTest {
                 "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
                 """
                 .formatted(intent);
+    }
+
+    /** Canonical additive composite contract (两个同单位百分率指标的合计点查, synthetic). */
+    private String additiveRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metricCodes":["ZB013","ZB017"],
+                "derivedMetrics":[{"metricCode":"DERIVED_SUM_ZB013_AND_ZB017","numerator":"ZB013","denominator":"ZB017","name":"不良贷款率与逾期贷款率合计"}],
+                "organizationCodes":["ORG006"],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
+                """;
+    }
+
+    private String additivePlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB013","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[{"metricCode":"DERIVED_SUM_ZB013_AND_ZB017","numerator":"ZB013","denominator":"ZB017","name":"不良贷款率与逾期贷款率合计"}],
+                "dimensions":["bank_organization"],"organizations":[{"code":"ORG006","bizName":null}],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB013","ZB017"],"orderSensitive":false}}
+                """;
+    }
+
+    /** Near-miss twin: the RATIO contract that cannot be numerically equivalent to the sum. */
+    private String additiveRatioNearMissRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metricCodes":["ZB013","ZB017"],"derivedMetrics":[],"organizationCodes":["ORG006"],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
+                """;
+    }
+
+    private String additiveRatioNearMissPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metrics":[{"bizName":"ZB013","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG006","bizName":null}],
+                "time":{"startDate":"2026-05-31","endDate":"2026-05-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB017"},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB013","ZB017"],"orderSensitive":true}}
+                """;
+    }
+
+    /** Minimal live schema for compiling the accepted additive contract end-to-end. */
+    private LLMReq.LLMSchema additiveSchema() {
+        LLMReq.LLMSchema schema = new LLMReq.LLMSchema();
+        schema.setDataSetId(12L);
+        schema.setDataSetName("银行指标数据集");
+        schema.setMetrics(List.of(
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("不良贷款率").bizName("ZB013").build(),
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("逾期贷款率").bizName("ZB017").build()));
+        schema.setDimensions(List.of(
+                com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                        .name("机构").bizName("bank_organization").build()));
+        schema.setPartitionTime(com.tencent.supersonic.headless.api.pojo.SchemaElement.builder()
+                .name("数据日期").bizName("bank_data_date").build());
+        return schema;
     }
 
     private String genericPointRatioPlanJson() {
@@ -1707,6 +2365,138 @@ class BankPlanGenStrategyTest {
                                 + "\"baselineEndDate\":\"2024-12-31\"",
                         "\"baselineStartDate\":\"2025-12-31\","
                                 + "\"baselineEndDate\":\"2025-12-31\"");
+    }
+
+    private String yearStartRequirementsJson(String comparison, String baselineDate) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB001"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2025-04-30","endDate":"2025-04-30","granularity":"DAY","comparison":"%s","baselineStartDate":"%s","baselineEndDate":"%s"},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["CHANGE_RATE"],"clarification":null}
+                """
+                .formatted(comparison, baselineDate, baselineDate);
+    }
+
+    private String yearStartPlanJson(String comparison, String baselineDate) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2025-04-30","endDate":"2025-04-30","granularity":"DAY","comparison":"%s","baselineStartDate":"%s","baselineEndDate":"%s"},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB001"],"orderSensitive":false,"aggregationMode":null}}
+                """
+                .formatted(comparison, baselineDate, baselineDate);
+    }
+
+    private String julyExplicitYearEndRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB003"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2025-07-31","endDate":"2025-07-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["CHANGE_RATE"],"clarification":null}
+                """;
+    }
+
+    private String julyExplicitYearEndPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB003","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2025-07-31","endDate":"2025-07-31","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB003"],"orderSensitive":false,"aggregationMode":null}}
+                """;
+    }
+
+    /**
+     * What the model would emit for a rank-change-across-periods question: a fully valid
+     * multi-metric CHANGE contract with the explicit year-end baseline — the near-miss family the
+     * rank-change gate must reject before it compiles into a wrong result fact.
+     */
+    private String rankChangeRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metricCodes":["ZB001","ZB002","ZB017","ZB011"],"derivedMetrics":[],"organizationCodes":["ORG002"],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE","CHANGE_RATE"],"clarification":null}
+                """;
+    }
+
+    private String rankChangePlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"CHANGE",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT","alias":null},{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB017","aggregation":"DEFAULT","alias":null},{"bizName":"ZB011","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG002","bizName":null}],
+                "time":{"startDate":"2026-04-30","endDate":"2026-04-30","granularity":"DAY","comparison":"PERIOD_OVER_PERIOD","baselineStartDate":"2024-12-31","baselineEndDate":"2024-12-31"},
+                "filters":[],"calculation":{"type":"CHANGE","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB001","ZB002","ZB017","ZB011"],"orderSensitive":false,"aggregationMode":null}}
+                """;
+    }
+
+    private String singlePeriodRankingRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metricCodes":["ZB001"],"derivedMetrics":[],"organizationCodes":[],
+                "time":{"startDate":"2024-12-31","endDate":"2024-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"3","values":[]}],
+                "requiredLimit":3,"answerFactTypes":["VALUE","RANK"],"clarification":null}
+                """;
+    }
+
+    private String singlePeriodRankingPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RANKING",
+                "metrics":[{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[],
+                "time":{"startDate":"2024-12-31","endDate":"2024-12-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[{"field":"rank","operator":"LTE","value":"3","values":[]}],
+                "calculation":{"type":"DIRECT","baseline":null},"orderBy":[{"field":"ZB001","direction":"DESC"}],"limit":3,
+                "output":{"columns":["bank_organization","ZB001"],"orderSensitive":true}}
+                """;
+    }
+
+    private String degenerateNamedRatioRequirementsJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metricCodes":["ZB002","ZB001"],"derivedMetrics":[],"organizationCodes":["ORG003"],
+                "time":{"startDate":"2025-01-01","endDate":"2025-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["VALUE"],"clarification":null}
+                """;
+    }
+
+    private String degenerateNamedRatioPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"POINT_QUERY",
+                "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG003","bizName":null}],
+                "time":{"startDate":"2025-01-01","endDate":"2025-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"DIRECT","baseline":null},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB002","ZB001"],"orderSensitive":false}}
+                """;
+    }
+
+    private String rangeLoanToDepositRatioRequirementsJson(String intent) {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"%s",
+                "metricCodes":["ZB002","ZB001"],
+                "derivedMetrics":[{"metricCode":"DERIVED_ZB002_DIV_ZB001","numerator":"ZB002","denominator":"ZB001","name":"存贷比"}],
+                "organizationCodes":["ORG003"],
+                "time":{"startDate":"2025-01-01","endDate":"2025-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"requiredLimit":null,"answerFactTypes":["RATIO_VALUE"],"clarification":null}
+                """
+                .formatted(intent);
+    }
+
+    private String rangeLoanToDepositRatioPlanJson() {
+        return """
+                {"version":"1.0","action":"EXECUTE","intent":"RATIO",
+                "metrics":[{"bizName":"ZB002","aggregation":"DEFAULT","alias":null},{"bizName":"ZB001","aggregation":"DEFAULT","alias":null}],
+                "derivedMetrics":[],"dimensions":["bank_organization"],"organizations":[{"code":"ORG003","bizName":null}],
+                "time":{"startDate":"2025-01-01","endDate":"2025-03-31","granularity":"DAY","comparison":"NONE","baselineStartDate":null,"baselineEndDate":null},
+                "filters":[],"calculation":{"type":"RATIO","baseline":"ZB001"},"orderBy":[],"limit":null,
+                "output":{"columns":["bank_organization","ZB002","ZB001"],"orderSensitive":true}}
+                """;
     }
 
     private String validPlanJson() {

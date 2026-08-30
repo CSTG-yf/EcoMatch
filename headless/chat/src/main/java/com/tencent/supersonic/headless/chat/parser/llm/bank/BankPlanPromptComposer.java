@@ -42,6 +42,24 @@ public final class BankPlanPromptComposer {
     public static final String COMMON_FACT_PREFIX = (ROLE_PREFIX + "\n\n{{SHARED_CATALOG}}")
             .replace("{{SHARED_CATALOG}}", BankSemanticRegistry.sharedCatalog()).strip();
 
+    /**
+     * Date and baseline window rules shared verbatim by the REQUIREMENTS and PLAN sections. A
+     * single constant keeps the two hand-copies from drifting apart; each section appends only its
+     * own intent/calculation binding tail.
+     */
+    private static final String DATE_BASELINE_RULES = """
+            重要豁免先记住：time.comparison=MOM_AND_YOY 时 baselineStartDate 和
+            baselineEndDate 都必须为 null，环比基期与同比基期全部由编译器派生，禁止自行填写。
+            除该豁免外：
+            - 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
+            - 对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
+              基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
+            - 绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期；点对点比较时，
+              startDate=endDate=当前点，baselineStartDate=baselineEndDate=较早点。
+            - “较年初”必须使用 comparison=START_OF_YEAR：当前期写题目给出的截至日期，
+              baselineStartDate=baselineEndDate=当前期前一年的 12-31；当年 01-01 不是“较年初”基期。
+            """;
+
     /** Nested requirements section: contract format, slot judgement, CLARIFY and repair rules. */
     private static final String REQUIREMENTS_STAGE_TEMPLATE =
             """
@@ -164,6 +182,12 @@ public final class BankPlanPromptComposer {
                       例如当前期 2025-10-31 的上季度末是 2025-09-30，不是简单减三个月得到 2025-07-31。
                       该语义使用 intent=CHANGE、comparison=PERIOD_OVER_PERIOD，并将 baselineStartDate 和
                       baselineEndDate 都设为该自然季度末。
+                    - “2026年3月末比上年同期增长”这类明确写出同期日期的同比使用 comparison=YEAR_OVER_YEAR：
+                      当前 startDate=endDate=题目给出的截至日，baselineStartDate=baselineEndDate=向前一个
+                      自然年的同月同日（2026-03-31→2025-03-31）；intent 必须为 CHANGE。
+                    - “较年初/年初以来增长多少”使用 comparison=START_OF_YEAR：当前 startDate=endDate=
+                      题目给出的截至日，baselineStartDate=baselineEndDate=上一个自然年的 12-31；
+                      当年 01-01 不是基期；intent 必须为 CHANGE。
                     - “收入结构”是权威目录定义的复合业务语义：必须同时选择中间业务收入（ZB007）和
                       净利息收入（ZB008）。它不是无代码的描述性类别；用户明确请求收入结构时，不得遗漏
                       任一项、不得因此 action=CLARIFY，也不得扩展为营业收入、营业支出或目录中的其他指标。
@@ -213,8 +237,14 @@ public final class BankPlanPromptComposer {
                       先指定机构；若题干已经指定某一机构，则不是这个全省机构选择合同。
                     - “哪家农商行/机构的某指标最高、最低、最多、最少、排第一或排最后”同样是全体机构选择：
                       没有题干点名的机构时 organizationCodes 必须为 []，intent=RANKING，保留一个目录指标和
-                      明确日期；第一/最高/最多/最大使用 filters 中唯一的 rank/LTE/1，最低/最少/最小/最后
-                      使用唯一的 rank 或 rank_from_bottom/LTE/1（按题干的正向或倒数语义），requiredLimit=1。
+                      明确日期，requiredLimit=1。名次切片按两步确定性映射填写，不凭语感：第一步查所选指标
+                      在权威目录 direction 列的方向；第二步按极值词面取对应端——rank 永远表示目录排序的
+                      最优端，rank_from_bottom 永远表示对侧端。direction=LOWER_BETTER（低优指标）时，
+                      “最低/最少/最小”写唯一的 rank/LTE/1，“最高/最多/最大/最好”写唯一的
+                      rank_from_bottom/LTE/1；direction=NEUTRAL 或 HIGHER_BETTER 时相反，
+                      “最高/最多/最大/最好”写唯一的 rank/LTE/1，“最低/最少/最小”写唯一的
+                      rank_from_bottom/LTE/1。“排第一/排最后”是位置语义，与指标方向无关，分别固定写
+                      rank/LTE/1 与 rank_from_bottom/LTE/1。
                       不得把任意一家机构写入 organizationCodes；若题干点名机构，才使用局部排名合同。
                     下面第二份是 action=CLARIFY 的完整格式：
                     {
@@ -240,6 +270,10 @@ public final class BankPlanPromptComposer {
                        如果用户文本与权威目录中的机构名称或别名（包括目录中的字母城市占位名称）完整匹配，
                        必须直接映射到该机构代码；不得因为名称看起来像匿名样例、不是现实行政区划或可以展开成别的城市，
                        就把一个唯一目录命中误判为机构歧义并 action=CLARIFY。只有没有目录精确命中或确实命中多个机构时才澄清。
+                       organizationCodes 必须绑定题面文字中逐字出现的目录机构（名称或别名）：
+                       题面中的城市字母与某个唯一目录机构名称一致时，必须绑定该机构码，
+                       不得绑定其他任何机构码，即使那些机构码同样是目录合法机构；只有全省/各家等全体
+                       机构范围才使用 []。
                        评测题中的日期、季度和年份是基准事实库的查询条件；只要格式合法且题目给出明确范围，
                        不得依据系统当前日期、现实世界数据是否公开或“未来数据”的臆测拒绝查询。若确实没有结果，
                        交由校验/执行工具返回事实错误后再修正。
@@ -255,13 +289,7 @@ public final class BankPlanPromptComposer {
                        该清单中的各项，绝不表示查询 21 个目录指标。最终检查必须满足：metricCodes
                        的每个代码都可回指“=”右侧的一个短语或右侧派生指标的分子/分母；不能回指的额外代码
                        属于合同错误，必须移除后再输出。
-                    3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
-                       对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
-                       基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
-                       绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期；点对点比较时，
-                       startDate=endDate=当前点，baselineStartDate=baselineEndDate=较早点。
-                       “较年初”必须使用 comparison=START_OF_YEAR：当前期写题目给出的截至日期，
-                       baselineStartDate=baselineEndDate=当前期前一年的 12-31；当年 01-01 不是“较年初”基期。
+                    3. {{DATE_BASELINE_RULES}}
                        comparison 非 NONE 时 REQUIREMENTS 的 intent 必须为 CHANGE；不得因题干含有“评估”“分析”
                        或“结构”等词改成 AGGREGATION、COMPARISON 或 POINT_QUERY。
                     4. “全省均值”只能使用目录允许的 benchmark/COMPARE/PROVINCE_AVERAGE 合同，不能写 SQL 或自行估算。
@@ -274,7 +302,8 @@ public final class BankPlanPromptComposer {
                     ════════════════════════════════
                     {{FILTER_CONTRACT}}
                     """
-                    .replace("{{FILTER_CONTRACT}}", BankSemanticRegistry.filterContract()).strip();
+                    .replace("{{FILTER_CONTRACT}}", BankSemanticRegistry.filterContract())
+                    .replace("{{DATE_BASELINE_RULES}}", DATE_BASELINE_RULES).strip();
 
     private static final String REQUIREMENTS_STAGE_SECTION = REQUIREMENTS_STAGE_TEMPLATE.replace(
             "{{REQUIREMENTS_REPAIR_OUTPUT}}",
@@ -314,7 +343,7 @@ public final class BankPlanPromptComposer {
                       "calculation":{"type":"<calculation 枚举>","baseline":null},
                       "orderBy":[{"field":"<已选指标或维度>","direction":"ASC 或 DESC"}],
                       "limit":null,
-                      "output":{"columns":["<已选维度或指标>"],"orderSensitive":false,"aggregationMode":null}
+                      "output":{"columns":["<已选维度或指标>"],"orderSensitive":false,"aggregationMode":"<AVERAGE_ONLY / WITH_EXTREMA / null>"}
                     }
 
                     查询计划字段填写规则（以下只说明输出 JSON 合同，不代替你依据用户问题进行自然语言理解）：
@@ -358,6 +387,20 @@ public final class BankPlanPromptComposer {
                        人均利润的 PLAN 使用同一受控点值比率形状：metrics 按 ZB011、ZB018 排列，
                        derivedMetrics=[]，calculation.type=RATIO、baseline="ZB018"，dimensions 包含
                        bank_organization，output.columns=["bank_organization","ZB011","ZB018"]。
+                       正向判例（目录发布派生指标点值比率）：题面点名目录已发布的比率类派生指标
+                       （存贷比、人均利润等形态），恰好命中其分子、分母两个基础指标、一个机构和
+                       一个明确日期时一次写对：action=EXECUTE、intent=RATIO；metricCodes 恰为该
+                       派生项按目录序排列的两个基础指标——分子在前、分母在后（存贷比形态即
+                       ["ZB002","ZB001"]）；derivedMetrics 恰含该发布派生项一项，逐字段照目录填写：
+                       metricCode=DERIVED_<分子 ZB###>_DIV_<分母 ZB###>，numerator、denominator、
+                       name 逐字照目录，不得自造派生码；plan 侧 metrics 按 [分子 ZB###,分母 ZB###]
+                       排列、derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，
+                       dimensions=["bank_organization"]、output.columns=["bank_organization",
+                       "<分子 ZB###>","<分母 ZB###>"]，编译器会返回 numerator_value、
+                       denominator_value、ratio_percent 三列比率事实。漏写派生项、交换分子分母或
+                       写成 DIRECT 都会被拒绝并要求按本形状重写。区分：目录没有对应发布派生指标
+                       的两个基础指标相除，才使用规则 3e 的 derivedMetrics=[] 直选形；目录已发布
+                       对应派生指标时必须用本派生形，不得退化成直选形。
                        存款结构双分项不使用 RATIO 计划：metrics 按 ZB003、ZB004、ZB001 排列，
                        calculation.type=DIRECT，output.orderSensitive=true；投影器会以 ZB001 为共同分母。
                        同一时点两个基础指标的绝对差值也不使用 RATIO 或 CHANGE：metrics 保留题干中的两个指标，
@@ -382,9 +425,48 @@ public final class BankPlanPromptComposer {
                         derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码，dimensions 必须包含
                         bank_organization，output.columns 先列机构再列两个基础指标；编译器会计算 RATIO_VALUE。
                         不得把这类明确比重问题改成 POINT_QUERY 或 DIRECT。
-                    3f. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
+                    3f. 直接指标的 RANKING 必须填写一个合法的 orderBy：field 只能精确填写本计划
+                        metrics[].bizName 中已选的 ZB### 代码，或 dimensions 中已选维度；direction 只能为 ASC 或 DESC。
+                        direction 不参与名次切片——切片完全由 rank/rank_from_bottom 过滤器决定；
+                        direction 按权威目录该指标的 direction 列照抄：direction=HIGHER_BETTER 填 DESC、
+                        direction=LOWER_BETTER 填 ASC；目录未标方向时填 DESC。
+                        绝不可填写中文指标名、
+                        metric_value、aggregate_value、rank、percent_change 或其他结果列/物理字段。含 derivedMetrics
+                        的排名保持 orderBy=[]，由编译器按目录方向排序。
+                    3g. 多个明确机构“加起来/合计/总和”的查询，必须保留所有 organizations，并使用
                         dimensions=["bank_organization"]、output.columns 先保留 bank_organization；查询结果逐机构
                         返回可核验加数，由结果事实层计算总和，不得提前汇成一个失去机构身份的匿名标量。
+                    3i. 比率分子为多个基础指标之和（复合分子比率，如 (指标A+指标B)/指标C）时：
+                        metrics 按全部加数在前、分母最后一个排列，calculation.type=RATIO、
+                        baseline=分母代码；derivedMetrics 写一个复合派生指标，numeratorOperands
+                        逐项列出全部加数（≥2 个不同 ZB###）、numerator 填第一个加数、
+                        denominator 填分母，metricCode 必须精确写成
+                        DERIVED_SUM_<n1>_AND_<n2>_DIV_<d>。例如分子为对公存款加个人存款、
+                        分母为各项存款时，metricCode 只能写 DERIVED_SUM_ZB003_AND_ZB004_DIV_ZB001。
+                        全部加数与分母都必须保留在 metrics 与 requirements.metricCodes 中；
+                        不写 numeratorOperands 时保持既有单分子契约不变。
+                        词表补充：两个同单位百分率指标的直接加合（“A与B之和/合计”类问法，无分母、
+                        无除法）编码为 DERIVED_SUM_<M1>_AND_<M2>：无 _DIV_ 后缀，M1、M2 为参与
+                        加合的目录指标码并按字典序排列。该编码仅当两个加数都是目录中百分率
+                        单位(%)的指标时才允许；金额类指标（元/亿元）的“合计/之和”不是派生指标——
+                        derivedMetrics 保持为空，把各加数直接并列写进 metrics 与
+                        requirements.metricCodes（普通多指标查询）。
+                        占语尾巴变体：“A与B的合计/之和占XX比”这类带“占XX比”措辞尾巴的问法，
+                        只要 A、B 都是目录中百分率单位(%)的指标，仍属于加合族：derivedMetrics
+                        照写一个 DERIVED_SUM_<M1>_AND_<M2>（两个加数值直接相加，无除法、无 ×100），
+                        “占XX比”只是措辞修饰，不得据此引入分母、除法或改判比率族。
+                        百分率操作数永远不进除法：两率之和再除以任何金额指标在量纲与数值上都是
+                        错误口径；calculation.type=RATIO（含 calculation.baseline）只接受金额单位
+                        的分子与分母。
+                        负向判例（“合计”不是比率）：“A与B的合计/之和/共计”这类两个同单位百分率
+                        指标的合计问法不是比率：不得因“合计”二字写比率形 derivedMetrics——
+                        禁止 _DIV_ 派生码、禁止除法、禁止把第二个加数当除数分母；也不得退化成
+                        不带派生指标的双指标点查，合计值事实必须保留。正确形状一次写对：
+                        requirements.metricCodes 恰为两个加数的目录指标直选并按字典序排列，
+                        derivedMetrics 恰为一个 DERIVED_SUM_<M1>_AND_<M2>，其中 numerator 填
+                        字典序较小的加数、denominator 填字典序较大的加数，两个字段只承载加数、
+                        不表示除法；intent=POINT_QUERY。比率形或空 derivedMetrics 都会被
+                        拒绝并要求按本形状重写。
                     4. 全省排名不等于全省均值比较。若你理解为 RANKING，且用户要求按全省名次判断表现，
                        不要使用 benchmark/COMPARE/PROVINCE_AVERAGE；应使用 filters:[]。混合直接指标和派生指标的
                        排名计划形状为：
@@ -393,8 +475,9 @@ public final class BankPlanPromptComposer {
                        "filters":[],
                        "calculation":{"type":"DIRECT","baseline":null}
                        并在 metrics 写出全部直接指标、在 derivedMetrics 写出目录中的派生指标；organizations 保留被评价机构。
-                       “某机构在全省13家里排第几”必须 organizations 保留该机构、limit=13，orderBy 使用该指标
-                       的目录排名方向，output.columns=["bank_organization","ZB###"]；不得在修复时删除目标机构。
+                       “某机构在全省里排第几”必须 organizations 保留该机构、limit 填全省机构总数
+                       （以权威目录机构清单为准），orderBy 使用该指标的目录排名方向，
+                       output.columns=["bank_organization","ZB###"]；不得在修复时删除目标机构。
                     5. “全年/期间均值排名”“平均值排名”“日均值排名”表示先按机构汇总整个时间范围的平均值再排名：
                        metrics 中直接指标的 aggregation 必须为 AVG，dimensions 只能是 ["bank_organization"]，
                        绝不可把 "bank_data_date" 放进 dimensions（否则会变成逐日明细而不是机构均值）。
@@ -436,12 +519,21 @@ public final class BankPlanPromptComposer {
                        若题干是“全省/全部机构中哪家排最后/倒数第N”，organizations 必须为 []，dimensions
                        必须为 ["bank_organization"]；不得虚构一个目标机构，也不得把“哪家”当作缺槽位。
                        对“哪家农商行/机构最高、最低、最多、最少、排第一”也一样：organizations=[]，
-                       dimensions=["bank_organization"]，只保留唯一 rank/LTE/1（不是机构过滤）；排序方向由
-                       指标目录和编译器决定，模型不要手填物理字段或改写排名结果。
-                    10b. “对公存款+个人存款是否等于各项存款/差额多少”是 POINT_QUERY 的三指标事实核对，
-                         metrics 按 [ZB003,ZB004,ZB001]、organizations 只含题干机构、DAY/NONE 时间、
-                         filters=[]、calculation.type=DIRECT，output.columns=["bank_organization","ZB003",
-                         "ZB004","ZB001"]；回答事实类型为 VALUE 和 GAP_VALUE，不能套 COMPARISON 或 RATIO。
+                       dimensions=["bank_organization"]，名次切片字段必须按 REQUIREMENTS 合同的
+                       确定性方向映射选择——rank 表示目录排序最优端、rank_from_bottom 表示对侧端：
+                       低优指标（direction=LOWER_BETTER）的“最低/最少/最小”写 rank、
+                       “最高/最多/最大/最好”写 rank_from_bottom，中性/高优指标相反——值固定为
+                       LTE/1（不是机构过滤）；同时对直接指标
+                       用该指标的 ZB### 代码填写 orderBy，不能手填物理字段或结果别名；只有派生指标排名才由编译器
+                       决定 orderBy=[]。
+                       正向判例（全省哪家极值选择）：“全省/全体机构中哪家（农商行/机构）某指标
+                       最高/最低/最多/最少”槽位完整时一次写对：action=EXECUTE、intent=RANKING、
+                       organizationCodes=[]（“哪家”就是全省范围，不是缺机构）、单一目录指标直选进
+                       metricCodes、time 为题面给出的单日日期（startDate=endDate，YYYY-MM-DD 原样
+                       保留）、filters 恰好一个名次过滤器——字段按目录方向两步映射取 rank 或
+                       rank_from_bottom、operator=LTE、value=题面名次 N（极值单选时 N=1）——
+                       requiredLimit 与该名次值同值。多写第二个名次过滤器、把任意一家机构写进
+                       organizationCodes 或漏掉 requiredLimit，都会被拒绝并要求按本形状重写。
                     10. “某机构某指标在一段期间有多少天高于全省均值”是逐日比较后计数，不是把全期
                        聚合成一个值再比较。必须使用 intent=AGGREGATION、单一机构、单一指标、
                        granularity=DAY、comparison=NONE，并保留 requirements 中已声明的
@@ -449,14 +541,20 @@ public final class BankPlanPromptComposer {
                        dimensions=["bank_organization"]、calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
                        orderBy=[]、limit=null，output.columns 只写 ["bank_organization","ZB###"]；
                        编译器会返回 DAYS_ABOVE_AVERAGE、TOTAL_COUNT 和 RATIO_VALUE 对应的事实列。
-                       不得先对全年求和或平均后只比较一次。这个专用 calculation 只表示“高于”，遇到
-                       “低于/小于全省均值多少天”不得套用 COUNT_DAYS_ABOVE_PROVINCE_AVERAGE。
+                       该查询族的 filters 必须只保留 benchmark 对象本身：禁止追加 metric_value 方向对象，
+                       也禁止追加任何其他 filter（后端会直接拒绝多余的过滤器）。不得先对全年求和或平均后只比较一次。
+                       这个专用 calculation 只表示“高于”，遇到“低于/小于全省均值多少天”不得套用 COUNT_DAYS_ABOVE_PROVINCE_AVERAGE。
                     10a. “某机构某指标全年/期间有多少天高于全省均值”是评测事实库中的日粒度计数：
-                        intent=AGGREGATION，保留该机构、该指标和完整日期范围，filters 必须包含
-                        benchmark/COMPARE/PROVINCE_AVERAGE，calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
+                        intent=AGGREGATION，保留该机构、该指标和完整日期范围，filters 必须包含且仅包含
+                        benchmark/COMPARE/PROVINCE_AVERAGE 一个过滤项，calculation.type=COUNT_DAYS_ABOVE_PROVINCE_AVERAGE、
                         dimensions=["bank_organization"]。不要因为指标通常按季度披露、题目年份晚于当前日期、
                         或机构名称使用字母城市占位符而改变查询形态；这些都是本权威评测目录中的有效槽位。
+                    10b. “对公存款+个人存款是否等于各项存款/差额多少”是 POINT_QUERY 的三指标事实核对，
+                         metrics 按 [ZB003,ZB004,ZB001]、organizations 只含题干机构、DAY/NONE 时间、
+                         filters=[]、calculation.type=DIRECT，output.columns=["bank_organization","ZB003",
+                         "ZB004","ZB001"]；回答事实类型为 VALUE 和 GAP_VALUE，不能套 COMPARISON 或 RATIO。
                     11. “某机构某指标在明确日期与全省均值比较”属于已确定的 AGGREGATION 省均值合同：
+                       使用 benchmark/COMPARE/PROVINCE_AVERAGE，保留单机构、单指标和日期。
                        使用 benchmark/COMPARE/PROVINCE_AVERAGE，保留单机构、单指标和日期。
                     12. “上季度末”是自然季度边界，不是固定回退三个月：2025-10-31→2025-09-30、
                        2025-07-31→2025-06-30、2025-04-30→2025-03-31、2025-01-31→2024-12-31。
@@ -468,6 +566,67 @@ public final class BankPlanPromptComposer {
                         intent=POINT_QUERY、dimensions=["bank_organization"]、calculation.type=DIRECT、
                         output.orderSensitive=true。结果事实层会分别计算两个分项相对 ZB002 的比例；
                         不得退化为单一 RATIO。
+                    15. 数量与输出细节槽位的填写规则：
+                        - limit 的唯一合法取值来源是排名切片条款：单侧前N或后N时 plan.limit=N；
+                          “前N名和后N名”同时出现 rank 与 rank_from_bottom 两个过滤器时 plan.limit=2*N
+                          （例如前三和后三为 6），此时 requirements.requiredLimit 保持单侧条数 N——
+                          即两侧切片族中 plan.limit(2N) 与 requiredLimit(N) 有意不同，其余一切场景两个
+                          槽位保持同值。除切片族外 limit 一律为 null；禁止把机构总数当成 limit 填写，
+                          需要全量机构时由 plan 形状（organizations=[]、dimensions 含 bank_organization）表达。
+                        - output.aggregationMode 的强制规则：题面含“日均值/平均值”且未同时问最高值和最低值时，
+                          必须填 "AVERAGE_ONLY"；题面同时询问最高值和最低值时必须填 "WITH_EXTREMA"；
+                          其余场景恒为 null。该字段不是可省略的装饰品，校验器按上述规则逐条核对。
+                          正向判例（极值并列输出）：题面同时要求“日均值/平均值”和“最高/最低（最大/最小）”
+                          的 AGGREGATION 查询（单机构、单指标、DAY 完整日期范围）一次写对：
+                          output.aggregationMode 必须精确为 "WITH_EXTREMA"，让编译器同时返回聚合值与
+                          极值列（aggregate_value、min_value、max_value、observation_count）；
+                          只填 "AVERAGE_ONLY" 的纯聚合均值形状会被拒绝并要求按本形状重写。反过来，
+                          极值词消失、只问日均值/平均值时必须回到 "AVERAGE_ONLY"。
+                        - time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”
+                          且所填日期恰好是该自然期期末时才允许；否则一律 DAY（聚合周期语义不属于 granularity）。
+                        - metrics[].alias、organizations[].bizName、derivedMetrics[].name 一律填 null 或
+                          逐字照抄权威目录中的中文名称，禁止自造别名。
+
+                    ════════════════════════════════
+                    专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）
+                    ════════════════════════════════
+                    RANK_CHANGE 跨期排名变化：“从基期到当期，各机构的某些指标排名变化了多少/
+                    位次有何变动”必须使用专用 calculation.type=RANK_CHANGE 查询族，禁止退化为值
+                    变化（CHANGE）或普通 RANKING。plan 槽位形状（日期一律取题面原词对应的真实
+                    期末日期，不得参照或靠近任何示例日期）：
+                    "intent":"CHANGE"，
+                    "metrics":[所选各指标，aggregation=DEFAULT]，
+                    "dimensions":["bank_organization"]，
+                    "time" 的当期写 startDate=endDate=题面当期日期、基期写
+                    baselineStartDate=baselineEndDate=题面基期日期，granularity=DAY，
+                    "calculation":{"type":"RANK_CHANGE","baseline":null}，
+                    "filters":[]、"orderBy":[]、"limit":null。
+                    基期与 comparison 的选择一律沿用本提示的共享 time 基期规则（“较年初”=
+                    START_OF_YEAR、基期为上一自然年 12-31 等），本族不新增任何基期解释。
+                    filters 禁止 rank/rank_from_bottom（排名变化看全部/选中机构的位次，不是切片）；
+                    derivedMetrics 必须为空；output.columns 仍只写 bank_organization 和所选指标。
+                    编译器会返回 metric_code、baseline_rank、current_rank、rank_change 事实列，
+                    rank_change=基期名次-当期名次，正数表示位次上升；不要把这些结果列写进
+                    output.columns 或 orderBy。
+
+                    COMPOUND_BENCHMARK 多指标复合基准阈值：“哪些机构的多个指标同时满足——每个
+                    指标分别要求高于或低于全省均值”的 AND 组合问句必须使用本族，不得把多个指标
+                    拆成多个单指标查询或退化成普通排名。plan 槽位形状（本族不提供任何判例，
+                    时间槽一律取题面原词对应的真实日期）：intent=THRESHOLD、organizations=[]、
+                    dimensions=["bank_organization"]、calculation.type=DIRECT、time.comparison=NONE、
+                    orderBy=[]、limit=null，output.columns 只写 ["bank_organization",
+                    "<所选各 ZB###>"]。filters 必须包含精确的 benchmark/COMPARE/PROVINCE_AVERAGE
+                    对象，并且每个所选指标各追加一条基准方向条件
+                    {"field":"<该指标 ZB###>","operator":"GT 或 GTE 或 LT 或 LTE",
+                    "value":"PROVINCE_AVERAGE","values":[]}——复合 AND 基准就是每个指标各一条
+                    benchmark 方向条件；方向按权威目录该指标 direction 列确定：HIGHER_BETTER 用
+                    GT/GTE（高于全省均值），LOWER_BETTER 用 LT/LTE（低于全省均值），与目录方向
+                    矛盾的条件会被拒绝修复。禁止把全省均值写进 metrics/metricCodes 或任何指标
+                    槽位（PROVINCE_AVERAGE 只能出现在基准/方向过滤对象中）；禁止用单个
+                    metric_value 方向对象同时表达多个指标；禁止派生指标与数值 metric_value 过滤。
+                    编译器会返回逐机构 org_code/org_name、每个指标的 <序数>_value/<序数>_average
+                    事实对和 AND 语义的 meets_condition 标志位（序数由目录方向与指标代码规范化
+                    决定）；不要把这些结果列写进 output.columns 或 orderBy。
 
                     ════════════════════════════════
                     PLAN 严格合同
@@ -476,11 +635,7 @@ public final class BankPlanPromptComposer {
                        小写代码、别名、物理字段名或自造代码。
                     2. metrics 必须逐项包含 requirements 声明的全部指标；不得默默补充或删除指标。
                        不得增加目录中未被用户要求的指标。
-                    3. 日期只能写 YYYY-MM-DD；比较基期必须用 baselineStartDate 和 baselineEndDate 明确表达。
-                       对 comparison 非 NONE 且非 MOM_AND_YOY 的比较，当前期只能写在 startDate/endDate，
-                       基期只能写在 baselineStartDate/baselineEndDate，且 baselineEndDate 必须早于 startDate。
-                       绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期；点对点比较时，
-                       startDate=endDate=当前点，baselineStartDate=baselineEndDate=较早点。
+                    3. {{DATE_BASELINE_RULES}}
                        comparison 只要不是 NONE（YEAR_OVER_YEAR、PERIOD_OVER_PERIOD、START_OF_YEAR 或 MOM_AND_YOY），
                        calculation.type 必须为 CHANGE；DIRECT 只允许 comparison=NONE。不要把已经声明的
                        比较基期当作普通当前值查询。
@@ -491,6 +646,7 @@ public final class BankPlanPromptComposer {
                     """
                     .replace("{{PLAN_CAPABILITY_CATALOG}}",
                             BankSemanticRegistry.planCapabilityCatalog())
+                    .replace("{{DATE_BASELINE_RULES}}", DATE_BASELINE_RULES)
                     .strip();
 
     private static final String PLAN_STAGE_SECTION = PLAN_STAGE_TEMPLATE.replace(
@@ -512,8 +668,22 @@ public final class BankPlanPromptComposer {
               "requirements":<下方定义的完整 BankRequestContract>,
               "plan":<下方定义的完整 BankQueryPlan；仅当 action=CLARIFY 时为 null>
             }
-            requirements.action=EXECUTE 时 plan 必须非 null，两个嵌套合同的指标、派生指标、机构、日期、
-            比较口径、filters、intent 和数量限制必须完全一致。requirements.action=CLARIFY 时 plan 必须为 null。
+            requirements.action=EXECUTE 时 plan 必须非 null，两个嵌套合同必须完全一致；
+            requirements.action=CLARIFY 时 plan 必须为 null。一致性按下面的映射逐条核对：
+            REQUIREMENTS↔PLAN 一致性映射表：
+            - intent 原样继承；time（四项日期+granularity+comparison）原样继承。
+            - metricCodes ⇔ plan.metrics 的 bizName 集合，顺序一致；derivedMetrics 原样照抄
+              （唯一例外：复合分子比率见 PLAN 规则 3i，requirements.derivedMetrics 保持 []）。
+              answerFactTypes 含 CHANGE_VALUE 或 CHANGE_RATE ⇔ calculation.type=CHANGE 且 comparison 非 NONE；
+              answerFactTypes 含 RATIO_VALUE：点值比率 ⇔ calculation.type=RATIO 且 baseline=分母代码，
+              目录派生指标 ⇔ derivedMetrics 非空。
+            - organizationCodes ⇔ organizations；organizations 非空时 dimensions 必须包含
+              bank_organization；organizations=[]（全省）时 dimensions 是否含 bank_organization 由族决定：
+              THRESHOLD 计数、全省 RANKING、省均值多机构比较必须包含，普通单机构点查询保持 []。
+            - filters 除 rank 切片外必须逐项继承出现在 plan.filters 中；rank/rank_from_bottom 只允许
+              出现在 plan.filters（requirements 不携带名次过滤器）。
+            - benchmark=COMPARE/PROVINCE_AVERAGE 对象必须原样同时存在于两个合同。
+            - 数量槽位映射见 PLAN 规则 15：仅双侧切片族允许 plan.limit=2*N 与 requiredLimit=N 并存。
             收到 <repair> 表示上一份完整响应未通过校验或执行；根据具体 error/tool_result 修正后，仍只输出
             一份完整 BankPlanningResponse。不得输出中间合同、解释、补丁、SQL、Markdown 或代码围栏。
             """.strip();
@@ -537,16 +707,16 @@ public final class BankPlanPromptComposer {
     public static final String FIXED_SYSTEM_PREFIX = SINGLE_PASS_SYSTEM_PREFIX;
 
     /** Legacy combined prefix version; bump whenever any stage section changes. */
-    public static final String PREFIX_VERSION = "bank-plan-sys-v56-single-pass";
+    public static final String PREFIX_VERSION = "bank-plan-sys-v66-first-shot-judgments";
 
     /** Version of the one-pass runtime prefix; part of the cache key. */
     public static final String SINGLE_PASS_PREFIX_VERSION = PREFIX_VERSION;
 
     /** Version of the REQUIREMENTS stage prefix; part of the stage cache key. */
-    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v5-stage-split";
+    public static final String REQUIREMENTS_PREFIX_VERSION = "bank-requirements-sys-v9-org-binding";
 
-    /** Version of the PLAN stage prefix; part of the stage cache key. */
-    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v53-stage-split";
+    /** Version of the PLAN stage prefix; part of the cache key. */
+    public static final String PLAN_PREFIX_VERSION = "bank-plan-sys-v57-stage-split";
 
     private BankPlanPromptComposer() {}
 
@@ -673,14 +843,21 @@ public final class BankPlanPromptComposer {
             String previousCandidate, String validationMessage, String errorTag,
             String familyExamples) {
         String error = validationMessage == null ? "" : validationMessage.strip();
-        if (looksLikeCatalogDump(error)) {
-            error = "contract validation failed; output one complete JSON object for the current stage";
-        }
+        error = sanitizeCatalogLeak(error);
         String repairTag = errorTag == null ? "error" : errorTag;
+        boolean toolResultFeedback = "tool_result".equals(repairTag);
         String clarificationRecheck = buildClarificationRecheck(stage, error);
-        String instruction = "SINGLE_PASS".equals(stage)
+        String instruction;
+        if (toolResultFeedback) {
+            instruction = "<tool_result> 中 failedStage 标明失败阶段（VALIDATION/COMPILE/TRANSLATE/"
+                    + "EXECUTE/RESULT_SEMANTIC），errorCode 是机器错误码，message/correctionHints 给出定向"
+                    + "修改建议，allowedValues 列出该槽位的合法取值集合；先读完这些字段再只修改其指出的槽位，";
+        } else {
+            instruction = "";
+        }
+        instruction += ("SINGLE_PASS".equals(stage)
                 ? "只输出修正后的完整 BankPlanningResponse JSON；不输出解释、补丁或 SQL。"
-                : "只输出修正后的完整当前阶段 JSON；不输出解释、补丁或 SQL。";
+                : "只输出修正后的完整当前阶段 JSON；不输出解释、补丁或 SQL。");
         String content = "%s%s\n\n<stage>%s</stage>%s\n<repair>\n<%s>%s</%s>\n"
                 + "<previous_candidate>\n%s\n</previous_candidate>\n" + "%s"
                 + "<instruction>%s</instruction>\n</repair>";
@@ -753,6 +930,28 @@ public final class BankPlanPromptComposer {
 
     static boolean looksLikeCatalogDump(String text) {
         return text != null && (text.contains("可填写值目录") || text.contains("【语义目录】"));
+    }
+
+    /**
+     * Strips only the leaked catalog tail from a repair message while keeping the diagnostic
+     * prefix. Falls back to the previous whole-message replacement when nothing diagnostic remains.
+     */
+    static String sanitizeCatalogLeak(String error) {
+        if (!looksLikeCatalogDump(error)) {
+            return error;
+        }
+        int leakStart = -1;
+        for (String marker : new String[] {"可填写值目录", "【语义目录】"}) {
+            int index = error.indexOf(marker);
+            if (index >= 0 && (leakStart < 0 || index < leakStart)) {
+                leakStart = index;
+            }
+        }
+        String retained = leakStart <= 0 ? "" : error.substring(0, leakStart).strip();
+        if (retained.isEmpty()) {
+            return "contract validation failed; output one complete JSON object for the current stage";
+        }
+        return retained;
     }
 
     static void assertQuestionOnlyUserContent(String userContent, String where) {

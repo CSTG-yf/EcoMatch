@@ -90,6 +90,7 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("aggregation\":\"AVG\""));
         assertTrue(sys.contains("rank_from_bottom"));
         assertTrue(sys.contains("哪家农商行/机构的某指标最高、最低、最多、最少"));
+        assertTrue(sys.contains("直接指标的 RANKING 必须填写一个合法的 orderBy"));
         assertTrue(sys.contains("limit 设为 2*N"));
         assertTrue(sys.contains("单日最高值和单日最低值出现在哪家"));
         assertTrue(sys.contains("AGGREGATION"));
@@ -233,7 +234,9 @@ class BankPlanPromptComposerTest {
         assertTrue(sys.contains("确定性点值比率例外"));
         assertTrue(sys.contains("metrics 必须按“分子、分母”"));
         assertTrue(sys.contains("calculation.type=RATIO"));
-        assertTrue(sys.contains("某机构在全省13家里排第几"));
+        assertTrue(sys.contains("某机构在全省里排第几"));
+        assertTrue(sys.contains("limit 填全省机构总数"),
+                "province rank position uses the catalog organization count, not a hardcoded 13");
         assertTrue(sys.contains("不得在修复时删除目标机构"));
         assertTrue(sys.contains("截至YYYY-MM-DD"));
         assertTrue(sys.contains("不得截断成 YYYY-MM"));
@@ -429,5 +432,411 @@ class BankPlanPromptComposerTest {
         assertTrue(repair.contains("<stage>SINGLE_PASS</stage>"));
         assertTrue(repair.contains("只输出修正后的完整 BankPlanningResponse JSON"));
         assertFalse(repair.contains("只输出修正后的完整当前阶段 JSON"));
+    }
+
+    @Test
+    void systemPrefixCarriesSharedDateBaselineRulesInBothStageContexts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("环比基期与同比基期全部由编译器派生，禁止自行填写"),
+                "MOM_AND_YOY baseline exemption must be stated first");
+        assertTrue(sys.contains("baselineEndDate 必须早于 startDate"));
+        assertTrue(sys.contains("绝不可把“从基期到当前期”误写成 startDate=基期、endDate=当前期"));
+        assertTrue(sys.contains("当年 01-01 不是“较年初”基期"));
+        int firstInjection = sys.indexOf("重要豁免先记住：time.comparison=MOM_AND_YOY");
+        int secondInjection = sys.indexOf("重要豁免先记住：time.comparison=MOM_AND_YOY",
+                firstInjection + 1);
+        assertTrue(firstInjection >= 0 && secondInjection > firstInjection,
+                "shared date/baseline rules must render into both REQUIREMENTS and PLAN sections");
+    }
+
+    @Test
+    void systemPrefixLocksSliceLimitAggregationModeAndGranularityContracts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("limit 的唯一合法取值来源是排名切片条款"));
+        assertTrue(sys.contains("plan.limit=2*N"));
+        assertTrue(sys.contains("禁止把机构总数当成 limit 填写"));
+        assertTrue(sys.contains("必须填 \"AVERAGE_ONLY\""));
+        assertTrue(sys.contains("必须填 \"WITH_EXTREMA\""));
+        assertTrue(sys.contains("校验器按上述规则逐条核对"));
+        assertTrue(sys.contains("否则一律 DAY（聚合周期语义不属于 granularity）"));
+        assertTrue(sys.contains("逐字照抄权威目录中的中文名称，禁止自造别名"));
+    }
+
+    @Test
+    void singlePassResponseSectionMapsEveryConsistencySlotBetweenContracts() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        assertTrue(sys.contains("REQUIREMENTS↔PLAN 一致性映射表"));
+        assertTrue(sys.contains("metricCodes ⇔ plan.metrics 的 bizName 集合，顺序一致"));
+        assertTrue(sys.contains("answerFactTypes 含 CHANGE_VALUE 或 CHANGE_RATE ⇔ calculation.type=CHANGE"));
+        assertTrue(sys.contains("organizations 非空时 dimensions 必须包含"));
+        assertTrue(sys.contains("THRESHOLD 计数、全省 RANKING、省均值多机构比较必须包含"));
+        assertTrue(sys.contains("rank/rank_from_bottom 只允许"));
+        assertTrue(sys.contains("benchmark=COMPARE/PROVINCE_AVERAGE 对象必须原样同时存在于两个合同"));
+        assertTrue(sys.contains("数量槽位映射见 PLAN 规则 15"));
+    }
+
+    @Test
+    void toolResultRepairExplainsFeedbackFieldsBeforeStageGuidance() {
+        BankPlanToolResult failed = BankPlanToolResult.failed(1, "trace-tool-result", null,
+                BankPlanToolResult.Stage.COMPILE, "JDBC_GRAMMAR",
+                Map.of("calculation", List.of("DIRECT", "CHANGE")),
+                List.of("把较早日期移入 baselineStartDate/baselineEndDate，而不是扩大 startDate。"));
+        String content = BankPlanPromptComposer.buildSinglePassToolRepairUserContent(
+                "存款是多少？", "{\"requirements\":{},\"plan\":{}}", failed, null);
+
+        assertTrue(content.contains("<tool_result>"));
+        assertTrue(content.contains("</tool_result>"));
+        assertTrue(content.contains("failedStage 标明失败阶段（VALIDATION/COMPILE/TRANSLATE/"));
+        assertTrue(content.contains("allowedValues 列出该槽位的合法取值集合"));
+        assertTrue(content.contains("JDBC_GRAMMAR"));
+
+        String plainRepair = BankPlanPromptComposer.buildSinglePassRepairUserContent(
+                "存款是多少？", "{\"requirements\":{},\"plan\":{}}", "boom", null);
+        assertFalse(plainRepair.contains("<tool_result>"), "plain errors keep the <error> tag");
+        assertFalse(plainRepair.contains("failedStage 标明失败阶段"),
+                "field legend is exclusive to tool_result repairs");
+    }
+
+    @Test
+    void catalogLeakSanitizerKeepsDiagnosisAndStripsOnlyTheCatalogTail() {
+        String leaked = "intent 非法值 RATIO_X；可填写值目录（只能从下列内容中选择）：\n"
+                + "- intent: [POINT_QUERY, AGGREGATION]\n- metrics: [ZB001]";
+        assertEquals("intent 非法值 RATIO_X；",
+                BankPlanPromptComposer.sanitizeCatalogLeak(leaked));
+        assertEquals(
+                "contract validation failed; output one complete JSON object for the current stage",
+                BankPlanPromptComposer.sanitizeCatalogLeak("【语义目录】\n指标代码清单……"));
+        assertEquals("plain failure", BankPlanPromptComposer.sanitizeCatalogLeak("plain failure"));
+    }
+
+    @Test
+    void systemPrefixKeepsV58DateAndBaselinePrecedentsVerbatim() {
+        // 防再弱化闸门：以下关键短语逐条取自 v58（bank-plan-sys-v58-single-pass，
+        // git show HEAD 原文）的日期锚定与基期选择判例。v59 曾因新增查询族文案与这些判例
+        // 混排导致官方 smoke 回归（较上年末被改成同比基期、完整日期被月末化）。
+        // 任何改写、挪动或删除都必须显式更新本清单并重跑官方 smoke 验证。
+        List<String> v58Phrases = List.of(
+                // 年末字面日期与“较上年末”相对表述判例（REQUIREMENTS 判例区）
+                "题干明确写出的 YYYY年末/年底就是该年份的 12-31",
+                "将 baselineStartDate/baselineEndDate 都写为 2024-12-31",
+                "只有“较上年末/较去年末”这类相对表述才按当前期前一自然年年末解释",
+                "已写出的 2024年末再向前减一年。",
+                // DATE_BASELINE_RULES 共享基期规则
+                "“较年初”必须使用 comparison=START_OF_YEAR",
+                "baselineStartDate=baselineEndDate=当前期前一年的 12-31",
+                "当年 01-01 不是“较年初”基期",
+                // 同比与自然周期判例
+                "这类明确写出同期日期的同比使用 comparison=YEAR_OVER_YEAR",
+                "该语义使用 intent=CHANGE、comparison=PERIOD_OVER_PERIOD",
+                "“上季度末”是自然季度边界，不是固定回退三个月",
+                // PLAN 日期保真与 granularity 对齐（规则 12/13/15）
+                "题干出现完整 YYYY-MM-DD（包括“截至YYYY-MM-DD”和月末日期）时，必须原样保留",
+                "不得因为日期恰好是月末就改为 MONTH，",
+                "也不得截断成 YYYY-MM",
+                "time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”");
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        v58Phrases.forEach(phrase -> assertTrue(sys.contains(phrase),
+                "v58 日期/基期判例被弱化或改写: " + phrase));
+    }
+
+    @Test
+    void granularityGuidanceKeepsExplicitPeriodEndAlignmentGate() {
+        // 题面明确“季末/半年末/年末”且日期对齐才可填非 DAY granularity，否则一律 DAY——
+        // 该闸门必须同时存在于 single-pass 与 staged PLAN 前缀中。
+        for (String prefix : List.of(BankPlanPromptComposer.FIXED_SYSTEM_PREFIX,
+                BankPlanPromptComposer.PLAN_SYSTEM_PREFIX)) {
+            assertTrue(prefix.contains(
+                    "time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现“季末/半年末/年末”"));
+            assertTrue(prefix.contains("且所填日期恰好是该自然期期末时才允许；否则一律 DAY"),
+                    "granularity gate lost the date-alignment condition");
+        }
+    }
+
+    @Test
+    void rankChangeAndCompoundRatioGuidanceStaysInsideItsOwnBlocks() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        // RANK_CHANGE 家族只允许住在专用补充块中；编号规则恢复 v58 的 1-15 收尾，不再有规则 16。
+        String familyHeader = "专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）";
+        int header = sys.indexOf(familyHeader);
+        assertTrue(header >= 0, "RANK_CHANGE family must live in its own labelled block");
+        assertFalse(sys.contains("16. “从基期到当期"),
+                "RANK_CHANGE must not be a numbered rule next to the date/granularity rules");
+        int aliasBulletEnd = sys.indexOf("逐字照抄权威目录中的中文名称，禁止自造别名");
+        assertTrue(aliasBulletEnd >= 0 && aliasBulletEnd < header);
+        String between = sys.substring(aliasBulletEnd, header);
+        assertFalse(between.contains("RANK_CHANGE"));
+        assertFalse(between.contains("排名变化"));
+        assertFalse(between.contains("numeratorOperands"));
+        assertFalse(between.contains("DERIVED_SUM"));
+
+        // 家族块内部不得夹带新的日期/基期判例或竞争性 comparison 选项，只能回指共享基期规则。
+        int planContract = sys.indexOf("PLAN 严格合同", header);
+        assertTrue(planContract > header);
+        String familyBlock = sys.substring(header, planContract);
+        assertTrue(familyBlock.contains("calculation.type=RANK_CHANGE"));
+        assertFalse(familyBlock.contains("较上年末"),
+                "baseline precedent stays in the canonical rules, not the family block");
+        assertFalse(familyBlock.contains("YEAR_OVER_YEAR"),
+                "family block must not advertise alternative comparisons");
+        // 带日期的合成示例会污染同一生成里的 requirements 日期槽（VAL-S-06：04-15 被
+        // 吸附到示例的 03-31），族块只允许无日期的槽位形状描述。
+        assertFalse(familyBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "family block must not carry literal example dates");
+        assertFalse(familyBlock.contains("合成示例"),
+                "family block must stay example-free; slots are described, not exemplified");
+        assertTrue(familyBlock.contains("题面当期日期"),
+                "family block must point dates back to the question's own words");
+        assertTrue(familyBlock.contains("沿用本提示的共享 time 基期规则"),
+                "family block must point back to the shared baseline rules");
+
+        // 复合分子比率只出现在规则 3i 自己的段落，不得混入日期/基期判例或其他规则。
+        int rule3iStart = sys.indexOf("比率分子为多个基础指标之和");
+        int rule3iEnd = sys.indexOf("4. 全省排名不等于全省均值比较");
+        assertTrue(rule3iStart >= 0 && rule3iEnd > rule3iStart);
+        for (int idx = sys.indexOf("numeratorOperands"); idx >= 0;
+                idx = sys.indexOf("numeratorOperands", idx + 1)) {
+            assertTrue(idx > rule3iStart && idx < rule3iEnd,
+                    "numeratorOperands guidance leaked outside rule 3i at index " + idx);
+        }
+        for (int idx = sys.indexOf("DERIVED_SUM"); idx >= 0;
+                idx = sys.indexOf("DERIVED_SUM", idx + 1)) {
+            assertTrue(idx > rule3iStart && idx < rule3iEnd,
+                    "DERIVED_SUM guidance leaked outside rule 3i at index " + idx);
+        }
+        // 加合派生指标词表（同单位百分率之和，无 _DIV_ 后缀、按字典序排列）同样只允许住在 3i，
+        // 且不得给加合码强加 _DIV_ 后缀或附带你判例。
+        assertTrue(sys.contains("DERIVED_SUM_<M1>_AND_<M2>"));
+        assertTrue(sys.contains("无 _DIV_ 后缀"));
+        assertTrue(sys.contains("按字典序排列"));
+        int additiveIdx = sys.indexOf("DERIVED_SUM_<M1>_AND_<M2>");
+        assertTrue(additiveIdx > rule3iStart && additiveIdx < rule3iEnd,
+                "additive derived-metric vocabulary must stay inside rule 3i");
+        // v63 收窄：加合编码仅限百分率(%)加数对，金额类“合计”必须重定向为普通多指标查询。
+        assertTrue(sys.contains("仅当两个加数都是目录中百分率"),
+                "the DERIVED_SUM vocabulary must be scoped to percent-unit operand pairs");
+        assertTrue(sys.contains("金额类指标（元/亿元）的“合计/之和”不是派生指标"),
+                "amount-unit sums must be redirected to the plain multi-metric contract");
+        // v64 追加（不升版本）：带“占XX比”措辞尾巴的变体仍是加合族，百分率操作数永不进除法。
+        int variantIdx = sys.indexOf("占语尾巴变体");
+        assertTrue(variantIdx > rule3iStart && variantIdx < rule3iEnd,
+                "the occupation-tail variant guidance must stay inside rule 3i");
+        assertTrue(sys.contains("“A与B的合计/之和占XX比”"),
+                "the abstract occupation-tail phrasing must be described with A/B/XX placeholders");
+        assertTrue(sys.contains("仍属于加合族"),
+                "occupation-tail percent pairs must stay in the additive family");
+        assertTrue(sys.contains("“占XX比”只是措辞修饰，不得据此引入分母、除法或改判比率族"),
+                "the tail wording must not promote a denominator, division, or the ratio family");
+        assertTrue(sys.contains("百分率操作数永远不进除法"),
+                "percent operands must be forbidden from every division");
+        assertTrue(sys.contains("两率之和再除以任何金额指标在量纲与数值上都是"),
+                "summing two rates then dividing by an amount metric must be named wrong");
+        assertTrue(sys.contains("calculation.type=RATIO（含 calculation.baseline）只接受金额单位"),
+                "the ratio family must be scoped to amount-unit numerator and denominator");
+        String variantBlock = sys.substring(variantIdx, rule3iEnd);
+        assertFalse(variantBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the occupation-tail variant guidance must stay date-free");
+        assertTrue(variantBlock.contains("无除法、无 ×100"),
+                "the additive contract must state raw addition with no division and no rescaling");
+    }
+
+    @Test
+    void v65RepairGuidanceAddsAdditiveNegativeExampleAndOrgBinding() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        // v65 负向判例必须住在 3i 段内：合计问法不是比率，比率形与空派生都被点名拒绝，
+        // 正确形状一次写对（两加数直选字典序 + 唯一 DERIVED_SUM 规范项）。
+        int rule3iStart = sys.indexOf("比率分子为多个基础指标之和");
+        int rule3iEnd = sys.indexOf("4. 全省排名不等于全省均值比较");
+        assertTrue(rule3iStart >= 0 && rule3iEnd > rule3iStart);
+        int negativeIdx = sys.indexOf("负向判例（“合计”不是比率）");
+        assertTrue(negativeIdx > rule3iStart && negativeIdx < rule3iEnd,
+                "the additive negative example must stay inside rule 3i");
+        assertTrue(sys.contains("“A与B的合计/之和/共计”这类两个同单位百分率"));
+        assertTrue(sys.contains("指标的合计问法不是比率：不得因“合计”二字写比率形 derivedMetrics"));
+        assertTrue(sys.contains("禁止 _DIV_ 派生码、禁止除法、禁止把第二个加数当除数分母"));
+        assertTrue(sys.contains("不带派生指标的双指标点查，合计值事实必须保留"),
+                "the empty-derived two-metric pivot must be named as a rejected shape");
+        assertTrue(sys.contains("requirements.metricCodes 恰为两个加数的目录指标直选并按字典序排列"));
+        assertTrue(sys.contains("derivedMetrics 恰为一个 DERIVED_SUM_<M1>_AND_<M2>"));
+        assertTrue(sys.contains("字典序较小的加数、denominator 填字典序较大的加数"));
+        assertTrue(sys.contains("比率形或空 derivedMetrics 都会被"));
+        String negativeBlock = sys.substring(negativeIdx, rule3iEnd);
+        assertFalse(negativeBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the negative example must stay date-free");
+        assertFalse(negativeBlock.contains("合成示例"),
+                "the negative example stays shape-descriptive, never exemplified");
+
+        // v65 机构绑定逐字核对：requirements 段（SINGLE_PASS 前缀复用同一段）必须出现该指令。
+        assertTrue(requirements.contains("organizationCodes 必须绑定题面文字中逐字出现的目录机构"));
+        assertTrue(requirements.contains("题面中的城市字母与某个唯一目录机构名称一致时"));
+        assertTrue(requirements.contains("不得绑定其他任何机构码，即使那些机构码同样是目录合法机构"));
+        assertTrue(requirements.contains("只有全省/各家等全体"));
+        assertTrue(requirements.contains("机构范围才使用 []"));
+        assertTrue(sys.contains("organizationCodes 必须绑定题面文字中逐字出现的目录机构"),
+                "the single-pass prefix embeds the same requirements section");
+    }
+
+    @Test
+    void rankingSuperlativeSliceFollowsDeterministicCatalogDirectionMapping() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        // rank=目录最优端、rank_from_bottom=对侧端的两步确定性映射必须写进 REQUIREMENTS 词条。
+        assertTrue(sys.contains("rank 永远表示目录排序的"));
+        assertTrue(requirements.contains("rank 永远表示目录排序的"));
+        assertTrue(requirements.contains("direction=LOWER_BETTER（低优指标）时"));
+        assertTrue(requirements.contains("“最低/最少/最小”写唯一的 rank/LTE/1"));
+        assertTrue(requirements.contains("“最高/最多/最大/最好”写唯一的"));
+        assertTrue(requirements.contains("rank_from_bottom/LTE/1"));
+        assertTrue(requirements.contains("“排第一/排最后”是位置语义，与指标方向无关"));
+        // PLAN 规则 9 的全省极值选择必须回指同一方向映射，不得再写死“最低→rank”。
+        assertTrue(sys.contains("名次切片字段必须按 REQUIREMENTS 合同的"));
+        assertTrue(sys.contains("确定性方向映射选择"));
+        assertFalse(sys.contains("（按题干的正向或倒数语义）"),
+                "the direction-neutral rank wording must be replaced by the catalog mapping");
+    }
+
+    @Test
+    void prefixVersionsArePinnedForReworkCacheInvalidation() {
+        // v59 因官方 smoke 回归被 v60 取代；v60 的族块示例日期又污染 requirements 日期槽
+        // （VAL-S-06）被 v61 去示例化取代；v62 将极值名次切片改为按目录 direction 的确定性
+        // 映射，并在 3i 补充同单位百分率加合词表；v63 把该词表收窄到百分率(%)加数对并给
+        // 金额类合计写明普通多指标重定向（TRAIN-M-58 修复轮死循环教训）；v64 在专用族块
+        // 追加 COMPOUND_BENCHMARK 多指标复合基准阈值族（逐指标基准方向条件、无日期判例），
+        // 并在 3i 词表就地补充“占XX比”尾巴变体仍属加合族、百分率永不进除法的规则（尚未
+        // 部署，故 v64 不再升版本）。v65 跨模型穿透补强：3i 追加“合计不是比率”负向判例
+        // （比率形与空派生双指标点查都被点名拒绝，正确形状=两加数直选字典序+唯一
+        // DERIVED_SUM 规范项），requirements 段追加机构绑定逐字核对指令。v66 首掷成功率
+        // 判例：三条正向合成判例各归位到对应族现有段落（规则 3 目录发布派生指标点值比率——
+        // requirements 恰含发布派生项、plan 直选两操作数 + RATIO 计算，3e 直选形只在区分语
+        // 中带过；规则 9 全省哪家极值选择的完整槽位；规则 15 极值并列 WITH_EXTREMA 输出），
+        // 只转录 gate 的可执行条件，不写错误码、不带具体日期与题号；PREFIX_VERSION 升为
+        // v66 以失效并重预热缀缓存，REQUIREMENTS 阶段前缀版本本轮不动。
+        // 再次 bump 必须携带官方证据并同步更新本断言。
+        assertEquals("bank-plan-sys-v66-first-shot-judgments",
+                BankPlanPromptComposer.PREFIX_VERSION);
+        assertEquals("bank-requirements-sys-v9-org-binding",
+                BankPlanPromptComposer.REQUIREMENTS_PREFIX_VERSION);
+        assertEquals("bank-plan-sys-v57-stage-split", BankPlanPromptComposer.PLAN_PREFIX_VERSION);
+        assertEquals(BankPlanPromptComposer.PREFIX_VERSION,
+                BankPlanPromptComposer.SINGLE_PASS_PREFIX_VERSION);
+    }
+
+    @Test
+    void compoundBenchmarkGuidanceStaysInsideItsOwnFamilyBlock() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+
+        // v64：复合 AND 基准族只允许住在专用族块内，独立成段，不混排进编号规则或日期判例。
+        int familyHeader = sys.indexOf("专用查询族补充（独立形状；不新增、不修改上方任何日期与基期判例）");
+        assertTrue(familyHeader >= 0, "family supplement block must exist");
+        int compoundStart = sys.indexOf("COMPOUND_BENCHMARK 多指标复合基准阈值");
+        assertTrue(compoundStart > familyHeader,
+                "compound benchmark guidance must live inside the family block");
+        int planContract = sys.indexOf("PLAN 严格合同", familyHeader);
+        assertTrue(planContract > compoundStart);
+        String compoundBlock = sys.substring(compoundStart, planContract);
+        int numberedRuleEnd = sys.indexOf("逐字照抄权威目录中的中文名称，禁止自造别名");
+        assertTrue(numberedRuleEnd >= 0 && numberedRuleEnd < familyHeader);
+        assertFalse(sys.substring(numberedRuleEnd, familyHeader).contains("COMPOUND_BENCHMARK"),
+                "compound benchmark must not leak into the numbered PLAN rules");
+
+        // 复合 AND 基准=每个指标各一条基准方向条件 + 方向按目录 + 全省均值禁止写进指标槽位。
+        assertTrue(compoundBlock.contains("每个"),
+                () -> "family block must state the AND condition contract");
+        assertTrue(sys.contains("复合 AND 基准就是每个指标各一条"),
+                "the compound AND sentence must be present verbatim");
+        assertTrue(sys.contains("禁止把全省均值写进 metrics/metricCodes 或任何指标"),
+                "province average must be forbidden inside metric slots");
+        assertTrue(compoundBlock.contains("\"field\":\"<该指标 ZB###>\""),
+                () -> compoundBlock);
+        assertTrue(compoundBlock.contains("HIGHER_BETTER 用"),
+                () -> compoundBlock);
+        assertTrue(compoundBlock.contains("LOWER_BETTER 用 LT/LTE"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("与目录方向"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("禁止用单个"), () -> compoundBlock);
+        assertTrue(compoundBlock.contains("meets_condition"), () -> compoundBlock);
+        // 无具体日期槽位的判例描述：族块段落不允许出现字面日期（历史教训：示例日期会污染
+        // 同一生成里的 requirements 日期槽）。
+        assertFalse(compoundBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "compound benchmark guidance must not carry literal example dates");
+        assertFalse(compoundBlock.contains("合成示例"),
+                "compound benchmark guidance stays slot-descriptive, never exemplified");
+    }
+
+    @Test
+    void v66FirstShotJudgmentsStayInsideTheirFamilyBlocksAndStayDateFree() {
+        String sys = BankPlanPromptComposer.FIXED_SYSTEM_PREFIX;
+        String requirements = BankPlanPromptComposer.REQUIREMENTS_SYSTEM_PREFIX;
+
+        // v66 判例只进 PLAN/SINGLE_PASS 段；REQUIREMENTS 阶段前缀不携带任何正向判例。
+        assertFalse(requirements.contains("正向判例"));
+
+        // 判例一（命名派生比率族）必须住在规则 3 段内，只转录 derived 点值比率 gate 的
+        // 可执行条件：requirements 恰含发布派生项，plan 侧直选两操作数 + RATIO 计算。
+        int rule3Start = sys.indexOf("3. 使用目录中的派生指标时");
+        int rule3aStart = sys.indexOf("3a. 同一日期同时要求环比和同比时");
+        assertTrue(rule3Start >= 0 && rule3aStart > rule3Start);
+        int derivedRatioIdx = sys.indexOf("正向判例（目录发布派生指标点值比率）");
+        assertTrue(derivedRatioIdx > rule3Start && derivedRatioIdx < rule3aStart,
+                "the named derived ratio judgment must stay inside rule 3");
+        // 上一轮的 generic 直选形判例必须已移除：官方失败族期望派生形，直选形判例会带偏首掷。
+        assertFalse(sys.contains("正向判例（两基础指标点值比率）"));
+        String derivedRatioBlock = sys.substring(derivedRatioIdx, rule3aStart);
+        assertTrue(derivedRatioBlock.contains("action=EXECUTE、intent=RATIO"));
+        assertTrue(derivedRatioBlock.contains("分子在前、分母在后（存贷比形态即"));
+        assertTrue(derivedRatioBlock.contains("derivedMetrics 恰含该发布派生项一项"));
+        assertTrue(derivedRatioBlock.contains("DERIVED_<分子 ZB###>_DIV_<分母 ZB###>"));
+        assertTrue(derivedRatioBlock.contains(
+                "derivedMetrics=[]、calculation.type=RATIO、baseline=分母代码"));
+        assertTrue(derivedRatioBlock.contains("ratio_percent 三列比率事实。漏写派生项、交换分子分母或"));
+        // 区分语（防误路由）：无发布派生指标才走 3e 直选形；已发布派生指标必须派生形。
+        assertTrue(derivedRatioBlock.contains("才使用规则 3e 的 derivedMetrics=[] 直选形；目录已发布"));
+        assertTrue(derivedRatioBlock.contains("对应派生指标时必须用本派生形，不得退化成直选形"));
+        assertFalse(derivedRatioBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the named derived ratio judgment must stay date-free");
+        assertFalse(derivedRatioBlock.contains("合成示例"),
+                "the named derived ratio judgment stays shape-descriptive, never exemplified");
+        assertFalse(derivedRatioBlock.contains("DERIVED_SUM"), "additive tokens stay inside rule 3i");
+        assertFalse(derivedRatioBlock.contains("numeratorOperands"));
+
+        // 判例二（聚合极值族）必须住在规则 15 的 aggregationMode 条款内。
+        int aggModeStart = sys.indexOf("output.aggregationMode 的强制规则");
+        int granularityStart = sys.indexOf(
+                "time.granularity 的 QUARTER/HALF_YEAR/YEAR 仅当题面明确出现");
+        assertTrue(aggModeStart >= 0 && granularityStart > aggModeStart);
+        int extremaIdx = sys.indexOf("正向判例（极值并列输出）");
+        assertTrue(extremaIdx > aggModeStart && extremaIdx < granularityStart,
+                "the aggregation extrema judgment must stay inside rule 15's aggregationMode bullet");
+        assertTrue(sys.contains("output.aggregationMode 必须精确为 \"WITH_EXTREMA\""));
+        assertTrue(sys.contains("极值列（aggregate_value、min_value、max_value、observation_count）"));
+        assertTrue(sys.contains("只填 \"AVERAGE_ONLY\" 的纯聚合均值形状会被拒绝并要求按本形状重写"));
+        String extremaBlock = sys.substring(extremaIdx, granularityStart);
+        assertFalse(extremaBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the extrema judgment must stay date-free");
+        assertFalse(extremaBlock.contains("合成示例"),
+                "the extrema judgment stays shape-descriptive, never exemplified");
+
+        // 判例三（全省排名族）必须住在规则 9 段内。
+        int rule9Start = sys.indexOf("9. “排名前三和后三/前N名和后N名”");
+        int rule10Start = sys.indexOf("10. “某机构某指标在一段期间有多少天高于全省均值”");
+        assertTrue(rule9Start >= 0 && rule10Start > rule9Start);
+        int provinceIdx = sys.indexOf("正向判例（全省哪家极值选择）");
+        assertTrue(provinceIdx > rule9Start && provinceIdx < rule10Start,
+                "the province-wide ranking judgment must stay inside rule 9");
+        assertTrue(sys.contains("槽位完整时一次写对：action=EXECUTE、intent=RANKING、"));
+        assertTrue(sys.contains("organizationCodes=[]（“哪家”就是全省范围，不是缺机构）"));
+        assertTrue(sys.contains("filters 恰好一个名次过滤器"));
+        assertTrue(sys.contains("operator=LTE、value=题面名次 N（极值单选时 N=1）"));
+        assertTrue(sys.contains("requiredLimit 与该名次值同值"));
+        String provinceBlock = sys.substring(provinceIdx, rule10Start);
+        assertFalse(provinceBlock.matches("(?s).*\\d{4}-\\d{2}-\\d{2}.*"),
+                "the province ranking judgment must stay date-free");
+        assertFalse(provinceBlock.contains("合成示例"),
+                "the province ranking judgment stays shape-descriptive, never exemplified");
     }
 }

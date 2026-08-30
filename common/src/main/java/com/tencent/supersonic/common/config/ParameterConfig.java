@@ -27,15 +27,25 @@ public abstract class ParameterConfig {
     }
 
     /**
-     * Parameter value will be derived in the following order: 1. `system config` set with user
-     * interface 2. `system property` set with application.yaml file 3. `default value` set with
+     * Parameter value will be derived in the following order: 1. `system property` set with
+     * `-D` on the command line (explicit per-process operator override, as documented on each
+     * Parameter) 2. `system config` set with user interface 3. `default value` set with
      * parameter declaration
+     *
+     * <p>The system property must be consulted before the system config: {@link
+     * SystemConfig#getParameters()} back-fills every registered parameter with its default
+     * value, so a name missing from the stored config still resolves non-blank and would
+     * otherwise shadow the `-D` override.
      *
      * @param parameter instance
      * @return parameter value
      */
     public String getParameterValue(Parameter parameter) {
         String paramName = parameter.getName();
+        String sysProperty = System.getProperty(paramName);
+        if (StringUtils.isNotBlank(sysProperty)) {
+            return sysProperty;
+        }
         String value = sysConfigService.getSystemConfig().getParameterByName(paramName);
         if (StringUtils.isBlank(value)) {
             if (environment.containsProperty(paramName)) {

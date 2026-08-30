@@ -73,6 +73,11 @@ public class BankPlanLlmPrefixCache {
         return delegate.generate(model, config, dynamicUserContent, useMemo);
     }
 
+    public void evictCompletion(ChatModelConfig config, Stage stage, String dynamicUserContent) {
+        requireSinglePass(stage);
+        delegate.evictCompletion(config, dynamicUserContent);
+    }
+
     /** Exposes one stage plus the existing top-level counters for report compatibility. */
     public Map<String, Object> stats() {
         Map<String, Object> singlePass = delegate.stats();

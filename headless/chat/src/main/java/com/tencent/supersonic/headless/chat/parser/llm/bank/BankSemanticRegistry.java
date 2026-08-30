@@ -8,8 +8,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -75,6 +77,7 @@ public final class BankSemanticRegistry {
     private static final Map<String, MetricDefinition> DERIVED_METRICS = buildDerivedMetrics();
     private static final Map<String, OrganizationDefinition> ORGANIZATIONS = buildOrganizations();
     private static final Map<String, PlanFieldDefinition> PLAN_FIELDS = buildPlanFields();
+    private static final Map<String, Double> DERIVED_RATIO_SCALES = buildDerivedRatioScales();
 
     private BankSemanticRegistry() {}
 
@@ -153,6 +156,55 @@ public final class BankSemanticRegistry {
         return DERIVED_METRICS;
     }
 
+    /**
+     * Result-contract multiplier applied to a numerator/denominator ratio, owned here so the point
+     * ratio compiler and the derived ranking template stay consistent. Percent-style catalog
+     * ratios default to 100; pairs whose units already cancel keep the raw quotient (1.0), and
+     * unit-conversion pairs (亿元→万元) scale by 10000.
+     */
+    public static double ratioScale(String numerator, String denominator) {
+        Double scale = numerator == null || denominator == null ? null
+                : DERIVED_RATIO_SCALES.get(ratioPairKey(numerator, denominator));
+        return scale == null ? 100.0 : scale;
+    }
+
+    /**
+     * Additive composite derived code shape: {@code DERIVED_SUM_<M1>_AND_<M2>} — no {@code _DIV_}
+     * suffix. The shape is deliberately not part of {@link #derivedMetricCodes()} (the prompt
+     * vocabulary stays pairwise-free); validators and parsers accept any canonical instantiation
+     * whose operands are registered percent-unit catalog metrics.
+     */
+    private static final Pattern ADDITIVE_DERIVED_METRIC_CODE =
+            Pattern.compile("DERIVED_SUM_([A-Z0-9]+)_AND_([A-Z0-9]+)");
+
+    /** True when the catalog publishes the metric with the percent unit (%). */
+    public static boolean isPercentUnitMetric(String code) {
+        MetricDefinition definition =
+                code == null ? null : METRICS.get(code.toUpperCase(Locale.ROOT));
+        return definition != null && "%".equals(definition.unit());
+    }
+
+    /** Exact-shape check for the additive composite derived code (two operands, no _DIV_ suffix). */
+    public static boolean isAdditiveDerivedMetricCode(String code) {
+        return code != null && ADDITIVE_DERIVED_METRIC_CODE.matcher(code).matches();
+    }
+
+    /**
+     * Canonical additive derived code for an operand pair: the operands are sorted
+     * lexicographically so one metric pair always has exactly one code form
+     * (e.g. ZB013+ZB017 → DERIVED_SUM_ZB013_AND_ZB017 regardless of mention order).
+     */
+    public static String additiveDerivedMetricCode(String first, String second) {
+        if (first == null || second == null) {
+            throw new IllegalArgumentException("additive derived operands are required");
+        }
+        String left = first.toUpperCase(Locale.ROOT);
+        String right = second.toUpperCase(Locale.ROOT);
+        return left.compareTo(right) < 0
+                ? "DERIVED_SUM_" + left + "_AND_" + right
+                : "DERIVED_SUM_" + right + "_AND_" + left;
+    }
+
     public static Map<String, OrganizationDefinition> organizations() {
         return ORGANIZATIONS;
     }
@@ -212,7 +264,8 @@ public final class BankSemanticRegistry {
                 "derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
                 "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},
-                "denominator":{"enum":%s},"name":{"type":"string"}}}}}}
+                "denominator":{"enum":%s},"name":{"type":"string"},
+                "numeratorOperands":{"type":["array","null"],"items":{"enum":%s}}}}}}}
                 """
                 .formatted(jsonArray(PLAN_ACTIONS), jsonArray(INTENTS), jsonArray(metricCodes()),
                         jsonArray(AGGREGATIONS), jsonArray(DIMENSIONS),
@@ -220,7 +273,8 @@ public final class BankSemanticRegistry {
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(CALCULATION_TYPES),
                         jsonArray(SORT_DIRECTIONS), jsonArray(derivedMetricCodes()),
-                        jsonArray(metricCodes()), jsonArray(metricCodes()))
+                        jsonArray(metricCodes()), jsonArray(metricCodes()),
+                        jsonArray(metricCodes()))
                 .strip();
     }
 
@@ -237,7 +291,9 @@ public final class BankSemanticRegistry {
                 "items":{"enum":%s}},"derivedMetrics":{"type":"array","items":{"type":"object",
                 "additionalProperties":false,"required":["metricCode","numerator","denominator","name"],
                 "properties":{"metricCode":{"enum":%s},"numerator":{"enum":%s},"denominator":{"enum":%s},
-                "name":{"type":"string"}}}},"organizationCodes":{"type":"array","items":{"enum":%s}},
+                "name":{"type":"string"},
+                "numeratorOperands":{"type":["array","null"],"items":{"enum":%s}}}}},
+                "organizationCodes":{"type":"array","items":{"enum":%s}},
                 "time":{"type":["object","null"],"additionalProperties":false,"required":["startDate",
                 "endDate","granularity","comparison","baselineStartDate","baselineEndDate"],"properties":{
                 "startDate":{"type":"string","format":"date","pattern":"^\\\\d{4}-\\\\d{2}-\\\\d{2}$"},
@@ -253,6 +309,7 @@ public final class BankSemanticRegistry {
                 .formatted(jsonArray(REQUIREMENT_ACTIONS), jsonArray(REQUIREMENT_INTENTS),
                         jsonArray(metricCodes()), jsonArray(derivedMetricCodes()),
                         jsonArray(metricCodes()), jsonArray(metricCodes()),
+                        jsonArray(metricCodes()),
                         jsonArray(organizationCodes()), jsonArray(TIME_GRANULARITIES),
                         jsonArray(TIME_COMPARISONS), jsonArray(filterFields()),
                         jsonArray(FILTER_OPERATORS), jsonArray(ANSWER_FACT_TYPES))
@@ -319,6 +376,12 @@ public final class BankSemanticRegistry {
                 plan fields（类型/必填/默认值/允许值/示例）：
                 %s
 
+                limit 与 aggregationMode 语义补充（解释性质，合法取值仍以上方目录为准）：
+                - limit 只服务排名切片：单侧「前N / 后N」填 N；「前N和后N」双侧切片填 2*N；
+                  非排名查询族一律为 null，禁止把机构总数当作 limit。
+                - output.aggregationMode 表示是否顺带输出极值：只问均值/日均值等平均口径时填
+                  AVERAGE_ONLY；同时要求最高值与最低值时填 WITH_EXTREMA；都不是则保持 null。
+
                 aggregation: %s
                 dimensions: %s
                 calculation type: %s
@@ -351,6 +414,16 @@ public final class BankSemanticRegistry {
                 - COMPARE 仅与 benchmark 搭配：value=PROVINCE_AVERAGE、values=[]
                 - metric_value 与 GT/GTE/LT/LTE 且 value=PROVINCE_AVERAGE 表示高于/低于全省均值的方向，
                   需同时声明上面的 benchmark 过滤项
+                非 EQ 运算符的使用场景（示例仅示意写法，具体取值以题干为准）：
+                - NE 排除单一取值，如 {"field":"bank_organization","operator":"NE",
+                  "value":"ORG005","values":[]}
+                - IN 命中列表内任一值，如 {"field":"bank_organization","operator":"IN",
+                  "value":null,"values":["ORG001","ORG002"]}
+                - NOT_IN 排除列表内全部值，如 {"field":"bank_organization","operator":"NOT_IN",
+                  "value":null,"values":["ORG003","ORG004"]}
+                - CONTAINS 名称包含匹配，如 {"field":"bank_organization","operator":"CONTAINS",
+                  "value":"农商行","values":[]}
+                全部样例 filters 中的 values 数组按上述规则填数；无列表运算时保持 values=[]。
                 """.formatted(filterFields(), FILTER_OPERATORS).strip();
     }
 
@@ -421,6 +494,27 @@ public final class BankSemanticRegistry {
                         immutableSet(source.getNumerator(), source.getDenominator()), INTENTS,
                         immutableSet("RATIO_PERCENT", "RANK_POSITION", "METRIC_ROLE"))));
         return Collections.unmodifiableMap(metrics);
+    }
+
+    /**
+     * Ratio result scales keyed by operand pair. Catalog ratios are percent-style (scale 100)
+     * unless the units cancel: 人均利润 = 净利润(万元) / 员工人数(人) is already a raw quotient
+     * (scale 1.0), and 网点平均存款规模 = 各项存款(亿元) / 网点数量(个) converts to 万元 per
+     * outlet (scale 10000). The point ratio compiler and the derived ranking template both read
+     * this map, so the two routes can never drift apart again.
+     */
+    private static Map<String, Double> buildDerivedRatioScales() {
+        LinkedHashMap<String, Double> scales = new LinkedHashMap<>();
+        BankFinancialLexicon.derivedMetrics().forEach((code, source) -> scales.put(
+                ratioPairKey(source.getNumerator(), source.getDenominator()), 100.0));
+        scales.put(ratioPairKey("ZB011", "ZB018"), 1.0);
+        scales.put(ratioPairKey("ZB001", "ZB019"), 10000.0);
+        return Collections.unmodifiableMap(scales);
+    }
+
+    private static String ratioPairKey(String numerator, String denominator) {
+        return numerator.toUpperCase(Locale.ROOT) + "|"
+                + denominator.toUpperCase(java.util.Locale.ROOT);
     }
 
     private static Map<String, OrganizationDefinition> buildOrganizations() {

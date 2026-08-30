@@ -19,6 +19,22 @@ class BankNl2SqlErrorTest {
     }
 
     @Test
+    void planStageExhaustedCarriesMachineReadableMarkerAndLastFailureCode() {
+        BankNl2SqlError coded = BankNl2SqlError.planStageExhausted(new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "derived_point_ratio_mismatch: ratio operands resolve to the same metric"));
+        assertTrue(coded.isPlanStageExhausted());
+        assertEquals("derived_point_ratio_mismatch", coded.getPlanFailureCode());
+
+        BankNl2SqlError uncoded = BankNl2SqlError.afterSingleRepair(
+                new BankQueryPlanParseException(
+                        BankQueryPlanParseException.Reason.SCHEMA_VIOLATION,
+                        "metrics must be non-empty"));
+        assertTrue(uncoded.isPlanStageExhausted());
+        assertEquals("SCHEMA_VIOLATION", uncoded.getPlanFailureCode());
+    }
+
+    @Test
     void exposesModelFailureAsTerminalUserMessage() {
         BankNl2SqlError error = BankNl2SqlError.modelFailure(new RuntimeException("unavailable"));
 

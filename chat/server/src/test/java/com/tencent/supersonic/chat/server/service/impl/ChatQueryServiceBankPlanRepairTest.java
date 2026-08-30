@@ -102,6 +102,57 @@ class ChatQueryServiceBankPlanRepairTest {
     }
 
     @Test
+    void repairsTranslationFailuresByRegeneratingTheWholePlan() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "fingerprint-1", "TRANSLATION_FAILED"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SUCCESS, result.getQueryState());
+        assertEquals(2, service.executeCount);
+        assertEquals(1, service.repairRequests.size());
+        ChatParseReq repairRequest = service.repairRequests.get(0);
+        String feedback = repairRequest.getBankPlanRepairContext().getToolResultJson();
+        assertTrue(feedback.contains("TRANSLATION_FAILED"));
+        assertTrue(feedback.contains("TRANSLATE"));
+        assertEquals(BankPlanTraceEvent.Action.REPAIRING, trace(result).get(0).getAction());
+    }
+
+    @Test
+    void carriesSqlSafetyRootCauseHintsIntoTheRepairContext() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "fingerprint-1", "SQL_SAFETY_POLICY"), succeeded()));
+        service.addRepairParse(parseResponse(20L, 1));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SUCCESS, result.getQueryState());
+        assertEquals(1, service.repairRequests.size());
+        String feedback =
+                service.repairRequests.get(0).getBankPlanRepairContext().getToolResultJson();
+        assertTrue(feedback.contains("failed_layer=SQL_SAFETY_POLICY"));
+        assertTrue(feedback.contains("root_message=opaque database error"));
+    }
+
+    @Test
+    void doesNotSpendARoundOnEnvironmentFaultsFromExecution() {
+        StubService service = new StubService(List.of(
+                failed(1, "trace-1", "fingerprint-1", "ENVIRONMENT_FAULT",
+                        "Provider auth error: Invalid API key for endpoint")));
+
+        QueryResult result = service.executeWithBankPlanRepair(executeRequest(), storedQuery());
+
+        assertEquals(QueryState.SEARCH_EXCEPTION, result.getQueryState());
+        assertEquals(1, service.executeCount);
+        assertTrue(service.repairRequests.isEmpty(),
+                "environment faults must terminate without any repair attempt");
+        List<BankPlanTraceEvent> events = trace(result);
+        assertEquals(BankPlanTraceEvent.Action.STOPPED, events.get(0).getAction());
+        assertEquals("ENVIRONMENT_FAULT", events.get(0).getErrorCode());
+    }
+
+    @Test
     void retriesResultContractFailuresEvenWhenDatabaseExecutionSucceeded() {
         StubService service = new StubService(List.of(
                 resultContractFailure(1, "trace-1", "fingerprint-1"), succeeded()));
@@ -132,13 +183,25 @@ class ChatQueryServiceBankPlanRepairTest {
 
     private static QueryResult failed(int attempt, String traceId, String fingerprint,
             String errorCode) {
-        BankPlanToolResult.Stage stage = "SQL_SAFETY_POLICY".equals(errorCode)
-                ? BankPlanToolResult.Stage.SQL_SAFETY
-                : "QUERY_GATEWAY".equals(errorCode)
-                        ? BankPlanToolResult.Stage.DATABASE_PREPARE
-                        : BankPlanToolResult.Stage.DATABASE_EXECUTE;
+        return failed(attempt, traceId, fingerprint, errorCode, "opaque database error");
+    }
+
+    private static QueryResult failed(int attempt, String traceId, String fingerprint,
+            String errorCode, String errorMessage) {
+        BankPlanToolResult.Stage stage = switch (errorCode) {
+            case "SQL_SAFETY_POLICY" -> BankPlanToolResult.Stage.SQL_SAFETY;
+            case "QUERY_GATEWAY" -> BankPlanToolResult.Stage.DATABASE_PREPARE;
+            case "TRANSLATION_FAILED" -> BankPlanToolResult.Stage.TRANSLATE;
+            default -> BankPlanToolResult.Stage.DATABASE_EXECUTE;
+        };
         BankPlanToolResult toolResult = BankPlanToolResult.failed(attempt, traceId, fingerprint,
-                stage, errorCode, Map.of(), List.of("regenerate the complete plan"));
+                stage, errorCode, Map.of(),
+                // Same hint shape SqlExecutor persists for execution-stage failures.
+                List.of("failed_layer=" + errorCode, "root_message=" + errorMessage,
+                        "regenerate the complete plan"));
+        if (errorMessage != null) {
+            toolResult.setMessage(errorMessage);
+        }
         SemanticParseInfo parseInfo = new SemanticParseInfo();
         parseInfo.getProperties().put(BankPlanToolResult.PROPERTY_KEY, toolResult);
         Map<String, Object> plan = new LinkedHashMap<>();

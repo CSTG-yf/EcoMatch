@@ -208,6 +208,8 @@ public class BankRequestContractResponseParser {
             }
             boolean provinceAverageBenchmark = isProvinceAverageBenchmark(filter);
             boolean provinceAverageDirection = isProvinceAverageDirection(filter);
+            boolean metricBenchmarkCondition =
+                    BankQueryPlanValidator.isMetricBenchmarkCondition(filter);
             if (("benchmark".equals(filter.getField()) || "COMPARE".equals(filter.getOperator()))
                     && !provinceAverageBenchmark) {
                 errors.add("province average must use exact filter "
@@ -215,13 +217,17 @@ public class BankRequestContractResponseParser {
                         + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}");
             }
             if ("PROVINCE_AVERAGE".equals(filter.getValue()) && !provinceAverageBenchmark
-                    && !provinceAverageDirection) {
-                errors.add("PROVINCE_AVERAGE may only be a benchmark or metric_value direction");
+                    && !provinceAverageDirection && !metricBenchmarkCondition) {
+                errors.add("PROVINCE_AVERAGE may only be a benchmark filter, a metric_value "
+                        + "direction object, or a per-metric benchmark condition "
+                        + "{\"field\":\"<ZB###>\",\"operator\":\"GT|GTE|LT|LTE\","
+                        + "\"value\":\"PROVINCE_AVERAGE\",\"values\":[]}");
             }
-            if (provinceAverageDirection && !hasProvinceAverageBenchmark) {
+            if ((provinceAverageDirection || metricBenchmarkCondition)
+                    && !hasProvinceAverageBenchmark) {
                 errors.add("province-average direction requires the exact benchmark filter");
             }
-            if ((provinceAverageBenchmark || provinceAverageDirection)
+            if ((provinceAverageBenchmark || provinceAverageDirection || metricBenchmarkCondition)
                     && (filter.getValues() == null || !filter.getValues().isEmpty())) {
                 errors.add("province-average filters values must be exactly []");
             }
@@ -248,8 +254,14 @@ public class BankRequestContractResponseParser {
         }
         Set<String> seen = new LinkedHashSet<>();
         for (BankQueryPlan.DerivedMetric metric : derivedMetrics) {
-            if (metric == null || StringUtils.isBlank(metric.getMetricCode())
-                    || !BankSemanticRegistry.derivedMetricCodes().contains(metric.getMetricCode())
+            if (metric == null || StringUtils.isBlank(metric.getMetricCode())) {
+                errors.add("derivedMetrics must declare one exact published code with distinct "
+                        + "registry numerator and denominator");
+                continue;
+            }
+            if (BankSemanticRegistry.isAdditiveDerivedMetricCode(metric.getMetricCode())) {
+                validateAdditiveDerivedMetric(metric, errors);
+            } else if (!BankSemanticRegistry.derivedMetricCodes().contains(metric.getMetricCode())
                     || !BankSemanticRegistry.metricCodes().contains(metric.getNumerator())
                     || !BankSemanticRegistry.metricCodes().contains(metric.getDenominator())
                     || metric.getNumerator().equals(metric.getDenominator())
@@ -262,6 +274,40 @@ public class BankRequestContractResponseParser {
             if (!seen.add(metric.getMetricCode())) {
                 errors.add("derivedMetrics contains a duplicate metricCode: " + metric.getMetricCode());
             }
+        }
+    }
+
+    /**
+     * Requirements-stage whitelist for the additive composite derived metric
+     * {@code DERIVED_SUM_<M1>_AND_<M2>}: the code must be the canonical (lexicographically
+     * ordered) form of two distinct registered percent-unit catalog metrics, and the item must
+     * repeat them as numerator (smaller code) and denominator (larger code) so the plan stage
+     * sees one coherent operand pair. A canonical code over amount-unit operands is rejected
+     * with a satisfiable redirect (drop the derived metric, list the operands plainly) —
+     * restating the percent rule there would leave repair without an accepting fixed point.
+     */
+    private void validateAdditiveDerivedMetric(BankQueryPlan.DerivedMetric metric,
+            List<String> errors) {
+        String code = metric.getMetricCode();
+        String numerator = metric.getNumerator();
+        String denominator = metric.getDenominator();
+        if (StringUtils.isBlank(numerator) || StringUtils.isBlank(denominator)
+                || !BankSemanticRegistry.metricCodes().contains(numerator)
+                || !BankSemanticRegistry.metricCodes().contains(denominator)
+                || numerator.equals(denominator)
+                || !BankSemanticRegistry.additiveDerivedMetricCode(numerator,
+                        denominator).equals(code)) {
+            errors.add("additive derivedMetrics must declare the canonical code "
+                    + "DERIVED_SUM_<M1>_AND_<M2> of two distinct percent-unit (%) catalog "
+                    + "metrics with numerator=M1 and denominator=M2: " + code);
+            return;
+        }
+        if (!BankSemanticRegistry.isPercentUnitMetric(numerator)
+                || !BankSemanticRegistry.isPercentUnitMetric(denominator)) {
+            errors.add("DERIVED_SUM derived metrics are only for percent-unit (%) operand "
+                    + "pairs; sums of amount-unit metrics stay plain multi-metric queries: "
+                    + "remove this derivedMetrics entry and list the operand metrics "
+                    + "directly in metrics and metricCodes: " + code);
         }
     }
 
