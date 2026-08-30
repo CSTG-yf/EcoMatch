@@ -830,3 +830,37 @@ H-04/H-10 属族内缺陷（`rank 切片空行集`、`双阈值契约`）、H-11
     观察项，非 v64 结构回归（下次 run 关注是否自愈）。
 - **有效净变化 vs r6 定版**：+H-10（复合族）+方差回落（H-03/04/12 全过）=
   38/40；M-19 转为「事实正确、计分契约错配」的诚实已知项。
+
+### 2026-08-30｜局域网 Qwen3.6-35B-A3B（.88）接入 + test r1 = 37/40
+
+- **背景**：用户指定改用局域网服务器 192.168.20.88 的 Qwen3.6-35B-A3B
+  （UD-Q4_K_M gguf，llama.cpp，`http://192.168.20.88:8080/v1` OpenAI 兼容，
+  model id = gguf 全路径）跑一次 test。SSH（root@/qwer@ 密钥认证）被拒，
+  服务端口直连可用，无需隧道；H2 停机窗口插入模型行 **id 2884**（temperature 0，
+  timeOut 300）。train 按指示跳过。
+- **同窗口部署（未提交，待批准）**：H-09 日期域守卫批（BankDataDomain 惰性
+  探测 + validator `DATE_OUT_OF_DATA_DOMAIN` 四日期槽位可修复守卫 +
+  `GOLD_CONTRACT_ISSUES.md` 金标缺陷报告）。api/core/chat 三 jar 成套替换，
+  重启后 memo 清空。
+- **smoke r1 = 5/5**（caseAccuracy 1.0，errorCategories 全 NONE）健康门禁通过。
+- **test r1（qwen88-test-20260830-r1）= 37/40（caseAccuracy 0.925）**，串行约
+  10 分钟；parse p50 11.1s（A3B 单题略慢于 GLM 主线）；errorCategories：
+  NONE 37 / PARSE_ERROR 2 / RESULT_FACT_MISMATCH 1；execution 38/40。
+- **跨模型关键观察**：H-09/H-10 双双通过——H-09 Qwen 一次填对日期，
+  `DATE_OUT_OF_DATA_DOMAIN` 本轮 0 触发（守卫为安全网，未需点火）；H-10
+  复合基准族在 Qwen 通道一次通过，**v64 新族非对单一模型过拟合**。
+- **三失败归因（全部模型能力差异，无模板/族回归）**：
+  - **TST-M-02（RESULT_FACT_MISMATCH）**：实体绑定滑误——「C市农商行」金标
+    绑 ORG003，Qwen 绑 ORG007；模板/日期（2025-03-31 vs 年初 2024-12-31）/
+    指标（ZB017）/列序与 GLM r8 完全一致，纯实体链接错。
+  - **TST-M-19（PARSE_ERROR）**：plan 两轮不收敛——Qwen 先出 derivedMetrics
+    比率形（`additive_composite_mismatch` 拒），修复轮仍违反 derivedMetrics
+    单一已发布码约束 → planStageExhausted。对照 GLM r8 同题路由加合族、事实
+    值 2.25 精确（仅计分契约错配）——v64 加合词表对 Qwen 穿透力不足。
+  - **TST-S-07（PARSE_ERROR）**：plan 两轮不收敛——
+    `province_wide_institution_ranking_mismatch` ×2，Qwen 未能产出合规的
+    全域排名 plan（GLM 同题过）。
+- **结论**：同 jar（v64+日期守卫）下 GLM-5.3-flash 38/40 vs Qwen3.6-A3B
+  37/40；差 1 题的构成 = plan 指令跟随弱 2 题（M-19/S-07）− 实体绑定滑误
+  1 题（M-02）+ Qwen 自己填对 H-09 日期（GLM 在此滑误）。既有已知项
+  TST-M-19 计分契约错配（GOLD_CONTRACT_ISSUES.md）在两模型下均不可计分。
