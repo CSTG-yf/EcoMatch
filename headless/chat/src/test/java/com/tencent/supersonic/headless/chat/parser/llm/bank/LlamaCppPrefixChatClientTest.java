@@ -33,14 +33,12 @@ class LlamaCppPrefixChatClientTest {
         String stripped = LlamaCppPrefixChatClient.stripThinking(raw);
         assertFalse(stripped.contains("先分析"));
         assertTrue(stripped.contains("SELECT 1"));
-        assertEquals("SELECT 1", BankFreeSqlPromptComposer.extractSql(raw));
     }
 
     @Test
     void stripThinkingKeepsPlainJson() {
         String raw = "{\"thought\":\"t\",\"sql\":\"SELECT 2\"}";
         assertEquals(raw, LlamaCppPrefixChatClient.stripThinking(raw));
-        assertEquals("SELECT 2", BankFreeSqlPromptComposer.extractSql(raw));
     }
 
     @Test
@@ -105,6 +103,35 @@ class LlamaCppPrefixChatClientTest {
         assertFalse(body.has("enable_thinking"));
         assertFalse(body.has("chat_template_kwargs"));
         assertEquals("json_schema", body.path("response_format").path("type").asText());
+    }
+
+    @Test
+    void reasoningEffortTravelsOnOpenAiWireAndStaysOffLlamaCppPayloads() {
+        ChatModelConfig cloud = plainChatConfig();
+        cloud.setBaseUrl("https://www.autodl.art/api/v1");
+        cloud.setReasoningEffort(" low ");
+
+        ObjectNode cloudBody = new LlamaCppPrefixChatClient().createRequestBody(cloud,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true);
+        assertEquals("low", cloudBody.path("reasoning_effort").asText());
+
+        ChatModelConfig local = plainChatConfig();
+        local.setBaseUrl("http://127.0.0.1:8899");
+        local.setReasoningEffort("low");
+
+        ObjectNode localBody = new LlamaCppPrefixChatClient().createRequestBody(local,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true);
+        assertFalse(localBody.has("reasoning_effort"),
+                "llama.cpp payloads keep their native thinking switches");
+
+        ChatModelConfig unset = plainChatConfig();
+        unset.setBaseUrl("https://api.openai.com/v1");
+
+        assertFalse(new LlamaCppPrefixChatClient().createRequestBody(unset,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.defaults(), true).has("reasoning_effort"));
     }
 
     @Test
@@ -303,6 +330,15 @@ class LlamaCppPrefixChatClientTest {
         ChatModelConfig config = new ChatModelConfig();
         config.setJsonFormat(true);
         config.setJsonFormatType("json_schema");
+        return config;
+    }
+
+    private static ChatModelConfig plainChatConfig() {
+        ChatModelConfig config = new ChatModelConfig();
+        config.setProvider("OPEN_AI");
+        config.setApiKey("sk-test");
+        config.setTemperature(0.0d);
+        config.setJsonFormat(false);
         return config;
     }
 

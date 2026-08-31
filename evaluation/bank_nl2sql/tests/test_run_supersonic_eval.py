@@ -17,7 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from evaluation_policy import EvaluationAccessError, load_evaluation_records, record_final_test_run  # noqa: E402
+from evaluation_policy import (  # noqa: E402
+    EvaluationAccessError,
+    load_evaluation_records,
+    record_final_test_run,
+)
 from run_supersonic_eval import (  # noqa: E402
     SuperSonicEvaluationError,
     _http_post_json,
@@ -30,7 +34,7 @@ from run_supersonic_eval import (  # noqa: E402
 
 
 class SuperSonicEvaluationPolicyTest(unittest.TestCase):
-    def test_dev_is_available_but_test_requires_final_acknowledgement_and_is_registered(self) -> None:
+    def test_splits_are_independent_but_test_requires_local_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             (root / "dev.jsonl").write_text(json.dumps({"id": "DEV-01"}) + "\n", encoding="utf-8")
@@ -42,12 +46,9 @@ class SuperSonicEvaluationPolicyTest(unittest.TestCase):
             with self.assertRaises(EvaluationAccessError):
                 load_evaluation_records(root, split="test")
             self.assertEqual(
-                [
-                    record["id"]
-                    for record in load_evaluation_records(
-                        root, split="test", acknowledge_final_test=True
-                    )
-                ],
+                [record["id"] for record in load_evaluation_records(
+                    root, split="test", acknowledge_final_test=True
+                )],
                 ["TEST-01"],
             )
 

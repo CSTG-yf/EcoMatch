@@ -53,12 +53,16 @@ public class BankPlanLlmPrefixCache {
         return delegate.stats().get("enableThinking") instanceof Boolean thinking && thinking;
     }
 
-    public void warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
-        delegate.warmPrefix(model, config);
+    public boolean warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return delegate.warmPrefix(model, config);
     }
 
-    public void warmPrefix(ChatLanguageModel model) {
-        warmPrefix(model, null);
+    public boolean warmPrefix(ChatLanguageModel model) {
+        return warmPrefix(model, null);
+    }
+
+    public boolean refreshPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return delegate.refreshPrefix(model, config);
     }
 
     public String generate(ChatLanguageModel model, Stage stage, String dynamicUserContent,
@@ -71,6 +75,11 @@ public class BankPlanLlmPrefixCache {
             String dynamicUserContent, boolean useMemo) {
         requireSinglePass(stage);
         return delegate.generate(model, config, dynamicUserContent, useMemo);
+    }
+
+    public void evictCompletion(ChatModelConfig config, Stage stage, String dynamicUserContent) {
+        requireSinglePass(stage);
+        delegate.evictCompletion(config, dynamicUserContent);
     }
 
     /** Exposes one stage plus the existing top-level counters for report compatibility. */

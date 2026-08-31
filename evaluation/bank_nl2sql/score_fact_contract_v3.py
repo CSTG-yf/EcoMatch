@@ -31,14 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path)
     parser.add_argument("--split", choices=("train", "dev", "test"), default="train")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--acknowledge-final-test", action="store_true")
     args = parser.parse_args(argv)
 
     try:
         records = load_evaluation_records(
             args.dataset,
             split=args.split,
-            acknowledge_final_test=args.acknowledge_final_test,
         )
     except EvaluationAccessError as error:
         parser.error(str(error))

@@ -4,6 +4,8 @@ import com.tencent.supersonic.headless.chat.intent.BankIntentResult.Clarificatio
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -94,6 +96,19 @@ class BankFinancialIntentRecognizerTest {
         assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
                 metricCodes(result));
         assertTrue(result.getFilters().isEmpty());
+        assertFalse(result.isClarificationRequired());
+    }
+
+    @Test
+    void shouldExecuteAnnualOperatingOverviewWithoutClarification() {
+        BankIntentResult result = recognizer.recognize(
+                "帮我分析一下江苏省D市农商行2025年的经营情况。", LocalDate.of(2026, 8, 31));
+
+        assertEquals(BankIntentType.POINT_QUERY, result.getIntent());
+        assertEquals(Set.of("ZB001", "ZB002", "ZB011", "ZB012", "ZB013", "ZB015", "ZB016", "ZB017"),
+                metricCodes(result));
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getStartDate());
+        assertEquals(LocalDate.of(2025, 12, 31), result.getTime().getEndDate());
         assertFalse(result.isClarificationRequired());
     }
 
@@ -316,6 +331,133 @@ class BankFinancialIntentRecognizerTest {
         assertEquals("ZB011", derived.getNumerator());
         assertEquals("ZB009", derived.getDenominator());
         assertEquals(Set.of("ZB011", "ZB009"), metricCodes(result));
+    }
+
+    @Test
+    void shouldMapNeutralMetricMinimumWordingToTheBottomSlice() {
+        BankIntentResult result = recognizer.recognize(
+                "2025年8月末全省哪家农商行的个人存款余额最少？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB004"), metricCodes(result));
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank_from_bottom", result.getFilters().get(0).getField());
+        assertEquals("LTE", result.getFilters().get(0).getOperator());
+        assertEquals("1", result.getFilters().get(0).getValue());
+    }
+
+    @Test
+    void shouldMapNeutralMetricMaximumWordingToTheTopSlice() {
+        BankIntentResult result = recognizer.recognize(
+                "2026年3月末全省哪家农商行的各项贷款余额最多？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB002"), metricCodes(result));
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank", result.getFilters().get(0).getField());
+        assertEquals("LTE", result.getFilters().get(0).getOperator());
+        assertEquals("1", result.getFilters().get(0).getValue());
+    }
+
+    @Test
+    void shouldMapLowerBetterMetricMinimumWordingToTheTopSlice() {
+        BankIntentResult result = recognizer.recognize(
+                "2026年3月末全省哪家农商行的逾期贷款率最低？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB017"), metricCodes(result));
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank", result.getFilters().get(0).getField());
+        assertEquals("LTE", result.getFilters().get(0).getOperator());
+        assertEquals("1", result.getFilters().get(0).getValue());
+    }
+
+    @Test
+    void shouldMapLowerBetterMetricMaximumWordingToTheBottomSlice() {
+        BankIntentResult result = recognizer.recognize(
+                "2026年3月末全省哪家农商行的成本收入比最高？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB012"), metricCodes(result));
+        assertEquals(1, result.getFilters().size());
+        assertEquals("rank_from_bottom", result.getFilters().get(0).getField());
+        assertEquals("LTE", result.getFilters().get(0).getOperator());
+        assertEquals("1", result.getFilters().get(0).getValue());
+    }
+
+    @Test
+    void shouldNotTurnALowerBetterThresholdRequirementIntoARankSlot() {
+        BankIntentResult result = recognizer.recognize(
+                "2026年一季度末，江苏省H市农商行的成本收入比满足35%的最低要求吗？",
+                LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.THRESHOLD, result.getIntent());
+        assertTrue(result.getFilters().stream().noneMatch(filter -> "rank".equals(filter.getField())
+                || "rank_from_bottom".equals(filter.getField())));
+        assertTrue(result.getFilters().stream()
+                .anyMatch(filter -> "metric_value".equals(filter.getField())
+                        && "GTE".equals(filter.getOperator()) && "35%".equals(filter.getValue())));
+    }
+
+    @Test
+    void shouldKeepTheExplicitLastPlacePathUnaffectedByMetricDirection() {
+        BankIntentResult result = recognizer.recognize(
+                "2026年3月末，全省哪家农商行的逾期贷款率排最后一名？", LocalDate.of(2026, 7, 22));
+
+        assertEquals(BankIntentType.RANKING, result.getIntent());
+        assertEquals(Set.of("ZB017"), metricCodes(result));
+        assertTrue(result.getFilters().stream().noneMatch(filter -> "rank".equals(filter.getField())));
+        assertTrue(result.getFilters().stream()
+                .anyMatch(filter -> "rank_from_bottom".equals(filter.getField())
+                        && "LTE".equals(filter.getOperator()) && "1".equals(filter.getValue())));
+    }
+
+    /**
+     * Synthetic shorthand additive phrase (简称词干不在任何别名表里): each stem resolves to its
+     * unique percent-unit catalog metric — 不良 disambiguates to the ZB013 ratio against the
+     * 亿元 balance, 逾期 to ZB017 — and the pair keeps the written order.
+     */
+    @Test
+    void additiveOperandResolutionBindsShorthandStemsToTheirUniquePercentMetrics() {
+        Optional<BankFinancialIntentRecognizer.AdditiveOperandPair> resolution = recognizer
+                .additiveOperandResolution("2026年5月末江苏省A市农商行不良+逾期合计占贷款比是多少");
+
+        assertTrue(resolution.isPresent());
+        assertEquals(List.of("ZB013", "ZB017"), resolution.get().operandCodes());
+        assertEquals("不良+逾期", resolution.get().phrase());
+    }
+
+    @Test
+    void additiveOperandResolutionToleratesParticlesAndChineseConnectors() {
+        Optional<BankFinancialIntentRecognizer.AdditiveOperandPair> resolution = recognizer
+                .additiveOperandResolution("某农商行在2026年5月末不良和逾期的合计是多少");
+
+        assertTrue(resolution.isPresent());
+        assertEquals(List.of("ZB013", "ZB017"), resolution.get().operandCodes());
+    }
+
+    /** 宁可不触发也不猜：non-percent stems resolve to zero percent candidates. */
+    @Test
+    void additiveOperandResolutionAbandonsStemsWithoutAPercentCandidate() {
+        assertTrue(recognizer
+                .additiveOperandResolution("指定机构的存款和贷款的合计是多少")
+                .isEmpty());
+    }
+
+    /** A stem shared by several percent metrics (率) is ambiguous and abandons the resolution. */
+    @Test
+    void additiveOperandResolutionAbandonsAmbiguousStemsWithSeveralPercentCandidates() {
+        assertTrue(recognizer
+                .additiveOperandResolution("指定机构的率和不良的合计是多少")
+                .isEmpty());
+    }
+
+    /** Two stems resolving to the same metric are not an additive operand pair. */
+    @Test
+    void additiveOperandResolutionRejectsIdenticalOperands() {
+        assertTrue(recognizer
+                .additiveOperandResolution("某机构的不良加不良率的合计是多少")
+                .isEmpty());
     }
 
     private Set<String> metricCodes(BankIntentResult result) {

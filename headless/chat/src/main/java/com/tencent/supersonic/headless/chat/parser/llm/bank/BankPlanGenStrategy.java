@@ -27,9 +27,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Model-owned constrained bank planning.
@@ -109,16 +111,14 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             } else {
                 dynamicUser = BankPlanPromptComposer.buildSinglePassRepairUserContent(
                         llmReq.getQueryText(), previousCandidate,
-                        lastError == null ? "planning response is invalid" : lastError.getMessage(),
-                        familyExamples);
+                        repairValidationMessage(lastError, attempt), familyExamples);
             }
             try {
-                String candidate = prefixCache.generate(model, modelConfig,
-                        BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, attempt == 0);
+                String candidate = generateSinglePassCandidate(model, modelConfig, dynamicUser,
+                        attempt == 0);
                 previousCandidate = candidate;
-                BankPlanningResponse planning = parseAndValidatePlanningResponse(
-                        llmReq.getQueryText(), candidate, admissionHints,
-                        toolRepair ? llmReq.getBankRequestContract() : null);
+                BankPlanningResponse planning = parseAndValidatePlanningResponse(llmReq,
+                        candidate);
                 BankRequestContract requirements = planning.getRequirements();
                 if (requirements.getAction() == BankRequestContract.Action.CLARIFY) {
                     String clarificationError = clarificationRecheckMessage(llmReq.getQueryText());
@@ -134,6 +134,19 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         throw BankNl2SqlError.afterSingleRepair(lastError);
                     }
                     throw BankNl2SqlError.clarificationRequired(requirements.getClarification());
+                }
+                // Question-vs-plan organization cross-check (catalog evidence only): a plan that
+                // binds a legal-but-wrong organization stays valid downstream and returns
+                // non-empty rows, so no validator or executor ever sees the mistake. The guard
+                // fires only when the question names exactly one catalog organization and the
+                // plan binds a different one; surfacing it here routes the plan back through the
+                // structured repair loop with a directive message.
+                Optional<String> bindingConflict = BankOrgBindingGuard.conflict(
+                        llmReq.getQueryText(), planOrganizationCodes(planning.getPlan()));
+                if (bindingConflict.isPresent()) {
+                    throw new BankQueryPlanParseException(
+                            BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                            bindingConflict.get());
                 }
                 SemanticIntentHints planHints = requirements.toPlanHints(admissionHints);
                 llmReq.setBankRequestContract(requirements);
@@ -162,11 +175,49 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 repairReasons.add(exception.getReason().name());
                 repairCodes.add(repairErrorCode(exception));
                 logRepair("SINGLE_PASS", attempt + 1, repairErrorCode(exception), exception);
+                if (exception.getReason() == BankQueryPlanParseException.Reason.MALFORMED_JSON) {
+                    // A truncated response replays identically from the completion memo and
+                    // would poison every later round with the same garbage; force a fresh roll.
+                    prefixCache.evictCompletion(modelConfig, BankPlanLlmPrefixCache.Stage.SINGLE_PASS,
+                            dynamicUser);
+                }
+                if (attempt == MAX_MODEL_ATTEMPTS - 1 && repeatsLastCode(repairCodes)) {
+                    // One escalation attempt (third model roll), granted only when both
+                    // base-budget failures carry the SAME error code: either the model keeps
+                    // re-violating one shape gate (the escalated message then demands a shape
+                    // change, not another slot tweak) or both rounds were MALFORMED_JSON
+                    // sampling truncations (the escalated round re-samples with the same
+                    // message; the memo eviction above already forces a fresh roll). Any other
+                    // two-failure pattern stays terminal after one structured repair.
+                    maxAttempts = MAX_MODEL_ATTEMPTS + 1;
+                }
+            } catch (BankPlanCompilationException exception) {
+                // Terminal compiler-class rejection from a plan-shape gate (e.g. a question shape
+                // no query family can express). It is not a model failure and owns no structured
+                // repair: propagate untouched so the terminal error cause chain keeps the exact
+                // Reason for candidate ranking and the controlled free-SQL fallback admission.
+                throw exception;
             } catch (RuntimeException exception) {
                 throw exception instanceof BankNl2SqlError bankError ? bankError
                         : BankNl2SqlError.modelFailure(exception);
             }
         }
+        // Terminal plan-stage exhaustion. The BankNl2SqlError envelope text "bank query plan
+        // remained invalid after one structured repair" is a fixed message signature shared by
+        // both exhaustion shapes: the base budget (initial + one structured repair) and the
+        // escalated budget (initial + two structured repairs, granted only for a repeated error
+        // code or a MALFORMED_JSON sampling loop). Do not repurpose or pattern-match that old
+        // signature for the two-repair case; if the envelope is ever reworded to name the
+        // two-repair exhaustion explicitly, that wording must ship as a NEW message signature
+        // instead of overloading this string. Until then the two cases are distinguished by the
+        // keyPipeline terminal line below plus the dynamic diagnostics: the envelope's
+        // planFailureCode carries the last gate code, and accepted responses record the exact
+        // roll count under bank.nl2sql.modelAttempts.
+        KEY_PIPELINE_LOG.info(
+                "BankPlanGenStrategy plan stage exhausted modelAttempts={} lastCode={} escalationUsed={}",
+                maxAttempts,
+                repairCodes.isEmpty() ? "NONE" : repairCodes.get(repairCodes.size() - 1),
+                maxAttempts > MAX_MODEL_ATTEMPTS);
         throw BankNl2SqlError.afterSingleRepair(lastError == null
                 ? new BankQueryPlanParseException(
                         BankQueryPlanParseException.Reason.VALIDATION_FAILED,
@@ -204,9 +255,60 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         return modelConfig;
     }
 
+    /** Warms only the local llama.cpp fixed prefix during application startup. */
+    public boolean warmLocalPrefixAtStartup(ChatModelConfig modelConfig) {
+        if (!FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(modelConfig)) {
+            return false;
+        }
+        ChatModelConfig configured = configureModel(modelConfig);
+        return prefixCache.warmPrefix(getChatLanguageModel(configured), configured);
+    }
+
+    /** Restores and verifies the local fixed prefix when the user creates a new chat. */
+    public boolean refreshLocalPrefixForSession(ChatModelConfig modelConfig) {
+        if (!FixedSystemPrefixLlmCache.usesLlamaCppPrefixTransport(modelConfig)) {
+            return false;
+        }
+        ChatModelConfig configured = configureModel(modelConfig);
+        return prefixCache.refreshPrefix(getChatLanguageModel(configured), configured);
+    }
+
     /**
-     * Extracts the stable error code that prefixes validator messages ({@code snake_case: ...}).
-     * Structured repair diagnostics must never collapse into a bare {@code VALIDATION_FAILED}.
+     * One model roll for the current attempt. A transient transport fault (timeout, connection
+     * reset, gateway 502/503/504, ...) — an endpoint blip that never produced a model answer —
+     * gets exactly one immediate re-roll of the same dynamic user content before the failure
+     * falls through to the environment-fault terminal path; official runs lose questions to such
+     * blips that an immediate replay answers every time. Hard provider faults (auth, quota,
+     * rate limit, 500) and a second consecutive failure propagate untouched into the existing
+     * terminal state. The re-roll is orthogonal to the structured repair budget: it never
+     * consumes a repair round and never advances {@code bank.nl2sql.modelAttempts}.
+     */
+    private String generateSinglePassCandidate(ChatLanguageModel model, ChatModelConfig modelConfig,
+            String dynamicUser, boolean useMemo) {
+        try {
+            return prefixCache.generate(model, modelConfig,
+                    BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, useMemo);
+        } catch (RuntimeException exception) {
+            if (!BankEnvironmentFaultClassifier.isTransientTransportFault(exception)) {
+                throw exception;
+            }
+            String detail = exception.getMessage() == null ? ""
+                    : exception.getMessage().substring(0,
+                            Math.min(160, exception.getMessage().length()));
+            KEY_PIPELINE_LOG.warn(
+                    "BankPlanGenStrategy transient transport fault on single-pass model call, "
+                            + "re-rolling once: category={} type={} error=[{}]",
+                    BankEnvironmentFaultClassifier.transientTransportCategory(exception),
+                    exception.getClass().getSimpleName(), detail);
+            return prefixCache.generate(model, modelConfig,
+                    BankPlanLlmPrefixCache.Stage.SINGLE_PASS, dynamicUser, useMemo);
+        }
+    }
+
+    /**
+     * Extracts the stable error code that prefixes validator messages ({@code CODE: ...}),
+     * preserving its original case. Structured repair diagnostics must never collapse a valid
+     * validator code into a bare {@code VALIDATION_FAILED}.
      */
     static String repairErrorCode(BankQueryPlanParseException exception) {
         if (exception == null) {
@@ -217,7 +319,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             int colon = message.indexOf(':');
             if (colon > 0) {
                 String candidate = message.substring(0, colon).trim();
-                if (candidate.matches("[a-z][a-z0-9_]{2,63}")) {
+                if (candidate.matches("[A-Za-z][A-Za-z0-9_]{2,63}")) {
                     return candidate;
                 }
             }
@@ -233,6 +335,72 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 "BankPlanGenStrategy repair stage={} attempt={} code={} reason={} detail=[{}]",
                 stage, attempt, code, exception == null ? "NONE" : exception.getReason().name(),
                 message.length() > 160 ? message.substring(0, 160) : message);
+    }
+
+    /**
+     * Builds the repair-round validation message. Every repair round appends the registered
+     * shape skeleton of the failing code, so the model receives the correct overall shape and
+     * not only the violated slot (the positive-skeleton pattern of the clarification recheck).
+     * The escalation round additionally demands a shape change, because the previous two rounds
+     * failed with the same code and slot-level tweaks have no accepting fixed point. A
+     * MALFORMED_JSON loop keeps the plain message: its repair is a fresh sample (the completion
+     * memo is evicted on every malformed failure), not a different plan shape.
+     */
+    private String repairValidationMessage(BankQueryPlanParseException lastError, int attempt) {
+        String message = lastError == null || lastError.getMessage() == null
+                ? "planning response is invalid" : lastError.getMessage();
+        StringBuilder validationMessage = new StringBuilder(message);
+        String skeleton = shapeSkeleton(lastError);
+        if (skeleton != null) {
+            validationMessage.append('\n').append(skeleton);
+        }
+        if (attempt >= MAX_MODEL_ATTEMPTS && !isMalformedJson(lastError)) {
+            validationMessage.append('\n')
+                    .append("升级提示：上一轮与上上轮为同一错误码（")
+                    .append(repairErrorCode(lastError))
+                    .append("），必须改变形状，不得只微调槽位；请改按上述整体形状骨架重新生成完整 JSON，"
+                            + "不得重复此前已被拒绝的槽位组合。");
+        }
+        return validationMessage.toString();
+    }
+
+    /**
+     * The registered skeleton for this failure, resolved in three tiers: by the recovered error
+     * code first; then by the raw leading {@code CODE:} message token as a compatibility fallback;
+     * then by the stable message signature for prefix-less requirements-contract parser failures.
+     * Null when no skeleton is registered; the repair message then stays exactly as emitted.
+     */
+    private static String shapeSkeleton(BankQueryPlanParseException lastError) {
+        if (lastError == null) {
+            return null;
+        }
+        return BankRepairShapeGuidance.forCode(repairErrorCode(lastError))
+                .or(() -> BankRepairShapeGuidance.forRawCodePrefix(lastError.getMessage()))
+                .or(() -> BankRepairShapeGuidance.forMessage(lastError.getMessage()))
+                .orElse(null);
+    }
+
+    private static boolean isMalformedJson(BankQueryPlanParseException exception) {
+        return exception != null
+                && exception.getReason() == BankQueryPlanParseException.Reason.MALFORMED_JSON;
+    }
+
+    /** True when the two most recent failures share one error code. */
+    private static boolean repeatsLastCode(List<String> repairCodes) {
+        return repairCodes.size() >= 2
+                && repairCodes.get(repairCodes.size() - 1)
+                        .equals(repairCodes.get(repairCodes.size() - 2));
+    }
+
+    /** Blank-free organization codes bound by the plan, in plan order. */
+    private static List<String> planOrganizationCodes(BankQueryPlan plan) {
+        if (plan == null || plan.getOrganizations() == null) {
+            return List.of();
+        }
+        return plan.getOrganizations().stream()
+                .map(BankQueryPlan.Organization::getCode)
+                .filter(code -> code != null && !code.isBlank())
+                .collect(Collectors.toList());
     }
 
     /**
@@ -333,6 +501,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         BankIntentResult evidence =
                 clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
         validateMonthAndYearComparison(queryText, requirements);
+        validateStartOfYearComparison(queryText, requirements);
         validateExplicitYearEndRange(queryText, requirements);
         validateExplicitProvinceBottomRanking(queryText, requirements);
         validateProvinceWideInstitutionRanking(queryText, requirements);
@@ -342,6 +511,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         // catalog recognizer is used to return a repairable error when a complete two-operand
         // point ratio is incorrectly clarified or classified as another query family.
         validateGenericPointRatioQuery(queryText, requirements);
+        validateAdditiveCompositeQuery(queryText, requirements);
         validateStructureShareFamily(queryText, requirements, evidence);
         if (requirements.getAction() != BankRequestContract.Action.EXECUTE) {
             return;
@@ -350,6 +520,10 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
             validateRankingIntent(requirements);
         }
         validateRankedChangeFamily(requirements, evidence);
+        // Named-ratio questions (存贷比/净利润率/人均利润) must keep the RATIO family wherever
+        // they appear — not only in the single-org single-date standalone context — so a
+        // degraded two-metric pivot cannot slip through validation.
+        validateDerivedPointRatioQuery(queryText, requirements, evidence);
         validateSelectedOrganizationRanking(queryText, requirements);
         validateOrganizationComparison(queryText, requirements);
         validateSelectedOrganizationBestComparison(queryText, requirements);
@@ -363,7 +537,6 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         if (!isStandalonePointRatioContext(queryText, requirements)) {
             return;
         }
-        validateDerivedPointRatioQuery(queryText, requirements, evidence);
         if (queryText.contains("不良贷款余额") && queryText.contains("贷款总额")
                 && containsAny(queryText, "占", "比重", "比例")) {
             validateQueryFamily("loan_share_ratio_mismatch", requirements, BankIntentType.RATIO,
@@ -481,12 +654,28 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     /**
-     * Validates any recognized derived metric (存贷比/净利润率/人均利润) as a standalone point ratio:
+     * Validates any recognized derived metric (存贷比/净利润率/人均利润) as a ratio-family query:
      * intent=RATIO with both base operands and the derived specification. The per-capita contract
-     * keeps its legacy error code so existing diagnostics stay comparable.
+     * keeps its legacy error code so existing diagnostics stay comparable. The gate is
+     * slot-driven and family-scoped: it fires whenever the lexicon recognizes a named ratio and
+     * the question carries no change, ranking, trend, benchmark, or composition wording that
+     * belongs to a different family — regardless of organization count or date shape — so a
+     * degraded two-metric STRUCT/POINT_QUERY pivot cannot silently pass validation.
      */
     private void validateDerivedPointRatioQuery(String queryText, BankRequestContract requirements,
             BankIntentResult evidence) {
+        if (requirements == null
+                || requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "较年初",
+                        "较上月", "较去年", "较同期", "增幅", "增量", "增长", "下降", "变动", "变化",
+                        "最高", "最低", "全省均值", "对比", "比较", "分别", "各自", "构成", "结构", "占")) {
+            return;
+        }
+        if (evidence.getMetrics().size() != 2 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null) {
+            return;
+        }
         for (BankIntentResult.DerivedMetricCandidate derived : evidence.getDerivedMetrics()) {
             String errorCode = "DERIVED_ZB011_DIV_ZB018".equals(derived.getCode())
                     ? "per_capita_profit_mismatch"
@@ -570,6 +759,196 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + ", organizationCodes=" + actualOrganizations + ", metricCodes="
                         + actualMetrics + ". Regenerate the complete requirements JSON; do not "
                         + "rewrite the model plan in the backend.");
+    }
+
+    /**
+     * Validates the "较年初 / 从年初" baseline family. A year-start comparison is anchored at
+     * the prior calendar year's 12-31; a contract that answers it with PERIOD_OVER_PERIOD and a
+     * current-year 01-01 baseline compiles to a different fact and is returned as a repairable
+     * error. Questions carrying an explicit YYYY年末 baseline belong to the explicit-year-end
+     * family and are excluded here.
+     */
+    private void validateStartOfYearComparison(String queryText,
+            BankRequestContract requirements) {
+        if (!isStartOfYearComparisonQuestion(queryText)) {
+            return;
+        }
+        BankQueryPlan.TimeRange time = requirements.getTime();
+        if (time == null || time.getStartDate() == null || time.getEndDate() == null
+                || time.getEndDate().getYear() <= 1) {
+            return;
+        }
+        LocalDate expectedBaseline = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+        boolean valid = time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && expectedBaseline.equals(time.getBaselineStartDate())
+                && expectedBaseline.equals(time.getBaselineEndDate());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "start_of_year_baseline_mismatch: “年初/较年初”比较的基期是当前期前一年的 12-31，"
+                        + "当年 01-01 不是基期；expected time.comparison=START_OF_YEAR, "
+                        + "baselineStartDate=baselineEndDate=" + expectedBaseline + "; model time="
+                        + time + ". 请仅修正冲突的时间槽位后重新生成完整 requirements JSON；不要改动"
+                        + "指标、机构或答案事实。");
+    }
+
+    /**
+     * Shared trigger for the year-start family: the wording names a relative year start and asks
+     * for a comparison, and the question does not carry an explicit YYYY年末 baseline (that is
+     * the explicit-year-end family).
+     */
+    private boolean isStartOfYearComparisonQuestion(String queryText) {
+        if (queryText == null || !queryText.contains("年初")
+                || containsAny(queryText, "年末", "年底")
+                || EXPLICIT_YEAR_END_RANGE.matcher(queryText).find()) {
+            return false;
+        }
+        return containsAny(queryText, "较年初", "年初以来", "年初至今")
+                || (queryText.contains("年初") && queryText.contains("到"));
+    }
+
+    /**
+     * Plan-level twin of {@link #validateStartOfYearComparison}: the SQL is compiled from the
+     * plan, so a requirements contract that passes while the plan keeps PERIOD_OVER_PERIOD with
+     * a current-year 01-01 baseline still produces the wrong fact. The same family trigger is
+     * enforced against the plan's own time slots.
+     */
+    private void validateStartOfYearPlanContract(String queryText, BankQueryPlan plan) {
+        if (!isStartOfYearComparisonQuestion(queryText) || plan == null || plan.getTime() == null
+                || plan.getTime().getEndDate() == null
+                || plan.getTime().getEndDate().getYear() <= 1) {
+            return;
+        }
+        BankQueryPlan.TimeRange time = plan.getTime();
+        LocalDate expectedBaseline = LocalDate.of(time.getEndDate().getYear() - 1, 12, 31);
+        boolean valid = time.getComparison() == BankQueryPlan.TimeComparison.START_OF_YEAR
+                && expectedBaseline.equals(time.getBaselineStartDate())
+                && expectedBaseline.equals(time.getBaselineEndDate());
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "start_of_year_plan_mismatch: “年初/较年初”比较的基期是当前期前一年的 12-31，"
+                        + "当年 01-01 不是基期；plan.time 必须 comparison=START_OF_YEAR 且 "
+                        + "baselineStartDate=baselineEndDate=" + expectedBaseline
+                        + "；当前 plan.time comparison=" + time.getComparison()
+                        + ", baselineStartDate=" + time.getBaselineStartDate()
+                        + ", baselineEndDate=" + time.getBaselineEndDate()
+                        + "。请仅修正 plan 的冲突时间槽位后重新输出完整 planning JSON；不要改动"
+                        + "requirements、指标、机构或答案事实。");
+    }
+
+    /**
+     * Plan-level twin gate for the "rank change across periods" question shape: the wording asks
+     * how the RANK POSITION of institutions changed between two period ends. That shape now owns
+     * the dedicated RANK_CHANGE query family, so the gate enforces family↔question coherence in
+     * both directions: a plan for this shape must declare calculation.type=RANK_CHANGE (a
+     * near-miss CHANGE/RANKING plan would still compile into a wrong-but-plausible result fact,
+     * which the compiler alone can never detect), and conversely a plan may not declare
+     * RANK_CHANGE for a question outside the shape. Both violations are repairable
+     * {@code VALIDATION_FAILED} parse failures whose messages tell the model exactly which plan
+     * slots to fix. The trigger reads only the question's semantic shape.
+     */
+    static void validateRankChangePlanContract(String queryText, BankQueryPlan plan) {
+        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE) {
+            return;
+        }
+        boolean shape = isRankChangeAcrossPeriodsQuestion(queryText);
+        boolean declaresRankChange = plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RANK_CHANGE;
+        if (shape == declaresRankChange) {
+            return;
+        }
+        if (shape) {
+            throw new BankQueryPlanParseException(
+                    BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                    "rank_change_plan_contract_required: 题目要求机构/指标排名在两个时期间的位次变化，"
+                            + "必须路由进 RANK_CHANGE 查询族；plan 必须声明 calculation.type=RANK_CHANGE，"
+                            + "并保持 intent=CHANGE、time.comparison=PERIOD_OVER_PERIOD（当前期写 "
+                            + "startDate=endDate，基期写 baselineStartDate=baselineEndDate）、"
+                            + "dimensions=[\"bank_organization\"]、orderBy=[]、limit=null、filters=[]"
+                            + "（禁止 rank/rank_from_bottom 过滤器，也不得使用 derivedMetrics）；"
+                            + "当前 plan calculation="
+                            + (plan.getCalculation() == null ? "null"
+                                    : plan.getCalculation().getType())
+                            + "。请仅修正 plan 的 calculation/intent/time/dimensions 槽位后重新输出"
+                            + "完整 planning JSON；不要改动 requirements。");
+        }
+        throw new BankQueryPlanParseException(
+                BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "rank_change_plan_not_applicable: 题面未出现跨期排名变化语义（排名词+变化词+跨期基期"
+                        + "三信号），禁止声明 calculation.type=RANK_CHANGE；请改回与题面语义匹配的"
+                        + "查询族后重新输出完整 planning JSON。");
+    }
+
+    /**
+     * Abstract shape trigger for rank change across periods (word lists only; no sample ids, no
+     * full-question matching, no catalog answers). All three signals must co-occur: a ranking
+     * word, a rank-change word, and a cross-period baseline signal. Magnitude-ranking markers
+     * (增幅/降幅/…排名) belong to the supported CHANGE family and are excluded; single-period
+     * rankings carry no change word, plain value changes carry no rank word, and share/composition
+     * questions carry neither — none of them can trip the triple.
+     */
+    static boolean isRankChangeAcrossPeriodsQuestion(String queryText) {
+        if (queryText == null || queryText.isBlank()) {
+            return false;
+        }
+        boolean rankSignal = containsAny(queryText, "排名", "排行", "名次", "位次", "榜单", "榜");
+        boolean rankChangeSignal = containsAny(queryText, "变化", "变动", "差异");
+        boolean magnitudeRankingSignal = containsAny(queryText, "增幅", "降幅", "涨跌幅", "变化幅度",
+                "增长最快", "下降最快", "增长最多", "下降最多");
+        boolean baselineSignal = containsAny(queryText, "较年初", "年初", "同比", "环比", "较上月",
+                "较去年", "较同期", "较上季", "上年末", "年末", "年底")
+                || (queryText.contains("从") && queryText.contains("到"))
+                || EXPLICIT_YEAR_END_RANGE.matcher(queryText).find();
+        return rankSignal && rankChangeSignal && !magnitudeRankingSignal && baselineSignal;
+    }
+
+    /**
+     * Plan-level twin of {@link #validateDerivedPointRatioQuery}: a named-ratio question whose
+     * requirements pass while the plan degrades to a POINT_QUERY/STRUCT pivot compiles to a
+     * two-metric pivot without the ratio column. The plan must keep intent=RATIO with a RATIO
+     * calculation.
+     */
+    private void validateRatioPlanContract(String queryText, BankQueryPlan plan) {
+        if (plan == null || plan.getAction() != BankQueryPlan.PlanAction.EXECUTE
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "较年初",
+                        "较上月", "较去年", "较同期", "增幅", "增量", "增长", "下降", "变动", "变化",
+                        "最高", "最低", "全省均值", "对比", "比较", "分别", "各自", "构成", "结构", "占")) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getMetrics().size() != 2 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null
+                || evidence.getDerivedMetrics().isEmpty()) {
+            return;
+        }
+        boolean ratioPlan = plan.getIntent() == BankIntentType.RATIO
+                && plan.getCalculation() != null
+                && plan.getCalculation().getType() == BankQueryPlan.CalculationType.RATIO;
+        if (ratioPlan) {
+            return;
+        }
+        StringBuilder derivedSpecs = new StringBuilder();
+        for (BankIntentResult.DerivedMetricCandidate derived : evidence.getDerivedMetrics()) {
+            if (derivedSpecs.length() > 0) {
+                derivedSpecs.append(", ");
+            }
+            derivedSpecs.append(derived.getCode()).append('=').append(derived.getNumerator())
+                    .append('/').append(derived.getDenominator());
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "derived_point_ratio_plan_mismatch: 命名比率类问法要求 plan 保持 RATIO 查询族"
+                        + "（intent=RATIO 且 calculation.type=RATIO，产出 numerator_value/"
+                        + "denominator_value/ratio_percent 列）；目录派生指标 " + derivedSpecs
+                        + "；当前 plan intent=" + plan.getIntent() + ", calculation="
+                        + (plan.getCalculation() == null ? "null"
+                                : plan.getCalculation().getType())
+                        + " 会退化为两指标透视点查。请仅修正 plan 的 intent/calculation/metrics "
+                        + "槽位后重新输出完整 planning JSON；不要改动 requirements。");
     }
 
     /**
@@ -1008,7 +1387,13 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
 
     private void validateGenericPointRatioQuery(String queryText,
             BankRequestContract requirements) {
-        if (!isGenericPointRatioQuestion(queryText)) {
+        if (!isGenericPointRatioQuestion(queryText)
+                // Two same-unit percent metrics summed together are the additive composite
+                // family's slots, not a two-metric ratio: the additive plan shape can never
+                // satisfy the RATIO contract and vice versa, so forcing RATIO here would turn
+                // repair into a no-accepting-fixed-point loop. The additive family gate below
+                // owns the repairable contract for these questions.
+                || isAdditiveCompositeSlot(queryText)) {
             return;
         }
         BankIntentResult evidence =
@@ -1029,6 +1414,118 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                 && containsAny(queryText, "比重", "比例", "占比", "比率")
                 && !containsAny(queryText, "分别", "各自", "构成", "结构", "排名", "排行", "趋势", "走势", "同比",
                         "环比", "较年初", "全省均值", "对比", "比较");
+    }
+
+    /**
+     * Slot trigger of the additive composite family (两个同单位百分率指标的合计点查). Word lists
+     * only — no sample ids, no full-question matching, no catalog answers. All slots must
+     * co-occur: an addition word face (合计/相加/之和/加起来/加总/加), an operand pair — either
+     * the two percent-unit evidence metrics or the two operands resolved by the recognizer's
+     * additive-phrase analysis (shorthand stems like 不良/逾期 that the alias table alone cannot
+     * bind, with unrelated evidence metrics such as a 贷款 share phrase ignored) — one
+     * organization and one explicit single-day window, without any change/ranking/trend/
+     * comparison/composition wording that belongs to a different family. Only then does the
+     * question yield from the generic point-ratio gate into the additive family contract.
+     */
+    private boolean isAdditiveCompositeSlot(String queryText) {
+        if (queryText == null
+                || !containsAny(queryText, "合计", "相加", "之和", "加起来", "加总", "加")
+                || containsAny(queryText, "排名", "排行", "趋势", "走势", "同比", "环比", "变化",
+                        "变动", "增长", "增加", "下降", "减少", "增幅", "降幅", "较年初", "较上月",
+                        "较去年", "较同期", "最高", "最低", "最大", "最小", "全省均值", "对比",
+                        "比较", "分别", "各自", "构成", "结构")) {
+            return false;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        if (evidence.getOrganizations().size() != 1 || evidence.getTime() == null
+                || evidence.getTime().getStartDate() == null
+                || evidence.getTime().getEndDate() == null
+                || !evidence.getTime().getStartDate().equals(evidence.getTime().getEndDate())) {
+            return false;
+        }
+        return !additiveOperandCodes(queryText, evidence).isEmpty();
+    }
+
+    /**
+     * Final operand contract of the additive slot: the recognizer's additive-phrase resolution
+     * wins because it alone can bind shorthand stems to their unique percent metric, and the two
+     * percent-unit evidence metrics are the fallback when the question spells the aliases out.
+     * Sorted so the canonical derived code is stable regardless of mention order.
+     */
+    private List<String> additiveOperandCodes(String queryText, BankIntentResult evidence) {
+        List<String> resolved = clarificationEvidenceRecognizer
+                .additiveOperandResolution(queryText)
+                .map(BankFinancialIntentRecognizer.AdditiveOperandPair::operandCodes)
+                .orElse(List.of());
+        if (resolved.size() == 2) {
+            return resolved.stream().sorted().toList();
+        }
+        List<String> codes = evidence.getMetrics().stream()
+                .map(BankIntentResult.MetricCandidate::getCode).toList();
+        if (codes.size() == 2
+                && BankSemanticRegistry.isPercentUnitMetric(codes.get(0))
+                && BankSemanticRegistry.isPercentUnitMetric(codes.get(1))) {
+            return codes.stream().sorted().toList();
+        }
+        return List.of();
+    }
+
+    /**
+     * Family gate for additive composite questions (两个同单位百分率指标的合计): the only
+     * compilable contract keeps intent=POINT_QUERY with both operands as the only metrics and
+     * one canonical {@code DERIVED_SUM_<M1>_AND_<M2>} derived metric — a RATIO plan is
+     * numerically never equivalent to the sum, and a plain two-metric pivot loses the combined
+     * value fact. Validation-only: the model still owns the complete requirements JSON; a
+     * mismatch returns as a repairable error and never rewrites the model output.
+     */
+    private void validateAdditiveCompositeQuery(String queryText, BankRequestContract requirements) {
+        if (requirements == null
+                || requirements.getAction() != BankRequestContract.Action.EXECUTE
+                || !isAdditiveCompositeSlot(queryText)) {
+            return;
+        }
+        BankIntentResult evidence =
+                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
+        List<String> expectedOperands = additiveOperandCodes(queryText, evidence);
+        if (expectedOperands.size() != 2) {
+            return;
+        }
+        String expectedDerived = BankSemanticRegistry.additiveDerivedMetricCode(
+                expectedOperands.get(0), expectedOperands.get(1));
+        String expectedOrganization = evidence.getOrganizations().get(0).getCode();
+        BankQueryPlan.TimeRange actualTime = requirements.getTime();
+        Set<String> actualMetrics = new LinkedHashSet<>(safeList(requirements.getMetricCodes()));
+        List<BankQueryPlan.DerivedMetric> actualDerived =
+                safeList(requirements.getDerivedMetrics());
+        boolean valid = requirements.getIntent() == BankIntentType.POINT_QUERY
+                && actualMetrics.equals(new LinkedHashSet<>(expectedOperands))
+                && actualDerived.size() == 1
+                && expectedDerived.equals(actualDerived.get(0).getMetricCode())
+                && safeList(requirements.getOrganizationCodes())
+                        .equals(List.of(expectedOrganization))
+                && actualTime != null
+                && evidence.getTime().getStartDate().equals(actualTime.getStartDate())
+                && actualTime.getStartDate().equals(actualTime.getEndDate())
+                && actualTime.getComparison() == BankQueryPlan.TimeComparison.NONE
+                && safeList(requirements.getFilters()).isEmpty();
+        if (valid) {
+            return;
+        }
+        throw new BankQueryPlanParseException(BankQueryPlanParseException.Reason.VALIDATION_FAILED,
+                "additive_composite_mismatch: 两个同单位百分率指标合计的问法要求 action=EXECUTE、"
+                        + "intent=POINT_QUERY、metricCodes=" + expectedOperands
+                        + "（加合与顺序无关，两个操作数都要直选）、derivedMetrics 恰为 "
+                        + "[{metricCode=" + expectedDerived + ", numerator="
+                        + expectedOperands.get(0) + ", denominator=" + expectedOperands.get(1)
+                        + "}]（按字典序规范形）、organizationCodes=[" + expectedOrganization
+                        + "]、单日 time（startDate=endDate=" + evidence.getTime().getStartDate()
+                        + "、comparison=NONE）、filters=[]；model intent="
+                        + requirements.getIntent() + ", metricCodes="
+                        + requirements.getMetricCodes() + ", derivedMetrics=" + actualDerived
+                        + ", organizationCodes=" + requirements.getOrganizationCodes()
+                        + ", time=" + actualTime + "。请重新生成完整 requirements JSON；"
+                        + "两个 % 指标的合计不得编译成 RATIO 或普通双指标点查。");
     }
 
     private void validateQueryFamily(String errorCode, BankRequestContract requirements,
@@ -1114,7 +1611,7 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
                         + "drop an explicitly named metric or change the comparison family.");
     }
 
-    private boolean containsAny(String text, String... values) {
+    private static boolean containsAny(String text, String... values) {
         for (String value : values) {
             if (text.contains(value)) {
                 return true;
@@ -1130,42 +1627,18 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
     }
 
     private String clarificationRecheckMessage(String queryText) {
-        BankIntentResult evidence =
-                clarificationEvidenceRecognizer.recognize(queryText, LocalDate.now());
-        List<String> slots = new ArrayList<>();
-        if (!evidence.getOrganizations().isEmpty()) {
-            slots.add("organizationCodes=" + evidence.getOrganizations().stream()
-                    .map(org -> org.getCode() + "(" + org.getName() + ")").toList());
-        }
-        if (!evidence.getMetrics().isEmpty()) {
-            slots.add("metricCodes=" + evidence.getMetrics().stream()
-                    .map(metric -> metric.getCode() + "(" + metric.getName() + ")").toList());
-        }
-        if (!evidence.getDerivedMetrics().isEmpty()) {
-            slots.add("derivedMetrics=" + evidence.getDerivedMetrics().stream()
-                    .map(metric -> metric.getCode() + "(" + metric.getName() + "="
-                            + metric.getNumerator() + "/" + metric.getDenominator() + ")")
-                    .toList());
-        }
-        if (evidence.getTime() != null && evidence.getTime().getStartDate() != null
-                && evidence.getTime().getEndDate() != null) {
-            slots.add("time=" + evidence.getTime().getStartDate() + ".."
-                    + evidence.getTime().getEndDate() + " granularity="
-                    + evidence.getTime().getGranularity());
-        }
-        if (slots.isEmpty()) {
-            return null;
-        }
         return CLARIFICATION_RECHECK_MESSAGE
-                + " Deterministic catalog validation found these explicit slots in the original "
-                + "question: " + String.join("; ", slots) + ". Treat this only as validation "
-                + "feedback: regenerate the entire requirements JSON yourself, include all listed "
-                + "base operands for each derived metric, and do not return CLARIFY for these slots.";
+                + " Do not delegate interpretation to a local heuristic recognizer. Infer the "
+                + "complete executable contract directly from the original question and the fixed "
+                + "semantic registry, then return the full EXECUTE response.";
     }
 
-    private BankPlanningResponse parseAndValidatePlanningResponse(String queryText,
-            String candidate, SemanticIntentHints admissionHints,
-            BankRequestContract expectedRequirements) {
+    private BankPlanningResponse parseAndValidatePlanningResponse(LLMReq llmReq,
+            String candidate) {
+        String queryText = llmReq.getQueryText();
+        SemanticIntentHints admissionHints = llmReq.getSemanticIntentHints();
+        BankRequestContract expectedRequirements =
+                llmReq.getBankPlanToolResult() == null ? null : llmReq.getBankRequestContract();
         BankRequestContract requirements =
                 planningResponseParser.parseRequirements(candidate, admissionHints);
         if (expectedRequirements != null && !expectedRequirements.equals(requirements)) {
@@ -1178,6 +1651,17 @@ public class BankPlanGenStrategy extends SqlGenStrategy {
         validateHighConfidenceQueryFamily(queryText, requirements);
         BankPlanningResponse planning = planningResponseParser.parse(candidate, admissionHints);
         if (planning.getPlan() != null) {
+            // Pin the validated requirements and this attempt's plan before the plan-shape gates
+            // run: a terminal UNSUPPORTED_QUERY_SHAPE rejection must leave the parser's COMPILE
+            // tool-repair round a rebuildable previous candidate instead of a missing-plan
+            // degeneration. The model still owns the complete contract; nothing is rewritten.
+            llmReq.setBankRequestContract(requirements);
+            llmReq.setPreviousBankQueryPlanJson(JsonUtil.toString(planning.getPlan()));
+            // The plan is what compiles: requirements-level gates alone let a divergent plan
+            // slip through when the model writes the requirements correctly but the plan wrong.
+            validateRankChangePlanContract(queryText, planning.getPlan());
+            validateStartOfYearPlanContract(queryText, planning.getPlan());
+            validateRatioPlanContract(queryText, planning.getPlan());
             validateModelOwnedOutputContract(queryText, planning.getPlan());
         }
         return planning;

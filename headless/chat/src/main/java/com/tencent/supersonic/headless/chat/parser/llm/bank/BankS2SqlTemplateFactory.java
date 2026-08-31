@@ -198,8 +198,110 @@ final class BankS2SqlTemplateFactory {
         return groupColumns.isEmpty() ? aggregate : groupColumns + ", " + aggregate;
     }
 
+    /**
+     * Cross-period rank change (当期排名 ⋈ 基期排名): for every selected metric, aggregate the
+     * current period and the earlier baseline period per organization, rank each window with a
+     * stable ROW_NUMBER ordered by the metric's catalog direction (organization code tie break),
+     * join the two ranks per organization, and emit the long-form
+     * metric_code / bank_organization / baseline_rank / current_rank / rank_change rows where
+     * rank_change = baseline_rank - current_rank (positive = moved up). Metric windows are
+     * UNION ALL-ed exactly like the multi-metric aggregation family, and the selected-organization
+     * restriction is applied only outside the ranking so ranks stay population-wide.
+     *
+     * <p>Shape contract: no semantic dimension name may appear as an alias target in the S2SQL —
+     * the semantic field registration drops every field name that is also an alias, so
+     * {@code ... AS bank_organization} silently removes org_code from the physical field set and
+     * H2 rejects the executed SQL with column-not-found (JDBC_GRAMMAR). The per-metric UNION ALL
+     * therefore lives inside a single output CTE whose join select carries no dimension alias.
+     */
+    String compileRankChange(TemplateContext context) {
+        if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "rank-change compilation requires at least one metric and no metric filter");
+        }
+        String currentWhere = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        String baselineWhere = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getBaselineStartDate(),
+                context.plan().getTime().getBaselineEndDate());
+        String outerWhere = selectedOrganizationsWhere(context);
+        List<String> ctes = new ArrayList<>();
+        List<String> projections = new ArrayList<>();
+        List<ResolvedMetric> metrics = context.metrics().stream()
+                .sorted(java.util.Comparator.comparing(ResolvedMetric::metricCode)).toList();
+        for (int index = 0; index < metrics.size(); index++) {
+            ResolvedMetric metric = metrics.get(index);
+            // Rank direction follows the metric's catalog definition, exactly like the
+            // derived/multi-metric ranking family.
+            String direction = BankResultProjector.rankingDirection(metric.metricCode());
+            ctes.add(rankChangeCtes(context, metric, index, direction, currentWhere,
+                    baselineWhere));
+            projections.add("""
+                    SELECT metric_code, bank_organization, baseline_rank, current_rank, rank_change
+                    FROM bank_rank_change_%s
+                    """.formatted(index).trim());
+        }
+        return """
+                WITH %s, bank_rank_change_output AS (
+                %s
+                )
+                SELECT metric_code, bank_organization, baseline_rank, current_rank, rank_change
+                FROM bank_rank_change_output%s
+                ORDER BY metric_code ASC, bank_organization ASC
+                """.formatted(String.join(",\n", ctes),
+                String.join("\nUNION ALL\n", projections), outerWhere).trim();
+    }
+
+    /** One metric's aggregate → rank → join CTE chain for the rank-change family. */
+    private String rankChangeCtes(TemplateContext context, ResolvedMetric metric, int index,
+            String direction, String currentWhere, String baselineWhere) {
+        String currentValues = "bank_current_values_" + index;
+        String baselineValues = "bank_baseline_values_" + index;
+        String currentRank = "bank_current_rank_" + index;
+        String baselineRank = "bank_baseline_rank_" + index;
+        String change = "bank_rank_change_" + index;
+        return """
+                %s AS (
+                  SELECT bank_organization, SUM(%s) AS metric_value
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                ), %s AS (
+                  SELECT bank_organization, SUM(%s) AS metric_value
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                ), %s AS (
+                  SELECT bank_organization,
+                         ROW_NUMBER() OVER (ORDER BY metric_value %s, bank_organization ASC) AS current_rank
+                  FROM %s
+                  WHERE metric_value IS NOT NULL
+                ), %s AS (
+                  SELECT bank_organization,
+                         ROW_NUMBER() OVER (ORDER BY metric_value %s, bank_organization ASC) AS baseline_rank
+                  FROM %s
+                  WHERE metric_value IS NOT NULL
+                ), %s AS (
+                  SELECT '%s' AS metric_code,
+                         %s.bank_organization,
+                         %s.baseline_rank AS baseline_rank,
+                         %s.current_rank AS current_rank,
+                         %s.baseline_rank - %s.current_rank AS rank_change
+                  FROM %s
+                  INNER JOIN %s
+                    ON %s.bank_organization = %s.bank_organization
+                )
+                """.formatted(currentValues, metric.identifier(), context.dataSetName(),
+                currentWhere, baselineValues, metric.identifier(), context.dataSetName(),
+                baselineWhere, currentRank, direction, currentValues, baselineRank, direction,
+                baselineValues, change, metric.metricCode(), currentRank, baselineRank, currentRank,
+                baselineRank, currentRank, currentRank, baselineRank, currentRank,
+                baselineRank).trim();
+    }
+
     String compileRatio(TemplateContext context, String numerator, String denominator) {
-        return compileRatio(context, numerator, denominator, 100.0);
+        return compileRatio(context, List.of(numerator), denominator, 100.0);
     }
 
     /**
@@ -208,15 +310,32 @@ final class BankS2SqlTemplateFactory {
      */
     String compileRatio(TemplateContext context, String numerator, String denominator,
             double scale) {
+        return compileRatio(context, List.of(numerator), denominator, scale);
+    }
+
+    /**
+     * Ratio over explicit numerator operands: a single operand compiles exactly like the legacy
+     * single-numerator template; several operands are summed as
+     * {@code SUM(op1) + SUM(op2) + ... AS numerator_value}. Every other part of the template is
+     * unchanged.
+     */
+    String compileRatio(TemplateContext context, List<String> numeratorOperands,
+            String denominator, double scale) {
         if (!context.metricFilters().isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
                     "ratio compilation currently requires no metric filter");
         }
+        if (numeratorOperands == null || numeratorOperands.isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "ratio compilation requires at least one numerator operand");
+        }
         String groupColumns = String.join(", ", context.dimensions());
         String where = where(context.dimensionFilters(), context.dateField(),
                 context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
-        String aggregates = "SUM(" + numerator + ") AS numerator_value, SUM(" + denominator
+        String numeratorExpression = sumAggregateExpression(numeratorOperands);
+        String aggregates = numeratorExpression + " AS numerator_value, SUM(" + denominator
                 + ") AS denominator_value";
         String innerSelect = groupColumns.isEmpty() ? aggregates : groupColumns + ", " + aggregates;
         String groupBy = groupColumns.isEmpty() ? "" : "\nGROUP BY " + groupColumns;
@@ -225,9 +344,7 @@ final class BankS2SqlTemplateFactory {
                         .collect(Collectors.joining(", "));
         String outerDimensions = groupColumns.isEmpty() ? "" : groupColumns + ", ";
         // Keep a decimal literal so percent ratios stay `* 100.0 /` (existing tests + SQL style).
-        String scaleLiteral = (Math.abs(scale - Math.rint(scale)) < 1e-9)
-                ? String.valueOf((long) Math.rint(scale)) + ".0"
-                : String.valueOf(scale);
+        String scaleLiteral = scaleLiteral(scale);
         return """
                 WITH bank_ratio AS (
                   SELECT %s
@@ -240,6 +357,62 @@ final class BankS2SqlTemplateFactory {
                 FROM bank_ratio%s
                 """.formatted(innerSelect, context.dataSetName(), where, groupBy, outerDimensions,
                 scaleLiteral, orderBy).trim();
+    }
+
+    /**
+     * Renders {@code SUM(a)} for one operand and {@code (SUM(a) + SUM(b))} for several, so a
+     * composite numerator stays a single parenthesized additive expression in every template.
+     */
+    private static String sumAggregateExpression(List<String> numeratorOperands) {
+        String sum = numeratorOperands.stream().map(operand -> "SUM(" + operand + ")")
+                .collect(Collectors.joining(" + "));
+        return numeratorOperands.size() == 1 ? sum : "(" + sum + ")";
+    }
+
+    /**
+     * Renders a ratio scale as a decimal SQL literal (e.g. {@code 100 -> 100.0}) so the compiled
+     * expression always stays in decimal arithmetic.
+     */
+    private static String scaleLiteral(double scale) {
+        return (Math.abs(scale - Math.rint(scale)) < 1e-9)
+                ? String.valueOf((long) Math.rint(scale)) + ".0"
+                : String.valueOf(scale);
+    }
+
+    /**
+     * Additive composite point query (两个同单位百分率指标的合计点查): one organization on one
+     * observation day, and the plain sum of the two percent-unit metric columns as one virtual
+     * metric. Percent values are already stored in %, and a single-day point window has nothing
+     * to aggregate across, so the template performs no SUM aggregation and applies no *100 scale
+     * — exactly the point contract of a virtual catalog metric. Operands are emitted in
+     * canonical (lexicographic metric-code) order, so one operand pair always compiles to the
+     * same byte-stable expression regardless of the plan's mention order.
+     */
+    String compileAdditiveComposite(TemplateContext context) {
+        if (context.metrics().size() != 2 || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "additive composite compilation requires exactly two metrics and no metric "
+                            + "filter");
+        }
+        List<ResolvedMetric> ordered = context.metrics().stream()
+                .sorted(java.util.Comparator.comparing(ResolvedMetric::metricCode)).toList();
+        if (context.dimensions().size() != 1
+                || !"bank_organization".equals(context.dimensions().get(0))) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "additive composite compilation requires only the organization dimension");
+        }
+        String dimension = context.dimensions().get(0);
+        String where = where(context.dimensionFilters(), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        return """
+                SELECT %s, %s + %s AS metric_value
+                FROM %s
+                WHERE %s
+                ORDER BY %s ASC
+                """.formatted(dimension, ordered.get(0).identifier(),
+                ordered.get(1).identifier(), context.dataSetName(), where, dimension).trim();
     }
 
     /**
@@ -310,6 +483,12 @@ final class BankS2SqlTemplateFactory {
      * Multi-metric org vs province average (H-04 四项关键指标与全省均值). Single base aggregation then unpivot
      * — avoids UNION-over-raw-scan physical SQL failures (JDBC_GRAMMAR) seen with multi-branch
      * bank_values CTEs.
+     *
+     * <p>Shape contract: the values-vs-average join lives inside the bank_gap CTE and no semantic
+     * dimension name appears as an alias target in the S2SQL — the semantic field registration
+     * drops every field name that is also an alias, so {@code ... AS bank_organization} silently
+     * removes org_code from the physical field set and H2 rejects the executed SQL with
+     * column-not-found (JDBC_GRAMMAR).
      */
     private String compileMultiMetricProvinceAverageThreshold(TemplateContext context) {
         if (context.metrics().isEmpty() || !context.metricFilters().isEmpty()) {
@@ -325,6 +504,7 @@ final class BankS2SqlTemplateFactory {
         String aggregates = context.metrics().stream().map(
                 metric -> "SUM(" + metric.identifier() + ") AS " + metric.identifier() + "_value")
                 .collect(Collectors.joining(", "));
+        String meetsConditions = meetsConditions(context);
         List<String> unpivots = new ArrayList<>();
         for (ResolvedMetric metric : context.metrics()) {
             unpivots.add("SELECT bank_organization, '" + metric.metricCode() + "' AS metric_code, "
@@ -342,23 +522,156 @@ final class BankS2SqlTemplateFactory {
                   SELECT metric_code, AVG(metric_value) AS provincial_average
                   FROM bank_values
                   GROUP BY metric_code
+                ), bank_gap AS (
+                  SELECT bank_values.bank_organization,
+                         bank_values.metric_code,
+                         bank_values.metric_value,
+                         province_average.provincial_average AS provincial_average,
+                         bank_values.metric_value - province_average.provincial_average AS gap_value,
+                         CASE WHEN %s THEN 1 ELSE 0 END AS meets_condition
+                  FROM bank_values
+                  INNER JOIN province_average
+                    ON bank_values.metric_code = province_average.metric_code
                 )
-                SELECT bank_values.bank_organization AS bank_organization,
-                       bank_values.metric_code AS metric_code,
-                       bank_values.metric_value AS metric_value,
-                       province_average.provincial_average AS provincial_average,
-                       bank_values.metric_value - province_average.provincial_average AS gap_value,
-                       CASE WHEN bank_values.metric_value = province_average.provincial_average THEN 0
-                            WHEN bank_values.metric_value > province_average.provincial_average THEN 1
-                            ELSE -1 END AS meets_condition
-                FROM bank_values
-                INNER JOIN province_average
-                  ON bank_values.metric_code = province_average.metric_code%s
+                SELECT bank_organization, metric_code, metric_value, provincial_average,
+                       gap_value, meets_condition
+                FROM bank_gap%s
                 ORDER BY metric_code ASC, bank_organization ASC
                 """
                 .formatted(aggregates, context.dataSetName(), where,
-                        String.join("\nUNION ALL\n", unpivots), outerWhere)
+                        String.join("\nUNION ALL\n", unpivots), meetsConditions, outerWhere)
                 .trim();
+    }
+
+    /**
+     * Per-metric satisfaction predicates for the multi-metric threshold template. Without an
+     * explicit plan direction the metric catalog decides: higher-better metrics meet when above
+     * the average, lower-better (ASC ranking) when below — a direction-blind sign flag would mark
+     * the worst NPL as satisfying (test r6 TST-H-10 lesson). When the plan declares a single
+     * global direction object (metric_value GT/GTE/LT/LTE PROVINCE_AVERAGE) that direction wins
+     * for every metric with its lenient GTE/LTE semantics, exactly like the single-metric
+     * {@link #provinceComparisonOperator} family — but the catalog directions must be uniform:
+     * one global operator cannot express a mixed-direction metric set (e.g. 不良率 below AND
+     * 拨备覆盖率 above the average), so that combination fails loudly for repair instead of
+     * guessing.
+     */
+    private String meetsConditions(TemplateContext context) {
+        String planComparator = provinceAverageComparator(context.provinceAverageOperator());
+        if (planComparator == null) {
+            return context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
+                    + metric.metricCode() + "' AND bank_values.metric_value "
+                    + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode()))
+                            ? ">" : "<")
+                    + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
+        }
+        List<String> catalogDirections = context.metrics().stream()
+                .map(metric -> BankResultProjector.rankingDirection(metric.metricCode()))
+                .distinct().toList();
+        if (catalogDirections.size() > 1) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "multi-metric province-average threshold cannot apply a single global "
+                            + "direction object to mixed catalog directions ("
+                            + String.join("/", catalogDirections)
+                            + "); declare per-metric directions or split the plan into "
+                            + "uniform-direction metrics");
+        }
+        return context.metrics().stream().map(metric -> "(bank_values.metric_code = '"
+                + metric.metricCode() + "' AND bank_values.metric_value " + planComparator
+                + " province_average.provincial_average)").collect(Collectors.joining(" OR "));
+    }
+
+    /**
+     * Compound benchmark threshold (多指标复合基准阈值：哪些机构同时满足 指标A低于全省均值 且
+     * 指标B高于全省均值). N≥2 catalog metrics are pivoted into one wide row per organization over
+     * the FULL population, and every metric's benchmark comparison is AND-combined into a single
+     * meets_condition flag. Each comparison's sign follows the metric's catalog direction
+     * (higher-better meets above the provincial average, lower-better below) — the same
+     * direction-aware contract the single-metric threshold family proved in evaluation; the
+     * plan's per-metric direction conditions were already validated against the catalog, so the
+     * template never trusts a plan-declared sign. Output contract (locked): bank_organization,
+     * then per metric in canonical order ({@link #compoundBenchmarkOrder}) an ordinal
+     * {@code <ordinal>_value} / {@code <ordinal>_average} pair, then meets_condition, ordered by
+     * organization ASC. No semantic dimension name may appear as an alias target — the outer
+     * SELECT reads the CTE columns unqualified.
+     */
+    String compileCompoundBenchmarkThreshold(TemplateContext context) {
+        if (context.metrics().size() < 2 || !context.metricFilters().isEmpty()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "compound benchmark threshold requires at least two metrics and no metric "
+                            + "filter");
+        }
+        List<ResolvedMetric> ordered = compoundBenchmarkOrder(context.metrics());
+        List<String> ordinals = compoundBenchmarkOrdinals(ordered.size());
+        List<String> pivotSelects = new ArrayList<>();
+        List<String> averageSelects = new ArrayList<>();
+        List<String> wideColumns = new ArrayList<>();
+        List<String> andConditions = new ArrayList<>();
+        for (int index = 0; index < ordered.size(); index++) {
+            ResolvedMetric metric = ordered.get(index);
+            String valueColumn = ordinals.get(index) + "_value";
+            String averageColumn = ordinals.get(index) + "_average";
+            pivotSelects.add("SUM(" + metric.identifier() + ") AS " + valueColumn);
+            averageSelects.add("AVG(" + valueColumn + ") AS " + averageColumn);
+            wideColumns.add(valueColumn);
+            wideColumns.add(averageColumn);
+            // Direction-aware sign from the catalog, exactly like the single-metric threshold
+            // family: DESC (higher-better) meets above the average, ASC meets below it.
+            andConditions.add(valueColumn
+                    + ("DESC".equals(BankResultProjector.rankingDirection(metric.metricCode()))
+                            ? " > " : " < ")
+                    + averageColumn);
+        }
+        String where = where(withoutOrganizationFilter(context), context.dateField(),
+                context.plan().getTime().getStartDate(), context.plan().getTime().getEndDate());
+        return """
+                WITH bank_org AS (
+                  SELECT bank_organization, %s
+                  FROM %s
+                  WHERE %s
+                  GROUP BY bank_organization
+                ), province_average AS (
+                  SELECT %s
+                  FROM bank_org
+                )
+                SELECT bank_organization, %s,
+                       CASE WHEN %s THEN 1 ELSE 0 END AS meets_condition
+                FROM bank_org CROSS JOIN province_average
+                ORDER BY bank_organization ASC
+                """.formatted(String.join(", ", pivotSelects), context.dataSetName(), where,
+                String.join(", ", averageSelects), String.join(", ", wideColumns),
+                String.join(" AND ", andConditions)).trim();
+    }
+
+    /**
+     * Canonical compound-benchmark metric order: higher-better (DESC ranking) metrics take the
+     * lower ordinals first, ties broken by metric code ASC. The order is derived from catalog
+     * metadata only — never from question wording or mention order — so one metric set always
+     * compiles to the same byte-stable column contract regardless of how the plan lists it.
+     */
+    static List<ResolvedMetric> compoundBenchmarkOrder(List<ResolvedMetric> metrics) {
+        return metrics.stream()
+                .sorted(java.util.Comparator
+                        .comparing((ResolvedMetric metric) -> !"DESC".equals(
+                                BankResultProjector.rankingDirection(metric.metricCode())))
+                        .thenComparing(ResolvedMetric::metricCode))
+                .toList();
+    }
+
+    private static final List<String> COMPOUND_BENCHMARK_ORDINALS = List.of("first", "second",
+            "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+            "eleventh", "twelfth");
+
+    /** Ordinal prefixes of the compound benchmark wide columns, in canonical order. */
+    static List<String> compoundBenchmarkOrdinals(int metricCount) {
+        if (metricCount < 2 || metricCount > COMPOUND_BENCHMARK_ORDINALS.size()) {
+            throw new BankPlanCompilationException(
+                    BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
+                    "compound benchmark threshold supports between two and "
+                            + COMPOUND_BENCHMARK_ORDINALS.size() + " metrics, got=" + metricCount);
+        }
+        return COMPOUND_BENCHMARK_ORDINALS.subList(0, metricCount);
     }
 
     String compileAbsoluteThreshold(TemplateContext context) {
@@ -572,13 +885,17 @@ final class BankS2SqlTemplateFactory {
      * receive or fabricate a rank position. Direct metrics keep their business direction
      * (ZB012/ZB013/ZB017 lower-is-better ASC, otherwise DESC); derived ratios always rank DESC. All
      * ranks are stable ROW_NUMBER ordinals with organization-code ASC tie breaks, and the final
-     * result is ordered metric_code ASC, bank_organization ASC.
+     * result is ordered metric_code ASC, bank_organization ASC. Plain multi-metric rankings without
+     * derived metrics compile through the same shape so every ranked answer carries
+     * metric_code + rank_position identity end to end.
      */
     String compileDerivedMetricRanking(TemplateContext context) {
-        if (context.plan().getDerivedMetrics().isEmpty() || !context.metricFilters().isEmpty()) {
+        if ((context.metrics().isEmpty() && context.plan().getDerivedMetrics().isEmpty())
+                || !context.metricFilters().isEmpty()) {
             throw new BankPlanCompilationException(
                     BankPlanCompilationException.Reason.UNSUPPORTED_CALCULATION,
-                    "derived-metric ranking requires derived metrics and no metric filter");
+                    "multi-metric ranking requires metrics or derived metrics and no metric "
+                            + "filter");
         }
         if (!context.dimensions().equals(List.of("bank_organization"))) {
             throw new BankPlanCompilationException(
@@ -609,16 +926,26 @@ final class BankS2SqlTemplateFactory {
         }
         for (BankQueryPlan.DerivedMetric derived : context.plan().getDerivedMetrics()) {
             String cte = "bank_metric_" + metricIndex;
+            // The ratio scale is registry-owned so this ranking route cannot drift from the
+            // point-ratio template for the same operand pair (e.g. 人均利润 stays a raw
+            // 万元/人 quotient while percent-style ratios keep the * 100.0 contract).
+            double ratioScale = BankSemanticRegistry.ratioScale(derived.getNumerator(),
+                    derived.getDenominator());
+            List<String> numeratorOperands = derived.getNumeratorOperands() == null
+                    || derived.getNumeratorOperands().isEmpty()
+                            ? List.of(derived.getNumerator())
+                            : derived.getNumeratorOperands();
             ctes.add("""
                     %s AS (
                       SELECT '%s' AS metric_code, bank_organization,
-                             SUM(%s) / NULLIF(SUM(%s), 0) * 100.0 AS metric_value
+                             %s / NULLIF(SUM(%s), 0) * %s AS metric_value
                       FROM %s
                       WHERE %s
                       GROUP BY bank_organization
                     )
-                    """.formatted(cte, derived.getMetricCode(), derived.getNumerator(),
-                    derived.getDenominator(), context.dataSetName(), where).trim());
+                    """.formatted(cte, derived.getMetricCode(),
+                    sumAggregateExpression(numeratorOperands), derived.getDenominator(),
+                    scaleLiteral(ratioScale), context.dataSetName(), where).trim());
             rankedSelects.add(rankedSelect(cte, "DESC"));
             metricIndex++;
         }
@@ -672,18 +999,29 @@ final class BankS2SqlTemplateFactory {
                 .orElse(null);
     }
 
+    /**
+     * Single-metric threshold comparison sign. The plan's captured province-average direction
+     * object (GT/GTE/LT/LTE) wins verbatim — including its lenient boundaries — so a question
+     * asking against the catalog direction (e.g. 不良率高于全省均值) is never judged inverted;
+     * without a direction object the higher-is-better default applies.
+     */
     private String provinceComparisonOperator(TemplateContext context) {
-        return context.plan().getFilters().stream()
-                .filter(filter -> "metric_value".equals(filter.getField())
-                        && "PROVINCE_AVERAGE".equals(filter.getValue()))
-                .map(BankQueryPlan.Filter::getOperator).findFirst()
-                .map(operator -> switch (operator) {
-                case "GT" -> ">";
-                case "GTE" -> ">=";
-                case "LT" -> "<";
-                case "LTE" -> "<=";
-                default -> null;
-                }).orElse(">");
+        String comparator = provinceAverageComparator(context.provinceAverageOperator());
+        return comparator == null ? ">" : comparator;
+    }
+
+    /** Maps the plan's logical direction object (GT/GTE/LT/LTE) to its SQL comparison sign. */
+    private static String provinceAverageComparator(String operator) {
+        if (operator == null) {
+            return null;
+        }
+        return switch (operator) {
+            case "GT" -> ">";
+            case "GTE" -> ">=";
+            case "LT" -> "<";
+            case "LTE" -> "<=";
+            default -> null;
+        };
     }
 
     private String comparisonOrderBy(BankQueryPlan plan) {
@@ -733,7 +1071,13 @@ final class BankS2SqlTemplateFactory {
 
     record ResolvedMetric(String identifier, String metricCode) {}
 
+    /**
+     * Immutable template inputs resolved by the compiler. {@code provinceAverageOperator} carries
+     * the plan's optional single global province-average direction object (metric_value
+     * GT/GTE/LT/LTE PROVINCE_AVERAGE); it is a logical benchmark direction consumed by the
+     * threshold templates and must never be rendered into a physical WHERE clause.
+     */
     record TemplateContext(BankQueryPlan plan, String dataSetName, List<ResolvedMetric> metrics,
             List<String> dimensions, String dateField, List<Filter> dimensionFilters,
-            List<Filter> metricFilters) {}
+            List<Filter> metricFilters, String provinceAverageOperator) {}
 }

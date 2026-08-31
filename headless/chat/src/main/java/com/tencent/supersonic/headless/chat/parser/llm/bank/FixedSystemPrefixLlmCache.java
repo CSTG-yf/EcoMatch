@@ -6,15 +6,18 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -34,11 +37,14 @@ public class FixedSystemPrefixLlmCache {
     private final String prefixVersion;
     private final String warmUserProbe;
     private final boolean autoWarm;
-    private final AtomicBoolean prefixWarmed = new AtomicBoolean(false);
+    private final Set<String> warmedModelKeys = ConcurrentHashMap.newKeySet();
     private final AtomicLong prefixWarmAttempts = new AtomicLong();
+    private final AtomicLong prefixWarmVerificationFailures = new AtomicLong();
     private final AtomicLong completionHits = new AtomicLong();
     private final AtomicLong completionMisses = new AtomicLong();
+    private final AtomicLong coalescedCompletionWaiters = new AtomicLong();
     private final AtomicLong modelCalls = new AtomicLong();
+    private final AtomicLong providerCalls = new AtomicLong();
     private final AtomicLong llamaCppCalls = new AtomicLong();
     private final AtomicLong llamaCppCacheHits = new AtomicLong();
     private final AtomicLong llamaCppCacheTokens = new AtomicLong();
@@ -51,7 +57,10 @@ public class FixedSystemPrefixLlmCache {
     private final String stageLabel;
     private final int safetyMaxTokens;
     private final Map<String, String> completionMemo;
-    private final LlamaCppPrefixChatClient llamaCppClient = new LlamaCppPrefixChatClient();
+    private final Map<String, CompletableFuture<String>> inFlightCompletions =
+            new ConcurrentHashMap<>();
+    private final LlamaCppPrefixChatClient openAiCompatibleClient =
+            new LlamaCppPrefixChatClient();
 
     public FixedSystemPrefixLlmCache(String systemPrefix, String prefixVersion) {
         this(systemPrefix, prefixVersion, DEFAULT_MEMO_CAPACITY, false, defaultWarmProbe(), false,
@@ -110,29 +119,57 @@ public class FixedSystemPrefixLlmCache {
         return prefixVersion;
     }
 
-    public void warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
-        boolean llamaCpp = config != null && StringUtils.isNotBlank(config.getBaseUrl());
-        if ((!autoWarm && !llamaCpp) || !prefixWarmed.compareAndSet(false, true)) {
-            return;
+    public synchronized boolean warmPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return warmPrefix(model, config, false);
+    }
+
+    /** Replays and verifies the fixed prefix when a new chat is created. */
+    public synchronized boolean refreshPrefix(ChatLanguageModel model, ChatModelConfig config) {
+        return warmPrefix(model, config, true);
+    }
+
+    private boolean warmPrefix(ChatLanguageModel model, ChatModelConfig config, boolean force) {
+        boolean llamaCpp = usesLlamaCppPrefixTransport(config);
+        if (!autoWarm && !llamaCpp) {
+            return false;
+        }
+        String modelKey = modelIdentity(config);
+        if (!force && warmedModelKeys.contains(modelKey)) {
+            return true;
         }
         prefixWarmAttempts.incrementAndGet();
         try {
+            long cacheHitsBefore = llamaCppCacheHits.get();
             callModel(model, config, warmUserProbe,
                     LlamaCppPrefixChatClient.ChatOptions.warmup(enableThinking));
+            if (llamaCpp) {
+                // The first request populates llama.cpp's KV cache. The second identical probe is
+                // the acceptance check: only a reported cache_n hit counts as warmed.
+                callModel(model, config, warmUserProbe,
+                        LlamaCppPrefixChatClient.ChatOptions.warmup(enableThinking));
+                if (llamaCppCacheHits.get() <= cacheHitsBefore) {
+                    throw new IllegalStateException(
+                            "llama.cpp warm-up verification returned no cache_n hit");
+                }
+            }
+            warmedModelKeys.add(modelKey);
             KEY_PIPELINE.info(
-                    "FixedSystemPrefixLlmCache warmed fixed system prefix version={} via={}",
-                    prefixVersion, llamaCpp ? "llama.cpp" : "langchain4j");
+                    "FixedSystemPrefixLlmCache verified fixed system prefix version={} via={} force={}",
+                    prefixVersion, llamaCpp ? "llama.cpp" : "langchain4j", force);
+            return true;
         } catch (RuntimeException ex) {
-            prefixWarmed.set(false);
+            warmedModelKeys.remove(modelKey);
+            prefixWarmVerificationFailures.incrementAndGet();
             LOG.warn("Fixed system prefix warm-up failed version={}: type={}, error=[{}]",
                     prefixVersion, ex.getClass().getSimpleName(),
                     ex.getMessage() == null ? ""
                             : ex.getMessage().substring(0, Math.min(160, ex.getMessage().length())));
+            return false;
         }
     }
 
-    public void warmPrefix(ChatLanguageModel model) {
-        warmPrefix(model, null);
+    public boolean warmPrefix(ChatLanguageModel model) {
+        return warmPrefix(model, null);
     }
 
     public String generate(ChatLanguageModel model, String dynamicUserContent, boolean useMemo) {
@@ -145,11 +182,11 @@ public class FixedSystemPrefixLlmCache {
             throw new IllegalArgumentException("dynamic user content is required");
         }
         if (model == null && (config == null || StringUtils.isBlank(config.getBaseUrl()))) {
-            throw new IllegalArgumentException("chat model or llama.cpp baseUrl is required");
+            throw new IllegalArgumentException("chat model or configured baseUrl is required");
         }
         warmPrefix(model, config);
 
-        String memoKey = memoKey(dynamicUserContent);
+        String memoKey = memoKey(config, dynamicUserContent);
         if (useMemo) {
             String cached = completionMemo.get(memoKey);
             if (cached != null) {
@@ -162,9 +199,32 @@ public class FixedSystemPrefixLlmCache {
             completionMisses.incrementAndGet();
         }
 
+        if (useMemo) {
+            CompletableFuture<String> mine = new CompletableFuture<>();
+            CompletableFuture<String> existing = inFlightCompletions.putIfAbsent(memoKey, mine);
+            if (existing != null) {
+                coalescedCompletionWaiters.incrementAndGet();
+                return awaitCompletion(existing);
+            }
+            try {
+                String text = callAndMemoize(model, config, dynamicUserContent, memoKey);
+                mine.complete(text);
+                return text;
+            } catch (RuntimeException ex) {
+                mine.completeExceptionally(ex);
+                throw ex;
+            } finally {
+                inFlightCompletions.remove(memoKey, mine);
+            }
+        }
+        return callAndMemoize(model, config, dynamicUserContent, null);
+    }
+
+    private String callAndMemoize(ChatLanguageModel model, ChatModelConfig config,
+            String dynamicUserContent, String memoKey) {
         modelCalls.incrementAndGet();
         String text = callModel(model, config, dynamicUserContent);
-        if (useMemo && text != null && !text.isBlank()) {
+        if (memoKey != null && text != null && !text.isBlank()) {
             completionMemo.put(memoKey, text);
         }
         KEY_PIPELINE.info(
@@ -173,16 +233,50 @@ public class FixedSystemPrefixLlmCache {
         return text;
     }
 
+    private String awaitCompletion(CompletableFuture<String> future) {
+        try {
+            return future.join();
+        } catch (CompletionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw ex;
+        }
+    }
+
+    /**
+     * Drops the memoized completion for this user content so a poisoned entry (e.g. a
+     * truncated model response that fails JSON parsing) is never replayed to later requests;
+     * the next caller rolls a fresh sample instead. Semantically invalid but well-formed
+     * responses should stay memoized — structured repair converges from them deterministically.
+     */
+    public void evictCompletion(ChatModelConfig config, String dynamicUserContent) {
+        if (dynamicUserContent == null) {
+            return;
+        }
+        String removed = completionMemo.remove(memoKey(config, dynamicUserContent));
+        if (removed != null) {
+            KEY_PIPELINE.info(
+                    "FixedSystemPrefixLlmCache completion EVICT prefixVersion={} memoSize={}",
+                    prefixVersion, completionMemo.size());
+        }
+    }
+
     public Map<String, Object> stats() {
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("stage", stageLabel);
         stats.put("prefixVersion", prefixVersion);
-        stats.put("prefixWarmed", prefixWarmed.get());
+        stats.put("prefixWarmed", !warmedModelKeys.isEmpty());
+        stats.put("prefixWarmModelCount", warmedModelKeys.size());
         stats.put("autoWarm", autoWarm);
         stats.put("prefixWarmAttempts", prefixWarmAttempts.get());
+        stats.put("prefixWarmVerificationFailures", prefixWarmVerificationFailures.get());
         stats.put("completionHits", completionHits.get());
         stats.put("completionMisses", completionMisses.get());
+        stats.put("coalescedCompletionWaiters", coalescedCompletionWaiters.get());
         stats.put("modelCalls", modelCalls.get());
+        stats.put("providerCalls", providerCalls.get());
         stats.put("llamaCppCalls", llamaCppCalls.get());
         stats.put("llamaCppCacheHits", llamaCppCacheHits.get());
         stats.put("llamaCppCacheTokens", llamaCppCacheTokens.get());
@@ -202,17 +296,24 @@ public class FixedSystemPrefixLlmCache {
     }
 
     String memoKey(String dynamicUserContent) {
-        return prefixVersion + ":" + sha256(dynamicUserContent);
+        return memoKey(null, dynamicUserContent);
+    }
+
+    String memoKey(ChatModelConfig config, String dynamicUserContent) {
+        return prefixVersion + ":" + modelIdentity(config) + ":" + sha256(dynamicUserContent);
     }
 
     /**
      * Resolves the llama.cpp chat options for one call: an explicit request (warm-up or thinking)
-     * wins; otherwise thinking wins when enabled; otherwise a safety cap bounds the decode, but
-     * only for local llama.cpp endpoints. Remote OpenAI-compatible endpoints (e.g. the remote
-     * DeepSeek reasoning endpoint) must not receive the implicit local safety cap, which would be
-     * consumed by {@code reasoning_content} and truncate the returned JSON.
+     * wins; otherwise thinking wins when enabled; otherwise a safety cap bounds the decode. The
+     * cap is always explicit for local llama.cpp endpoints and for remote endpoints whose model
+     * config carries a bounded reasoning budget ({@code reasoningEffort}); remote reasoning
+     * endpoints without that bound stay uncapped because server-side reasoning tokens would
+     * silently consume an implicit decode budget and truncate the returned JSON. Uncapped remote
+     * calls fall back to the provider default, which truncated long plan JSON in official runs
+     * (613/1114-token MALFORMED_JSON), so bounded-reasoning endpoints must send the cap.
      */
-    LlamaCppPrefixChatClient.ChatOptions resolveOptions(String baseUrl,
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(ChatModelConfig config,
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
         if (requestedOptions != null) {
             return requestedOptions;
@@ -220,62 +321,64 @@ public class FixedSystemPrefixLlmCache {
         if (enableThinking) {
             return LlamaCppPrefixChatClient.ChatOptions.thinking(thinkingMaxTokens);
         }
-        if (safetyMaxTokens > 0 && isLocalLlamaCppEndpoint(baseUrl)) {
+        String baseUrl = config == null ? null : config.getBaseUrl();
+        if (safetyMaxTokens > 0
+                && (LlamaCppPrefixChatClient.usesLlamaCppExtensions(baseUrl)
+                        || hasBoundedRemoteReasoning(config))) {
             return LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens);
         }
         return LlamaCppPrefixChatClient.ChatOptions.defaults();
     }
 
-    /** Legacy single-arg overload; resolves against the configured safety cap for local endpoints. */
+    private static boolean hasBoundedRemoteReasoning(ChatModelConfig config) {
+        return config != null && StringUtils.isNotBlank(config.getReasoningEffort());
+    }
+
+    /** Test/legacy bridge: baseUrl-only resolution with no model-level reasoning bound. */
+    LlamaCppPrefixChatClient.ChatOptions resolveOptions(String baseUrl,
+            LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
+        ChatModelConfig config = null;
+        if (baseUrl != null) {
+            config = new ChatModelConfig();
+            config.setBaseUrl(baseUrl);
+        }
+        return resolveOptions(config, requestedOptions);
+    }
+
+    /** Legacy single-arg overload; resolves without endpoint or reasoning-bound knowledge. */
     LlamaCppPrefixChatClient.ChatOptions resolveOptions(
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
-        return resolveOptions(null, requestedOptions);
+        return resolveOptions((ChatModelConfig) null, requestedOptions);
+    }
+
+    static boolean usesLlamaCppPrefixTransport(ChatModelConfig config) {
+        return config != null && StringUtils.isNotBlank(config.getBaseUrl())
+                && "OPEN_AI".equalsIgnoreCase(config.getProvider())
+                && LlamaCppPrefixChatClient.usesLlamaCppExtensions(config.getBaseUrl());
     }
 
     /**
-     * The implicit safety cap is a llama.cpp-local guard: it applies to loopback and RFC1918
-     * private endpoints only. A remote OpenAI-compatible baseUrl (https/https on a public host)
-     * gets no implicit cap; explicit requested options always win and are decided elsewhere.
+     * Uses the direct OpenAI-compatible transport when a structured stage must attach its exact
+     * JSON Schema. Local endpoints additionally receive llama.cpp extensions; public endpoints do
+     * not. Other providers continue through their registered {@link ChatLanguageModel}.
      */
-    private static boolean isLocalLlamaCppEndpoint(String baseUrl) {
-        if (StringUtils.isBlank(baseUrl)) {
-            return true;
-        }
-        String host = hostOf(baseUrl);
-        if (StringUtils.isBlank(host)) {
-            return false;
-        }
-        String normalized = host.toLowerCase(java.util.Locale.ROOT);
-        if ("localhost".equals(normalized) || "::1".equals(normalized)) {
-            return true;
-        }
-        if (!IPV4_HOST.matcher(normalized).matches()) {
-            return false;
-        }
-        String[] octets = normalized.split("\\.");
-        int first = Integer.parseInt(octets[0]);
-        int second = Integer.parseInt(octets[1]);
-        if (first == 127) {
-            return true;
-        }
-        if (first == 10) {
-            return true;
-        }
-        if (first == 172 && second >= 16 && second <= 31) {
-            return true;
-        }
-        return first == 192 && second == 168;
+    static boolean usesOpenAiStructuredTransport(ChatModelConfig config) {
+        return config != null && StringUtils.isNotBlank(config.getBaseUrl())
+                && "OPEN_AI".equalsIgnoreCase(config.getProvider());
     }
 
-    private static final java.util.regex.Pattern IPV4_HOST =
-            java.util.regex.Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
-
-    private static String hostOf(String baseUrl) {
-        try {
-            return URI.create(baseUrl.trim()).getHost();
-        } catch (IllegalArgumentException e) {
-            return null;
+    private static String modelIdentity(ChatModelConfig config) {
+        if (config == null) {
+            return sha256("provider-default");
         }
+        String provider = StringUtils.defaultString(config.getProvider()).strip()
+                .toUpperCase(Locale.ROOT);
+        String baseUrl = StringUtils.defaultString(config.getBaseUrl()).strip();
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        String modelName = StringUtils.defaultString(config.getModelName()).strip();
+        return sha256(provider + "\n" + baseUrl + "\n" + modelName);
     }
 
     private String callModel(ChatLanguageModel model, ChatModelConfig config,
@@ -285,17 +388,26 @@ public class FixedSystemPrefixLlmCache {
 
     private String callModel(ChatLanguageModel model, ChatModelConfig config,
             String dynamicUserContent, LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
-        if (config != null && StringUtils.isNotBlank(config.getBaseUrl())) {
+        boolean llamaCpp = usesLlamaCppPrefixTransport(config);
+        LlamaCppPrefixChatClient.ChatOptions options = bindStageSchema(config,
+                resolveOptions(config, requestedOptions));
+        // Every OpenAI-compatible remote goes through our direct client so configured knobs such
+        // as reasoning_effort reach the wire even without a bound response schema.
+        boolean directOpenAiCompatible = !llamaCpp && usesOpenAiStructuredTransport(config);
+        if (llamaCpp || directOpenAiCompatible) {
             try {
                 LlamaCppPrefixChatClient.ChatResult result =
-                        llamaCppClient.chat(config, systemPrefix, dynamicUserContent,
-                                bindStageSchema(config, resolveOptions(config.getBaseUrl(),
-                                        requestedOptions)));
-                llamaCppCalls.incrementAndGet();
-                recordLlamaCppTimings(result);
+                        openAiCompatibleClient.chat(config, systemPrefix, dynamicUserContent,
+                                options);
+                if (llamaCpp) {
+                    llamaCppCalls.incrementAndGet();
+                    recordLlamaCppTimings(result);
+                } else {
+                    providerCalls.incrementAndGet();
+                }
                 return result.content();
             } catch (RuntimeException ex) {
-                if (!shouldFallbackToLangchain(ex)) {
+                if (!llamaCpp || !shouldFallbackToLangchain(ex)) {
                     throw ex;
                 }
                 LOG.warn(
@@ -310,8 +422,9 @@ public class FixedSystemPrefixLlmCache {
             }
         }
         if (model == null) {
-            throw new IllegalStateException("no chat model available after llama.cpp failure");
+            throw new IllegalStateException("no standard provider chat model is available");
         }
+        providerCalls.incrementAndGet();
         return model.generate(composeFullPrompt(dynamicUserContent));
     }
 
@@ -322,6 +435,7 @@ public class FixedSystemPrefixLlmCache {
     LlamaCppPrefixChatClient.ChatOptions bindStageSchema(ChatModelConfig config,
             LlamaCppPrefixChatClient.ChatOptions options) {
         if (options.enableThinking() || options.omitResponseFormat()
+                || config == null
                 || !Boolean.TRUE.equals(config.getJsonFormat())
                 || !"json_schema".equalsIgnoreCase(config.getJsonFormatType())) {
             return options;

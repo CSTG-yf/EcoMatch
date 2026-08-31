@@ -332,6 +332,60 @@ def select_database(client: "ApiClient", database_id: int | None = None) -> int:
     )
 
 
+def resolve_model_database_binding(client: "ApiClient", model_id: int) -> dict[str, Any]:
+    """Return the public, secret-free database binding for one semantic model."""
+    resolved_model_id = _positive_id(model_id, "model id")
+    model = client.json("GET", f"/api/semantic/model/getModel/{resolved_model_id}")
+    if not isinstance(model, dict):
+        raise BankAgentBootstrapError("model detail response must be an object")
+    database_id = _positive_id(model.get("databaseId"), "model database id")
+    databases = client.json("GET", "/api/semantic/database/getDatabaseList")
+    database = _find_unique(databases, "id", database_id, "database")
+    if database is None:
+        raise BankAgentBootstrapError(
+            f"model database id {database_id} was not found in the database list"
+        )
+    url = database.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise BankAgentBootstrapError("model database URL is missing")
+    return {
+        "id": database_id,
+        "name": database.get("name"),
+        "type": database.get("type"),
+        "url": url.strip(),
+    }
+
+
+def _canonical_h2_file_path(url: str) -> str:
+    prefix = "jdbc:h2:file:"
+    if not url.lower().startswith(prefix):
+        raise BankAgentBootstrapError("bank model database must use an H2 file JDBC URL")
+    location = url[len(prefix) :].split(";", 1)[0].strip()
+    if not location:
+        raise BankAgentBootstrapError("bank model H2 JDBC URL has no file path")
+    return os.path.normcase(os.path.normpath(str(Path(location).expanduser().resolve())))
+
+
+def assert_expected_h2_database_binding(
+    binding: dict[str, Any], expected_h2_database: Path | None
+) -> None:
+    """Fail closed when a bank model points away from the imported H2 file."""
+    if expected_h2_database is None:
+        return
+    url = binding.get("url")
+    if not isinstance(url, str):
+        raise BankAgentBootstrapError("model database URL is missing")
+    actual_path = _canonical_h2_file_path(url)
+    expected_path = os.path.normcase(
+        os.path.normpath(str(expected_h2_database.expanduser().resolve()))
+    )
+    if actual_path != expected_path:
+        raise BankAgentBootstrapError(
+            "bank model database URL does not match the requested H2 database: "
+            f"actual={actual_path}, expected={expected_path}"
+        )
+
+
 def build_bank_model_payload(
     *,
     database_id: int,
@@ -866,6 +920,7 @@ def bootstrap(
     organization_field: str,
     indicator_code_field: str,
     indicator_value_field: str,
+    expected_h2_database: Path | None = None,
 ) -> dict[str, Any]:
     manifest, workbook, manifest_sha = resolve_official_release(dataset_dir)
     client = ApiClient(base_url, token)
@@ -883,6 +938,8 @@ def bootstrap(
     )
     resolved_model_id = _positive_id(resources["modelId"], "model id")
     resolved_chat_model_id = resources["chatModelId"]
+    database_binding = resolve_model_database_binding(client, resolved_model_id)
+    assert_expected_h2_database_binding(database_binding, expected_h2_database)
     import_report = client.multipart(
         "/api/semantic/bank/resources/import",
         {
@@ -934,6 +991,7 @@ def bootstrap(
         "chatModelId": resolved_chat_model_id,
         "createdAgent": existing_agent is None,
         "runtimeResources": resources,
+        "databaseBinding": database_binding,
         "semanticImport": {
             "organizations": import_report.get("organizationCount"),
             "indicators": import_report.get("indicatorCount"),
@@ -972,6 +1030,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--organization-field", default="org_code")
     parser.add_argument("--indicator-code-field", default="metric_code")
     parser.add_argument("--indicator-value-field", default="metric_value")
+    parser.add_argument(
+        "--expected-h2-database",
+        type=Path,
+        help="Require the selected bank model to use this H2 database base path",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--output",
@@ -991,6 +1054,11 @@ def main(argv: list[str] | None = None) -> int:
                 "modelId": args.model_id,
                 "chatModelId": args.chat_model_id,
                 "chatModelName": args.chat_model_name,
+                "expectedH2Database": (
+                    str(args.expected_h2_database.resolve())
+                    if args.expected_h2_database is not None
+                    else None
+                ),
                 "agentName": args.agent_name,
                 "networkWrites": 0,
             }
@@ -1019,6 +1087,7 @@ def main(argv: list[str] | None = None) -> int:
                 organization_field=args.organization_field,
                 indicator_code_field=args.indicator_code_field,
                 indicator_value_field=args.indicator_value_field,
+                expected_h2_database=args.expected_h2_database,
             )
     except BankAgentBootstrapError as exc:
         parser.error(str(exc))

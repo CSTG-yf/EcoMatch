@@ -74,6 +74,13 @@ public class ParserConfig extends ParameterConfig {
                     "默认 false：一律走受约束模型候选与多步修复；true 时命中规则计划直接编译（消融/时延实验）；也可用 -D 同名系统属性覆盖",
                     "bool", "语义解析配置");
 
+    public static final Parameter PARSER_BANK_FREE_SQL_FALLBACK_ENABLE = new Parameter(
+            "s2.parser.bank.free-sql-fallback.enable", "false", "银行主路径不可达时是否启用受控自由SQL兜底",
+            "默认 false：仅当编译终态为 UNSUPPORTED_QUERY_SHAPE/UNSUPPORTED_CALCULATION/"
+                    + "UNSUPPORTED_FILTER/S2SQL_RENDER_FAILED 且修复预算耗尽时，进入带 AST 白名单、"
+                    + "规范列契约与独立预算（1 生成 + 1 修复）的自由 SQL 兜底；也可用 -D 同名系统属性覆盖",
+            "bool", "语义解析配置");
+
     public static final Parameter PARSER_SHOW_COUNT =
             new Parameter("s2.parser.show.count", "3", "解析结果展示个数", "前端展示的解析个数", "number", "语义解析配置");
 
@@ -92,7 +99,8 @@ public class ParserConfig extends ParameterConfig {
                 PARSER_SELF_CONSISTENCY_NUMBER, PARSER_BANK_MAX_CANDIDATES,
                 PARSER_BANK_CONSTRAINED_PLAN_ENABLE, PARSER_BANK_FREE_SQL_THINKING_ENABLE,
                 PARSER_BANK_PLAN_THINKING_ENABLE,
-                PARSER_BANK_PLAN_DETERMINISTIC_SHORT_CIRCUIT_ENABLE, PARSER_SHOW_COUNT,
+                PARSER_BANK_PLAN_DETERMINISTIC_SHORT_CIRCUIT_ENABLE,
+                PARSER_BANK_FREE_SQL_FALLBACK_ENABLE, PARSER_SHOW_COUNT,
                 PARSER_FIELDS_COUNT_THRESHOLD);
     }
 }

@@ -2,6 +2,7 @@ package com.tencent.supersonic.headless.chat.intent;
 
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.DerivedMetricDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.MetricDefinition;
+import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.MetricDirection;
 import com.tencent.supersonic.headless.chat.intent.BankFinancialLexicon.OrganizationDefinition;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.Clarification;
 import com.tencent.supersonic.headless.chat.intent.BankIntentResult.DerivedMetricCandidate;
@@ -20,8 +21,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,6 +44,7 @@ public class BankFinancialIntentRecognizer {
     private static final Pattern MONTH_END = Pattern.compile("(20\\d{2})年(\\d{1,2})月(?:末|底)");
     private static final Pattern YEAR_END = Pattern.compile("(20\\d{2})年(?:末|底|年末|年底)");
     private static final Pattern FULL_YEAR = Pattern.compile("(20\\d{2})年(?:全年|年度)");
+    private static final Pattern BARE_YEAR = Pattern.compile("(20\\d{2})年");
     private static final Pattern QUARTER_END = Pattern.compile("(20\\d{2})年?(?:第)?([一二三四1-4])季度末?");
     private static final Pattern HALF_YEAR_END = Pattern.compile("(20\\d{2})年([上下])半年末");
     private static final Pattern THRESHOLD =
@@ -49,6 +53,24 @@ public class BankFinancialIntentRecognizer {
             Pattern.compile("(\\d+(?:\\.\\d+)?%?)的?(最低要求|最低标准|监管要求|最高限额)");
     private static final Pattern PROVINCE_SCOPE = Pattern.compile("全省|13家|十三家|哪家|各家|所有(?:机构|农商行)");
     private static final Pattern BROAD_METRIC = Pattern.compile("(贷款|存款|经营|风险)(?:情况|指标|表现|怎么样|如何)");
+    /** Word faces meaning "the smallest value"; the rank slot is resolved against the metric
+     * catalog direction instead of hard-coding one end of the ordering. */
+    private static final List<String> MIN_VALUE_FACES = List.of("最低", "最少", "最小");
+    /** Word faces meaning "the largest value"; direction-resolved like {@link #MIN_VALUE_FACES}. */
+    private static final List<String> MAX_VALUE_FACES = List.of("最高", "最多", "最大", "最好");
+    /** Addition word faces shared with the BankPlanGenStrategy additive slot vocabulary. */
+    private static final List<String> ADDITIVE_SUM_FACES =
+            List.of("合计", "相加", "之和", "加总", "加起来");
+    /**
+     * Two metric shorthand stems joined by an addition connector (+, ＋, 与, 和, 加). Stems are
+     * lazy runs stopped by a plain function-word/punctuation boundary so the segmentation never
+     * swallows the surrounding clause (e.g. 逾期合计占贷款比 keeps the stem 逾期).
+     */
+    private static final Pattern ADDITIVE_STEM_PHRASE = Pattern.compile(
+            "([\\u4e00-\\u9fa5A-Za-z0-9]{1,10}?)\\s*(?:\\+|＋|和|与|加)\\s*"
+                    + "([\\u4e00-\\u9fa5A-Za-z0-9]{1,10}?)"
+                    + "(?=合计|相加|之和|加总|加起来|的|了|占|是|在|有|两|各|这|哪|和|与|加|比"
+                    + "|，|。|,|\\.|；|;|、|：|:|？|\\?|！|!|（|\\(|）|\\)|“|”|\"|'|\\s|$)");
 
     public BankIntentResult recognize(String queryText, LocalDate referenceDate) {
         if (StringUtils.isBlank(queryText)) {
@@ -65,7 +87,8 @@ public class BankFinancialIntentRecognizer {
         result.setDerivedMetrics(extractDerivedMetrics(original));
         result.setOrganizations(extractOrganizations(original));
         result.setTime(extractTime(normalized, effectiveReference));
-        result.setFilters(extractFilters(normalized));
+        result.setFilters(extractFilters(normalized, result.getMetrics().stream()
+                .map(MetricCandidate::getCode).collect(Collectors.toSet())));
         result.setIntentCandidates(classify(normalized, result.getOrganizations().size()));
         result.setIntent(result.getIntentCandidates().get(0).getIntent());
         result.setScene(scene(result.getMetrics()));
@@ -110,6 +133,74 @@ public class BankFinancialIntentRecognizer {
         return normalized;
     }
 
+    /**
+     * Resolves an additive phrase (两个指标词干被加合连接词连接且带合计类词) into its operand
+     * metric pair, in the order the stems appear in the text. Each shorthand stem must resolve to
+     * exactly one percent-unit catalog metric via alias containment: a stem with zero candidates
+     * or several percent candidates (e.g. 不良 hits both the % ratio and the 亿元 balance)
+     * abandons that phrase, and the resolution only succeeds with two distinct uniquely-resolved
+     * operands — preferring silence over guessing. Purely catalog-driven: no sample ids and no
+     * memorized question text. Candidate phrases are retried from every start offset so leading
+     * clause noise (农商行的不良) never masks the bare stems (不良).
+     */
+    public Optional<AdditiveOperandPair> additiveOperandResolution(String queryText) {
+        if (StringUtils.isBlank(queryText)
+                || ADDITIVE_SUM_FACES.stream().noneMatch(queryText::contains)) {
+            return Optional.empty();
+        }
+        Matcher phrase = ADDITIVE_STEM_PHRASE.matcher(queryText);
+        for (int from = 0; from < queryText.length(); from++) {
+            if (!phrase.find(from)) {
+                break;
+            }
+            from = phrase.start();
+            String first = trimAdditiveStem(phrase.group(1));
+            String second = trimAdditiveStem(phrase.group(2));
+            if (first.isEmpty() || second.isEmpty()) {
+                continue;
+            }
+            String firstCode = resolvePercentStem(first);
+            String secondCode = resolvePercentStem(second);
+            if (firstCode != null && secondCode != null && !firstCode.equals(secondCode)) {
+                return Optional.of(new AdditiveOperandPair(List.of(firstCode, secondCode),
+                        phrase.group(), phrase.start(), phrase.end()));
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Unique percent-unit catalog metric whose alias contains the stem, or null when ambiguous. */
+    private String resolvePercentStem(String stem) {
+        Set<String> percentCandidates = new LinkedHashSet<>();
+        for (MetricDefinition metric : BankFinancialLexicon.metrics().values()) {
+            boolean stemHit = metric.getAliases().stream().anyMatch(alias -> alias.contains(stem));
+            if (stemHit && "%".equals(metric.getUnit())) {
+                percentCandidates.add(metric.getCode());
+            }
+        }
+        return percentCandidates.size() == 1 ? percentCandidates.iterator().next() : null;
+    }
+
+    /** Strips clause particles and addition-word tails a lazy stem may have absorbed. */
+    private String trimAdditiveStem(String raw) {
+        String stem = raw.trim();
+        boolean changed = true;
+        while (changed && !stem.isEmpty()) {
+            changed = false;
+            for (String face : ADDITIVE_SUM_FACES) {
+                if (stem.length() > face.length() && stem.endsWith(face)) {
+                    stem = stem.substring(0, stem.length() - face.length());
+                    changed = true;
+                }
+            }
+            if (stem.length() > 1 && (stem.startsWith("的") || stem.startsWith("了"))) {
+                stem = stem.substring(1);
+                changed = true;
+            }
+        }
+        return stem.trim();
+    }
+
     private List<MetricCandidate> extractMetrics(String text) {
         List<AliasHit> hits = new ArrayList<>();
         for (MetricDefinition metric : BankFinancialLexicon.metrics().values()) {
@@ -144,7 +235,8 @@ public class BankFinancialIntentRecognizer {
                             .build());
         }
         addCompositeMetrics(text, matches);
-        if (isComprehensivePerformanceRanking(text)) {
+        if (isComprehensivePerformanceRanking(text) || isComprehensivePerformanceOverview(text)
+                || (matches.isEmpty() && isComprehensiveAnnualYearOverYear(text))) {
             for (String code : COMPREHENSIVE_PERFORMANCE_METRICS) {
                 addMetric(matches, code, "comprehensive performance profile");
             }
@@ -153,13 +245,12 @@ public class BankFinancialIntentRecognizer {
     }
 
     private void addCompositeMetrics(String text, Map<String, MetricCandidate> matches) {
-        if (text.contains("净利润率")) {
-            addMetric(matches, "ZB011", "净利润率分子");
-            addMetric(matches, "ZB009", "净利润率分母");
-        }
-        if (text.contains("存贷比")) {
-            addMetric(matches, "ZB002", "存贷比贷款口径");
-            addMetric(matches, "ZB001", "存贷比存款口径");
+        for (DerivedMetricDefinition derived : BankFinancialLexicon.derivedMetrics().values()) {
+            boolean matched = derived.getAliases().stream().anyMatch(text::contains);
+            if (matched) {
+                addMetric(matches, derived.getNumerator(), derived.getName() + "分子");
+                addMetric(matches, derived.getDenominator(), derived.getName() + "分母");
+            }
         }
         if (text.contains("风险指标")) {
             for (String code : List.of("ZB013", "ZB015", "ZB017", "ZB016")) {
@@ -199,6 +290,21 @@ public class BankFinancialIntentRecognizer {
     private boolean isComprehensivePerformanceRanking(String text) {
         return text.contains("\u6307\u6807")
                 && containsAny(text, "\u8868\u73b0\u8f83\u597d", "\u8868\u73b0\u8f83\u5dee");
+    }
+
+    private boolean isComprehensivePerformanceOverview(String text) {
+        return containsAny(text, "经营情况", "经营状况", "经营表现", "经营分析");
+    }
+
+    /**
+     * A named institution plus a bare year and year-over-year wording is a complete request for the
+     * fixed operating profile when no metric was named. It must not fall back to metric
+     * clarification merely because the user omitted the eight catalog labels.
+     */
+    private boolean isComprehensiveAnnualYearOverYear(String text) {
+        return text != null && BARE_YEAR.matcher(text).find()
+                && containsAny(text, "同比", "较上年同期", "较去年同期", "较同期")
+                && containsAny(text, "增长", "增幅", "变化", "变动", "下降", "增加", "减少", "多少");
     }
 
     private List<OrganizationSlot> extractOrganizations(String text) {
@@ -303,6 +409,15 @@ public class BankFinancialIntentRecognizer {
                 "HALF_YEAR");
         addImplicitYearEndForExplicitRange(text, hits);
 
+        if (hits.isEmpty() && (isComprehensivePerformanceOverview(text)
+                || isComprehensiveAnnualYearOverYear(text))) {
+            Matcher year = BARE_YEAR.matcher(text);
+            if (year.find()) {
+                LocalDate yearEnd = LocalDate.of(integer(year, 1), 12, 31);
+                hits.add(new DateHit(year.group(), yearEnd, yearEnd, "YEAR"));
+            }
+        }
+
         if (hits.stream().findFirst().isPresent() && text.contains("年初")) {
             int year = hits.get(0).start().getYear();
             hits.add(new DateHit("年初", LocalDate.of(year, 1, 1), LocalDate.of(year, 1, 1), "YEAR"));
@@ -364,7 +479,7 @@ public class BankFinancialIntentRecognizer {
         return null;
     }
 
-    private List<FilterSlot> extractFilters(String text) {
+    private List<FilterSlot> extractFilters(String text, Set<String> metricCodes) {
         List<FilterSlot> filters = new ArrayList<>();
         boolean comprehensivePerformanceProfile = isComprehensivePerformanceRanking(text)
                 && containsAny(text, "表现较好") && containsAny(text, "表现较差");
@@ -398,9 +513,28 @@ public class BankFinancialIntentRecognizer {
             if (topRank.find()) {
                 filters.add(FilterSlot.builder().field("rank").operator("LTE")
                         .value(rankValue(topRank.group(1))).sourceText(topRank.group()).build());
-            } else if (containsAny(text, "第一", "最高", "最低", "最多", "最少", "表现较好")) {
-                filters.add(FilterSlot.builder().field("rank").operator("LTE")
-                        .value(text.contains("表现较好") ? "3" : "1").sourceText("排名前部").build());
+            } else if (text.contains("第一")) {
+                // Position wording is direction-neutral: the catalog ordering itself defines
+                // place 1, so "排第一" always lands on the best end.
+                filters.add(FilterSlot.builder().field("rank").operator("LTE").value("1")
+                        .sourceText("排名前部").build());
+            } else if (containsAny(text, "最高", "最低", "最多", "最少", "最小", "最大", "最好")) {
+                // Extreme wording is direction-resolved against the metric catalog: rank means
+                // the catalog's best-performing end (ASC for LOWER_BETTER metrics, DESC
+                // otherwise) and rank_from_bottom means the opposite end, matching the
+                // compiler's ranking-direction contract. When both an extreme-min and an
+                // extreme-max face appear, the earliest one in the text wins.
+                int minFace = indexOfAny(text, MIN_VALUE_FACES);
+                int maxFace = indexOfAny(text, MAX_VALUE_FACES);
+                boolean minWins = minFace >= 0 && (maxFace < 0 || minFace < maxFace);
+                boolean lowerBetter = prefersLowerValue(metricCodes);
+                boolean bestEnd = minWins ? lowerBetter : !lowerBetter;
+                filters.add(FilterSlot.builder()
+                        .field(bestEnd ? "rank" : "rank_from_bottom").operator("LTE").value("1")
+                        .sourceText(bestEnd ? "排名前部" : "排名后部").build());
+            } else if (text.contains("表现较好")) {
+                filters.add(FilterSlot.builder().field("rank").operator("LTE").value("3")
+                        .sourceText("排名前部").build());
             }
 
             Matcher bottomRank =
@@ -493,10 +627,30 @@ public class BankFinancialIntentRecognizer {
                 .get(value));
     }
 
+    /**
+     * Whether the recognized metrics are "lower is better" per the authoritative lexicon. The
+     * ranking compiler (BankResultProjector) derives its LOWER_VALUE_IS_BETTER set from this same
+     * catalog, so reading the direction here keeps the recognizer's rank evidence and the
+     * compiler's slice semantics on one source of truth.
+     */
+    private boolean prefersLowerValue(Set<String> metricCodes) {
+        return metricCodes.stream().anyMatch(code -> {
+            BankFinancialLexicon.MetricDefinition metric = BankFinancialLexicon.metrics().get(code);
+            return metric != null && metric.getDirection() == MetricDirection.LOWER_BETTER;
+        });
+    }
+
+    /** Earliest occurrence of any face in the text, or -1 when none is present. */
+    private int indexOfAny(String text, List<String> faces) {
+        return faces.stream().mapToInt(text::indexOf).filter(index -> index >= 0).min().orElse(-1);
+    }
+
     private void addClarifications(BankIntentResult result, String text) {
         boolean broadMetric = BROAD_METRIC.matcher(text).find();
         if ((result.getMetrics().isEmpty() || broadMetric)
-                && !isComprehensivePerformanceRanking(text)) {
+                && !isComprehensivePerformanceRanking(text)
+                && !isComprehensivePerformanceOverview(text)
+                && !isComprehensiveAnnualYearOverYear(text)) {
             List<String> options;
             if (text.contains("贷款")) {
                 options = metricNames("ZB002", "ZB013", "ZB014", "ZB017");
@@ -545,7 +699,7 @@ public class BankFinancialIntentRecognizer {
         double time =
                 result.getTime() == null ? 0.45D : result.getTime().isAmbiguous() ? 0.4D : 0.97D;
         double score = intent * 0.30D + metric * 0.30D + organization * 0.20D + time * 0.20D;
-        if (BROAD_METRIC.matcher(text).find()) {
+        if (BROAD_METRIC.matcher(text).find() && !isComprehensivePerformanceOverview(text)) {
             score = Math.min(score, 0.64D);
         }
         return round(score);
@@ -676,6 +830,10 @@ public class BankFinancialIntentRecognizer {
             return end - start;
         }
     }
+
+    /** Resolved additive operand pair: codes in text order plus the matched phrase span. */
+    public record AdditiveOperandPair(List<String> operandCodes, String phrase, int start,
+            int end) {}
 
     private record DateHit(String expression, LocalDate start, LocalDate end, String granularity) {}
 

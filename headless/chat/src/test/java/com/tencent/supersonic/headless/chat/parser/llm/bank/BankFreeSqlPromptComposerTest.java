@@ -54,6 +54,18 @@ class BankFreeSqlPromptComposerTest {
     }
 
     @Test
+    void freeFallbackPrefixRejectsUnfilteredBranchesAndRequiresExplicitDatePredicates() {
+        String prefix = BankFreeSqlPromptComposer.FREE_FALLBACK_SYSTEM_PREFIX;
+        // Branches without their own filter translate into unbounded SELECT * scans that the
+        // execution-layer safety policy rejects; the rule must be stated up front so the first
+        // candidate already carries per-branch predicates.
+        assertTrue(prefix.contains("每个 CTE 与子查询分支都必须自带过滤条件"));
+        assertTrue(prefix.contains("执行层安全策略中一律被拒绝"));
+        assertTrue(prefix.contains("日期谓词必须显式写在最外层查询与每个涉及数据表的分支内"));
+        assertTrue(BankFreeSqlPromptComposer.FREE_FALLBACK_PROMPT_VERSION.contains("v2"));
+    }
+
+    @Test
     void legacyDynamicUserRejectsSchemaInUserTurn() {
         assertThrows(IllegalArgumentException.class,
                 () -> BankFreeSqlPromptComposer.buildDynamicUserContent("", "存款是多少", "SchemaX",

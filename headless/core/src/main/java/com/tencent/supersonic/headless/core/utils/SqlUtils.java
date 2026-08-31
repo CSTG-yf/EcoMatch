@@ -5,6 +5,7 @@ import javax.sql.DataSource;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.common.util.SensitiveLogUtils;
+import com.tencent.supersonic.headless.api.pojo.bank.BankDataDomain;
 import com.tencent.supersonic.headless.api.pojo.enums.DataType;
 import com.tencent.supersonic.headless.api.pojo.response.DatabaseResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
@@ -23,6 +24,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -105,6 +107,7 @@ public class SqlUtils {
         Connection connection = null;
         try {
             connection = jdbcDataSourceUtils.getConnection(database);
+            probeBankDataDomain(connection);
         } catch (Exception e) {
             log.warn("JDBC connection validation failed: type={}, error=[{}]",
                     e.getClass().getSimpleName(), SensitiveLogUtils.summarize(e));
@@ -118,6 +121,46 @@ public class SqlUtils {
         jdbcTemplate.setMaxRows(resultLimit);
         jdbcTemplate.setQueryTimeout(queryTimeoutSeconds);
         return jdbcTemplate;
+    }
+
+    /**
+     * Lazily initializes the bank {@code data_date} domain from the first live JDBC connection on
+     * the execution path (one {@code SELECT MIN/MAX} observation, cached process-wide). The parse
+     * path has no connection of its own, so this is the only seam where the validator guard can
+     * learn the real domain. Every failure here is silently ignored — the guard falls open until a
+     * later request retries, and execution itself is never affected.
+     */
+    static void probeBankDataDomain(Connection connection) {
+        if (connection == null || BankDataDomain.current() != null) {
+            return;
+        }
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(
+                        "SELECT MIN(data_date), MAX(data_date) FROM bank_metric_daily")) {
+            if (resultSet.next()) {
+                LocalDate min = asLocalDate(resultSet.getObject(1));
+                LocalDate max = asLocalDate(resultSet.getObject(2));
+                BankDataDomain.tryInitialize(min, max);
+            }
+        } catch (Exception e) {
+            log.debug("BankDataDomain probe skipped: {}", SensitiveLogUtils.summarize(e));
+        }
+    }
+
+    private static LocalDate asLocalDate(Object value) {
+        if (value instanceof LocalDate localDate) {
+            return localDate;
+        }
+        if (value instanceof java.sql.Date date) {
+            return date.toLocalDate();
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime().toLocalDate();
+        }
+        if (value instanceof String text && !text.isBlank() && text.length() >= 10) {
+            return LocalDate.parse(text.trim().substring(0, 10));
+        }
+        return null;
     }
 
     public void queryInternal(String sql, SemanticQueryResp queryResultWithColumns) {
