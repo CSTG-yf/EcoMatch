@@ -309,9 +309,10 @@ public class FixedSystemPrefixLlmCache {
      * cap is always explicit for local llama.cpp endpoints and for remote endpoints whose model
      * config carries a bounded reasoning budget ({@code reasoningEffort}); remote reasoning
      * endpoints without that bound stay uncapped because server-side reasoning tokens would
-     * silently consume an implicit decode budget and truncate the returned JSON. Uncapped remote
-     * calls fall back to the provider default, which truncated long plan JSON in official runs
-     * (613/1114-token MALFORMED_JSON), so bounded-reasoning endpoints must send the cap.
+     * silently consume an implicit decode budget and truncate the returned JSON. Bailian Qwen is
+     * also safe to cap because the direct client explicitly disables its thinking mode. Uncapped
+     * remote calls fall back to the provider default, which truncated long plan JSON in official
+     * runs (613/1114-token MALFORMED_JSON), so bounded-reasoning endpoints must send the cap.
      */
     LlamaCppPrefixChatClient.ChatOptions resolveOptions(ChatModelConfig config,
             LlamaCppPrefixChatClient.ChatOptions requestedOptions) {
@@ -324,7 +325,8 @@ public class FixedSystemPrefixLlmCache {
         String baseUrl = config == null ? null : config.getBaseUrl();
         if (safetyMaxTokens > 0
                 && (LlamaCppPrefixChatClient.usesLlamaCppExtensions(baseUrl)
-                        || hasBoundedRemoteReasoning(config))) {
+                        || hasBoundedRemoteReasoning(config)
+                        || LlamaCppPrefixChatClient.usesAliyunQwenThinkingControl(config))) {
             return LlamaCppPrefixChatClient.ChatOptions.safetyCap(safetyMaxTokens);
         }
         return LlamaCppPrefixChatClient.ChatOptions.defaults();
