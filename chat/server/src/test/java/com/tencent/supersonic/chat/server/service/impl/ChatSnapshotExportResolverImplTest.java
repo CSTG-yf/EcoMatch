@@ -234,6 +234,53 @@ class ChatSnapshotExportResolverImplTest {
         assertNull(data.getDateRange());
     }
 
+    @Test
+    void infersLineChartForTrendResultsWhenRecommendationIsMissing() {
+        QueryResult result = successfulResult();
+        result.setRecommendedChart(null);
+        result.setQueryColumns(List.of(new QueryColumn("数据日期", "DATE", "data_date"),
+                new QueryColumn("指标值", "NUMBER", "metric_value")));
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("data_date", "2025-02-28");
+        first.put("metric_value", 100);
+        Map<String, Object> second = new LinkedHashMap<>();
+        second.put("data_date", "2025-03-31");
+        second.put("metric_value", 120);
+        result.setQueryResults(List.of(first, second));
+        ChatQueryDO stored = storedQuery("alice");
+        stored.setQueryResult(JsonUtil.toString(result));
+        when(chatQueryRepository.getChatQueryDO(42L)).thenReturn(stored);
+        stubVisibleSchema(new SemanticSchemaResp());
+
+        assertEquals("LINE", resolver.resolve(42L, user("alice")).getChartType());
+    }
+
+    @Test
+    void infersBarChartForCategoryComparisonAndSkipsSingleRowResults() {
+        QueryResult result = successfulResult();
+        result.setRecommendedChart(null);
+        result.setQueryColumns(List.of(new QueryColumn("机构名称", "VARCHAR", "org_name"),
+                new QueryColumn("指标值", "NUMBER", "metric_value")));
+        Map<String, Object> first = new LinkedHashMap<>();
+        first.put("org_name", "城东支行");
+        first.put("metric_value", 100);
+        Map<String, Object> second = new LinkedHashMap<>();
+        second.put("org_name", "城西支行");
+        second.put("metric_value", 90);
+        result.setQueryResults(List.of(first, second));
+        ChatQueryDO stored = storedQuery("alice");
+        stored.setQueryResult(JsonUtil.toString(result));
+        when(chatQueryRepository.getChatQueryDO(42L)).thenReturn(stored);
+        stubVisibleSchema(new SemanticSchemaResp());
+
+        assertEquals("BAR", resolver.resolve(42L, user("alice")).getChartType());
+
+        // single-row results stay chartless
+        result.setQueryResults(List.of(first));
+        stored.setQueryResult(JsonUtil.toString(result));
+        assertNull(resolver.resolve(42L, user("alice")).getChartType());
+    }
+
     private void stubVisibleSchema(SemanticSchemaResp schema) {
         schema.setModelIds(List.of(7L));
         when(schemaService.fetchSemanticSchema(any())).thenReturn(schema);

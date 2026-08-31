@@ -135,7 +135,7 @@ const BankAnswerToolbar: React.FC<Props> = ({
           renderButton('refresh', '重新查询', <ReloadOutlined />, onRefresh)}
         {onExportData &&
           !isParserError &&
-          renderButton('export-data', '导出数据', <DownloadOutlined />, () => {
+          renderButton('export-data', '导出报表', <DownloadOutlined />, () => {
             setExportLoading(true);
             onExportData();
             setTimeout(() => setExportLoading(false), 1000);

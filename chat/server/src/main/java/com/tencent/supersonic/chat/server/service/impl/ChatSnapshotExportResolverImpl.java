@@ -85,9 +85,45 @@ public class ChatSnapshotExportResolverImpl implements ChatSnapshotExportResolve
                 .masked(result.isDataMasked()).maskedColumns(result.getMaskedColumns() == null
                         ? Set.of() : result.getMaskedColumns())
                 .conclusion(conclusionOf(result))
-                .chartType(result.getRecommendedChart() == null ? null
-                        : result.getRecommendedChart().getChartType())
+                .chartType(chartTypeOf(result, columns, rows))
                 .dateRange(resolveDateRange(result, columns, rows)).build();
+    }
+
+    /**
+     * The bank answer path does not always persist a recommendedChart. When it is missing, infer
+     * one from the result shape: a date column makes a trend (LINE); any other category column
+     * together with a numeric column makes a comparison (BAR). Single-row or single-column
+     * results stay chartless.
+     */
+    private String chartTypeOf(QueryResult result, List<QueryColumn> columns,
+            List<Map<String, Object>> rows) {
+        if (result.getRecommendedChart() != null
+                && StringUtils.isNotBlank(result.getRecommendedChart().getChartType())) {
+            return result.getRecommendedChart().getChartType();
+        }
+        if (columns.size() < 2 || rows == null || rows.size() < 2) {
+            return null;
+        }
+        boolean hasNumeric = columns.stream().anyMatch(ChatSnapshotExportResolverImpl::isNumeric);
+        if (!hasNumeric) {
+            return null;
+        }
+        if (columns.stream().anyMatch(ChatSnapshotExportResolverImpl::isDate)) {
+            return "LINE";
+        }
+        boolean hasCategory =
+                columns.stream().anyMatch(column -> !isNumeric(column) && !isDate(column));
+        return hasCategory ? "BAR" : null;
+    }
+
+    private static boolean isNumeric(QueryColumn column) {
+        return "NUMBER".equalsIgnoreCase(StringUtils.defaultString(column.getType()))
+                || "NUMBER".equalsIgnoreCase(StringUtils.defaultString(column.getShowType()));
+    }
+
+    private static boolean isDate(QueryColumn column) {
+        return "DATE".equalsIgnoreCase(StringUtils.defaultString(column.getType()))
+                || "DATE".equalsIgnoreCase(StringUtils.defaultString(column.getShowType()));
     }
 
     /**

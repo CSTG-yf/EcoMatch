@@ -63,6 +63,7 @@ class ExportTaskServiceImplTest {
     private SemanticLayerService semanticLayerService;
     private AuditEventPublisher auditPublisher;
     private org.springframework.beans.factory.ObjectProvider<ChatSnapshotExportResolver> snapshotResolvers;
+    private org.springframework.beans.factory.ObjectProvider<com.tencent.supersonic.headless.server.utils.ChartImageRenderer> chartImageRenderers;
     private ExportTaskServiceImpl service;
     private ExportTaskDO persisted;
 
@@ -72,9 +73,10 @@ class ExportTaskServiceImplTest {
         semanticLayerService = mock(SemanticLayerService.class);
         auditPublisher = mock(AuditEventPublisher.class);
         snapshotResolvers = mock(org.springframework.beans.factory.ObjectProvider.class);
+        chartImageRenderers = mock(org.springframework.beans.factory.ObjectProvider.class);
         service = new ExportTaskServiceImpl(mapper, semanticLayerService,
                 mock(DashboardService.class), mock(DashboardExportQueryValidator.class),
-                auditPublisher, snapshotResolvers, exportRoot.toString());
+                auditPublisher, snapshotResolvers, chartImageRenderers, exportRoot.toString());
         when(mapper.insert(any(ExportTaskDO.class))).thenAnswer(invocation -> {
             persisted = invocation.getArgument(0);
             persisted.setId(1L);
@@ -508,6 +510,164 @@ class ExportTaskServiceImplTest {
             }
         }
         return null;
+    }
+
+    @Test
+    void snapshotXlsxEmbedsNativeChartPart() throws Exception {
+        QueryColumn orgName = new QueryColumn("机构名称", "VARCHAR", "org_name");
+        QueryColumn metricValue = new QueryColumn("指标值", "NUMBER", "metric_value");
+        metricValue.setShowType("NUMBER");
+        LinkedHashMap<String, Object> row1 = new LinkedHashMap<>();
+        row1.put("org_name", "城东支行");
+        row1.put("metric_value", 116.98);
+        LinkedHashMap<String, Object> row2 = new LinkedHashMap<>();
+        row2.put("org_name", "城西支行");
+        row2.put("metric_value", 88.5);
+        ChatSnapshotExportData snapshot = ChatSnapshotExportData.builder().queryId(42L)
+                .question("各机构存款余额排名").dataSetId(7L)
+                .columns(List.of(orgName, metricValue))
+                .rows(List.<java.util.Map<String, Object>>of(row1, row2))
+                .chartType("BAR").build();
+        ChatSnapshotExportResolver resolver = mock(ChatSnapshotExportResolver.class);
+        when(snapshotResolvers.getIfAvailable()).thenReturn(resolver);
+        when(resolver.resolve(anyLong(), any())).thenReturn(snapshot);
+
+        ExportTaskResp response =
+                service.create(snapshotRequest(ExportFormat.XLSX, 42L), user("alice"));
+
+        assertEquals(ExportStatus.SUCCEEDED, response.getStatus());
+        Path file = exportRoot.resolve(persisted.getStorageKey());
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file.toFile())) {
+            var chartPart = zip.getEntry("xl/charts/chart1.xml");
+            assertTrue(chartPart != null, "embedded chart part should exist in the workbook");
+            String chartXml = new String(zip.getInputStream(chartPart).readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(chartXml.contains("<c:barChart>"), "implicit BAR chart expected");
+            assertTrue(chartXml.contains("城东支行"), "category values should be cached");
+            assertTrue(chartXml.contains("'各机构存款余额排名'!$B$2:$B$3"),
+                    "chart should reference the data sheet value range");
+        }
+        try (InputStream input = Files.newInputStream(file);
+                XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            assertEquals("图表", workbook.getSheetAt(workbook.getNumberOfSheets() - 1)
+                    .getSheetName());
+            assertEquals(116.98, workbook.getSheet("各机构存款余额排名").getRow(1).getCell(1)
+                    .getNumericCellValue(), 0.001);
+        }
+    }
+
+    @Test
+    void xlsxChartFailureFallsBackToDataOnlyWorkbook() throws Exception {
+        QueryColumn orgName = new QueryColumn("机构名称", "VARCHAR", "org_name");
+        QueryColumn metricValue = new QueryColumn("指标值", "NUMBER", "metric_value");
+        metricValue.setShowType("NUMBER");
+        LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+        row.put("org_name", "城东支行");
+        row.put("metric_value", "***"); // masked, non-numeric value breaks chart building
+        ChatSnapshotExportData snapshot = ChatSnapshotExportData.builder().queryId(42L)
+                .question("各机构存款余额排名").dataSetId(7L)
+                .columns(List.of(orgName, metricValue))
+                .rows(List.<java.util.Map<String, Object>>of(row)).chartType("BAR").build();
+        ChatSnapshotExportResolver resolver = mock(ChatSnapshotExportResolver.class);
+        when(snapshotResolvers.getIfAvailable()).thenReturn(resolver);
+        when(resolver.resolve(anyLong(), any())).thenReturn(snapshot);
+
+        ExportTaskResp response =
+                service.create(snapshotRequest(ExportFormat.XLSX, 42L), user("alice"));
+
+        assertEquals(ExportStatus.SUCCEEDED, response.getStatus());
+        Path file = exportRoot.resolve(persisted.getStorageKey());
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file.toFile())) {
+            assertTrue(zip.getEntry("xl/charts/chart1.xml") == null,
+                    "failed charts must not leave broken chart parts behind");
+        }
+        try (InputStream input = Files.newInputStream(file);
+                XSSFWorkbook workbook = new XSSFWorkbook(input)) {
+            assertEquals("城东支行",
+                    workbook.getSheet("各机构存款余额排名").getRow(1).getCell(0).getStringCellValue());
+        }
+    }
+
+    @Test
+    void snapshotPdfEmbedsEchartsImageWhenRendererIsAvailable() throws Exception {
+        QueryColumn orgName = new QueryColumn("机构名称", "VARCHAR", "org_name");
+        QueryColumn metricValue = new QueryColumn("指标值", "NUMBER", "metric_value");
+        metricValue.setShowType("NUMBER");
+        LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+        row.put("org_name", "城东支行");
+        row.put("metric_value", 116.98);
+        ChatSnapshotExportData snapshot = ChatSnapshotExportData.builder().queryId(42L)
+                .question("各机构存款余额排名").dataSetId(7L)
+                .columns(List.of(orgName, metricValue))
+                .rows(List.<java.util.Map<String, Object>>of(row)).chartType("BAR").build();
+        ChatSnapshotExportResolver resolver = mock(ChatSnapshotExportResolver.class);
+        when(snapshotResolvers.getIfAvailable()).thenReturn(resolver);
+        when(resolver.resolve(anyLong(), any())).thenReturn(snapshot);
+        var renderer = mock(
+                com.tencent.supersonic.headless.server.utils.ChartImageRenderer.class);
+        when(chartImageRenderers.getIfAvailable()).thenReturn(renderer);
+        java.awt.image.BufferedImage chartImage =
+                new java.awt.image.BufferedImage(900, 500, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        var graphics = chartImage.createGraphics();
+        graphics.setColor(java.awt.Color.WHITE);
+        graphics.fillRect(0, 0, 900, 500);
+        graphics.setColor(java.awt.Color.BLUE);
+        graphics.fillRect(200, 100, 400, 300);
+        graphics.dispose();
+        java.io.ByteArrayOutputStream png = new java.io.ByteArrayOutputStream();
+        javax.imageio.ImageIO.write(chartImage, "png", png);
+        when(renderer.renderPng(any())).thenReturn(png.toByteArray());
+
+        ExportTaskResp response =
+                service.create(snapshotRequest(ExportFormat.PDF, 42L), user("alice"));
+
+        assertEquals(ExportStatus.SUCCEEDED, response.getStatus());
+        verify(renderer).renderPng(any());
+        Path pdf = exportRoot.resolve(persisted.getStorageKey());
+        try (PDDocument document = PDDocument.load(pdf.toFile())) {
+            assertEquals(2, document.getNumberOfPages());
+            var pdfRenderer = new org.apache.pdfbox.rendering.PDFRenderer(document);
+            for (int page = 0; page < document.getNumberOfPages(); page++) {
+                assertTrue(hasNonWhitePixels(pdfRenderer.renderImage(page)),
+                        "page " + page + " should not be blank");
+            }
+        }
+    }
+
+    @Test
+    void snapshotPdfFallsBackToHandDrawnChartWhenRendererFails() throws Exception {
+        QueryColumn orgName = new QueryColumn("机构名称", "VARCHAR", "org_name");
+        QueryColumn metricValue = new QueryColumn("指标值", "NUMBER", "metric_value");
+        metricValue.setShowType("NUMBER");
+        LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+        row.put("org_name", "城东支行");
+        row.put("metric_value", 116.98);
+        ChatSnapshotExportData snapshot = ChatSnapshotExportData.builder().queryId(42L)
+                .question("各机构存款余额排名").dataSetId(7L)
+                .columns(List.of(orgName, metricValue))
+                .rows(List.<java.util.Map<String, Object>>of(row)).chartType("BAR").build();
+        ChatSnapshotExportResolver resolver = mock(ChatSnapshotExportResolver.class);
+        when(snapshotResolvers.getIfAvailable()).thenReturn(resolver);
+        when(resolver.resolve(anyLong(), any())).thenReturn(snapshot);
+        var renderer = mock(
+                com.tencent.supersonic.headless.server.utils.ChartImageRenderer.class);
+        when(chartImageRenderers.getIfAvailable()).thenReturn(renderer);
+        when(renderer.renderPng(any())).thenReturn(null); // headless browser unavailable
+
+        ExportTaskResp response =
+                service.create(snapshotRequest(ExportFormat.PDF, 42L), user("alice"));
+
+        assertEquals(ExportStatus.SUCCEEDED, response.getStatus());
+        Path pdf = exportRoot.resolve(persisted.getStorageKey());
+        try (PDDocument document = PDDocument.load(pdf.toFile())) {
+            // hand-drawn fallback chart page + one text page
+            assertEquals(2, document.getNumberOfPages());
+            var pdfRenderer = new org.apache.pdfbox.rendering.PDFRenderer(document);
+            for (int page = 0; page < document.getNumberOfPages(); page++) {
+                assertTrue(hasNonWhitePixels(pdfRenderer.renderImage(page)),
+                        "page " + page + " should not be blank");
+            }
+        }
     }
 
     @Test

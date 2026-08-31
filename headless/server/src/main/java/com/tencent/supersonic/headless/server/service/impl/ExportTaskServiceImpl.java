@@ -31,6 +31,7 @@ import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
 import com.tencent.supersonic.headless.server.service.ChatSnapshotExportResolver;
 import com.tencent.supersonic.headless.server.service.DashboardService;
 import com.tencent.supersonic.headless.server.service.ExportTaskService;
+import com.tencent.supersonic.headless.server.utils.ChartImageRenderer;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -41,9 +42,16 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.Row;
-import org.apache.poi.xssf.streaming.SXSSFSheet;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFChart;
+import org.apache.poi.xssf.usermodel.XSSFClientAnchor;
+import org.apache.poi.xssf.usermodel.XSSFDrawing;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -57,7 +65,9 @@ import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -82,6 +92,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
+import javax.imageio.ImageIO;
 
 @Slf4j
 @Service
@@ -91,7 +105,9 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     static final int MAX_LIST_PAGE_SIZE = 100;
     static final long MAX_ROWS = 10_000;
     static final int MAX_PDF_ROWS = 500;
+    static final int MAX_CHART_ROWS = 30;
     static final long MAX_FILE_BYTES = 25L * 1024 * 1024;
+    static final String CHART_SHEET_NAME = "图表";
     static final Duration RETENTION = Duration.ofHours(24);
     private static final Semaphore EXPORT_PERMITS = new Semaphore(4);
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
@@ -112,6 +128,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     private final DashboardExportQueryValidator dashboardExportQueryValidator;
     private final AuditEventPublisher auditEventPublisher;
     private final ObjectProvider<ChatSnapshotExportResolver> snapshotResolvers;
+    private final ObjectProvider<ChartImageRenderer> chartImageRenderers;
     private final Path exportRoot;
 
     public ExportTaskServiceImpl(ExportTaskMapper exportTaskMapper,
@@ -119,6 +136,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             DashboardExportQueryValidator dashboardExportQueryValidator,
             AuditEventPublisher auditEventPublisher,
             ObjectProvider<ChatSnapshotExportResolver> snapshotResolvers,
+            ObjectProvider<ChartImageRenderer> chartImageRenderers,
             @Value("${s2.export.storage-dir:${java.io.tmpdir}/supersonic-exports}") String storageDirectory) {
         this.exportTaskMapper = exportTaskMapper;
         this.semanticLayerService = semanticLayerService;
@@ -126,6 +144,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         this.dashboardExportQueryValidator = dashboardExportQueryValidator;
         this.auditEventPublisher = auditEventPublisher;
         this.snapshotResolvers = snapshotResolvers;
+        this.chartImageRenderers = chartImageRenderers;
         this.exportRoot = Path.of(storageDirectory).toAbsolutePath().normalize();
     }
 
@@ -355,51 +374,332 @@ public class ExportTaskServiceImpl implements ExportTaskService {
 
     private void writeXlsx(Path file, ExportCreateReq request, DashboardResp dashboard,
             ExportData data, User user, String taskId) throws IOException {
-        try (SXSSFWorkbook workbook = new SXSSFWorkbook(100);
-                OutputStream output = Files.newOutputStream(file, StandardOpenOption.WRITE,
-                        StandardOpenOption.TRUNCATE_EXISTING)) {
-            workbook.setCompressTempFiles(true);
-            SXSSFSheet summary = workbook.createSheet("Summary");
-            int row = 0;
-            row = writeKeyValue(summary, row, "报表标题", reportTitle(request, dashboard, data));
-            row = writeKeyValue(summary, row, "资源类型", resourceTypeLabel(request));
-            row = writeKeyValue(summary, row, "生成时间", timestamp());
-            row = writeKeyValue(summary, row, "导出人", user.getDisplayName());
-            row = writeKeyValue(summary, row, "是否脱敏", data.masked() ? "是" : "否");
-            row = writeKeyValue(summary, row, "数据行数", String.valueOf(data.rowCount()));
-            if (StringUtils.isNotBlank(data.dateRange())) {
-                row = writeKeyValue(summary, row, "数据日期范围", data.dateRange());
-            }
-            if (StringUtils.isNotBlank(data.conclusion())) {
-                row = writeKeyValue(summary, row, "分析结论", data.conclusion());
-            }
-            row = writeKeyValue(summary, row, "数据脱敏说明", maskingNote(data));
-            row = writeKeyValue(summary, row, "行数说明", rowCountNote(data, ExportFormat.XLSX));
-            row = writeKeyValue(summary, row, "导出水印", watermark(user, taskId));
-            if (dashboard != null) {
-                row = writeKeyValue(summary, row, "看板版本", String.valueOf(dashboard.getVersion()));
-                writeKeyValue(summary, row, "看板描述",
-                        StringUtils.defaultString(dashboard.getDescription()));
-            }
-            for (ExportSheet exportSheet : data.sheets()) {
-                SXSSFSheet sheet = workbook.createSheet(safeSheetName(exportSheet.name()));
-                Row header = sheet.createRow(0);
-                for (int column = 0; column < exportSheet.columns().size(); column++) {
-                    header.createCell(column)
-                            .setCellValue(safeCell(exportSheet.columns().get(column).getName()));
+        List<ExportChartReq> charts = effectiveCharts(request, data);
+        // SXSSF (streaming) cannot carry native chart parts, so chart exports use an in-memory
+        // XSSF workbook; the row limit (MAX_ROWS) keeps memory usage bounded.
+        if (charts.isEmpty()) {
+            try (SXSSFWorkbook workbook = new SXSSFWorkbook(100);
+                    OutputStream output = Files.newOutputStream(file, StandardOpenOption.WRITE,
+                            StandardOpenOption.TRUNCATE_EXISTING)) {
+                workbook.setCompressTempFiles(true);
+                writeSummarySheet(workbook, request, dashboard, data, user, taskId);
+                for (int index = 0; index < data.sheets().size(); index++) {
+                    writeDataSheet(workbook, data.sheets().get(index), Set.of(), null, null);
                 }
-                int rowIndex = 1;
-                for (Map<String, Object> values : exportSheet.rows()) {
-                    Row dataRow = sheet.createRow(rowIndex++);
-                    for (int column = 0; column < exportSheet.columns().size(); column++) {
-                        QueryColumn queryColumn = exportSheet.columns().get(column);
-                        Cell cell = dataRow.createCell(column);
-                        cell.setCellValue(
-                                safeCell(cellText(queryColumn, values.get(queryColumn.getBizName()))));
+                workbook.write(output);
+            }
+            return;
+        }
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            writeSummarySheet(workbook, request, dashboard, data, user, taskId);
+            CellStyle numberStyle = numberStyle(workbook, "#,##0.##");
+            CellStyle percentStyle = numberStyle(workbook, "0.00%");
+            List<String> sheetNames = new ArrayList<>();
+            for (int index = 0; index < data.sheets().size(); index++) {
+                ExportSheet exportSheet = data.sheets().get(index);
+                sheetNames.add(safeSheetName(exportSheet.name()));
+                Set<String> numericFields = numericValueFields(charts, index);
+                writeDataSheet(workbook, exportSheet, numericFields, numberStyle, percentStyle);
+            }
+            Map<String, String> chartParts = Map.of();
+            try {
+                chartParts = embedCharts(workbook, data, charts, sheetNames);
+            } catch (RuntimeException e) {
+                // Chart embedding is best-effort; the plain data workbook must still export.
+                log.warn("Skipped embedded XLSX charts: errorType={}",
+                        e.getClass().getSimpleName());
+            }
+            try (OutputStream output = Files.newOutputStream(file, StandardOpenOption.WRITE,
+                    StandardOpenOption.TRUNCATE_EXISTING)) {
+                workbook.write(output);
+            }
+            if (!chartParts.isEmpty()) {
+                rewriteChartParts(file, chartParts);
+            }
+        }
+    }
+
+    /** Explicit charts from the request, else the implicit snapshot chart (same rule as PDF). */
+    private List<ExportChartReq> effectiveCharts(ExportCreateReq request, ExportData data) {
+        if (!request.getCharts().isEmpty()) {
+            return request.getCharts();
+        }
+        ExportChartReq snapshotChart = snapshotChart(data);
+        return snapshotChart == null ? List.of() : List.of(snapshotChart);
+    }
+
+    private void writeSummarySheet(Workbook workbook, ExportCreateReq request,
+            DashboardResp dashboard, ExportData data, User user, String taskId) {
+        Sheet summary = workbook.createSheet("Summary");
+        int row = 0;
+        row = writeKeyValue(summary, row, "报表标题", reportTitle(request, dashboard, data));
+        row = writeKeyValue(summary, row, "资源类型", resourceTypeLabel(request));
+        row = writeKeyValue(summary, row, "生成时间", timestamp());
+        row = writeKeyValue(summary, row, "导出人", user.getDisplayName());
+        row = writeKeyValue(summary, row, "是否脱敏", data.masked() ? "是" : "否");
+        row = writeKeyValue(summary, row, "数据行数", String.valueOf(data.rowCount()));
+        if (StringUtils.isNotBlank(data.dateRange())) {
+            row = writeKeyValue(summary, row, "数据日期范围", data.dateRange());
+        }
+        if (StringUtils.isNotBlank(data.conclusion())) {
+            row = writeKeyValue(summary, row, "分析结论", data.conclusion());
+        }
+        row = writeKeyValue(summary, row, "数据脱敏说明", maskingNote(data));
+        row = writeKeyValue(summary, row, "行数说明", rowCountNote(data, ExportFormat.XLSX));
+        row = writeKeyValue(summary, row, "导出水印", watermark(user, taskId));
+        if (dashboard != null) {
+            row = writeKeyValue(summary, row, "看板版本", String.valueOf(dashboard.getVersion()));
+            writeKeyValue(summary, row, "看板描述",
+                    StringUtils.defaultString(dashboard.getDescription()));
+        }
+    }
+
+    /**
+     * Writes one data sheet. Columns referenced as a chart value axis are stored as numeric
+     * cells (with a percent/thousands display format matching cellText semantics) so the
+     * embedded chart can reference them; everything else stays text.
+     */
+    private void writeDataSheet(Workbook workbook, ExportSheet exportSheet,
+            Set<String> numericFields, CellStyle numberStyle, CellStyle percentStyle) {
+        Sheet sheet = workbook.createSheet(safeSheetName(exportSheet.name()));
+        Row header = sheet.createRow(0);
+        for (int column = 0; column < exportSheet.columns().size(); column++) {
+            header.createCell(column)
+                    .setCellValue(safeCell(exportSheet.columns().get(column).getName()));
+        }
+        int rowIndex = 1;
+        for (Map<String, Object> values : exportSheet.rows()) {
+            Row dataRow = sheet.createRow(rowIndex++);
+            for (int column = 0; column < exportSheet.columns().size(); column++) {
+                QueryColumn queryColumn = exportSheet.columns().get(column);
+                Cell cell = dataRow.createCell(column);
+                Object raw = values.get(queryColumn.getBizName());
+                if (numericFields.contains(queryColumn.getBizName())
+                        && writeNumericCell(cell, queryColumn, raw, numberStyle, percentStyle)) {
+                    continue;
+                }
+                cell.setCellValue(safeCell(cellText(queryColumn, raw)));
+            }
+        }
+    }
+
+    private boolean writeNumericCell(Cell cell, QueryColumn column, Object raw,
+            CellStyle numberStyle, CellStyle percentStyle) {
+        Double number = chartNumber(raw);
+        if (number == null) {
+            return false;
+        }
+        cell.setCellValue(number);
+        boolean percent =
+                DataFormatTypeEnum.PERCENT.getName().equalsIgnoreCase(column.getDataFormatType());
+        cell.setCellStyle(percent ? percentStyle : numberStyle);
+        return true;
+    }
+
+    private CellStyle numberStyle(Workbook workbook, String format) {
+        CellStyle style = workbook.createCellStyle();
+        style.setDataFormat(workbook.createDataFormat().getFormat(format));
+        return style;
+    }
+
+    private static Set<String> numericValueFields(List<ExportChartReq> charts, int sheetIndex) {
+        Set<String> fields = new LinkedHashSet<>();
+        for (ExportChartReq chart : charts) {
+            if (chart.getQueryIndex() != null && chart.getQueryIndex() == sheetIndex) {
+                fields.add(chart.getValueField());
+            }
+        }
+        return fields;
+    }
+
+    /**
+     * Creates one native chart part per chart on a dedicated "图表" sheet and returns the chart
+     * XML keyed by package part name ("/xl/charts/chartN.xml"). The chart XML is generated as
+     * text because POI 3.17 ships reduced OOXML schema classes without bar-chart bindings; the
+     * parts are swapped into the written workbook by {@link #rewriteChartParts}.
+     */
+    private Map<String, String> embedCharts(XSSFWorkbook workbook, ExportData data,
+            List<ExportChartReq> charts, List<String> sheetNames) {
+        XSSFSheet chartSheet = workbook.createSheet(CHART_SHEET_NAME);
+        XSSFDrawing drawing = chartSheet.createDrawingPatriarch();
+        Map<String, String> parts = new LinkedHashMap<>();
+        int position = 0;
+        for (ExportChartReq chart : charts) {
+            try {
+                // Build the XML before creating the part so a broken chart never leaves a
+                // placeholder chart part behind; one bad chart must not block the others.
+                ExportSheet sheet = data.sheets().get(chart.getQueryIndex());
+                ChartSeries series = chartSeries(sheet, chart);
+                if (series == null) {
+                    continue;
+                }
+                String xml = chartXml(chart, sheet, series, sheetNames.get(chart.getQueryIndex()),
+                        position);
+                int row = 1 + position * 18;
+                XSSFClientAnchor anchor = drawing.createAnchor(0, 0, 0, 0, 1, row, 10, row + 15);
+                XSSFChart xssfChart = drawing.createChart(anchor);
+                parts.put(xssfChart.getPackagePart().getPartName().getName(), xml);
+                position++;
+            } catch (RuntimeException e) {
+                log.warn("Skipped embedded XLSX chart '{}': errorType={}", chart.getTitle(),
+                        e.getClass().getSimpleName());
+            }
+        }
+        if (parts.isEmpty()) {
+            workbook.removeSheetAt(workbook.getSheetIndex(chartSheet));
+        }
+        return parts;
+    }
+
+    private String chartXml(ExportChartReq chart, ExportSheet sheet, ChartSeries series,
+            String sheetName, int position) {
+        int categoryColumn = columnIndex(sheet, chart.getCategoryField());
+        int valueColumn = columnIndex(sheet, chart.getValueField());
+        int lastRow = series.values().size() + 1;
+        String categoryRef = quoteSheetName(sheetName) + "!$" + columnLetter(categoryColumn)
+                + "$2:$" + columnLetter(categoryColumn) + "$" + lastRow;
+        String valueRef = quoteSheetName(sheetName) + "!$" + columnLetter(valueColumn) + "$2:$"
+                + columnLetter(valueColumn) + "$" + lastRow;
+        long categoryAxisId = 100_000_001L + position * 2L;
+        long valueAxisId = categoryAxisId + 1;
+        StringBuilder xml = new StringBuilder(4096);
+        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        xml.append("<c:chartSpace xmlns:c=\"http://schemas.openxmlformats.org/drawingml/2006/chart\""
+                + " xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\""
+                + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">");
+        xml.append("<c:chart>");
+        xml.append(chartTitle(StringUtils.defaultIfBlank(chart.getTitle(), "图表")));
+        xml.append("<c:autoTitleDeleted val=\"0\"/><c:plotArea><c:layout/>");
+        boolean line = chart.getType() == ExportChartType.LINE;
+        xml.append(line ? "<c:lineChart><c:grouping val=\"standard\"/>"
+                : "<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/>");
+        xml.append("<c:varyColors val=\"0\"/><c:ser>");
+        xml.append("<c:idx val=\"0\"/><c:order val=\"0\"/><c:tx><c:v>")
+                .append(escapeXml(columnLabel(sheet, chart.getValueField())))
+                .append("</c:v></c:tx>");
+        if (line) {
+            xml.append("<c:marker><c:symbol val=\"circle\"/></c:marker>");
+        }
+        xml.append("<c:cat><c:strRef><c:f>").append(categoryRef)
+                .append("</c:f><c:strCache><c:ptCount val=\"").append(series.categories().size())
+                .append("\"/>");
+        for (int i = 0; i < series.categories().size(); i++) {
+            xml.append("<c:pt idx=\"").append(i).append("\"><c:v>")
+                    .append(escapeXml(series.categories().get(i))).append("</c:v></c:pt>");
+        }
+        xml.append("</c:strCache></c:strRef></c:cat>");
+        xml.append("<c:val><c:numRef><c:f>").append(valueRef)
+                .append("</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"")
+                .append(series.values().size()).append("\"/>");
+        for (int i = 0; i < series.values().size(); i++) {
+            xml.append("<c:pt idx=\"").append(i).append("\"><c:v>")
+                    .append(BigDecimal.valueOf(series.values().get(i)).stripTrailingZeros()
+                            .toPlainString())
+                    .append("</c:v></c:pt>");
+        }
+        xml.append("</c:numCache></c:numRef></c:val>");
+        xml.append(line ? "<c:smooth val=\"0\"/></c:ser><c:marker val=\"1\"/>"
+                : "</c:ser><c:gapWidth val=\"150\"/>");
+        xml.append("<c:axId val=\"").append(categoryAxisId).append("\"/><c:axId val=\"")
+                .append(valueAxisId).append("\"/>");
+        xml.append(line ? "</c:lineChart>" : "</c:barChart>");
+        // CT_CatAx/CT_ValAx element order is schema-fixed: axId, scaling, delete, axPos,
+        // gridlines, title, numFmt, tick marks/labels, crossAx, crosses, axis-specific extras.
+        xml.append("<c:catAx><c:axId val=\"").append(categoryAxisId).append("\"/>")
+                .append("<c:scaling><c:orientation val=\"minMax\"/></c:scaling>")
+                .append("<c:delete val=\"0\"/><c:axPos val=\"b\"/>")
+                .append(chartTitle(columnLabel(sheet, chart.getCategoryField())))
+                .append("<c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"").append(valueAxisId)
+                .append("\"/><c:crosses val=\"autoZero\"/><c:auto val=\"1\"/>")
+                .append("<c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/>")
+                .append("<c:noMultiLvlLbl val=\"0\"/></c:catAx>");
+        xml.append("<c:valAx><c:axId val=\"").append(valueAxisId).append("\"/>")
+                .append("<c:scaling><c:orientation val=\"minMax\"/></c:scaling>")
+                .append("<c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/>")
+                .append(chartTitle(columnLabel(sheet, chart.getValueField())))
+                .append("<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/>")
+                .append("<c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"").append(categoryAxisId)
+                .append("\"/><c:crosses val=\"autoZero\"/>")
+                .append(line ? "<c:crossBetween val=\"midCat\"/>"
+                        : "<c:crossBetween val=\"between\"/>")
+                .append("</c:valAx>");
+        xml.append("</c:plotArea>");
+        xml.append("<c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/></c:legend>");
+        xml.append("<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/>");
+        xml.append("</c:chart></c:chartSpace>");
+        return xml.toString();
+    }
+
+    private String chartTitle(String text) {
+        return "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr/></a:pPr>"
+                + "<a:r><a:t>" + escapeXml(text) + "</a:t></a:r></a:p></c:rich></c:tx>"
+                + "<c:overlay val=\"0\"/></c:title>";
+    }
+
+    /** Replaces the placeholder chart parts of a written workbook with the real chart XML. */
+    private void rewriteChartParts(Path xlsx, Map<String, String> chartParts) throws IOException {
+        Path replaced = Files.createTempFile(xlsx.getParent(), "chart-", ".xlsx");
+        try (ZipFile source = new ZipFile(xlsx.toFile());
+                OutputStream targetStream = Files.newOutputStream(replaced);
+                ZipOutputStream target = new ZipOutputStream(targetStream)) {
+            var entries = source.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                target.putNextEntry(new ZipEntry(entry.getName()));
+                String xml = chartParts.get("/" + entry.getName());
+                if (xml != null) {
+                    target.write(xml.getBytes(StandardCharsets.UTF_8));
+                } else {
+                    try (InputStream input = source.getInputStream(entry)) {
+                        input.transferTo(target);
                     }
                 }
+                target.closeEntry();
             }
-            workbook.write(output);
+        }
+        moveIntoPlace(replaced, xlsx);
+    }
+
+    private int columnIndex(ExportSheet sheet, String field) {
+        for (int index = 0; index < sheet.columns().size(); index++) {
+            if (field.equals(sheet.columns().get(index).getBizName())) {
+                return index;
+            }
+        }
+        throw new InvalidArgumentException("Export chart references an unknown field");
+    }
+
+    private String columnLetter(int columnIndex) {
+        StringBuilder letter = new StringBuilder();
+        int value = columnIndex;
+        do {
+            letter.insert(0, (char) ('A' + value % 26));
+            value = value / 26 - 1;
+        } while (value >= 0);
+        return letter.toString();
+    }
+
+    private String quoteSheetName(String sheetName) {
+        return "'" + sheetName.replace("'", "''") + "'";
+    }
+
+    private String escapeXml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&apos;");
+    }
+
+    /** Parses a chart value; returns null when the value is absent or not numeric. */
+    private Double chartNumber(Object raw) {
+        if (raw instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(String.valueOf(raw));
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
@@ -435,12 +735,12 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         lines.add(watermark(user, taskId));
         try (PDDocument document = new PDDocument()) {
             for (ExportChartReq chart : request.getCharts()) {
-                drawChartPage(document, chart, data, user);
+                addChartPage(document, chart, data, user);
             }
             ExportChartReq snapshotChart = snapshotChart(data);
             if (request.getCharts().isEmpty() && snapshotChart != null) {
                 try {
-                    drawChartPage(document, snapshotChart, data, user);
+                    addChartPage(document, snapshotChart, data, user);
                 } catch (RuntimeException e) {
                     // The implicit snapshot chart is best-effort; never fail the export over it.
                     log.warn("Skipped snapshot chart page: errorType={}",
@@ -468,17 +768,97 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 graphics.setFont(cjkFont(Font.PLAIN, 18));
                 graphics.drawString(watermark(user, taskId), 50, 1070);
                 graphics.dispose();
-                PDPage page = new PDPage(
-                        new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
-                document.addPage(page);
-                PDImageXObject pdImage = LosslessFactory.createFromImage(document, image);
-                try (PDPageContentStream content = new PDPageContentStream(document, page)) {
-                    content.drawImage(pdImage, 0, 0, page.getMediaBox().getWidth(),
-                            page.getMediaBox().getHeight());
-                }
+                addImagePage(document, image);
             }
             document.save(file.toFile());
         }
+    }
+
+    /**
+     * Renders one chart page: a real ECharts screenshot via headless Edge when the renderer is
+     * available, otherwise the hand-drawn Graphics2D chart as fallback.
+     */
+    private void addChartPage(PDDocument document, ExportChartReq chart, ExportData data,
+            User user) throws IOException {
+        byte[] png = renderChartImage(chart, data);
+        if (png == null) {
+            drawChartPage(document, chart, data, user);
+            return;
+        }
+        BufferedImage source = ImageIO.read(new ByteArrayInputStream(png));
+        if (source == null) {
+            log.warn("Headless chart screenshot is not a readable image; using fallback");
+            drawChartPage(document, chart, data, user);
+            return;
+        }
+        BufferedImage image = new BufferedImage(1600, 1100, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setColor(Color.WHITE);
+        graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+        graphics.drawImage(source, 80, 150, 1440, 800, null);
+        graphics.setColor(new Color(210, 210, 210));
+        graphics.setFont(cjkFont(Font.PLAIN, 18));
+        graphics.drawString(user.getDisplayName() + " | " + timestamp(), 80, 1050);
+        graphics.dispose();
+        addImagePage(document, image);
+    }
+
+    /**
+     * Returns the ECharts screenshot for a chart, or null when no renderer is deployed or
+     * rendering fails; chart data problems propagate as before so the fallback still validates
+     * the request the same way.
+     */
+    private byte[] renderChartImage(ExportChartReq chart, ExportData data) {
+        ChartImageRenderer renderer = chartImageRenderers.getIfAvailable();
+        if (renderer == null) {
+            return null;
+        }
+        ExportSheet sheet = data.sheets().get(chart.getQueryIndex());
+        ChartSeries series = chartSeries(sheet, chart);
+        if (series == null) {
+            return null;
+        }
+        String type = chart.getType() == ExportChartType.LINE ? "line" : "bar";
+        return renderer.renderPng(new ChartImageRenderer.ChartSpec(
+                StringUtils.defaultIfBlank(chart.getTitle(), "图表"), type, series.categories(),
+                series.values(), columnLabel(sheet, chart.getCategoryField()),
+                columnLabel(sheet, chart.getValueField())));
+    }
+
+    private void addImagePage(PDDocument document, BufferedImage image) throws IOException {
+        PDPage page =
+                new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
+        document.addPage(page);
+        PDImageXObject pdImage = LosslessFactory.createFromImage(document, image);
+        try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+            content.drawImage(pdImage, 0, 0, page.getMediaBox().getWidth(),
+                    page.getMediaBox().getHeight());
+        }
+    }
+
+    /**
+     * Extracts the chart series (categories + numeric values, capped at MAX_CHART_ROWS rows)
+     * shared by the XLSX and PDF chart paths. Returns null when there is no data to plot.
+     */
+    private ChartSeries chartSeries(ExportSheet sheet, ExportChartReq chart) {
+        requireChartField(sheet, chart.getCategoryField());
+        requireChartField(sheet, chart.getValueField());
+        List<Map<String, Object>> rows = sheet.rows().stream().limit(MAX_CHART_ROWS).toList();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        List<String> categories = new ArrayList<>();
+        List<Double> values = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Double value = chartNumber(row.get(chart.getValueField()));
+            if (value == null) {
+                throw new InvalidArgumentException(
+                        "Export chart value field must contain numeric data");
+            }
+            categories.add(safeCell(row.get(chart.getCategoryField())));
+            values.add(value);
+        }
+        return new ChartSeries(categories, values);
     }
 
     /**
@@ -694,23 +1074,12 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     private void drawChartPage(PDDocument document, ExportChartReq chart, ExportData data,
             User user) throws IOException {
         ExportSheet sheet = data.sheets().get(chart.getQueryIndex());
-        requireChartField(sheet, chart.getCategoryField());
-        requireChartField(sheet, chart.getValueField());
-        List<Map<String, Object>> rows = sheet.rows().stream().limit(30).toList();
-        if (rows.isEmpty()) {
+        ChartSeries series = chartSeries(sheet, chart);
+        if (series == null) {
             return;
         }
-        List<Double> values = new ArrayList<>();
-        for (Map<String, Object> row : rows) {
-            Object raw = row.get(chart.getValueField());
-            try {
-                values.add(raw instanceof Number number ? number.doubleValue()
-                        : Double.parseDouble(String.valueOf(raw)));
-            } catch (RuntimeException e) {
-                throw new InvalidArgumentException(
-                        "Export chart value field must contain numeric data");
-            }
-        }
+        List<String> categories = series.categories();
+        List<Double> values = series.values();
         double max = values.stream().mapToDouble(Math::abs).max().orElse(1D);
         max = max == 0 ? 1 : max;
         BufferedImage image = new BufferedImage(1600, 1100, BufferedImage.TYPE_INT_RGB);
@@ -731,13 +1100,13 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         graphics.drawLine(left, top + height, left + width, top + height);
         graphics.drawLine(left, top, left, top + height);
         graphics.setFont(cjkFont(Font.PLAIN, 18));
-        graphics.drawString(truncate(valueFieldLabel(sheet, chart.getValueField()), 30), left,
+        graphics.drawString(truncate(columnLabel(sheet, chart.getValueField()), 30), left,
                 top - 12);
-        int step = Math.max(1, width / rows.size());
+        int step = Math.max(1, width / categories.size());
         int previousX = 0;
         int previousY = 0;
         graphics.setFont(cjkFont(Font.PLAIN, 16));
-        for (int index = 0; index < rows.size(); index++) {
+        for (int index = 0; index < categories.size(); index++) {
             int x = left + index * step + step / 2;
             int valueHeight = (int) (Math.abs(values.get(index)) / max * (height - 60));
             int y = top + height - valueHeight;
@@ -753,21 +1122,14 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 previousY = y;
             }
             graphics.setColor(Color.DARK_GRAY);
-            String label = truncate(safeCell(rows.get(index).get(chart.getCategoryField())), 12);
+            String label = truncate(categories.get(index), 12);
             graphics.drawString(label, x - Math.min(45, label.length() * 4), top + height + 28);
         }
         graphics.setColor(new Color(210, 210, 210));
         graphics.setFont(cjkFont(Font.PLAIN, 18));
         graphics.drawString(user.getDisplayName() + " | " + timestamp(), 80, 1050);
         graphics.dispose();
-        PDPage page =
-                new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
-        document.addPage(page);
-        PDImageXObject pdImage = LosslessFactory.createFromImage(document, image);
-        try (PDPageContentStream content = new PDPageContentStream(document, page)) {
-            content.drawImage(pdImage, 0, 0, page.getMediaBox().getWidth(),
-                    page.getMediaBox().getHeight());
-        }
+        addImagePage(document, image);
     }
 
     private void requireChartField(ExportSheet sheet, String field) {
@@ -790,7 +1152,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 .filter(StringUtils::isNotBlank).map(String::trim).findFirst().orElse(null);
     }
 
-    private int writeKeyValue(SXSSFSheet sheet, int rowIndex, String key, String value) {
+    private int writeKeyValue(Sheet sheet, int rowIndex, String key, String value) {
         Row row = sheet.createRow(rowIndex);
         row.createCell(0).setCellValue(key);
         row.createCell(1).setCellValue(safeCell(value));
@@ -842,10 +1204,10 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 : note + "。";
     }
 
-    private String valueFieldLabel(ExportSheet sheet, String valueField) {
-        return sheet.columns().stream().filter(column -> valueField.equals(column.getBizName()))
+    private String columnLabel(ExportSheet sheet, String field) {
+        return sheet.columns().stream().filter(column -> field.equals(column.getBizName()))
                 .map(QueryColumn::getName).filter(StringUtils::isNotBlank).findFirst()
-                .orElse(valueField);
+                .orElse(field);
     }
 
     /**
@@ -995,6 +1357,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
 
     private record ExportSheet(String name, List<QueryColumn> columns,
             List<Map<String, Object>> rows) {}
+
+    private record ChartSeries(List<String> categories, List<Double> values) {}
 
     private record ExportData(List<ExportSheet> sheets, long rowCount, boolean masked,
             Set<String> maskedColumns, String conclusion, String title, String dateRange,
