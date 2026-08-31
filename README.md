@@ -1,84 +1,150 @@
-[中文版](README_CN.md) | [日本語版](README_JP.md) | [Docs](https://supersonicbi.github.io/)
-
-![Java CI](https://github.com/tencentmusic/supersonic/workflows/supersonic%20CI/badge.svg)
-
 # SuperSonic
 
-SuperSonic is the next-generation AI+BI platform that unifies **Chat BI** (powered by LLM) and **Headless BI** (powered by semantic layer) paradigms. This unification ensures that Chat BI has access to the same curated and governed semantic data models as traditional BI. Furthermore, the implementation of both paradigms benefit from each other:
+SuperSonic 是一个融合对话式商业智能与无头商业智能的新一代智能数据分析平台。平台以统一语义层为基础，让业务用户能够使用自然语言查询数据，也让分析工程师能够集中定义和治理指标、维度、实体、标签及其关系。
 
-- Chat BI's Text2SQL gets augmented with context-retrieval from semantic models.
-- Headless BI's query interface gets extended with natural language API.
+通过语义模型增强自然语言转 SQL，SuperSonic 可以减少模型幻觉和复杂 SQL 生成负担；同一套语义模型也可通过开放接口服务于报表、应用和智能助手。
 
-<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_ideas.png" height="75%" width="75%" />
+<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_ideas.png" alt="SuperSonic 设计理念" width="75%" />
 
-SuperSonic provides a **Chat BI interface** that empowers users to query data using natural language and visualize the results with suitable charts. To enable such experience, the only thing necessary is to build logical semantic models (definition of metric/dimension/tag, along with their meaning and relationships) through a **Headless BI interface**. Meanwhile, SuperSonic is designed to be extensible and composable, allowing custom implementations to be added and configured with Java SPI.
+## 核心能力
 
-<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_demo.gif" height="100%" width="100%" />
+- 对话式问数：支持自然语言查询、结果可视化、多轮对话、输入联想和后续问题推荐。
+- 统一语义层：集中管理指标、维度、实体、标签、业务术语及关联关系。
+- 语义增强解析：通过知识检索、模式映射、语义解析与修正生成可靠查询。
+- 开放查询接口：使用统一数据语义为外部系统提供查询能力。
+- 细粒度权限：支持数据集级、列级和行级访问控制。
+- 可插拔扩展：基于 Java SPI 扩展解析器、插件及其他核心能力。
+- 多数据源支持：支持 MySQL、PostgreSQL、ClickHouse、StarRocks、Presto、Trino、DuckDB 等数据库。
 
-## Motivation
+<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_demo.gif" alt="SuperSonic 使用演示" width="100%" />
 
-The emergence of Large Language Model (LLM) like ChatGPT is reshaping the way information is retrieved, leading to a new paradigm in the field of data analytics known as Chat BI. To implement Chat BI, both academia and industry are primarily focused on harnessing the power of LLMs to convert natural language into SQL, commonly referred to as Text2SQL or NL2SQL. While some approaches show promising results, their **reliability** falls short for large-scale real-world applications.
+## 工作原理
 
-Meanwhile, another emerging paradigm called Headless BI, which focuses on constructing unified semantic data models, has garnered significant attention. Headless BI is implemented through a universal semantic layer that exposes consistent data semantics via an open API.
+SuperSonic 将自然语言问数与统一语义模型结合，主要处理流程如下：
 
-From our perspective, the integration of Chat BI and Headless BI has the potential to enhance the Text2SQL generation in two dimensions:
+1. 模型知识库定期从语义模型中提取结构、业务术语和字段值，构建词典与索引。
+2. 模式映射器识别问题中的指标、维度、实体和值，并匹配相关语义信息。
+3. 语义解析器理解查询意图，生成语义查询语句。
+4. 语义修正器校验并修正不合法或不完整的语义信息。
+5. 语义翻译器将语义查询转换为可在物理数据源执行的 SQL。
+6. 查询结果通过对话界面或开放接口返回，并以合适的图表展示。
 
-1. Incorporate data semantics (such as business terms, column values, etc.) into the prompt, enabling LLM to better understand the semantics and **reduce hallucination**.
-2. Offload the generation of advanced SQL syntax (such as join, formula, etc.) from LLM to the semantic layer to **reduce complexity**. 
+<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_components.png" alt="SuperSonic 组件架构" width="65%" />
 
-With these ideas in mind, we develop SuperSonic as a practical reference implementation and use it to power our real-world products. Additionally, to facilitate further development we decide to open source SuperSonic as an extensible framework.
+## 快速开始
 
-## Out-of-the-box Features
+### 使用发行包
 
-- Built-in Chat BI interface for *business users* to enter natural language queries
-- Built-in Headless BI interface for *analytics engineers* to build semantic data models
-- Built-in rule-based semantic parser to improve efficiency in certain scenarios (e.g. demonstration, integration testing)
-- Built-in support for input auto-completion, multi-turn conversation as well as post-query recommendation
-- Built-in support for three-level data access control: dataset-level, column-level and row-level
+1. 从 [发行页面](https://github.com/tencentmusic/supersonic/releases) 下载预构建发行包。
+2. 解压后启动独立服务：
 
-## Extensible Components
+```bash
+./assembly/bin/supersonic-daemon.sh start
+```
 
-The high-level architecture and main process flow is as follows:
+3. 浏览器访问 [http://localhost:9080](http://localhost:9080)。
 
-<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_components.png" height="65%" width="65%" /> 
+### 使用容器部署
 
-- **Knowledge Base:** extracts schema information periodically from the semantic models and build dictionary and index to facilitate schema mapping.
+请先安装 Docker 与 Docker Compose，然后执行：
 
-- **Schema Mapper:** identifies references to schema elements(metrics/dimensions/entities/values) in user queries. It matches the query text against the knowledge base.
+```bash
+wget https://raw.githubusercontent.com/tencentmusic/supersonic/master/docker/docker-compose.yml
+docker compose up -d
+```
 
-- **Semantic Parser:** understands user queries and generates semantic query statement. It consists of a combination of rule-based and LLM-based parsers, each of which deals with specific scenarios.
+服务启动后访问 [http://localhost:9080](http://localhost:9080)。
 
-- **Semantic Corrector:** checks validity of semantic query statement and performs correction if necessary. It consists of a combination of rule-based and LLM-based correctors, each of which deals with specific scenarios.
+### 从源码一键启动
 
-- **Semantic Translator:** converts semantic query statement into SQL statement that can be executed against physical data models.
+开发环境要求：
 
-- **Chat Plugin:** extends functionality with third-party tools. Given a list of configured plugins with descriptions and sample questions, an LLM will be leveraged to select the most suitable one.
+- Java 21
+- Maven
+- Node.js 16 或更高版本
+- pnpm 9.12.3 或更高版本
 
-- **Chat Memory:** encapsulates a collection of historical query trajectories that can be recalled to facilitate few-shot prompting.
+在 Windows 项目根目录执行：
 
-## Quick Demo
-### Online playground
-Visit http://117.72.46.148:9080 to register and experience as a new user. Please do not modify system configurations. We will restart to reset configurations regularly every weekend.
+```powershell
+.\start-all.bat
+```
 
-### Docker Deployment
-- Install Docker and docker-compose.
-- Download the docker-compose.yml file; Execute: wget https://raw.githubusercontent.com/tencentmusic/supersonic/master/docker/docker-compose.yml.
-- Execute "docker-compose up -d".
-- Open a browser and visit http://localhost:9080 to start exploring.
+脚本会安装前端依赖，并分别启动后端与前端开发服务器。默认使用本地文件型 H2 数据库：
 
-### Local build
-SuperSonic comes with sample semantic models as well as chat conversations that can be used as a starting point. Please follow the steps: 
+- 前端开发服务：[http://localhost:9000](http://localhost:9000)
+- 后端服务：[http://localhost:9080](http://localhost:9080)
 
-- Download the latest prebuilt binary from the [release page](https://github.com/tencentmusic/supersonic/releases)
-- Run script "assembly/bin/supersonic-daemon.sh start" to start a standalone Java service
-- Visit http://localhost:9080 in the browser to start exploration
+使用 PostgreSQL 作为源码开发数据库：
 
-## Build and Development
+```powershell
+.\start-all.bat postgres
+```
 
-Please refer to project [Docs](https://supersonicbi.github.io/docs/%E7%B3%BB%E7%BB%9F%E9%83%A8%E7%BD%B2/%E6%BA%90%E7%A0%81%E7%BC%96%E8%AF%91%E9%83%A8%E7%BD%B2/). 
+启动完整的 Docker Compose 服务：
 
-## WeChat Contact
+```powershell
+.\start-all.bat docker
+```
 
-Please follow SuperSonic wechat official account:
+停止本地服务或容器服务：
 
-<img src="https://github.com/supersonicbi/supersonic-website/blob/main/static/img/supersonic_wechat_oa.png" height="50%" width="50%" />
+```powershell
+.\start-all.bat stop
+.\start-all.bat docker stop
+```
+
+Linux 与 macOS 可使用同目录下的 `start-all.sh`。
+
+## 构建与测试
+
+### 后端
+
+```bash
+# 构建发行包并跳过测试
+mvn clean package -DskipTests -Dspotless.skip=true
+
+# 运行全部后端测试
+mvn test
+
+# 运行指定测试类
+mvn test -Dtest=测试类名
+```
+
+### 前端
+
+```bash
+cd webapp
+pnpm install
+pnpm dev
+pnpm test
+pnpm build
+```
+
+### 构建完整发行版
+
+```bash
+./assembly/bin/supersonic-build.sh standalone
+```
+
+## 项目结构
+
+```text
+supersonic/
+├── auth/           身份认证与访问控制
+├── chat/           智能问答与自然语言解析
+├── common/         公共组件与基础能力
+├── headless/       语义层与开放查询接口
+├── launchers/      独立、问答和语义层启动器
+├── webapp/         前端应用
+├── evaluation/     自然语言转 SQL 评测工具
+├── assembly/       构建、打包与运行脚本
+└── docker/         容器部署配置
+```
+
+## 技术栈
+
+- 后端：Java 21、Spring Boot、MyBatis-Plus、LangChain4j、Apache Calcite、JSqlParser
+- 前端：React、UmiJS、Ant Design、ECharts、AntV
+- 数据库：MySQL、PostgreSQL、H2、ClickHouse、StarRocks、Presto、Trino、DuckDB
+
