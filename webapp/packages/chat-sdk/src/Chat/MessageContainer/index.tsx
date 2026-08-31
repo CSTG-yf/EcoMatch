@@ -31,6 +31,7 @@ type Props = {
     isRefresh?: boolean
   ) => void;
   onSendMsg: (value: string) => void;
+  onSelectQuestion: (value: string) => void;
   onRetryHistory: () => void;
   onContinueQuestion: (question: string) => void;
   onSaveToDashboard?: (source: DashboardQuerySource) => void;
@@ -52,6 +53,7 @@ const MessageContainer: React.FC<Props> = ({
   historyError,
   onMsgDataLoaded,
   onSendMsg,
+  onSelectQuestion,
   onRetryHistory,
   onContinueQuestion,
   onSaveToDashboard,
@@ -119,7 +121,7 @@ const MessageContainer: React.FC<Props> = ({
             <div key={msgId} id={`${msgId}`} className={styles.messageItem}>
               {type === MessageTypeEnum.TEXT && <Text position="left" data={msg} />}
               {type === MessageTypeEnum.AGENT_LIST && (
-                <AgentTip currentAgent={currentAgent} onSendMsg={onSendMsg} />
+                <AgentTip currentAgent={currentAgent} onSelectQuestion={onSelectQuestion} />
               )}
               {type === MessageTypeEnum.QUESTION && (
                 <>

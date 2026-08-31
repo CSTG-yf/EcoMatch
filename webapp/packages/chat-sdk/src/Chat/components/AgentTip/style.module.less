@@ -31,10 +31,35 @@
         font-size: 13px;
         row-gap: 8px;
 
-        .example {
-          color: var(--chat-blue);
-          cursor: pointer;
+        & + .examples {
+          margin-top: 16px;
         }
+
+        .sectionTitle {
+          color: var(--text-color);
+          font-weight: 500;
+        }
+
+        .example {
+          padding: 0;
+          color: var(--chat-blue);
+          font: inherit;
+          line-height: 1.6;
+          text-align: left;
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+      }
+
+      .description {
+        margin-top: 16px;
+        color: var(--text-color);
+        font-size: 13px;
       }
 
       &.fullscreen {

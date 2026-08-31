@@ -545,6 +545,10 @@ const Chat: ForwardRefRenderFunction<any, Props> = (
                     onExportQuery={onExportQuery}
                     onMsgDataLoaded={onMsgDataLoaded}
                     onSendMsg={onSendMsg}
+                    onSelectQuestion={question => {
+                      setInputMsg(question);
+                      inputFocus();
+                    }}
                     onRetryHistory={() => {
                       updateHistoryMsg(historyFailedPage).then(success => {
                         if (success && historyFailedPage > pageNo) {
