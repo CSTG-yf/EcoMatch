@@ -65,6 +65,18 @@ export const validateExportRequest = (request: ExportCreateReq): ExportCreateReq
   if (title && title.length > 200) {
     throw new Error('导出标题不能超过 200 个字符');
   }
+  const snapshotQueryId =
+    request.snapshotQueryId == null ? undefined : Number(request.snapshotQueryId);
+  if (
+    request.snapshotQueryId != null &&
+    (!Number.isInteger(snapshotQueryId) || (snapshotQueryId as number) <= 0)
+  ) {
+    throw new Error('快照导出必须指定有效的问数记录 ID');
+  }
+  const isSnapshot = snapshotQueryId != null;
+  if (isSnapshot && request.resourceType !== 'QUERY') {
+    throw new Error('快照导出仅支持问数结果来源');
+  }
   const queries = Array.isArray(request.queries) ? request.queries : [];
   if (queries.length > EXPORT_LIMITS.maxQueries) {
     throw new Error('单个导出最多包含 20 个查询');
@@ -75,7 +87,7 @@ export const validateExportRequest = (request: ExportCreateReq): ExportCreateReq
   if (queries.some((query) => Number(query.offset || 0) < 0)) {
     throw new Error('查询偏移量不能为负数');
   }
-  if (request.resourceType === 'QUERY' && queries.length !== 1) {
+  if (request.resourceType === 'QUERY' && !isSnapshot && queries.length !== 1) {
     throw new Error('问数导出必须包含且仅包含一个结构化查询');
   }
   if (
@@ -88,12 +100,13 @@ export const validateExportRequest = (request: ExportCreateReq): ExportCreateReq
   if (charts.length > EXPORT_LIMITS.maxQueries) {
     throw new Error('单个导出最多包含 20 个图表');
   }
+  const queryCount = isSnapshot ? 1 : queries.length;
   charts.forEach((chart) => {
     if (
       !chart ||
       !Number.isInteger(chart.queryIndex) ||
       chart.queryIndex < 0 ||
-      chart.queryIndex >= queries.length ||
+      chart.queryIndex >= queryCount ||
       !['BAR', 'LINE'].includes(chart.type) ||
       !chart.categoryField?.trim() ||
       !chart.valueField?.trim()
@@ -110,6 +123,7 @@ export const validateExportRequest = (request: ExportCreateReq): ExportCreateReq
     title: title || undefined,
     queries,
     charts,
+    snapshotQueryId,
   };
 };
 
@@ -159,10 +173,14 @@ export const buildLockedExportRequest = (
     dashboardId: initialRequest.dashboardId,
     queries: initialRequest.queries,
     charts: initialRequest.charts,
+    snapshotQueryId: initialRequest.snapshotQueryId,
   });
 };
 
 export const dataRangeText = (request: ExportCreateReq) => {
+  if (request.snapshotQueryId != null) {
+    return '问数回答快照导出（结果以回答时数据为准），单文件最多 10,000 行；XLSX 最多 10,000 行 / PDF 最多 500 行';
+  }
   const queryCount = request.queries.length;
   const requestedRows = request.queries.reduce((total, query) => {
     const limit = Number(query.limit ?? EXPORT_LIMITS.maxRows);

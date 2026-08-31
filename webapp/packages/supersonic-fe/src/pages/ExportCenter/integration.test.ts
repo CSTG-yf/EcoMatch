@@ -109,6 +109,40 @@ describe('export integration converter', () => {
     });
   });
 
+  it('builds a snapshot export request when the source carries a chat query id', () => {
+    expect(buildQueryExportRequest({ ...source, queryId: 123 }, 'XLSX')).toEqual({
+      resourceType: 'QUERY',
+      format: 'XLSX',
+      title: source.question,
+      queries: [],
+      charts: [],
+      snapshotQueryId: 123,
+      dashboardId: undefined,
+    });
+  });
+
+  it('snapshots bank-path sources whose parseInfo cannot be replayed structurally', () => {
+    const bankSource = {
+      question: '各机构存款余额同比',
+      queryId: 55,
+      semanticQuery: {},
+    } as DashboardQuerySource;
+
+    const request = buildQueryExportRequest(bankSource, 'PDF');
+
+    expect(request.snapshotQueryId).toBe(55);
+    expect(request.queries).toEqual([]);
+    expect(request.charts).toEqual([]);
+  });
+
+  it('falls back to structured replay when the query id is not a positive integer', () => {
+    const request = buildQueryExportRequest({ ...source, queryId: 0 }, 'XLSX');
+
+    expect(request.snapshotQueryId).toBeUndefined();
+    expect(request.queries).toHaveLength(1);
+    expect(request.queries[0]).toMatchObject({ dataSetId: 12, modelIds: [7] });
+  });
+
   it('builds dashboard queries, global filters, and safe PDF chart definitions', () => {
     const dashboard: Dashboard = {
       id: 21,

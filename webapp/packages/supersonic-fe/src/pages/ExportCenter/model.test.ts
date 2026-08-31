@@ -66,6 +66,67 @@ describe('export center model', () => {
     );
   });
 
+  it('allows snapshot exports with an implicit single query', () => {
+    const snapshot = validateExportRequest({
+      resourceType: 'QUERY',
+      format: 'XLSX',
+      title: '问数快照',
+      queries: [],
+      charts: [],
+      snapshotQueryId: 321,
+    });
+
+    expect(snapshot.snapshotQueryId).toBe(321);
+    expect(snapshot.queries).toEqual([]);
+    expect(() =>
+      validateExportRequest({
+        ...snapshot,
+        charts: [{ queryIndex: 0, type: 'BAR', categoryField: '机构', valueField: '存款余额' }],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateExportRequest({
+        ...snapshot,
+        charts: [{ queryIndex: 1, type: 'BAR', categoryField: '机构', valueField: '存款余额' }],
+      }),
+    ).toThrow('图表定义无效');
+  });
+
+  it('rejects invalid snapshot query ids and non-query snapshot resources', () => {
+    expect(() =>
+      validateExportRequest({ ...request, queries: [], snapshotQueryId: 0 }),
+    ).toThrow('快照导出必须指定有效的问数记录 ID');
+    expect(() =>
+      validateExportRequest({ ...request, queries: [], snapshotQueryId: -3 }),
+    ).toThrow('快照导出必须指定有效的问数记录 ID');
+    expect(() =>
+      validateExportRequest({
+        ...request,
+        resourceType: 'DASHBOARD',
+        dashboardId: 9,
+        snapshotQueryId: 3,
+      }),
+    ).toThrow('快照导出仅支持问数结果来源');
+  });
+
+  it('keeps the snapshot id immutable through locked rebuilds', () => {
+    const locked = buildLockedExportRequest(
+      { ...request, queries: [], snapshotQueryId: 88 },
+      'PDF',
+    );
+    expect(locked.snapshotQueryId).toBe(88);
+    expect(locked.queries).toEqual([]);
+  });
+
+  it('describes snapshot exports as answer-time data', () => {
+    expect(dataRangeText({ ...request, queries: [], snapshotQueryId: 7 })).toContain(
+      '问数回答快照导出',
+    );
+    expect(dataRangeText({ ...request, queries: [], snapshotQueryId: 7 })).toContain(
+      'PDF 最多 500 行',
+    );
+  });
+
   it('keeps trusted source fields immutable for locked integration entry points', () => {
     const locked = buildLockedExportRequest(request, 'PDF');
     expect(locked).toEqual({ ...request, format: 'PDF' });

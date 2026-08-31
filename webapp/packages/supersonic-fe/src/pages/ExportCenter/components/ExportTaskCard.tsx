@@ -1,10 +1,11 @@
 import {
+  DeleteOutlined,
   DownloadOutlined,
   ReloadOutlined,
   RetweetOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Descriptions, Space, Tag, Tooltip, Typography } from 'antd';
+import { Button, Card, Descriptions, Popconfirm, Space, Tag, Tooltip, Typography } from 'antd';
 import {
   canDownloadTask,
   canRetryTask,
@@ -30,9 +31,10 @@ interface Props {
   onRefresh: (taskId: string) => void;
   onDownload: (task: ExportTaskItem) => void;
   onRetry: (task: ExportTaskItem) => void;
+  onDelete: (task: ExportTaskItem) => void;
 }
 
-const ExportTaskCard = ({ task, loading, onRefresh, onDownload, onRetry }: Props) => (
+const ExportTaskCard = ({ task, loading, onRefresh, onDownload, onRetry, onDelete }: Props) => (
   <Card className={styles.taskCard} size="small">
     <div className={styles.taskHeader}>
       <div className={styles.taskIdentity}>
@@ -75,6 +77,17 @@ const ExportTaskCard = ({ task, loading, onRefresh, onDownload, onRetry }: Props
         >
           下载
         </Button>
+        <Popconfirm
+          title="删除后文件不可恢复，确定删除该导出任务？"
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true, loading }}
+          onConfirm={() => onDelete(task)}
+        >
+          <Button danger icon={<DeleteOutlined />} disabled={loading}>
+            删除
+          </Button>
+        </Popconfirm>
       </Space>
     </div>
     {task.actionError && (

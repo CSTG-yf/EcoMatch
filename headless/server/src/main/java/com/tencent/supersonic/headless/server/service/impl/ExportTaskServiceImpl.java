@@ -3,8 +3,10 @@ package com.tencent.supersonic.headless.server.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.tencent.supersonic.common.pojo.DataFormat;
 import com.tencent.supersonic.common.pojo.QueryColumn;
 import com.tencent.supersonic.common.pojo.User;
+import com.tencent.supersonic.common.pojo.enums.DataFormatTypeEnum;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.common.pojo.exception.InvalidPermissionException;
 import com.tencent.supersonic.headless.api.pojo.enums.ExportChartType;
@@ -15,6 +17,7 @@ import com.tencent.supersonic.headless.api.pojo.request.ExportChartReq;
 import com.tencent.supersonic.headless.api.pojo.request.ExportCreateReq;
 import com.tencent.supersonic.headless.api.pojo.request.QuerySqlReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryStructReq;
+import com.tencent.supersonic.headless.api.pojo.response.ChatSnapshotExportData;
 import com.tencent.supersonic.headless.api.pojo.response.DashboardResp;
 import com.tencent.supersonic.headless.api.pojo.response.ExportTaskResp;
 import com.tencent.supersonic.headless.api.pojo.response.SemanticQueryResp;
@@ -25,6 +28,7 @@ import com.tencent.supersonic.headless.server.security.audit.AuditEventPublisher
 import com.tencent.supersonic.headless.server.security.audit.model.AuditEvent;
 import com.tencent.supersonic.headless.server.security.audit.model.AuditEventType;
 import com.tencent.supersonic.headless.server.security.audit.model.AuditOutcome;
+import com.tencent.supersonic.headless.server.service.ChatSnapshotExportResolver;
 import com.tencent.supersonic.headless.server.service.DashboardService;
 import com.tencent.supersonic.headless.server.service.ExportTaskService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -41,6 +45,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.xssf.streaming.SXSSFSheet;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -48,11 +53,14 @@ import org.springframework.stereotype.Service;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -61,6 +69,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -84,6 +94,15 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     static final long MAX_FILE_BYTES = 25L * 1024 * 1024;
     static final Duration RETENTION = Duration.ofHours(24);
     private static final Semaphore EXPORT_PERMITS = new Semaphore(4);
+    private static final DateTimeFormatter TIMESTAMP_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter FILE_NAME_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmm");
+    static final int MAX_FILE_NAME_BASE = 60;
+    /** CJK-capable font candidates, in preference order; PDF pages are rasterized via AWT. */
+    private static final List<String> CJK_FONT_CANDIDATES = List.of("Microsoft YaHei", "SimSun",
+            "Noto Sans CJK SC", "PingFang SC", "WenQuanYi Micro Hei");
+    private static volatile String cjkFontFamily;
     private static final List<String> ORGANIZATION_ATTRIBUTE_KEYS =
             List.of("organizationId", "organizationCode", "orgId", "departmentId");
 
@@ -92,18 +111,21 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     private final DashboardService dashboardService;
     private final DashboardExportQueryValidator dashboardExportQueryValidator;
     private final AuditEventPublisher auditEventPublisher;
+    private final ObjectProvider<ChatSnapshotExportResolver> snapshotResolvers;
     private final Path exportRoot;
 
     public ExportTaskServiceImpl(ExportTaskMapper exportTaskMapper,
             SemanticLayerService semanticLayerService, DashboardService dashboardService,
             DashboardExportQueryValidator dashboardExportQueryValidator,
             AuditEventPublisher auditEventPublisher,
+            ObjectProvider<ChatSnapshotExportResolver> snapshotResolvers,
             @Value("${s2.export.storage-dir:${java.io.tmpdir}/supersonic-exports}") String storageDirectory) {
         this.exportTaskMapper = exportTaskMapper;
         this.semanticLayerService = semanticLayerService;
         this.dashboardService = dashboardService;
         this.dashboardExportQueryValidator = dashboardExportQueryValidator;
         this.auditEventPublisher = auditEventPublisher;
+        this.snapshotResolvers = snapshotResolvers;
         this.exportRoot = Path.of(storageDirectory).toAbsolutePath().normalize();
     }
 
@@ -118,7 +140,9 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         if (dashboard != null) {
             dashboardExportQueryValidator.validate(dashboard, request.getQueries());
         }
-        String resourceId = dashboard == null ? taskId : String.valueOf(dashboard.getId());
+        String resourceId = dashboard != null ? String.valueOf(dashboard.getId())
+                : request.getSnapshotQueryId() != null ? "chat-query-" + request.getSnapshotQueryId()
+                        : taskId;
         ExportTaskDO task = newTask(taskId, request, resourceId, user);
         exportTaskMapper.insert(task);
         long started = System.nanoTime();
@@ -134,7 +158,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             task.setStatus(ExportStatus.RUNNING.name());
             task.setUpdatedAt(new Date());
             exportTaskMapper.updateById(task);
-            ExportData data = executeQueries(request.getQueries(), user);
+            ExportData data = request.getSnapshotQueryId() != null ? resolveSnapshot(request, user)
+                    : executeQueries(request.getQueries(), user);
             if (request.getFormat() == ExportFormat.PDF && data.rowCount() > MAX_PDF_ROWS) {
                 throw new InvalidArgumentException("PDF export cannot exceed 500 data rows");
             }
@@ -144,9 +169,9 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             Path destination = resolveStorage(storageKey);
             temporary = Files.createTempFile(exportRoot, taskId + "-", ".tmp");
             if (request.getFormat() == ExportFormat.XLSX) {
-                writeXlsx(temporary, request, dashboard, data);
+                writeXlsx(temporary, request, dashboard, data, user, taskId);
             } else {
-                writePdf(temporary, request, dashboard, data, user);
+                writePdf(temporary, request, dashboard, data, user, taskId);
             }
             long fileSize = Files.size(temporary);
             if (fileSize > MAX_FILE_BYTES) {
@@ -221,8 +246,13 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             response.setContentType(
                     task.getFormat().equals(ExportFormat.PDF.name()) ? "application/pdf"
                             : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            response.setHeader("Content-Disposition", "attachment; filename*=UTF-8''" + URLEncoder
-                    .encode(task.getFileName(), StandardCharsets.UTF_8).replace("+", "%20"));
+            String fileName = StringUtils.defaultIfBlank(task.getFileName(),
+                    task.getTaskId() + "." + task.getFormat().toLowerCase());
+            String encodedName =
+                    URLEncoder.encode(fileName, StandardCharsets.UTF_8).replace("+", "%20");
+            String asciiName = fileName.replaceAll("[^\\x20-\\x7E]", "_").replace('"', '_');
+            response.setHeader("Content-Disposition",
+                    "attachment; filename=\"" + asciiName + "\"; filename*=UTF-8''" + encodedName);
             response.setHeader("Content-Length", String.valueOf(Files.size(file)));
             response.setHeader("Cache-Control", "no-store");
             try (OutputStream output = new BufferedOutputStream(response.getOutputStream())) {
@@ -231,6 +261,22 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         } catch (IOException e) {
             throw new IllegalStateException("Export download failed", e);
         }
+    }
+
+    @Override
+    public void delete(String taskId, User user) {
+        long started = System.nanoTime();
+        ExportTaskDO task = requireOwned(taskId, user);
+        // A RUNNING task is generated on the create() request thread and is never
+        // interrupted here; it also carries no storage key yet. Since the expiry sweep
+        // only visits rows still in the table, the file is removed here for every
+        // non-RUNNING status; an already-cleaned file only logs a warning.
+        if (!ExportStatus.RUNNING.name().equals(task.getStatus())
+                && StringUtils.isNotBlank(task.getStorageKey())) {
+            deleteQuietly(resolveStorage(task.getStorageKey()));
+        }
+        exportTaskMapper.deleteById(task.getId());
+        publish(task, user, AuditEventType.EXPORT_DELETED, AuditOutcome.SUCCESS, null, started);
     }
 
     @Override
@@ -283,26 +329,56 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             }
             sheets.add(new ExportSheet("Query " + index++, columns, rows));
         }
-        return new ExportData(sheets, totalRows, masked, maskedColumns);
+        return new ExportData(sheets, totalRows, masked, maskedColumns, null, null, null, null);
+    }
+
+    private ExportData resolveSnapshot(ExportCreateReq request, User user) {
+        ChatSnapshotExportResolver resolver = snapshotResolvers.getIfAvailable();
+        if (resolver == null) {
+            throw new InvalidArgumentException("当前部署不支持快照导出");
+        }
+        ChatSnapshotExportData snapshot = resolver.resolve(request.getSnapshotQueryId(), user);
+        List<QueryColumn> columns =
+                snapshot.getColumns() == null ? List.of() : snapshot.getColumns();
+        List<Map<String, Object>> rows = snapshot.getRows() == null ? List.of() : snapshot.getRows();
+        if (rows.size() > MAX_ROWS) {
+            throw new InvalidArgumentException("Export cannot exceed 10000 data rows");
+        }
+        String sheetName = StringUtils.defaultIfBlank(snapshot.getQuestion(), "Snapshot");
+        ExportSheet sheet = new ExportSheet(truncate(sheetName.trim(), 30), columns, rows);
+        Set<String> maskedColumns =
+                snapshot.getMaskedColumns() == null ? Set.of() : snapshot.getMaskedColumns();
+        return new ExportData(List.of(sheet), rows.size(), snapshot.isMasked(), maskedColumns,
+                snapshot.getConclusion(), snapshot.getQuestion(), snapshot.getDateRange(),
+                snapshot.getChartType());
     }
 
     private void writeXlsx(Path file, ExportCreateReq request, DashboardResp dashboard,
-            ExportData data) throws IOException {
+            ExportData data, User user, String taskId) throws IOException {
         try (SXSSFWorkbook workbook = new SXSSFWorkbook(100);
                 OutputStream output = Files.newOutputStream(file, StandardOpenOption.WRITE,
                         StandardOpenOption.TRUNCATE_EXISTING)) {
             workbook.setCompressTempFiles(true);
             SXSSFSheet summary = workbook.createSheet("Summary");
             int row = 0;
-            row = writeKeyValue(summary, row, "Title", title(request, dashboard));
-            row = writeKeyValue(summary, row, "Resource type", request.getResourceType().name());
-            row = writeKeyValue(summary, row, "Generated at", new Date().toString());
-            row = writeKeyValue(summary, row, "Data masked", String.valueOf(data.masked()));
-            row = writeKeyValue(summary, row, "Row count", String.valueOf(data.rowCount()));
+            row = writeKeyValue(summary, row, "报表标题", reportTitle(request, dashboard, data));
+            row = writeKeyValue(summary, row, "资源类型", resourceTypeLabel(request));
+            row = writeKeyValue(summary, row, "生成时间", timestamp());
+            row = writeKeyValue(summary, row, "导出人", user.getDisplayName());
+            row = writeKeyValue(summary, row, "是否脱敏", data.masked() ? "是" : "否");
+            row = writeKeyValue(summary, row, "数据行数", String.valueOf(data.rowCount()));
+            if (StringUtils.isNotBlank(data.dateRange())) {
+                row = writeKeyValue(summary, row, "数据日期范围", data.dateRange());
+            }
+            if (StringUtils.isNotBlank(data.conclusion())) {
+                row = writeKeyValue(summary, row, "分析结论", data.conclusion());
+            }
+            row = writeKeyValue(summary, row, "数据脱敏说明", maskingNote(data));
+            row = writeKeyValue(summary, row, "行数说明", rowCountNote(data, ExportFormat.XLSX));
+            row = writeKeyValue(summary, row, "导出水印", watermark(user, taskId));
             if (dashboard != null) {
-                row = writeKeyValue(summary, row, "Dashboard version",
-                        String.valueOf(dashboard.getVersion()));
-                writeKeyValue(summary, row, "Description",
+                row = writeKeyValue(summary, row, "看板版本", String.valueOf(dashboard.getVersion()));
+                writeKeyValue(summary, row, "看板描述",
                         StringUtils.defaultString(dashboard.getDescription()));
             }
             for (ExportSheet exportSheet : data.sheets()) {
@@ -318,7 +394,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                     for (int column = 0; column < exportSheet.columns().size(); column++) {
                         QueryColumn queryColumn = exportSheet.columns().get(column);
                         Cell cell = dataRow.createCell(column);
-                        cell.setCellValue(safeCell(values.get(queryColumn.getBizName())));
+                        cell.setCellValue(
+                                safeCell(cellText(queryColumn, values.get(queryColumn.getBizName()))));
                     }
                 }
             }
@@ -327,14 +404,22 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     }
 
     private void writePdf(Path file, ExportCreateReq request, DashboardResp dashboard,
-            ExportData data, User user) throws IOException {
+            ExportData data, User user, String taskId) throws IOException {
         List<String> lines = new ArrayList<>();
-        lines.add(title(request, dashboard));
-        lines.add("Generated: " + new Date());
-        lines.add("User: " + user.getDisplayName());
-        lines.add("Rows: " + data.rowCount() + " | Masked: " + data.masked());
+        lines.add("报表标题：" + reportTitle(request, dashboard, data));
+        lines.add("生成时间：" + timestamp());
+        lines.add("导出人：" + user.getDisplayName());
+        if (StringUtils.isNotBlank(data.dateRange())) {
+            lines.add("数据日期范围：" + data.dateRange());
+        }
+        lines.add("数据行数：" + data.rowCount() + " | 是否脱敏：" + (data.masked() ? "是" : "否"));
+        if (StringUtils.isNotBlank(data.conclusion())) {
+            lines.add("");
+            lines.add("分析结论：");
+            lines.addAll(wrapText(data.conclusion(), 55));
+        }
         if (dashboard != null && StringUtils.isNotBlank(dashboard.getDescription())) {
-            lines.add("Description: " + dashboard.getDescription());
+            lines.add("看板描述：" + dashboard.getDescription());
         }
         for (ExportSheet sheet : data.sheets()) {
             lines.add("");
@@ -344,9 +429,23 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 lines.add(joinRow(sheet.columns(), row));
             }
         }
+        lines.add("");
+        lines.add(maskingNote(data));
+        lines.add(rowCountNote(data, ExportFormat.PDF));
+        lines.add(watermark(user, taskId));
         try (PDDocument document = new PDDocument()) {
             for (ExportChartReq chart : request.getCharts()) {
                 drawChartPage(document, chart, data, user);
+            }
+            ExportChartReq snapshotChart = snapshotChart(data);
+            if (request.getCharts().isEmpty() && snapshotChart != null) {
+                try {
+                    drawChartPage(document, snapshotChart, data, user);
+                } catch (RuntimeException e) {
+                    // The implicit snapshot chart is best-effort; never fail the export over it.
+                    log.warn("Skipped snapshot chart page: errorType={}",
+                            e.getClass().getSimpleName());
+                }
             }
             int lineIndex = 0;
             while (lineIndex < lines.size() || document.getNumberOfPages() == 0) {
@@ -355,7 +454,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                 graphics.setColor(Color.WHITE);
                 graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
                 graphics.setColor(Color.DARK_GRAY);
-                graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 24));
+                graphics.setFont(cjkFont(Font.PLAIN, 24));
                 graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                         RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                 int y = 55;
@@ -366,8 +465,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
                     pageLines++;
                 }
                 graphics.setColor(new Color(220, 220, 220));
-                graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 18));
-                graphics.drawString(user.getDisplayName() + " | " + new Date(), 50, 1070);
+                graphics.setFont(cjkFont(Font.PLAIN, 18));
+                graphics.drawString(watermark(user, taskId), 50, 1070);
                 graphics.dispose();
                 PDPage page = new PDPage(
                         new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
@@ -382,9 +481,51 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         }
     }
 
+    /**
+     * Builds an implicit chart for snapshot exports whose stored recommendation is a bar/column/
+     * line chart: the first non-numeric column is the category axis, the first numeric column is
+     * the value axis. Returns null when the snapshot does not support a chart.
+     */
+    private ExportChartReq snapshotChart(ExportData data) {
+        String chartType = StringUtils.defaultString(data.chartType()).toUpperCase();
+        if (!Set.of("BAR", "COLUMN", "LINE").contains(chartType) || data.sheets().isEmpty()) {
+            return null;
+        }
+        ExportSheet sheet = data.sheets().get(0);
+        QueryColumn category = null;
+        QueryColumn value = null;
+        for (QueryColumn column : sheet.columns()) {
+            boolean numeric = "NUMBER".equalsIgnoreCase(column.getShowType());
+            if (numeric && value == null) {
+                value = column;
+            } else if (!numeric && category == null) {
+                category = column;
+            }
+        }
+        if (category == null || value == null) {
+            return null;
+        }
+        ExportChartReq chart = new ExportChartReq();
+        chart.setQueryIndex(0);
+        chart.setType("LINE".equals(chartType) ? ExportChartType.LINE : ExportChartType.BAR);
+        chart.setTitle(StringUtils.defaultIfBlank(data.title(), "图表"));
+        chart.setCategoryField(category.getBizName());
+        chart.setValueField(value.getBizName());
+        return chart;
+    }
+
     private void validateRequest(ExportCreateReq request) {
         if (request == null || request.getResourceType() == null || request.getFormat() == null) {
             throw new InvalidArgumentException("Export resource type and format are required");
+        }
+        boolean snapshot = request.getSnapshotQueryId() != null;
+        if (snapshot) {
+            if (request.getResourceType() != ExportResourceType.QUERY) {
+                throw new InvalidArgumentException("Snapshot export only supports query resources");
+            }
+            if (request.getSnapshotQueryId() <= 0) {
+                throw new InvalidArgumentException("Snapshot query id is invalid");
+            }
         }
         List<QueryStructReq> queries =
                 request.getQueries() == null ? List.of() : request.getQueries();
@@ -392,7 +533,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         if (queries.size() > MAX_QUERIES) {
             throw new InvalidArgumentException("Export cannot contain more than 20 queries");
         }
-        if (request.getResourceType() == ExportResourceType.QUERY && queries.size() != 1) {
+        if (request.getResourceType() == ExportResourceType.QUERY && !snapshot
+                && queries.size() != 1) {
             throw new InvalidArgumentException(
                     "Query export requires exactly one structured query");
         }
@@ -408,9 +550,10 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         if (charts.size() > MAX_QUERIES) {
             throw new InvalidArgumentException("Export cannot contain more than 20 charts");
         }
+        int queryCount = snapshot ? 1 : queries.size();
         for (ExportChartReq chart : charts) {
             if (chart == null || chart.getQueryIndex() == null || chart.getQueryIndex() < 0
-                    || chart.getQueryIndex() >= queries.size() || chart.getType() == null
+                    || chart.getQueryIndex() >= queryCount || chart.getType() == null
                     || StringUtils.isBlank(chart.getCategoryField())
                     || StringUtils.isBlank(chart.getValueField())) {
                 throw new InvalidArgumentException("Export chart definition is invalid");
@@ -450,7 +593,7 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         Date now = new Date();
         task.setStatus(ExportStatus.SUCCEEDED.name());
         task.setStorageKey(storageKey);
-        task.setFileName(fileName(request));
+        task.setFileName(fileName(request, data));
         task.setFileSize(fileSize);
         task.setRowCount(data.rowCount());
         task.setMaskingSummary(
@@ -576,8 +719,10 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                 RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
         graphics.setColor(Color.DARK_GRAY);
-        graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 32));
+        graphics.setFont(cjkFont(Font.BOLD, 32));
         graphics.drawString(StringUtils.defaultIfBlank(chart.getTitle(), "Chart"), 80, 70);
         int left = 120;
         int top = 130;
@@ -585,10 +730,13 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         int height = 780;
         graphics.drawLine(left, top + height, left + width, top + height);
         graphics.drawLine(left, top, left, top + height);
+        graphics.setFont(cjkFont(Font.PLAIN, 18));
+        graphics.drawString(truncate(valueFieldLabel(sheet, chart.getValueField()), 30), left,
+                top - 12);
         int step = Math.max(1, width / rows.size());
         int previousX = 0;
         int previousY = 0;
-        graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 16));
+        graphics.setFont(cjkFont(Font.PLAIN, 16));
         for (int index = 0; index < rows.size(); index++) {
             int x = left + index * step + step / 2;
             int valueHeight = (int) (Math.abs(values.get(index)) / max * (height - 60));
@@ -609,7 +757,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             graphics.drawString(label, x - Math.min(45, label.length() * 4), top + height + 28);
         }
         graphics.setColor(new Color(210, 210, 210));
-        graphics.drawString(user.getDisplayName() + " | " + new Date(), 80, 1050);
+        graphics.setFont(cjkFont(Font.PLAIN, 18));
+        graphics.drawString(user.getDisplayName() + " | " + timestamp(), 80, 1050);
         graphics.dispose();
         PDPage page =
                 new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
@@ -655,14 +804,155 @@ public class ExportTaskServiceImpl implements ExportTaskService {
         return dashboard == null ? "Query export" : dashboard.getName();
     }
 
-    private String fileName(ExportCreateReq request) {
-        String base = StringUtils.defaultIfBlank(request.getTitle(),
+    /** The report title is the snapshot question when present, else the request/dashboard title. */
+    private String reportTitle(ExportCreateReq request, DashboardResp dashboard, ExportData data) {
+        return StringUtils.defaultIfBlank(data.title(), title(request, dashboard));
+    }
+
+    private String resourceTypeLabel(ExportCreateReq request) {
+        return request.getResourceType() == ExportResourceType.DASHBOARD ? "看板" : "问数查询";
+    }
+
+    private String timestamp() {
+        return LocalDateTime.now().format(TIMESTAMP_FORMAT);
+    }
+
+    private String watermark(User user, String taskId) {
+        return "导出水印：" + user.getDisplayName() + " | " + timestamp() + " | " + taskId;
+    }
+
+    private String maskingNote(ExportData data) {
+        if (!data.masked()) {
+            return "数据脱敏说明：本报表数据未脱敏。";
+        }
+        int count = data.maskedColumns() == null ? 0 : data.maskedColumns().size();
+        String detail = count > 0
+                ? "，涉及字段 " + count + " 个（"
+                        + data.maskedColumns().stream().sorted().collect(
+                                java.util.stream.Collectors.joining("、"))
+                        + "）"
+                : "";
+        return "数据脱敏说明：查询结果已脱敏" + detail + "，报表按脱敏后的值导出。";
+    }
+
+    private String rowCountNote(ExportData data, ExportFormat format) {
+        String note = "行数说明：本报表共导出 " + data.rowCount() + " 行数据，单次导出上限 "
+                + String.format("%,d", MAX_ROWS) + " 行";
+        return format == ExportFormat.PDF ? note + "，PDF 最多展示前 " + MAX_PDF_ROWS + " 行。"
+                : note + "。";
+    }
+
+    private String valueFieldLabel(ExportSheet sheet, String valueField) {
+        return sheet.columns().stream().filter(column -> valueField.equals(column.getBizName()))
+                .map(QueryColumn::getName).filter(StringUtils::isNotBlank).findFirst()
+                .orElse(valueField);
+    }
+
+    /**
+     * Formats a cell value for display: percent metrics as xx.xx% (following the webapp
+     * needMultiply100 semantics), other numeric values with thousands separators. Non-numeric
+     * values pass through unchanged.
+     */
+    private String cellText(QueryColumn column, Object value) {
+        if (!(value instanceof Number number)) {
+            return value == null ? "" : String.valueOf(value);
+        }
+        if (DataFormatTypeEnum.PERCENT.getName().equalsIgnoreCase(column.getDataFormatType())) {
+            BigDecimal decimal = toBigDecimal(number);
+            DataFormat format = column.getDataFormat();
+            if (format == null || format.isNeedMultiply100()) {
+                decimal = decimal.multiply(BigDecimal.valueOf(100));
+            }
+            int places = format == null || format.getDecimalPlaces() == null ? 2
+                    : format.getDecimalPlaces();
+            return decimal.setScale(places, RoundingMode.HALF_UP).stripTrailingZeros()
+                    .toPlainString() + "%";
+        }
+        return groupThousands(toBigDecimal(number).stripTrailingZeros().toPlainString());
+    }
+
+    private BigDecimal toBigDecimal(Number number) {
+        return number instanceof BigDecimal decimal ? decimal
+                : new BigDecimal(number.toString());
+    }
+
+    private String groupThousands(String plain) {
+        int dot = plain.indexOf('.');
+        String integer = dot < 0 ? plain : plain.substring(0, dot);
+        String fraction = dot < 0 ? "" : plain.substring(dot);
+        String sign = integer.startsWith("-") ? "-" : "";
+        String digits = sign.isEmpty() ? integer : integer.substring(1);
+        StringBuilder grouped = new StringBuilder();
+        for (int i = 0; i < digits.length(); i++) {
+            if (i > 0 && (digits.length() - i) % 3 == 0) {
+                grouped.append(',');
+            }
+            grouped.append(digits.charAt(i));
+        }
+        return sign + grouped + fraction;
+    }
+
+    private List<String> wrapText(String text, int width) {
+        List<String> lines = new ArrayList<>();
+        String remaining = text;
+        while (remaining.length() > width) {
+            lines.add(remaining.substring(0, width));
+            remaining = remaining.substring(width);
+        }
+        if (!remaining.isEmpty()) {
+            lines.add(remaining);
+        }
+        return lines;
+    }
+
+    /**
+     * PDF pages are rasterized from AWT images, so text is CJK-safe as long as the JVM has a
+     * CJK-capable font. Picks the first installed candidate; falls back to the logical
+     * SansSerif font with a warning when none is found.
+     */
+    static Font cjkFont(int style, int size) {
+        return new Font(cjkFontFamily(), style, size);
+    }
+
+    private static String cjkFontFamily() {
+        String family = cjkFontFamily;
+        if (family == null) {
+            synchronized (ExportTaskServiceImpl.class) {
+                if (cjkFontFamily == null) {
+                    Set<String> available = Set.of(GraphicsEnvironment
+                            .getLocalGraphicsEnvironment().getAvailableFontFamilyNames());
+                    cjkFontFamily = CJK_FONT_CANDIDATES.stream().filter(available::contains)
+                            .filter(name -> new Font(name, Font.PLAIN, 12).canDisplay('中'))
+                            .findFirst().orElse(Font.SANS_SERIF);
+                    if (Font.SANS_SERIF.equals(cjkFontFamily)) {
+                        log.warn("No CJK font found on this system; PDF export falls back to "
+                                + "logical SansSerif, Chinese text may not render");
+                    }
+                }
+                family = cjkFontFamily;
+            }
+        }
+        return family;
+    }
+
+    /**
+     * The download file name is semantic: "<report title>_<yyyyMMdd-HHmm>.<ext>". The title is the
+     * request title when given, else the snapshot question; illegal file-name characters are
+     * replaced and the base is truncated so the stored name stays portable.
+     */
+    private String fileName(ExportCreateReq request, ExportData data) {
+        String base = StringUtils.defaultIfBlank(request.getTitle(), data.title());
+        base = StringUtils.defaultIfBlank(base,
                 request.getResourceType().name().toLowerCase() + "-export");
         base = base.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
-        if (base.length() > 80) {
-            base = base.substring(0, 80);
+        if (base.length() > MAX_FILE_NAME_BASE) {
+            base = base.substring(0, MAX_FILE_NAME_BASE);
         }
-        return base + "." + request.getFormat().name().toLowerCase();
+        if (base.isEmpty()) {
+            base = request.getResourceType().name().toLowerCase() + "-export";
+        }
+        return base + "_" + LocalDateTime.now().format(FILE_NAME_TIMESTAMP) + "."
+                + request.getFormat().name().toLowerCase();
     }
 
     private String safeSheetName(String name) {
@@ -684,8 +974,8 @@ public class ExportTaskServiceImpl implements ExportTaskService {
     }
 
     private String joinRow(List<QueryColumn> columns, Map<String, Object> row) {
-        return String.join(" | ",
-                columns.stream().map(column -> safeCell(row.get(column.getBizName()))).toList());
+        return String.join(" | ", columns.stream()
+                .map(column -> safeCell(cellText(column, row.get(column.getBizName())))).toList());
     }
 
     private String truncate(String value, int length) {
@@ -707,5 +997,6 @@ public class ExportTaskServiceImpl implements ExportTaskService {
             List<Map<String, Object>> rows) {}
 
     private record ExportData(List<ExportSheet> sheets, long rowCount, boolean masked,
-            Set<String> maskedColumns) {}
+            Set<String> maskedColumns, String conclusion, String title, String dateRange,
+            String chartType) {}
 }

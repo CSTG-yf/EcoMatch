@@ -1,3 +1,4 @@
+import { message } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyExportError, isPollingStatus, upsertTask, validateExportRequest } from './model';
 import { exportApi } from './service';
@@ -121,6 +122,20 @@ export const useExportTasks = () => {
     [withTaskAction],
   );
 
+  const remove = useCallback(
+    async (task: ExportTaskItem) => {
+      const deleted = await withTaskAction(task.taskId, async () => {
+        await exportApi.remove(task.taskId);
+        return true;
+      });
+      if (deleted) {
+        setTasks((current) => current.filter((item) => item.taskId !== task.taskId));
+        message.success('导出任务已删除');
+      }
+    },
+    [withTaskAction],
+  );
+
   const retry = useCallback(
     async (task: ExportTaskItem) => (task.request ? create(task.request) : undefined),
     [create],
@@ -151,6 +166,7 @@ export const useExportTasks = () => {
     refresh,
     addByTaskId,
     download,
+    remove,
     retry,
     loadList,
     clearError: () => setPageError(undefined),

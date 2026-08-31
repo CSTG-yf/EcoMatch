@@ -20,6 +20,10 @@ export const getExportTask = async (taskId: string): Promise<ExportTaskResp> => 
   return normalizeApiResult(response);
 };
 
+export const deleteExportTask = async (taskId: string): Promise<void> => {
+  await request(`${exportBase}/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+};
+
 export const getExportTasks = async (
   params: {
     pageNum?: number;
@@ -80,6 +84,7 @@ export const exportApi = {
   create: createExportTask,
   get: getExportTask,
   list: getExportTasks,
+  remove: deleteExportTask,
   download: downloadExportFile,
   saveDownload,
 };

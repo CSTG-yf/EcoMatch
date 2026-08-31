@@ -80,6 +80,7 @@ const AuditEventsTab: React.FC = () => {
         EXPORT_STARTED: '导出开始',
         EXPORT_SUCCEEDED: '导出成功',
         EXPORT_FAILED: '导出失败',
+        EXPORT_DELETED: '导出删除',
         SHARE_CREATED: '创建分享',
         SHARE_ACCESSED: '访问分享',
         SHARE_REVOKED: '撤销分享',

@@ -1,13 +1,16 @@
 import {
   ClockCircleOutlined,
+  DashboardOutlined,
   FileProtectOutlined,
+  MessageOutlined,
   PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Empty, Input, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Input, Space, Spin, Typography } from 'antd';
 import { useState } from 'react';
-import { history, useLocation } from '@umijs/max';
+import { history, useLocation, useModel } from '@umijs/max';
+import { canViewDeveloperDiagnostics } from '@/utils/developerAccess';
 import CreateExport from './components/CreateExport';
 import ExportTaskCard from './components/ExportTaskCard';
 import { EXPORT_LIMITS } from './model';
@@ -17,8 +20,11 @@ import { ExportCreateReq } from './types';
 
 const ExportCenter = () => {
   const location = useLocation();
+  const { initialState } = useModel('@@initialState');
   const routeRequest = (location.state as { initialRequest?: ExportCreateReq } | undefined)
     ?.initialRequest;
+  // 空白创建（手填 QueryStructReq JSON）仅对管理员开放；普通用户从问数/看板跳转进入。
+  const canCreateBlank = canViewDeveloperDiagnostics(initialState?.currentUser);
   const [taskId, setTaskId] = useState('');
   const {
     tasks,
@@ -30,6 +36,7 @@ const ExportCenter = () => {
     refresh,
     addByTaskId,
     download,
+    remove,
     retry,
     loadList,
     clearError,
@@ -57,12 +64,30 @@ const ExportCenter = () => {
             查看由当前账号创建的受控导出任务和文件状态
           </Typography.Text>
         </div>
-        <CreateExport
-          initialRequest={routeRequest}
-          lockedSource={Boolean(routeRequest)}
-          autoOpen={Boolean(routeRequest)}
-          onCreate={routeRequest ? createFromRoute : create}
-        />
+        {routeRequest || canCreateBlank ? (
+          <CreateExport
+            initialRequest={routeRequest}
+            lockedSource={Boolean(routeRequest)}
+            autoOpen={Boolean(routeRequest)}
+            onCreate={routeRequest ? createFromRoute : create}
+          />
+        ) : (
+          <Card className={styles.createGuide} size="small">
+            <Typography.Text>从问数对话的回答卡片或分析看板发起导出</Typography.Text>
+            <Space wrap>
+              <Button
+                type="primary"
+                icon={<MessageOutlined />}
+                onClick={() => history.push('/chat')}
+              >
+                去问数
+              </Button>
+              <Button icon={<DashboardOutlined />} onClick={() => history.push('/dashboard')}>
+                去看板
+              </Button>
+            </Space>
+          </Card>
+        )}
       </header>
 
       <section className={styles.securityBand} aria-label="导出安全范围">
@@ -146,6 +171,7 @@ const ExportCenter = () => {
                   onRefresh={(id) => void refresh(id)}
                   onDownload={(item) => void download(item)}
                   onRetry={(item) => void retry(item)}
+                  onDelete={(item) => void remove(item)}
                 />
               ))}
             </div>

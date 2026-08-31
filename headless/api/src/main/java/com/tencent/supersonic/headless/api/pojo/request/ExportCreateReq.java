@@ -25,4 +25,10 @@ public class ExportCreateReq {
     private List<QueryStructReq> queries = new ArrayList<>();
 
     private List<ExportChartReq> charts = new ArrayList<>();
+
+    /**
+     * Snapshot export carries only the chat query id. The server loads the stored result data
+     * from chat history; clients must never submit result snapshots themselves.
+     */
+    private Long snapshotQueryId;
 }

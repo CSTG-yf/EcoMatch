@@ -16,5 +16,7 @@ public interface ExportTaskService {
 
     void download(String taskId, User user, HttpServletResponse response);
 
+    void delete(String taskId, User user);
+
     int cleanupExpired();
 }

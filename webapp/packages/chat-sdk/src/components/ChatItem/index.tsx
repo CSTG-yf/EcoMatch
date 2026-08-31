@@ -22,7 +22,6 @@ import { isMobile } from '../../utils/utils';
 import classNames from 'classnames';
 import { AgentType } from '../../Chat/type';
 import dayjs, { Dayjs } from 'dayjs';
-import { exportCsvFile } from '../../utils/utils';
 import { useMethodRegister } from '../../hooks';
 import BankAnswerWorkflow from './BankAnswerWorkflow';
 import BankAnswerToolbar from './BankAnswerToolbar';
@@ -530,20 +529,8 @@ const ChatItem: React.FC<Props> = ({
       );
       return;
     }
-    const { queryColumns, queryResults } = data || {};
-    if (!!queryResults && !!queryColumns) {
-      const exportData = queryResults.map(item => {
-        return queryColumns.reduce((result, column) => {
-          result[column.name || column.nameEn] = item[column.nameEn];
-          return result;
-        }, {});
-      });
-      if (exportData.length === 0) {
-        message.error('该条消息暂不支持该操作');
-        return;
-      }
-      exportCsvFile(exportData);
-    }
+    // 没有服务端导出通道时不再前端拼 CSV 直接下载（绕过权限/审计），改为明确提示。
+    message.warning('当前环境不支持导出，请联系管理员');
   };
 
   const contentClass = classNames(`${prefixCls}-content`, {

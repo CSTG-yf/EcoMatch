@@ -46,6 +46,11 @@ export interface ExportCreateReq {
   title?: string;
   queries: QueryStructReq[];
   charts: ExportChartReq[];
+  /**
+   * Snapshot export carries only the chat query id; the server resolves the stored result
+   * from chat history. Clients must never submit result snapshots.
+   */
+  snapshotQueryId?: number;
 }
 
 export interface ExportTaskResp {

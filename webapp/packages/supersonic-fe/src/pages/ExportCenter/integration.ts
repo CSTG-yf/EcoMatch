@@ -135,14 +135,26 @@ export const dashboardSourceToQueryStruct = (
 export const buildQueryExportRequest = (
   source: DashboardQuerySource,
   format: ExportFormat,
-): ExportCreateReq =>
-  validateExportRequest({
+): ExportCreateReq => {
+  const snapshotQueryId = positiveInteger(source?.queryId);
+  if (snapshotQueryId) {
+    return validateExportRequest({
+      resourceType: 'QUERY',
+      format,
+      title: source.question,
+      queries: [],
+      charts: [],
+      snapshotQueryId,
+    });
+  }
+  return validateExportRequest({
     resourceType: 'QUERY',
     format,
     title: source.question,
     queries: [dashboardSourceToQueryStruct(source)],
     charts: [],
   });
+};
 
 const parseDashboardConfig = (dashboard: Dashboard) => {
   try {

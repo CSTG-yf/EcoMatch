@@ -11,6 +11,7 @@ const originalApiBaseUrl = process.env.API_BASE_URL;
 process.env.API_BASE_URL = '/api/semantic/';
 const {
   createExportTask,
+  deleteExportTask,
   downloadExportFile,
   fileNameFromDisposition,
   getExportTasks,
@@ -59,6 +60,15 @@ describe('export service contracts', () => {
     await expect(getExportTask(task.taskId)).resolves.toEqual(task);
     expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/export/task%2Fwith%20spaces', {
       method: 'GET',
+    });
+  });
+
+  it('deletes a task through the formal DELETE endpoint with an encoded path segment', async () => {
+    mockedRequest.mockResolvedValue(undefined as any);
+
+    await expect(deleteExportTask(task.taskId)).resolves.toBeUndefined();
+    expect(mockedRequest).toHaveBeenCalledWith('/api/semantic/export/task%2Fwith%20spaces', {
+      method: 'DELETE',
     });
   });
 

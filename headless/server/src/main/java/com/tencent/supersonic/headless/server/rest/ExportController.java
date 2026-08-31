@@ -8,6 +8,7 @@ import com.tencent.supersonic.headless.api.pojo.response.ExportTaskResp;
 import com.tencent.supersonic.headless.server.service.ExportTaskService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -50,6 +51,12 @@ public class ExportController {
     public void download(@PathVariable("taskId") String taskId, HttpServletRequest request,
             HttpServletResponse response) {
         exportTaskService.download(taskId, user(request, response), response);
+    }
+
+    @DeleteMapping("/{taskId}")
+    public void delete(@PathVariable("taskId") String taskId, HttpServletRequest request,
+            HttpServletResponse response) {
+        exportTaskService.delete(taskId, user(request, response));
     }
 
     private User user(HttpServletRequest request, HttpServletResponse response) {
