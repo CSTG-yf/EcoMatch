@@ -180,6 +180,11 @@ public class LlamaCppPrefixChatClient {
             templateKwargs.put("enable_thinking", opts.enableThinking());
             // Some llama.cpp builds only inspect the top-level flag.
             body.put("enable_thinking", opts.enableThinking());
+        } else if (usesAliyunQwenThinkingControl(config)) {
+            // Bailian's OpenAI-compatible Chat Completions API defaults hybrid Qwen models to
+            // thinking mode. response_format=json_schema is only reliable when that provider
+            // extension is sent explicitly; the generic OpenAI field set has no equivalent.
+            body.put("enable_thinking", opts.enableThinking());
         }
         if (!opts.enableThinking() && Boolean.TRUE.equals(config.getJsonFormat())) {
             if (opts.omitResponseFormat()) {
@@ -544,6 +549,32 @@ public class LlamaCppPrefixChatClient {
         } catch (NumberFormatException exception) {
             return false;
         }
+    }
+
+    /** Whether this remote Chat Completions endpoint accepts Bailian's Qwen thinking switch. */
+    static boolean usesAliyunQwenThinkingControl(ChatModelConfig config) {
+        if (config == null || StringUtils.isBlank(config.getBaseUrl())
+                || StringUtils.isBlank(config.getModelName())) {
+            return false;
+        }
+        String model = config.getModelName().strip().toLowerCase(java.util.Locale.ROOT);
+        if (!model.startsWith("qwen")) {
+            return false;
+        }
+        String host;
+        try {
+            host = URI.create(config.getBaseUrl().trim()).getHost();
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        if (StringUtils.isBlank(host)) {
+            return false;
+        }
+        String normalized = host.toLowerCase(java.util.Locale.ROOT);
+        return "dashscope.aliyuncs.com".equals(normalized)
+                || normalized.endsWith(".dashscope.aliyuncs.com")
+                || "maas.aliyuncs.com".equals(normalized)
+                || normalized.endsWith(".maas.aliyuncs.com");
     }
 
     /**

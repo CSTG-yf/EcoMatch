@@ -106,6 +106,40 @@ class LlamaCppPrefixChatClientTest {
     }
 
     @Test
+    void aliyunQwenExplicitlyDisablesThinkingForStructuredOutput() {
+        ChatModelConfig config = jsonSchemaConfig();
+        config.setBaseUrl(
+                "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
+        config.setModelName("qwen3.8-27b");
+
+        ObjectNode body = new LlamaCppPrefixChatClient().createRequestBody(config,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_planning_response",
+                        BankPlanningResponse.JSON_SCHEMA), true);
+
+        assertFalse(body.path("enable_thinking").asBoolean(true));
+        assertFalse(body.has("chat_template_kwargs"));
+        assertEquals("json_schema", body.path("response_format").path("type").asText());
+        assertTrue(LlamaCppPrefixChatClient.usesAliyunQwenThinkingControl(config));
+    }
+
+    @Test
+    void aliyunNonQwenDoesNotReceiveQwenThinkingExtension() {
+        ChatModelConfig config = jsonSchemaConfig();
+        config.setBaseUrl(
+                "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
+        config.setModelName("deepseek-v4-pro");
+
+        ObjectNode body = new LlamaCppPrefixChatClient().createRequestBody(config,
+                "stable system", "real user request",
+                LlamaCppPrefixChatClient.ChatOptions.jsonSchema("bank_planning_response",
+                        BankPlanningResponse.JSON_SCHEMA), true);
+
+        assertFalse(body.has("enable_thinking"));
+        assertFalse(LlamaCppPrefixChatClient.usesAliyunQwenThinkingControl(config));
+    }
+
+    @Test
     void reasoningEffortTravelsOnOpenAiWireAndStaysOffLlamaCppPayloads() {
         ChatModelConfig cloud = plainChatConfig();
         cloud.setBaseUrl("https://www.autodl.art/api/v1");

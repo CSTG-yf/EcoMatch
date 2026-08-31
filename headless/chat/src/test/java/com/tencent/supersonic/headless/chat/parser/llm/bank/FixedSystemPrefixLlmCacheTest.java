@@ -176,6 +176,18 @@ class FixedSystemPrefixLlmCacheTest {
     }
 
     @Test
+    void aliyunQwenGetsDecodeCapAfterThinkingIsExplicitlyDisabled() {
+        FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
+                false, "预热", false, 0, "SINGLE_PASS", 2048);
+        ChatModelConfig qwen = modelConfig("OPEN_AI",
+                "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "qwen3.8-27b");
+
+        assertEquals(new LlamaCppPrefixChatClient.ChatOptions(false, 2048),
+                cache.resolveOptions(qwen, null));
+    }
+
+    @Test
     void remoteEndpointWithoutReasoningBoundKeepsLegacyNoCapProtection() {
         FixedSystemPrefixLlmCache cache = new FixedSystemPrefixLlmCache("系统前缀", "v-test", 32,
                 false, "预热", false, 0, "SINGLE_PASS", 2048);
